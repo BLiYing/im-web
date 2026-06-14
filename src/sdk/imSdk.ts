@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, type Envelope, type ChatMessage } from "./protocol";
+import { T, type Envelope, type ChatMessage, type Conversation } from "./protocol";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -21,6 +21,7 @@ export class IMClient {
   private ws: WebSocket | null = null;
   private seq = 0;
   private uid = "";
+  private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
   private state: ConnState = "disconnected";
   private pingTimer: number | null = null;
   private reconnectAttempts = 0;
@@ -53,6 +54,16 @@ export class IMClient {
     this.ws?.close(1000);
     this.ws = null;
     this.setState("disconnected");
+  }
+
+  /** 拉取当前用户的会话列表（GET /api/v1/conversations，带 Bearer token）。 */
+  async fetchConversations(): Promise<Conversation[]> {
+    const resp = await fetch("/api/v1/conversations", {
+      headers: { Authorization: `Bearer ${this.token}` },
+    });
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.message || "fetch conversations failed");
+    return (body.data?.conversations ?? []) as Conversation[];
   }
 
   /** 登记会话：每次（重）连成功后自动从已同步位点发 sync_req 补回缺失/离线消息。 */
@@ -90,6 +101,7 @@ export class IMClient {
         throw new Error(body.message || "login failed");
       }
       token = body.data.token;
+      this.token = token;
     } catch (e) {
       if (!this.manualClose) this.scheduleReconnect();
       return;

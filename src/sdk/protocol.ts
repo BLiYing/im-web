@@ -33,6 +33,25 @@ export interface ChatMessage {
   status: MessageStatus;
 }
 
+/** 会话列表项里的最后一条消息（对齐后端 conversation.MessageView）。 */
+export interface ConvLastMessage {
+  server_msg_id: string;
+  from: string;
+  content_type: string;
+  content: string;
+  conv_seq: number;
+  timestamp: number;
+}
+
+/** 会话列表项（对齐后端 conversation.Summary）。 */
+export interface Conversation {
+  conv_id: string;
+  peer: string;
+  last_message: ConvLastMessage | null;
+  latest_conv_seq: number;
+  unread: number;
+}
+
 /** 会话 id：两个 uid 规范排序，保证收发双方一致（对齐协议示例 u_{a}_u_{b}）。 */
 export function convIdFor(a: string, b: string): string {
   const [x, y] = [String(a), String(b)].sort();
