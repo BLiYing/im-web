@@ -1,15 +1,20 @@
-/* Design tokens（与 IMServer/docs/UI.md 对齐；iOS 端落对应常量）。 */
+/* Design tokens（Telegram 绿主题，与 iOS IMTheme 对齐；见 IMServer/docs/UI.md）。 */
 :root {
-  --accent: #0b93f6;
+  --accent: #4ca64c;            /* 主色：Telegram 绿 */
   --bg: #f5f6f8;
   --surface: #ffffff;
   --line: #e3e6ea;
-  --bubble-me: #0b93f6;
-  --bubble-me-text: #ffffff;
-  --bubble-them: #e9ebee;
+  --bubble-me: #e3fdd0;         /* 自己气泡：浅绿 */
+  --bubble-them: #ffffff;       /* 对方气泡：白 */
   --text: #1d2129;
   --text-secondary: #8a929c;
-  --radius-bubble: 14px;
+  --check-read: #4ca64c;        /* 已读双勾绿 */
+  --meta-time: #6b8a5e;         /* 气泡内时间小字（浅绿气泡上的次要色） */
+  --wall-top: #d6e8c4;          /* 聊天壁纸渐变上端 */
+  --wall-bottom: #b4d89b;       /* 聊天壁纸渐变下端 */
+  --date-pill-bg: rgba(92, 138, 76, 0.55); /* 日期分隔胶囊底 */
+  --badge: #3e91ff;             /* 未读胶囊蓝（区别于绿在线点/绿勾，对齐 iOS） */
+  --radius-bubble: 18px;
   --radius-card: 8px;
   --space-1: 4px;
   --space-2: 8px;
@@ -19,7 +24,11 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #16181c; --surface: #1f2227; --line: #2a2e35;
-    --bubble-them: #2a2e35; --text: #e6e8eb; --text-secondary: #8a929c;
+    --bubble-me: #1f4d2e; --bubble-them: #262d31;
+    --text: #e6e8eb; --text-secondary: #8a929c;
+    --check-read: #7ddc7d; --meta-time: #9fb89a;
+    --wall-top: #0e1a12; --wall-bottom: #16261a;
+    --date-pill-bg: rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -64,7 +73,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .empty { padding: 40px var(--space-4); text-align: center; color: var(--text-secondary); }
 .convitem { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); cursor: pointer; }
 .convitem:hover { background: var(--bg); }
-.convitem.active { background: rgba(11, 147, 246, 0.12); }
+.convitem.active { background: rgba(76, 166, 76, 0.14); }
 .avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; }
 .convbody { flex: 1; min-width: 0; }
 .convtop { display: flex; justify-content: space-between; }
@@ -72,16 +81,33 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convtime { font-size: 12px; color: var(--text-secondary); }
 .convlast { color: var(--text-secondary); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* 聊天消息滚动容器 */
-.msgs { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) 0; }
+/* 聊天消息滚动容器（Telegram 绿壁纸：绿渐变 + 低透明涂鸦平铺）。 */
+.msgs {
+  flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) 0;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><g fill='%23ffffff' fill-opacity='0.13'><circle cx='30' cy='30' r='10'/><circle cx='150' cy='20' r='6'/><path d='M95 58 l5 11 12 1 -9 8 3 12 -11 -6 -11 6 3 -12 -9 -8 12 -1z'/><circle cx='186' cy='92' r='8'/><circle cx='38' cy='120' r='7'/><path d='M170 150 c-4 -8 -16 -2 -10 6 l10 10 10 -10 c6 -8 -6 -14 -10 -6z'/><circle cx='110' cy='150' r='5'/><circle cx='18' cy='178' r='6'/><circle cx='70' cy='196' r='8'/><circle cx='196' cy='196' r='5'/></g></svg>"),
+    linear-gradient(180deg, var(--wall-top), var(--wall-bottom));
+  background-repeat: repeat, no-repeat;
+  background-size: 220px 220px, cover;
+  background-attachment: local, local;
+}
 .msg-item { padding: var(--space-1) var(--space-4); }
 .row { display: flex; flex-direction: column; max-width: 72%; }
 .row.me { margin-left: auto; align-items: flex-end; }   /* 块级 + margin-left:auto → 靠右 */
 .row.them { margin-right: auto; align-items: flex-start; }
-.bubble { padding: var(--space-2) var(--space-3); border-radius: var(--radius-bubble); }
-.me .bubble { background: var(--bubble-me); color: var(--bubble-me-text); border-bottom-right-radius: var(--space-1); }
-.them .bubble { background: var(--bubble-them); color: var(--text); border-bottom-left-radius: var(--space-1); }
-.meta { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+/* 气泡：行内 flex 让时间/勾贴在右下角（Telegram 风格），文本主色（深色自动转白）。 */
+.bubble { padding: 6px 10px; border-radius: var(--radius-bubble); display: inline-flex; flex-wrap: wrap;
+  align-items: flex-end; max-width: 100%; color: var(--text); box-shadow: 0 1px 1px rgba(0,0,0,0.08); }
+.me .bubble { background: var(--bubble-me); border-bottom-right-radius: var(--space-1); }
+.them .bubble { background: var(--bubble-them); border-bottom-left-radius: var(--space-1); }
+.btext { white-space: pre-wrap; word-break: break-word; }
+.bmeta { font-size: 11px; color: var(--meta-time); margin-left: var(--space-2); align-self: flex-end; white-space: nowrap; }
+.bmeta .ck { color: var(--meta-time); }
+.bmeta .ck.read { color: var(--check-read); }
+.bmeta .failed { color: #e5484d; }
+/* 日期分隔胶囊（居中浮于壁纸上）。 */
+.date-pill { display: flex; justify-content: center; margin: 10px 0 6px; }
+.date-pill span { background: var(--date-pill-bg); color: #fff; font-size: 12px; font-weight: 600; padding: 3px 12px; border-radius: 12px; }
 .chat footer { display: flex; gap: var(--space-2); padding: 10px var(--space-4); border-top: 1px solid var(--line); }
 .chat footer input { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--text); }
 .chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: #fff; cursor: pointer; }
@@ -90,9 +116,12 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convitem { position: relative; }
 /* 时间在右上、红点在右下，避免重叠（对齐 Telegram/微信）。 */
 .convtime { flex-shrink: 0; padding-left: var(--space-2); }
-.badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e53935; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+/* 列表「我发的最后一条」已读双勾：对端已读→绿 ✓✓，否则→灰 ✓。 */
+.convck { color: var(--text-secondary); }
+.convck.read { color: var(--check-read); }
+.badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--badge); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
 /* 未读分割线（Telegram 风格的"未读消息"）。 */
-.unread-divider { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; color: #e53935; font-size: 12px; }
+.unread-divider { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; color: var(--text-secondary); font-size: 12px; }
 .unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .unread-divider span { white-space: nowrap; }
 .avatar { position: relative; }
@@ -105,4 +134,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 右下角"跳到底部"悬浮按钮（Telegram 风格，带未读计数）。 */
 .jump-btn { position: absolute; right: var(--space-4); bottom: 72px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.18); display: flex; align-items: center; justify-content: center; }
 .jump-btn:hover { background: var(--bg); }
-.jump-badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e53935; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+.jump-badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--badge); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+
+/* 长按/右键消息菜单（复制 / 删除），与 iOS UIContextMenu 对齐。 */
+.ctx-menu { position: fixed; z-index: 50; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.22); padding: 4px; min-width: 128px; }
+.ctx-menu button { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
+.ctx-menu button:hover { background: var(--bg); }
+.ctx-menu button.danger { color: #e5484d; }

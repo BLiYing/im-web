@@ -24,6 +24,7 @@ src/
 
 ## 工作约定
 - **每次开始主要回复前，先读 `current_task.md` 恢复上下文**，改动后更新它。
+- **`current_task.md` 是"活快照"，不是流水账**：固定四节（当前焦点 / 下一步 / 已知坑·限制 / 关联工程·常用命令），**就地覆盖，禁止追加 `Status ②③④…` 新块**。历史交给 `git log` 与 `current_task.archive.md`（只读归档）。逐功能×端状态只写 `../IMServer/docs/CLIENT_PARITY.md`（唯一来源）。
 - **聊天消息列表的交互行为**（进会话定位/分页/未读分割线/红点/已读/跳转按钮/自动滚动）**以 `../IMServer/docs/CHAT_UX.md` 为单一事实来源**，照它实现，别另起一套。
 - 协议字段以 `../IMServer/docs/PROTOCOL.md` 为准；端能力矩阵 `../IMServer/docs/CLIENT_PARITY.md`；阶段划分 `../IMServer/docs/ROADMAP.md`。
 - 类型先行：新协议字段先加到 `sdk/protocol.ts`，再在 UI/SDK 用；避免 `any`。

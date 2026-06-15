@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { IMClient, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation } from "./sdk/protocol";
 
@@ -20,6 +20,7 @@ export default function App() {
   const [entryReadSeq, setEntryReadSeq] = useState(0); // 进会话时的已读位点（精确定位未读分割线，CHAT_UX §4）
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
+  const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
@@ -77,9 +78,13 @@ export default function App() {
         setMsgsByConv((prev) => {
           const out: Record<string, ChatMessage[]> = {};
           for (const [cid, list] of Object.entries(prev)) {
-            out[cid] = list.map((m) =>
-              m.clientMsgId === clientMsgId ? { ...m, status: ok ? "sent" : "failed", convSeq } : m
-            );
+            out[cid] = list.map((m) => {
+              if (m.clientMsgId !== clientMsgId) return m;
+              // 防 sync_resp/carbon 重复回显自己发的：把 ack 拿到的 conv_seq 登记进去重集
+              // （new_msg/sync 无 client_msg_id，只能按 conv_seq 去重；与 iOS handleSendResult 一致）。
+              if (ok && convSeq > 0) (seenByConv.current[cid] ??= new Set()).add(convSeq);
+              return { ...m, status: ok ? "sent" : "failed", convSeq };
+            });
           }
           return out;
         });
@@ -164,6 +169,38 @@ export default function App() {
     setInput("");
   }, [input, peer, uid, appendMsg]);
 
+  // 本地删除一条消息（仅本端：从内存列表 + 去重集移除，不影响对端）。
+  const deleteMessage = useCallback((m: ChatMessage) => {
+    setMsgsByConv((prev) => {
+      const list = (prev[m.convId] ?? []).filter((x) =>
+        m.clientMsgId ? x.clientMsgId !== m.clientMsgId : x.convSeq !== m.convSeq
+      );
+      return { ...prev, [m.convId]: list };
+    });
+    if (m.convSeq > 0) seenByConv.current[m.convId]?.delete(m.convSeq);
+    setMenu(null);
+  }, []);
+
+  const copyMessage = useCallback((m: ChatMessage) => {
+    void navigator.clipboard?.writeText(m.content);
+    setMenu(null);
+  }, []);
+
+  // 菜单打开时：点空白/滚动/Esc 关闭。
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(null); };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
   const onInputChange = useCallback((val: string) => {
     setInput(val);
     const now = Date.now();
@@ -196,9 +233,11 @@ export default function App() {
       if (messages.length === 0) return; // 等锚点窗口到达再定位
       if (firstUnreadIdx >= 0 && !forceBottomRef.current && dividerRef.current) {
         dividerRef.current.scrollIntoView({ block: "start" }); // 停在首条未读（分割线在其上方）
-        wasNearBottomRef.current = false;
-        setJumpCount(entryUnreadRef.current);
-        setShowJump(entryUnreadRef.current > 0);
+        // 定位后实测是否已贴底：未读不多、整屏放得下时分割线滚到顶仍贴底 → 不显示 ↓N（CHAT_UX §7）。
+        const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+        wasNearBottomRef.current = nearBottom;
+        setShowJump(!nearBottom && entryUnreadRef.current > 0);
+        setJumpCount(nearBottom ? 0 : entryUnreadRef.current);
       } else {
         box.scrollTop = box.scrollHeight; // 无未读 / 强制到底
         wasNearBottomRef.current = true;
@@ -340,7 +379,14 @@ export default function App() {
               <div className="convbody">
                 <div className="convtop">
                   <span className="convpeer">{c.peer}</span>
-                  <span className="convtime">{c.last_message ? fmtTime(c.last_message.timestamp) : ""}</span>
+                  <span className="convtime">
+                    {c.last_message?.from === uid && (
+                      <span className={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "convck read" : "convck"}>
+                        {c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "✓✓ " : "✓ "}
+                      </span>
+                    )}
+                    {c.last_message ? fmtTime(c.last_message.timestamp) : ""}
+                  </span>
                 </div>
                 <div className="convlast">{c.last_message?.content ?? "（无消息）"}</div>
               </div>
@@ -370,19 +416,26 @@ export default function App() {
             {messages.map((m, i) => {
               const mine = m.from === uid;
               const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
+              const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
               return (
                 <div className="msg-item" key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                   {i === firstUnreadIdx && (
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
                   )}
                   <div className={`row ${mine ? "me" : "them"}`}>
-                    <div className="bubble">{m.content}</div>
-                    <div className="meta">
-                      {mine
-                        ? m.status === "sending" ? "发送中…"
-                          : m.status === "failed" ? "发送失败 ✗"
-                            : readByPeer ? "已读" : `已送达 ✓ · seq#${m.convSeq}`
-                        : `来自 ${m.from} · seq#${m.convSeq}`}
+                    <div className="bubble"
+                      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
+                      <span className="btext">{m.content}</span>
+                      <span className="bmeta">
+                        {mine ? (
+                          m.status === "sending" ? "发送中…"
+                            : m.status === "failed" ? <span className="failed">发送失败 ✗</span>
+                              : <>{fmtTime(m.timestamp)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+                        ) : (
+                          fmtTime(m.timestamp)
+                        )}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -404,8 +457,33 @@ export default function App() {
         </div>
         {!peer && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
+
+      {menu && (
+        <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => copyMessage(menu.m)}>复制</button>
+          <button className="danger" onClick={() => deleteMessage(menu.m)}>删除</button>
+        </div>
+      )}
     </div>
   );
+}
+
+// 两个毫秒时间戳是否同一自然日（聊天页按日期分组用）。
+function isSameDay(a: number, b: number): boolean {
+  if (!a || !b) return false;
+  const da = new Date(a), db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+}
+
+// 毫秒时间戳 → 日期分隔文案：今天/昨天/M月d日（今年）/yyyy年M月d日（往年）。
+function dayHeader(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts), now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(ts, now.getTime())) return "今天";
+  if (isSameDay(ts, yesterday.getTime())) return "昨天";
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 // 消息列表里的最大 conv_seq（发送中的 0 不计）。
