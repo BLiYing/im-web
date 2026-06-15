@@ -39,6 +39,9 @@ export default function App() {
   const loadingNewerRef = useRef(false); // 是否正在下滚加载更新历史
   const latestSeqRef = useRef(0); // 该会话服务端最新 conv_seq（判断下方是否还有未加载）
   const forceBottomRef = useRef(false); // jumpToBottom 触发的"强制定位到底"（忽略未读分割线）
+  const maxReadReportedRef = useRef(0); // 已上报的最大已读 conv_seq（可见即读，单调不回退）
+  const pendingReadRef = useRef(0); // 已滚入视口的最大 conv_seq（节流后上报）
+  const readTimerRef = useRef<number | null>(null); // 可见即读上报的节流定时器
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -67,10 +70,8 @@ export default function App() {
           seen.add(m.convSeq);
         }
         appendMsg(m.convId, m);
-        if (m.convId === currentConvRef.current && m.from !== uid && m.convSeq > 0) {
-          // 正在看这个会话 + 对端发来 → 标记已读（对端看到已读双勾）。
-          clientRef.current?.markRead(m.convId, m.convSeq);
-        }
+        // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由滚动/布局后的 markVisibleRead 读到，
+        // 在上方看历史时则不读，留到滚下去再读。
         // 任何对端来信都刷新会话列表（双栏下列表常驻：更新最后一条/排序/红点）。
         if (m.from !== uid) void refreshConversations();
       },
@@ -130,11 +131,11 @@ export default function App() {
     forceBottomRef.current = false;
     setShowJump(false);
     setJumpCount(0);
+    // 可见即读：已读起点=进入前位点；只有滚入视口超过它的消息才上报（见 markVisibleRead）。
+    maxReadReportedRef.current = readSeq;
+    pendingReadRef.current = readSeq;
     clientRef.current?.openConversation(cid, readSeq, latestSeq); // 加载锚点窗口，余下双向分页
-    // 打开即全部已读（CHAT_UX §6 简化）：上报到 latest，会话列表红点随即清零；
-    // 分割线仍用进入前的 readSeq 快照定位，不受影响。
-    if (latestSeq > 0) clientRef.current?.markRead(cid, latestSeq);
-    void refreshConversations(); // 选会话后刷新列表（清当前会话红点 / 更新其他会话）
+    void refreshConversations(); // 选会话后刷新列表（更新其他会话 / 排序）
   }, [uid, conversations, refreshConversations]);
 
   const logout = useCallback(() => {
@@ -296,9 +297,47 @@ export default function App() {
     }
   }, [phase, convId, messages.length, uid, firstUnreadIdx]);
 
+  // 可见即读（CHAT_UX §6 完整语义）：扫描在视口内的消息，取最大 conv_seq；超过已滚入位点则节流上报。
+  // 同时把"↓N"更新为视口下方仍未读的对端消息数（随滚动递减，滚到底为 0）。
+  const markVisibleRead = useCallback(() => {
+    const box = msgsRef.current;
+    if (!box) return;
+    const boxBottom = box.getBoundingClientRect().bottom;
+    const items = box.querySelectorAll<HTMLElement>(".msg-item[data-seq]");
+    let maxSeq = 0;
+    items.forEach((el) => {
+      const seq = Number(el.dataset.seq);
+      // 元素顶部已进入容器可见底边 → 视为已滚入（被看到过）；其中最大 seq = 当前看到的最深位置。
+      if (seq > 0 && el.getBoundingClientRect().top < boxBottom) maxSeq = Math.max(maxSeq, seq);
+    });
+    if (maxSeq > pendingReadRef.current) {
+      pendingReadRef.current = maxSeq;
+      if (readTimerRef.current) clearTimeout(readTimerRef.current);
+      readTimerRef.current = window.setTimeout(() => {
+        if (pendingReadRef.current > maxReadReportedRef.current) {
+          maxReadReportedRef.current = pendingReadRef.current;
+          clientRef.current?.markRead(currentConvRef.current, maxReadReportedRef.current);
+          void refreshConversations(); // 已读推进后刷新左侧列表，红点未读数随滚动递减
+        }
+      }, 300);
+    }
+    // ↓N = 视口下方仍未读的对端消息数（conv_seq 超过已滚入位点、且是对端消息）。
+    let below = 0;
+    items.forEach((el) => {
+      if (Number(el.dataset.seq) > pendingReadRef.current && el.querySelector(".row.them")) below++;
+    });
+    setJumpCount(below);
+  }, [refreshConversations]);
+
+  // 进会话/新消息渲染后扫一遍可见消息（覆盖"整屏放得下、不触发滚动"的短会话；滚动另由 onMsgsScroll 处理）。
+  useEffect(() => {
+    if (phase === "app" && convId) markVisibleRead();
+  }, [phase, convId, messages.length, markVisibleRead]);
+
   const onMsgsScroll = useCallback(() => {
     const box = msgsRef.current;
     if (!box) return;
+    markVisibleRead(); // 可见即读：滚到哪、读到哪
     const cid = currentConvRef.current;
     const list = msgsByConv[cid] ?? [];
     const nearBottomPx = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
@@ -418,7 +457,7 @@ export default function App() {
               const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
               const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
               return (
-                <div className="msg-item" key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
                   {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                   {i === firstUnreadIdx && (
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
