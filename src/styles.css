@@ -35,7 +35,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .hint { font-size: 12px; color: var(--text-secondary); }
 .hint code { background: var(--bubble-them); padding: 1px 5px; border-radius: 4px; }
 
-.screen { display: flex; flex-direction: column; height: 100vh; max-width: 640px; margin: 0 auto; background: var(--surface); }
+.screen { display: flex; flex-direction: column; height: 100vh; max-width: 640px; margin: 0 auto; background: var(--surface); position: relative; }
 .screen header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--line); font-weight: 600; }
 .link { border: 0; background: none; color: var(--accent); font-size: 15px; cursor: pointer; }
 
@@ -82,3 +82,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .screen header .dot.on { background: #1aab5b; }
 .screen header .muted { color: var(--text-secondary); font-size: 12px; font-weight: 400; }
 .typing { padding: 4px var(--space-4); color: var(--text-secondary); font-size: 12px; }
+
+/* 右下角"跳到底部"悬浮按钮（Telegram 风格，带未读计数）。 */
+.jump-btn { position: absolute; right: var(--space-4); bottom: 72px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.18); display: flex; align-items: center; justify-content: center; }
+.jump-btn:hover { background: var(--bg); }
+.jump-badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e53935; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }

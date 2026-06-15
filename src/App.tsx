@@ -17,6 +17,8 @@ export default function App() {
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
   const [typingConv, setTypingConv] = useState<string | null>(null);
   const [unreadAnchor, setUnreadAnchor] = useState(-1); // 进会话时的已读位点：首条未读=convSeq>anchor；-1 表示无未读
+  const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
+  const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
@@ -26,6 +28,9 @@ export default function App() {
   const msgsRef = useRef<HTMLDivElement | null>(null); // 消息滚动容器
   const dividerRef = useRef<HTMLDivElement | null>(null); // 未读分割线
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
+  const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
+  const prevLenRef = useRef(0); // 上次渲染的消息条数（判断新增）
+  const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -103,7 +108,10 @@ export default function App() {
     // 进会话定位：记录"进入前"的已读位点，据此渲染未读分割线并滚动到它。
     const conv = conversations.find((c) => c.conv_id === cid);
     setUnreadAnchor(conv && conv.unread > 0 ? conv.read_seq : -1);
+    entryUnreadRef.current = conv?.unread ?? 0;
     pendingScrollRef.current = true;
+    setShowJump(false);
+    setJumpCount(0);
     clientRef.current?.trackConversation(cid); // 触发增量同步拉历史
     // 已读：把已知最新消息位点上报（新同步进来的由 onMessage 续报）。
     const known = msgsByConv[cid] ?? [];
@@ -163,20 +171,64 @@ export default function App() {
   const firstUnreadIdx =
     unreadAnchor < 0 ? -1 : messages.findIndex((m) => m.convSeq > unreadAnchor && m.from !== uid);
 
-  // 进会话定位 / 新消息贴底。
+  // 进会话定位 / 新消息贴底 / 滚动在上时累加"未读"并显示跳转按钮。
   useLayoutEffect(() => {
     if (phase !== "chat") return;
     const box = msgsRef.current;
     if (!box) return;
+    const prevLen = prevLenRef.current;
+    prevLenRef.current = messages.length;
+
     if (pendingScrollRef.current) {
       if (messages.length === 0) return; // 等历史/同步到达再定位
-      if (dividerRef.current) dividerRef.current.scrollIntoView({ block: "center" });
-      else box.scrollTop = box.scrollHeight;
+      if (dividerRef.current) {
+        dividerRef.current.scrollIntoView({ block: "center" }); // 定位到首条未读
+        wasNearBottomRef.current = false;
+        setJumpCount(entryUnreadRef.current); // 底部还有未读 → 按钮带数字
+        setShowJump(entryUnreadRef.current > 0);
+      } else {
+        box.scrollTop = box.scrollHeight; // 无未读 → 直接贴底
+        wasNearBottomRef.current = true;
+        setShowJump(false);
+      }
       pendingScrollRef.current = false;
-    } else {
-      box.scrollTop = box.scrollHeight; // 收到/发送消息 → 滚到底
+      return;
     }
-  }, [phase, convId, messages.length]);
+
+    const added = messages.length - prevLen;
+    const lastMine = messages[messages.length - 1]?.from === uid;
+    if (lastMine || wasNearBottomRef.current) {
+      box.scrollTop = box.scrollHeight; // 自己发 / 已在底部 → 贴底
+      wasNearBottomRef.current = true;
+      setShowJump(false);
+      setJumpCount(0);
+    } else if (added > 0) {
+      setJumpCount((n) => n + added); // 在上面看历史时来的新消息累加
+      setShowJump(true);
+    }
+  }, [phase, convId, messages.length, uid]);
+
+  const onMsgsScroll = useCallback(() => {
+    const box = msgsRef.current;
+    if (!box) return;
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    wasNearBottomRef.current = nearBottom;
+    if (nearBottom) {
+      setShowJump(false);
+      setJumpCount(0);
+    } else {
+      setShowJump(true);
+    }
+  }, []);
+
+  const jumpToBottom = useCallback(() => {
+    const box = msgsRef.current;
+    if (!box) return;
+    box.scrollTop = box.scrollHeight;
+    wasNearBottomRef.current = true;
+    setShowJump(false);
+    setJumpCount(0);
+  }, []);
 
   // ---- 登录 ----
   if (phase === "login") {
@@ -240,7 +292,7 @@ export default function App() {
         </span>
         <span className="muted">{stateText}</span>
       </header>
-      <div className="msgs" ref={msgsRef}>
+      <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
         {messages.map((m, i) => {
           const mine = m.from === uid;
           const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
@@ -263,6 +315,11 @@ export default function App() {
           );
         })}
       </div>
+      {showJump && (
+        <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
+          ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
+        </button>
+      )}
       {typingConv === convId && <div className="typing">对方正在输入…</div>}
       <footer>
         <input value={input} placeholder="输入消息，回车发送…"
