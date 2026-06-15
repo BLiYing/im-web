@@ -8,6 +8,8 @@ export const T = {
   ACK: "ack",
   NEW_MSG: "new_msg",
   RECEIPT: "receipt",
+  TYPING: "typing",
+  PRESENCE: "presence",
   SYNC_REQ: "sync_req",
   SYNC_RESP: "sync_resp",
   ERROR: "error",

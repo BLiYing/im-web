@@ -10,12 +10,18 @@ export default function App() {
   const [state, setState] = useState<ConnState>("disconnected");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [msgsByConv, setMsgsByConv] = useState<Record<string, ChatMessage[]>>({});
-  const [peer, setPeer] = useState(""); // 当前聊天对端
+  const [peer, setPeer] = useState("");
   const [newPeer, setNewPeer] = useState("");
   const [input, setInput] = useState("");
+  const [presence, setPresence] = useState<Record<string, string>>({}); // user -> online/offline
+  const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
+  const [typingConv, setTypingConv] = useState<string | null>(null);
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
+  const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
+  const typingTimer = useRef<number | null>(null);
+  const lastTypingSent = useRef<number>(0);
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -26,7 +32,7 @@ export default function App() {
       const convs = await clientRef.current?.fetchConversations();
       if (convs) setConversations(convs);
     } catch {
-      /* 忽略：列表可暂为空 */
+      /* 忽略 */
     }
   }, []);
 
@@ -44,6 +50,10 @@ export default function App() {
           seen.add(m.convSeq);
         }
         appendMsg(m.convId, m);
+        // 正在看这个会话 + 是对端发来的 → 标记已读（对端会看到已读双勾）。
+        if (m.convId === currentConvRef.current && m.from !== uid && m.convSeq > 0) {
+          clientRef.current?.markRead(m.convId, m.convSeq);
+        }
       },
       onAck: (clientMsgId, ok, convSeq) => {
         setMsgsByConv((prev) => {
@@ -55,6 +65,18 @@ export default function App() {
           }
           return out;
         });
+      },
+      onReceipt: (convId, from, status, upToSeq) => {
+        if (status === "read" && from !== uid) {
+          setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
+        }
+      },
+      onPresence: (user, status) => setPresence((prev) => ({ ...prev, [user]: status })),
+      onTyping: (convId, from) => {
+        if (from === uid) return;
+        setTypingConv(convId);
+        if (typingTimer.current) clearTimeout(typingTimer.current);
+        typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
       },
     });
     clientRef.current = client;
@@ -68,14 +90,22 @@ export default function App() {
       alert("请输入有效的对方 uid");
       return;
     }
+    const cid = convIdFor(uid, p);
     setPeer(p);
-    clientRef.current?.trackConversation(convIdFor(uid, p)); // 触发增量同步拉历史
+    currentConvRef.current = cid;
+    clientRef.current?.trackConversation(cid); // 触发增量同步拉历史
+    // 已读：把已知最新消息位点上报（新同步进来的由 onMessage 续报）。
+    const known = msgsByConv[cid] ?? [];
+    const maxSeq = known.reduce((a, m) => Math.max(a, m.convSeq), 0);
+    if (maxSeq > 0) clientRef.current?.markRead(cid, maxSeq);
     setPhase("chat");
-  }, [uid]);
+  }, [uid, msgsByConv]);
 
   const backToList = useCallback(() => {
+    currentConvRef.current = "";
     setPeer("");
     setNewPeer("");
+    setTypingConv(null);
     void refreshConversations();
     setPhase("list");
   }, [refreshConversations]);
@@ -84,8 +114,11 @@ export default function App() {
     clientRef.current?.disconnect();
     clientRef.current = null;
     seenByConv.current = {};
+    currentConvRef.current = "";
     setConversations([]);
     setMsgsByConv({});
+    setPresence({});
+    setPeerReadSeq({});
     setPhase("login");
   }, []);
 
@@ -101,6 +134,15 @@ export default function App() {
     });
     setInput("");
   }, [input, peer, uid, appendMsg]);
+
+  const onInputChange = useCallback((val: string) => {
+    setInput(val);
+    const now = Date.now();
+    if (val && peer && now - lastTypingSent.current > 2000) {
+      lastTypingSent.current = now;
+      clientRef.current?.sendTyping(convIdFor(uid, peer));
+    }
+  }, [peer, uid]);
 
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
@@ -134,7 +176,10 @@ export default function App() {
           {conversations.length === 0 && <div className="empty">还没有会话，输入对方 uid 发起一个吧</div>}
           {conversations.map((c) => (
             <div key={c.conv_id} className="convitem" onClick={() => openChat(c.peer)}>
-              <div className="avatar">{c.peer.slice(-2)}</div>
+              <div className="avatar">
+                {c.peer.slice(-2)}
+                {presence[c.peer] === "online" && <span className="presence-dot" />}
+              </div>
               <div className="convbody">
                 <div className="convtop">
                   <span className="convpeer">{c.peer}</span>
@@ -142,6 +187,7 @@ export default function App() {
                 </div>
                 <div className="convlast">{c.last_message?.content ?? "（无消息）"}</div>
               </div>
+              {c.unread > 0 && <span className="badge">{c.unread > 99 ? "99+" : c.unread}</span>}
             </div>
           ))}
         </div>
@@ -152,30 +198,40 @@ export default function App() {
   // ---- 聊天 ----
   const convId = convIdFor(uid, peer);
   const messages = msgsByConv[convId] ?? [];
+  const readSeq = peerReadSeq[convId] ?? 0;
+  const peerOnline = presence[peer] === "online";
   return (
     <div className="screen">
       <header>
         <button className="link" onClick={backToList}>‹ 会话</button>
-        <span>与 {peer} 聊天（{stateText}）</span>
+        <span>
+          <span className={`dot ${peerOnline ? "on" : ""}`} /> 与 {peer} 聊天
+          {peerOnline ? "（在线）" : ""}
+        </span>
+        <span className="muted">{stateText}</span>
       </header>
       <div className="msgs">
         {messages.map((m, i) => {
           const mine = m.from === uid;
+          const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
           return (
             <div key={m.clientMsgId ?? m.serverMsgId ?? i} className={`row ${mine ? "me" : "them"}`}>
               <div className="bubble">{m.content}</div>
               <div className="meta">
                 {mine
-                  ? m.status === "sending" ? "发送中…" : m.status === "sent" ? `已送达 ✓ · seq#${m.convSeq}` : m.status === "failed" ? "发送失败 ✗" : ""
+                  ? m.status === "sending" ? "发送中…"
+                    : m.status === "failed" ? "发送失败 ✗"
+                      : readByPeer ? "已读" : `已送达 ✓ · seq#${m.convSeq}`
                   : `来自 ${m.from} · seq#${m.convSeq}`}
               </div>
             </div>
           );
         })}
       </div>
+      {typingConv === convId && <div className="typing">对方正在输入…</div>}
       <footer>
         <input value={input} placeholder="输入消息，回车发送…"
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => onInputChange(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
         <button onClick={send}>发送</button>
       </footer>

@@ -15,6 +15,12 @@ export interface IMClientHandlers {
   onMessage?: (msg: ChatMessage) => void;
   /** 发送结果：成功时带 server 分配的 convSeq。 */
   onAck?: (clientMsgId: string, ok: boolean, convSeq: number) => void;
+  /** 对端回执：from 已读/送达到 upToSeq（用于已读双勾）。 */
+  onReceipt?: (convId: string, from: string, status: string, upToSeq: number) => void;
+  /** 在线状态变化：某用户上线/离线。 */
+  onPresence?: (user: string, status: string) => void;
+  /** 对端正在输入。 */
+  onTyping?: (convId: string, from: string) => void;
 }
 
 export class IMClient {
@@ -147,6 +153,15 @@ export class IMClient {
           if (conv.has_more && conv.conv_id) this.sendSyncReq([conv.conv_id]);
         }
         break;
+      case T.RECEIPT:
+        this.handlers.onReceipt?.(d.conv_id, d.from, d.status, d.up_to_conv_seq);
+        break;
+      case T.PRESENCE:
+        this.handlers.onPresence?.(d.user, d.status);
+        break;
+      case T.TYPING:
+        this.handlers.onTyping?.(d.conv_id, d.from);
+        break;
       case T.PONG:
         break;
       case T.ERROR:
@@ -169,6 +184,18 @@ export class IMClient {
     this.updateSynced(msg.convId, msg.convSeq);
     this.sendReceipt(msg.convId, msg.convSeq);
     this.handlers.onMessage?.(msg);
+  }
+
+  /** 发送"正在输入"给会话对端（临时态）。 */
+  sendTyping(convId: string): void {
+    if (convId) this.send({ type: T.TYPING, data: { conv_id: convId } });
+  }
+
+  /** 上报已读到 upToSeq（对端据此显示已读双勾）。 */
+  markRead(convId: string, upToSeq: number): void {
+    if (convId && upToSeq > 0) {
+      this.send({ type: T.RECEIPT, data: { conv_id: convId, status: "read", up_to_conv_seq: upToSeq } });
+    }
   }
 
   private sendReceipt(convId: string, upTo: number): void {
