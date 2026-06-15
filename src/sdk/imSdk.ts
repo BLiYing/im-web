@@ -34,6 +34,8 @@ export class IMClient {
   private manualClose = false;
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
+  private historyPending = new Set<string>(); // 正在加载更早历史的会话（抑制 has_more 自动向前翻页）
+  private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
   private handlers: IMClientHandlers;
 
   constructor(handlers: IMClientHandlers = {}) {
@@ -72,15 +74,23 @@ export class IMClient {
     return (body.data?.conversations ?? []) as Conversation[];
   }
 
-  /** 登记会话：每次（重）连成功后自动从已同步位点发 sync_req 补回缺失/离线消息。
-   *  首次打开某会话时把游标重置为 0，从头全量回填历史——否则在列表页实时收到的新消息
-   *  会把游标推到很高，进会话只 sync 到新消息、拉不回中间的历史（会出现空洞）。 */
-  trackConversation(convId: string): void {
+  /** 登记会话并加载最近一页历史。
+   *  首次打开把游标定到 latestSeq - 一页，只同步最近一页（避免一次拉全量历史导致卡顿/视图追着
+   *  加载前沿乱滚）；更早的历史由 loadOlder 上滚加载。重连时用现有游标做增量补偿。 */
+  trackConversation(convId: string, latestSeq = 0): void {
     if (!convId) return;
     const firstTime = !this.tracked.has(convId);
     this.tracked.add(convId);
-    if (firstTime) this.syncedSeq.delete(convId); // 强制 since=0，全量回填
+    if (firstTime) this.syncedSeq.set(convId, Math.max(0, latestSeq - this.historyPage));
     if (this.state === "connected") this.sendSyncReq([convId]);
+  }
+
+  /** 加载 oldestSeq 之前的一页更早历史（上滚到顶触发）。不自动向前翻页，避免回到最新。 */
+  loadOlder(convId: string, oldestSeq: number): void {
+    if (!convId || oldestSeq <= 1) return;
+    const since = Math.max(0, oldestSeq - 1 - this.historyPage); // 返回 [oldestSeq-页 .. oldestSeq-1]
+    this.historyPending.add(convId);
+    this.send({ type: T.SYNC_REQ, seq: ++this.seq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
   }
 
   /** 发送文本，返回 client_msg_id。 */
@@ -153,8 +163,13 @@ export class IMClient {
         break;
       case T.SYNC_RESP:
         for (const conv of d.conversations || []) {
+          const isHistory = conv.conv_id && this.historyPending.has(conv.conv_id);
           for (const m of conv.messages || []) this.processIncoming(m);
-          if (conv.has_more && conv.conv_id) this.sendSyncReq([conv.conv_id]);
+          if (isHistory) {
+            this.historyPending.delete(conv.conv_id); // 历史页：不向前翻页
+          } else if (conv.has_more && conv.conv_id) {
+            this.sendSyncReq([conv.conv_id]); // 增量/最近页：继续翻到最新
+          }
         }
         break;
       case T.RECEIPT:

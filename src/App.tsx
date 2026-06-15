@@ -31,6 +31,9 @@ export default function App() {
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
+  const prevMinSeqRef = useRef(0); // 上次渲染的最小 conv_seq（判断顶部是否插了更早历史）
+  const loadingOlderRef = useRef(false); // 是否正在加载更早历史（防重复触发）
+  const histAnchorRef = useRef<{ h: number; t: number } | null>(null); // 加载历史前的滚动锚点（保位）
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -112,7 +115,7 @@ export default function App() {
     pendingScrollRef.current = true;
     setShowJump(false);
     setJumpCount(0);
-    clientRef.current?.trackConversation(cid); // 触发增量同步拉历史
+    clientRef.current?.trackConversation(cid, conv?.latest_conv_seq ?? 0); // 只同步最近一页，余下上滚加载
     // 已读：把已知最新消息位点上报（新同步进来的由 onMessage 续报）。
     const known = msgsByConv[cid] ?? [];
     const maxSeq = known.reduce((a, m) => Math.max(a, m.convSeq), 0);
@@ -194,10 +197,24 @@ export default function App() {
       }
       pendingScrollRef.current = false;
       prevMaxSeqRef.current = maxSeqOf(messages);
+      prevMinSeqRef.current = minSeqOf(messages);
       return;
     }
 
-    // 只有"底部来了更大的 conv_seq"才算新消息；历史回填（更小 seq）不动滚动/计数。
+    // 上滚加载更早历史：顶部插入了更小 seq → 保持视觉位置（不跳、不贴底、不动计数）。
+    const minSeq = minSeqOf(messages);
+    if (histAnchorRef.current && minSeq < prevMinSeqRef.current) {
+      const a = histAnchorRef.current;
+      box.scrollTop = box.scrollHeight - a.h + a.t;
+      histAnchorRef.current = null;
+      loadingOlderRef.current = false;
+      prevMinSeqRef.current = minSeq;
+      prevMaxSeqRef.current = Math.max(prevMaxSeqRef.current, maxSeqOf(messages));
+      return;
+    }
+    prevMinSeqRef.current = minSeq;
+
+    // 只有"底部来了更大的 conv_seq"才算新消息；历史（更小 seq）不动滚动/计数。
     const newPeer = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current).length;
     const lastMine = messages[messages.length - 1]?.from === uid;
     prevMaxSeqRef.current = Math.max(prevMaxSeqRef.current, maxSeqOf(messages));
@@ -230,7 +247,17 @@ export default function App() {
     } else {
       setShowJump(true);
     }
-  }, []);
+    // 上滚到顶 → 加载更早一页历史（保留滚动位置由 effect 处理）。
+    if (box.scrollTop < 120 && !loadingOlderRef.current) {
+      const cid = currentConvRef.current;
+      const oldest = minSeqOf(msgsByConv[cid] ?? []);
+      if (oldest > 1) {
+        loadingOlderRef.current = true;
+        histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
+        clientRef.current?.loadOlder(cid, oldest);
+      }
+    }
+  }, [msgsByConv]);
 
   const jumpToBottom = useCallback(() => {
     const box = msgsRef.current;
@@ -346,6 +373,13 @@ export default function App() {
 function maxSeqOf(messages: ChatMessage[]): number {
   let m = 0;
   for (const x of messages) if (x.convSeq > m) m = x.convSeq;
+  return m;
+}
+
+// 消息列表里的最小 conv_seq（发送中的 0 不计；空列表返回 0）。
+function minSeqOf(messages: ChatMessage[]): number {
+  let m = 0;
+  for (const x of messages) if (x.convSeq > 0 && (m === 0 || x.convSeq < m)) m = x.convSeq;
   return m;
 }
 
