@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { IMClient, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation } from "./sdk/protocol";
 
@@ -29,7 +29,7 @@ export default function App() {
   const dividerRef = useRef<HTMLDivElement | null>(null); // 未读分割线
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
-  const prevLenRef = useRef(0); // 上次渲染的消息条数（判断新增）
+  const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
@@ -166,7 +166,10 @@ export default function App() {
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
   const convId = peer ? convIdFor(uid, peer) : "";
-  const messages = msgsByConv[convId] ?? [];
+  // 按 conv_seq 排序（回填的历史可能晚于实时消息到达）；发送中(convSeq=0)排末尾。
+  const messages = (msgsByConv[convId] ?? [])
+    .slice()
+    .sort((a, b) => (a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER));
   // 首条未读下标：从尾部倒数第 entryUnread 条"对端消息"（只依赖未读计数，不依赖 read_seq）。
   const firstUnreadIdx = firstUnreadIndex(messages, uid, entryUnread);
 
@@ -175,8 +178,6 @@ export default function App() {
     if (phase !== "chat") return;
     const box = msgsRef.current;
     if (!box) return;
-    const prevLen = prevLenRef.current;
-    prevLenRef.current = messages.length;
 
     if (pendingScrollRef.current) {
       if (messages.length === 0) return; // 等历史/同步到达再定位
@@ -192,19 +193,29 @@ export default function App() {
         setShowJump(false);
       }
       pendingScrollRef.current = false;
+      prevMaxSeqRef.current = maxSeqOf(messages);
       return;
     }
 
-    const added = messages.length - prevLen;
+    // 只有"底部来了更大的 conv_seq"才算新消息；历史回填（更小 seq）不动滚动/计数。
+    const newPeer = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current).length;
     const lastMine = messages[messages.length - 1]?.from === uid;
-    if (lastMine || wasNearBottomRef.current) {
-      box.scrollTop = box.scrollHeight; // 自己发 / 已在底部 → 贴底
+    prevMaxSeqRef.current = Math.max(prevMaxSeqRef.current, maxSeqOf(messages));
+
+    if (lastMine) {
+      box.scrollTop = box.scrollHeight; // 自己发 → 贴底
       wasNearBottomRef.current = true;
       setShowJump(false);
       setJumpCount(0);
-    } else if (added > 0) {
-      setJumpCount((n) => n + added); // 在上面看历史时来的新消息累加
-      setShowJump(true);
+    } else if (newPeer > 0) {
+      if (wasNearBottomRef.current) {
+        box.scrollTop = box.scrollHeight; // 已在底部 → 贴底
+        setShowJump(false);
+        setJumpCount(0);
+      } else {
+        setJumpCount((n) => n + newPeer); // 在上面看历史 → 累加并显示按钮
+        setShowJump(true);
+      }
     }
   }, [phase, convId, messages.length, uid]);
 
@@ -297,7 +308,7 @@ export default function App() {
           const mine = m.from === uid;
           const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
           return (
-            <div key={m.clientMsgId ?? m.serverMsgId ?? i}>
+            <Fragment key={m.clientMsgId ?? m.serverMsgId ?? i}>
               {i === firstUnreadIdx && (
                 <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
               )}
@@ -311,7 +322,7 @@ export default function App() {
                     : `来自 ${m.from} · seq#${m.convSeq}`}
                 </div>
               </div>
-            </div>
+            </Fragment>
           );
         })}
       </div>
@@ -329,6 +340,13 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+// 消息列表里的最大 conv_seq（发送中的 0 不计）。
+function maxSeqOf(messages: ChatMessage[]): number {
+  let m = 0;
+  for (const x of messages) if (x.convSeq > m) m = x.convSeq;
+  return m;
 }
 
 // 首条未读下标：从尾部倒数第 n 条"对端消息"。仅依赖未读计数，不依赖 read_seq。

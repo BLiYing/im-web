@@ -72,10 +72,14 @@ export class IMClient {
     return (body.data?.conversations ?? []) as Conversation[];
   }
 
-  /** 登记会话：每次（重）连成功后自动从已同步位点发 sync_req 补回缺失/离线消息。 */
+  /** 登记会话：每次（重）连成功后自动从已同步位点发 sync_req 补回缺失/离线消息。
+   *  首次打开某会话时把游标重置为 0，从头全量回填历史——否则在列表页实时收到的新消息
+   *  会把游标推到很高，进会话只 sync 到新消息、拉不回中间的历史（会出现空洞）。 */
   trackConversation(convId: string): void {
     if (!convId) return;
+    const firstTime = !this.tracked.has(convId);
     this.tracked.add(convId);
+    if (firstTime) this.syncedSeq.delete(convId); // 强制 since=0，全量回填
     if (this.state === "connected") this.sendSyncReq([convId]);
   }
 
