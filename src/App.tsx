@@ -17,7 +17,8 @@ export default function App() {
   const [presence, setPresence] = useState<Record<string, string>>({}); // user -> online/offline
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
   const [typingConv, setTypingConv] = useState<string | null>(null);
-  const [entryUnread, setEntryUnread] = useState(0); // 进会话时的未读条数（用于定位分割线，从尾部倒数）
+  const [entryUnread, setEntryUnread] = useState(0); // 进会话时的未读数（红点/↓N 计数，服务端 cap 999）
+  const [entryReadSeq, setEntryReadSeq] = useState(0); // 进会话时的已读位点（精确定位未读分割线，CHAT_UX §4）
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
 
@@ -32,7 +33,10 @@ export default function App() {
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
   const prevMinSeqRef = useRef(0); // 上次渲染的最小 conv_seq（判断顶部是否插了更早历史）
-  const loadingOlderRef = useRef(false); // 是否正在加载更早历史（防重复触发）
+  const loadingOlderRef = useRef(false); // 是否正在上滚加载更早历史
+  const loadingNewerRef = useRef(false); // 是否正在下滚加载更新历史
+  const latestSeqRef = useRef(0); // 该会话服务端最新 conv_seq（判断下方是否还有未加载）
+  const forceBottomRef = useRef(false); // jumpToBottom 触发的"强制定位到底"（忽略未读分割线）
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -107,18 +111,22 @@ export default function App() {
     const cid = convIdFor(uid, p);
     setPeer(p);
     currentConvRef.current = cid;
-    // 进会话定位：记录"进入前"的已读位点，据此渲染未读分割线并滚动到它。
+    // 进会话定位（CHAT_UX §3）：以 read_seq 为锚点——有未读则停在首条未读，否则到最新。
     const conv = conversations.find((c) => c.conv_id === cid);
+    const readSeq = conv?.read_seq ?? 0;
+    const latestSeq = conv?.latest_conv_seq ?? 0;
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
+    setEntryReadSeq(readSeq);
+    latestSeqRef.current = latestSeq;
     pendingScrollRef.current = true;
+    forceBottomRef.current = false;
     setShowJump(false);
     setJumpCount(0);
-    clientRef.current?.trackConversation(cid, conv?.latest_conv_seq ?? 0); // 只同步最近一页，余下上滚加载
-    // 已读：把已知最新消息位点上报（新同步进来的由 onMessage 续报）。
-    const known = msgsByConv[cid] ?? [];
-    const maxSeq = known.reduce((a, m) => Math.max(a, m.convSeq), 0);
-    if (maxSeq > 0) clientRef.current?.markRead(cid, maxSeq);
+    clientRef.current?.openConversation(cid, readSeq, latestSeq); // 加载锚点窗口，余下双向分页
+    // 打开即全部已读（CHAT_UX §6 简化）：上报到 latest，会话列表红点随即清零；
+    // 分割线仍用进入前的 readSeq 快照定位，不受影响。
+    if (latestSeq > 0) clientRef.current?.markRead(cid, latestSeq);
     setPhase("chat");
   }, [uid, msgsByConv, conversations]);
 
@@ -172,8 +180,9 @@ export default function App() {
   const messages = (msgsByConv[convId] ?? [])
     .slice()
     .sort((a, b) => (a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER));
-  // 首条未读下标：从尾部倒数第 entryUnread 条"对端消息"（只依赖未读计数，不依赖 read_seq）。
-  const firstUnreadIdx = firstUnreadIndex(messages, uid, entryUnread);
+  // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
+  const firstUnreadIdx =
+    entryUnread > 0 ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq) : -1;
 
   // shift：本次渲染是否在"顶部插入了更早历史"（与上次渲染比 min/max seq）。
   // 传给 VList 后由 virtua 自动从底部维持滚动位置，反向分页不跳。
@@ -194,36 +203,49 @@ export default function App() {
     const curMax = maxSeqOf(messages);
 
     if (pendingScrollRef.current) {
-      if (messages.length === 0) return; // 等最近一页到达再定位
-      if (firstUnreadIdx >= 0) {
-        h.scrollToIndex(firstUnreadIdx, { align: "start" }); // 定位到首条未读
+      if (messages.length === 0) return; // 等锚点窗口到达再定位
+      if (firstUnreadIdx >= 0 && !forceBottomRef.current) {
+        h.scrollToIndex(firstUnreadIdx, { align: "start" }); // 停在首条未读（分割线在其上方）
         wasNearBottomRef.current = false;
         setJumpCount(entryUnreadRef.current);
         setShowJump(entryUnreadRef.current > 0);
       } else {
-        h.scrollToIndex(messages.length - 1, { align: "end" }); // 否则直接到最新
+        h.scrollToIndex(messages.length - 1, { align: "end" }); // 无未读 / 强制到底
         wasNearBottomRef.current = true;
         setShowJump(false);
       }
       pendingScrollRef.current = false;
+      forceBottomRef.current = false;
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
       return;
     }
 
-    // 顶部插入了更早历史：位置已由 VList 的 shift 维持，这里只复位加载锁。
+    // 复位分页锁：顶部插了更老（min 变小）/底部接了更新（max 变大）。
+    const wasLoadingNewer = loadingNewerRef.current;
+    if (curMin < prevMinSeqRef.current) loadingOlderRef.current = false;
+    if (curMax > prevMaxSeqRef.current) loadingNewerRef.current = false;
+
+    // 顶部插入更早历史：位置由 VList 的 shift 维持，不动滚动/计数。
     if (curMin < prevMinSeqRef.current && curMax <= prevMaxSeqRef.current) {
-      loadingOlderRef.current = false;
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
       return;
     }
 
-    // 底部来了更大的 conv_seq 才算新消息。
+    // 下滚分页加载的更新历史（≤ latest）：插在底部下方，位置不动（virtua 自然保持）。
+    if (curMax > prevMaxSeqRef.current && curMax <= latestSeqRef.current && wasLoadingNewer) {
+      prevMinSeqRef.current = curMin;
+      prevMaxSeqRef.current = curMax;
+      return;
+    }
+
+    // 真·新消息（live，conv_seq 超过进会话时的 latest）或自己发送。
     const newPeer = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current).length;
     const lastMine = messages[messages.length - 1]?.from === uid;
     prevMinSeqRef.current = curMin;
     prevMaxSeqRef.current = curMax;
+    if (curMax > latestSeqRef.current) latestSeqRef.current = curMax; // live 推进 latest
 
     if (lastMine) {
       h.scrollToIndex(messages.length - 1, { align: "end" }); // 自己发 → 贴底
@@ -242,27 +264,31 @@ export default function App() {
     }
   }, [phase, convId, messages.length, uid, firstUnreadIdx]);
 
-  // virtua 的滚动回调：offset = 当前 scrollTop。判断贴底/到顶。
+  // virtua 的滚动回调：offset = 当前 scrollTop。判断贴底/到顶 + 双向分页。
   const onVScroll = useCallback(
     (offset: number) => {
       const h = vlistRef.current;
       if (!h) return;
-      const nearBottom = offset >= h.scrollSize - h.viewportSize - 80;
-      wasNearBottomRef.current = nearBottom;
-      if (nearBottom) {
-        setShowJump(false);
-        setJumpCount(0);
-      } else {
-        setShowJump(true);
-      }
-      // 上滚到顶 → 加载更早一页历史（位置由 shift 维持）。
-      if (offset < 200 && !loadingOlderRef.current) {
-        const cid = currentConvRef.current;
-        const oldest = minSeqOf(msgsByConv[cid] ?? []);
-        if (oldest > 1) {
-          loadingOlderRef.current = true;
-          clientRef.current?.loadOlder(cid, oldest);
-        }
+      const cid = currentConvRef.current;
+      const list = msgsByConv[cid] ?? [];
+      const nearBottomPx = offset >= h.scrollSize - h.viewportSize - 80;
+      const newest = maxSeqOf(list);
+      const oldest = minSeqOf(list);
+      const moreBelow = newest < latestSeqRef.current; // 下方还有未加载的更新历史
+      const atTrueBottom = nearBottomPx && !moreBelow;
+      wasNearBottomRef.current = atTrueBottom;
+      setShowJump(!atTrueBottom);
+      if (atTrueBottom) setJumpCount(0);
+
+      const busy = loadingOlderRef.current || loadingNewerRef.current;
+      // 下滚到底 → 加载更新一页（位置不动）。
+      if (nearBottomPx && moreBelow && !busy) {
+        loadingNewerRef.current = true;
+        clientRef.current?.loadNewer(cid, newest);
+      } else if (offset < 200 && oldest > 1 && !busy) {
+        // 上滚到顶 → 加载更早一页（位置由 shift 维持）。
+        loadingOlderRef.current = true;
+        clientRef.current?.loadOlder(cid, oldest);
       }
     },
     [msgsByConv]
@@ -271,11 +297,21 @@ export default function App() {
   const jumpToBottom = useCallback(() => {
     const h = vlistRef.current;
     if (!h) return;
-    h.scrollTo(h.scrollSize); // 滚到最底
+    const cid = currentConvRef.current;
+    const newest = maxSeqOf(msgsByConv[cid] ?? []);
+    if (newest < latestSeqRef.current) {
+      // 下方还有大段未加载（如从很老的未读处直接跳底）→ 重载最近一页再贴底。
+      setEntryUnread(0);
+      forceBottomRef.current = true;
+      pendingScrollRef.current = true;
+      clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current);
+    } else {
+      h.scrollTo(h.scrollSize); // 已加载到底 → 直接滚到最底
+    }
     wasNearBottomRef.current = true;
     setShowJump(false);
     setJumpCount(0);
-  }, []);
+  }, [msgsByConv]);
 
   // ---- 登录 ----
   if (phase === "login") {
@@ -390,19 +426,6 @@ function minSeqOf(messages: ChatMessage[]): number {
   let m = 0;
   for (const x of messages) if (x.convSeq > 0 && (m === 0 || x.convSeq < m)) m = x.convSeq;
   return m;
-}
-
-// 首条未读下标：从尾部倒数第 n 条"对端消息"。仅依赖未读计数，不依赖 read_seq。
-function firstUnreadIndex(messages: ChatMessage[], uid: string, n: number): number {
-  if (n <= 0) return -1;
-  let c = 0;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].from !== uid) {
-      c++;
-      if (c === n) return i;
-    }
-  }
-  return -1; // 本地消息不足 n 条对端消息（历史还没拉全），不画分割线
 }
 
 function fmtTime(ts: number): string {

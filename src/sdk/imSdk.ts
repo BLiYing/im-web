@@ -34,8 +34,9 @@ export class IMClient {
   private manualClose = false;
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
-  private historyPending = new Set<string>(); // 正在加载更早历史的会话（抑制 has_more 自动向前翻页）
+  private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
+  private readonly contextBefore = 10; // 进会话时未读分割线上方保留的已读上下文条数
   private handlers: IMClientHandlers;
 
   constructor(handlers: IMClientHandlers = {}) {
@@ -74,22 +75,36 @@ export class IMClient {
     return (body.data?.conversations ?? []) as Conversation[];
   }
 
-  /** 登记会话并加载最近一页历史。
-   *  首次打开把游标定到 latestSeq - 一页，只同步最近一页（避免一次拉全量历史导致卡顿/视图追着
-   *  加载前沿乱滚）；更早的历史由 loadOlder 上滚加载。重连时用现有游标做增量补偿。 */
-  trackConversation(convId: string, latestSeq = 0): void {
+  /** 进会话：建立重连基线 + 加载初始可视窗口（见 CHAT_UX §3）。
+   *  - 有未读（latestSeq>readSeq）：从 readSeq-上下文 起一页，锚定到首条未读；
+   *  - 无未读：加载最近一页，贴底。
+   *  reconnect 基线设为 latestSeq（增量补偿只取更新的消息；中间历史靠分页加载）。 */
+  openConversation(convId: string, readSeq: number, latestSeq: number): void {
     if (!convId) return;
-    const firstTime = !this.tracked.has(convId);
     this.tracked.add(convId);
-    if (firstTime) this.syncedSeq.set(convId, Math.max(0, latestSeq - this.historyPage));
-    if (this.state === "connected") this.sendSyncReq([convId]);
+    this.syncedSeq.set(convId, latestSeq);
+    const since =
+      latestSeq > readSeq
+        ? Math.max(0, readSeq - this.contextBefore) // 有未读 → 锚到首条未读附近
+        : Math.max(0, latestSeq - this.historyPage); // 无未读 → 最近一页
+    this.requestPage(convId, since);
   }
 
-  /** 加载 oldestSeq 之前的一页更早历史（上滚到顶触发）。不自动向前翻页，避免回到最新。 */
+  /** 加载 oldestSeq 之前的一页（上滚到顶触发）。 */
   loadOlder(convId: string, oldestSeq: number): void {
     if (!convId || oldestSeq <= 1) return;
-    const since = Math.max(0, oldestSeq - 1 - this.historyPage); // 返回 [oldestSeq-页 .. oldestSeq-1]
-    this.historyPending.add(convId);
+    this.requestPage(convId, Math.max(0, oldestSeq - 1 - this.historyPage)); // [oldestSeq-页 .. oldestSeq-1]
+  }
+
+  /** 加载 newestSeq 之后的一页（下滚到底、且还没到 latest 时触发）。 */
+  loadNewer(convId: string, newestSeq: number): void {
+    if (!convId) return;
+    this.requestPage(convId, newestSeq); // [newestSeq+1 .. newestSeq+页]
+  }
+
+  /** 发一页分页请求：指定游标、单页、不自动向前翻页（由 SYNC_RESP 的 pagedPending 抑制）。 */
+  private requestPage(convId: string, since: number): void {
+    this.pagedPending.add(convId);
     this.send({ type: T.SYNC_REQ, seq: ++this.seq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
   }
 
@@ -163,12 +178,12 @@ export class IMClient {
         break;
       case T.SYNC_RESP:
         for (const conv of d.conversations || []) {
-          const isHistory = conv.conv_id && this.historyPending.has(conv.conv_id);
+          const isPaged = conv.conv_id && this.pagedPending.has(conv.conv_id);
           for (const m of conv.messages || []) this.processIncoming(m);
-          if (isHistory) {
-            this.historyPending.delete(conv.conv_id); // 历史页：不向前翻页
+          if (isPaged) {
+            this.pagedPending.delete(conv.conv_id); // 分页：单页，不自动向前翻页
           } else if (conv.has_more && conv.conv_id) {
-            this.sendSyncReq([conv.conv_id]); // 增量/最近页：继续翻到最新
+            this.sendSyncReq([conv.conv_id]); // 重连增量：继续翻到最新
           }
         }
         break;
