@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { VList, type VListHandle } from "virtua";
 import { IMClient, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation } from "./sdk/protocol";
 
@@ -25,15 +26,13 @@ export default function App() {
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
-  const msgsRef = useRef<HTMLDivElement | null>(null); // 消息滚动容器
-  const dividerRef = useRef<HTMLDivElement | null>(null); // 未读分割线
+  const vlistRef = useRef<VListHandle>(null); // 虚拟列表句柄（滚动/定位）
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
   const prevMinSeqRef = useRef(0); // 上次渲染的最小 conv_seq（判断顶部是否插了更早历史）
   const loadingOlderRef = useRef(false); // 是否正在加载更早历史（防重复触发）
-  const histAnchorRef = useRef<{ h: number; t: number } | null>(null); // 加载历史前的滚动锚点（保位）
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -176,57 +175,64 @@ export default function App() {
   // 首条未读下标：从尾部倒数第 entryUnread 条"对端消息"（只依赖未读计数，不依赖 read_seq）。
   const firstUnreadIdx = firstUnreadIndex(messages, uid, entryUnread);
 
-  // 进会话定位 / 新消息贴底 / 滚动在上时累加"未读"并显示跳转按钮。
+  // shift：本次渲染是否在"顶部插入了更早历史"（与上次渲染比 min/max seq）。
+  // 传给 VList 后由 virtua 自动从底部维持滚动位置，反向分页不跳。
+  const renderMin = minSeqOf(messages);
+  const renderMax = maxSeqOf(messages);
+  const shift =
+    !pendingScrollRef.current &&
+    prevMinSeqRef.current > 0 &&
+    renderMin < prevMinSeqRef.current &&
+    renderMax <= prevMaxSeqRef.current;
+
+  // 进会话定位 / 新消息贴底 / 顶部插历史复位锁 / 在上看历史时累加跳转计数。
   useLayoutEffect(() => {
     if (phase !== "chat") return;
-    const box = msgsRef.current;
-    if (!box) return;
+    const h = vlistRef.current;
+    if (!h) return;
+    const curMin = minSeqOf(messages);
+    const curMax = maxSeqOf(messages);
 
     if (pendingScrollRef.current) {
-      if (messages.length === 0) return; // 等历史/同步到达再定位
-      if (dividerRef.current) {
-        dividerRef.current.scrollIntoView({ block: "center" }); // 定位到首条未读
-        const nb = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-        wasNearBottomRef.current = nb;
-        setJumpCount(nb ? 0 : entryUnreadRef.current); // 下方还有未读 → 按钮带数字
-        setShowJump(!nb && entryUnreadRef.current > 0); // 内容一屏放得下则不显示按钮
+      if (messages.length === 0) return; // 等最近一页到达再定位
+      if (firstUnreadIdx >= 0) {
+        h.scrollToIndex(firstUnreadIdx, { align: "start" }); // 定位到首条未读
+        wasNearBottomRef.current = false;
+        setJumpCount(entryUnreadRef.current);
+        setShowJump(entryUnreadRef.current > 0);
       } else {
-        box.scrollTop = box.scrollHeight; // 无未读 → 直接贴底
+        h.scrollToIndex(messages.length - 1, { align: "end" }); // 否则直接到最新
         wasNearBottomRef.current = true;
         setShowJump(false);
       }
       pendingScrollRef.current = false;
-      prevMaxSeqRef.current = maxSeqOf(messages);
-      prevMinSeqRef.current = minSeqOf(messages);
+      prevMinSeqRef.current = curMin;
+      prevMaxSeqRef.current = curMax;
       return;
     }
 
-    // 上滚加载更早历史：顶部插入了更小 seq → 保持视觉位置（不跳、不贴底、不动计数）。
-    const minSeq = minSeqOf(messages);
-    if (histAnchorRef.current && minSeq < prevMinSeqRef.current) {
-      const a = histAnchorRef.current;
-      box.scrollTop = box.scrollHeight - a.h + a.t;
-      histAnchorRef.current = null;
+    // 顶部插入了更早历史：位置已由 VList 的 shift 维持，这里只复位加载锁。
+    if (curMin < prevMinSeqRef.current && curMax <= prevMaxSeqRef.current) {
       loadingOlderRef.current = false;
-      prevMinSeqRef.current = minSeq;
-      prevMaxSeqRef.current = Math.max(prevMaxSeqRef.current, maxSeqOf(messages));
+      prevMinSeqRef.current = curMin;
+      prevMaxSeqRef.current = curMax;
       return;
     }
-    prevMinSeqRef.current = minSeq;
 
-    // 只有"底部来了更大的 conv_seq"才算新消息；历史（更小 seq）不动滚动/计数。
+    // 底部来了更大的 conv_seq 才算新消息。
     const newPeer = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current).length;
     const lastMine = messages[messages.length - 1]?.from === uid;
-    prevMaxSeqRef.current = Math.max(prevMaxSeqRef.current, maxSeqOf(messages));
+    prevMinSeqRef.current = curMin;
+    prevMaxSeqRef.current = curMax;
 
     if (lastMine) {
-      box.scrollTop = box.scrollHeight; // 自己发 → 贴底
+      h.scrollToIndex(messages.length - 1, { align: "end" }); // 自己发 → 贴底
       wasNearBottomRef.current = true;
       setShowJump(false);
       setJumpCount(0);
     } else if (newPeer > 0) {
       if (wasNearBottomRef.current) {
-        box.scrollTop = box.scrollHeight; // 已在底部 → 贴底
+        h.scrollToIndex(messages.length - 1, { align: "end" }); // 已在底部 → 贴底
         setShowJump(false);
         setJumpCount(0);
       } else {
@@ -234,35 +240,38 @@ export default function App() {
         setShowJump(true);
       }
     }
-  }, [phase, convId, messages.length, uid]);
+  }, [phase, convId, messages.length, uid, firstUnreadIdx]);
 
-  const onMsgsScroll = useCallback(() => {
-    const box = msgsRef.current;
-    if (!box) return;
-    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-    wasNearBottomRef.current = nearBottom;
-    if (nearBottom) {
-      setShowJump(false);
-      setJumpCount(0);
-    } else {
-      setShowJump(true);
-    }
-    // 上滚到顶 → 加载更早一页历史（保留滚动位置由 effect 处理）。
-    if (box.scrollTop < 120 && !loadingOlderRef.current) {
-      const cid = currentConvRef.current;
-      const oldest = minSeqOf(msgsByConv[cid] ?? []);
-      if (oldest > 1) {
-        loadingOlderRef.current = true;
-        histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
-        clientRef.current?.loadOlder(cid, oldest);
+  // virtua 的滚动回调：offset = 当前 scrollTop。判断贴底/到顶。
+  const onVScroll = useCallback(
+    (offset: number) => {
+      const h = vlistRef.current;
+      if (!h) return;
+      const nearBottom = offset >= h.scrollSize - h.viewportSize - 80;
+      wasNearBottomRef.current = nearBottom;
+      if (nearBottom) {
+        setShowJump(false);
+        setJumpCount(0);
+      } else {
+        setShowJump(true);
       }
-    }
-  }, [msgsByConv]);
+      // 上滚到顶 → 加载更早一页历史（位置由 shift 维持）。
+      if (offset < 200 && !loadingOlderRef.current) {
+        const cid = currentConvRef.current;
+        const oldest = minSeqOf(msgsByConv[cid] ?? []);
+        if (oldest > 1) {
+          loadingOlderRef.current = true;
+          clientRef.current?.loadOlder(cid, oldest);
+        }
+      }
+    },
+    [msgsByConv]
+  );
 
   const jumpToBottom = useCallback(() => {
-    const box = msgsRef.current;
-    if (!box) return;
-    box.scrollTop = box.scrollHeight;
+    const h = vlistRef.current;
+    if (!h) return;
+    h.scrollTo(h.scrollSize); // 滚到最底
     wasNearBottomRef.current = true;
     setShowJump(false);
     setJumpCount(0);
@@ -330,14 +339,14 @@ export default function App() {
         </span>
         <span className="muted">{stateText}</span>
       </header>
-      <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
+      <VList ref={vlistRef} className="msgs" shift={shift} onScroll={onVScroll}>
         {messages.map((m, i) => {
           const mine = m.from === uid;
           const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
           return (
-            <Fragment key={m.clientMsgId ?? m.serverMsgId ?? i}>
+            <div className="msg-item" key={m.clientMsgId ?? m.serverMsgId ?? i}>
               {i === firstUnreadIdx && (
-                <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                <div className="unread-divider"><span>未读消息</span></div>
               )}
               <div className={`row ${mine ? "me" : "them"}`}>
                 <div className="bubble">{m.content}</div>
@@ -349,10 +358,10 @@ export default function App() {
                     : `来自 ${m.from} · seq#${m.convSeq}`}
                 </div>
               </div>
-            </Fragment>
+            </div>
           );
         })}
-      </div>
+      </VList>
       {showJump && (
         <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
           ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
