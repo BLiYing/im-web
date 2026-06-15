@@ -16,7 +16,7 @@ export default function App() {
   const [presence, setPresence] = useState<Record<string, string>>({}); // user -> online/offline
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
   const [typingConv, setTypingConv] = useState<string | null>(null);
-  const [unreadAnchor, setUnreadAnchor] = useState(-1); // 进会话时的已读位点：首条未读=convSeq>anchor；-1 表示无未读
+  const [entryUnread, setEntryUnread] = useState(0); // 进会话时的未读条数（用于定位分割线，从尾部倒数）
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
 
@@ -107,7 +107,7 @@ export default function App() {
     currentConvRef.current = cid;
     // 进会话定位：记录"进入前"的已读位点，据此渲染未读分割线并滚动到它。
     const conv = conversations.find((c) => c.conv_id === cid);
-    setUnreadAnchor(conv && conv.unread > 0 ? conv.read_seq : -1);
+    setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
     pendingScrollRef.current = true;
     setShowJump(false);
@@ -167,9 +167,8 @@ export default function App() {
 
   const convId = peer ? convIdFor(uid, peer) : "";
   const messages = msgsByConv[convId] ?? [];
-  // 首条未读下标：进会话时 convSeq>anchor 的第一条（用于插分割线）。
-  const firstUnreadIdx =
-    unreadAnchor < 0 ? -1 : messages.findIndex((m) => m.convSeq > unreadAnchor && m.from !== uid);
+  // 首条未读下标：从尾部倒数第 entryUnread 条"对端消息"（只依赖未读计数，不依赖 read_seq）。
+  const firstUnreadIdx = firstUnreadIndex(messages, uid, entryUnread);
 
   // 进会话定位 / 新消息贴底 / 滚动在上时累加"未读"并显示跳转按钮。
   useLayoutEffect(() => {
@@ -183,9 +182,10 @@ export default function App() {
       if (messages.length === 0) return; // 等历史/同步到达再定位
       if (dividerRef.current) {
         dividerRef.current.scrollIntoView({ block: "center" }); // 定位到首条未读
-        wasNearBottomRef.current = false;
-        setJumpCount(entryUnreadRef.current); // 底部还有未读 → 按钮带数字
-        setShowJump(entryUnreadRef.current > 0);
+        const nb = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+        wasNearBottomRef.current = nb;
+        setJumpCount(nb ? 0 : entryUnreadRef.current); // 下方还有未读 → 按钮带数字
+        setShowJump(!nb && entryUnreadRef.current > 0); // 内容一屏放得下则不显示按钮
       } else {
         box.scrollTop = box.scrollHeight; // 无未读 → 直接贴底
         wasNearBottomRef.current = true;
@@ -329,6 +329,19 @@ export default function App() {
       </footer>
     </div>
   );
+}
+
+// 首条未读下标：从尾部倒数第 n 条"对端消息"。仅依赖未读计数，不依赖 read_seq。
+function firstUnreadIndex(messages: ChatMessage[], uid: string, n: number): number {
+  if (n <= 0) return -1;
+  let c = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].from !== uid) {
+      c++;
+      if (c === n) return i;
+    }
+  }
+  return -1; // 本地消息不足 n 条对端消息（历史还没拉全），不画分割线
 }
 
 function fmtTime(ts: number): string {
