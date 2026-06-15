@@ -69,10 +69,9 @@ export default function App() {
         if (m.convId === currentConvRef.current && m.from !== uid && m.convSeq > 0) {
           // 正在看这个会话 + 对端发来 → 标记已读（对端看到已读双勾）。
           clientRef.current?.markRead(m.convId, m.convSeq);
-        } else if (m.from !== uid) {
-          // 不在该会话 → 刷新会话列表，更新未读红点与最后一条。
-          void refreshConversations();
         }
+        // 任何对端来信都刷新会话列表（双栏下列表常驻：更新最后一条/排序/红点）。
+        if (m.from !== uid) void refreshConversations();
       },
       onAck: (clientMsgId, ok, convSeq) => {
         setMsgsByConv((prev) => {
@@ -84,6 +83,8 @@ export default function App() {
           }
           return out;
         });
+        // 自己发送成功 → 刷新列表：新发起的会话首条消息后即出现在左侧、更新最后一条。
+        if (ok) void refreshConversations();
       },
       onReceipt: (convId, from, status, upToSeq) => {
         if (status === "read" && from !== uid) {
