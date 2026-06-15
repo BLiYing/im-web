@@ -50,9 +50,12 @@ export default function App() {
           seen.add(m.convSeq);
         }
         appendMsg(m.convId, m);
-        // 正在看这个会话 + 是对端发来的 → 标记已读（对端会看到已读双勾）。
         if (m.convId === currentConvRef.current && m.from !== uid && m.convSeq > 0) {
+          // 正在看这个会话 + 对端发来 → 标记已读（对端看到已读双勾）。
           clientRef.current?.markRead(m.convId, m.convSeq);
+        } else if (m.from !== uid) {
+          // 不在该会话 → 刷新会话列表，更新未读红点与最后一条。
+          void refreshConversations();
         }
       },
       onAck: (clientMsgId, ok, convSeq) => {
