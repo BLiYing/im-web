@@ -52,6 +52,7 @@ export interface Conversation {
   last_message: ConvLastMessage | null;
   latest_conv_seq: number;
   unread: number;
+  read_seq: number; // 本人已读位点（首条未读 = convSeq > read_seq 的第一条）
 }
 
 /** 会话 id：两个 uid 规范排序，保证收发双方一致（对齐协议示例 u_{a}_u_{b}）。 */

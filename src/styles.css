@@ -69,7 +69,13 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 /* M2：未读红点 / 在线状态 / 正在输入 */
 .convitem { position: relative; }
-.badge { position: absolute; right: var(--space-4); top: 50%; transform: translateY(-50%); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e53935; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+/* 时间在右上、红点在右下，避免重叠（对齐 Telegram/微信）。 */
+.convtime { flex-shrink: 0; padding-left: var(--space-2); }
+.badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #e53935; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+/* 未读分割线（Telegram 风格的"未读消息"）。 */
+.unread-divider { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; color: #e53935; font-size: 12px; }
+.unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.unread-divider span { white-space: nowrap; }
 .avatar { position: relative; }
 .presence-dot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; background: #1aab5b; border: 2px solid var(--surface); }
 .screen header .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); margin-right: 4px; }

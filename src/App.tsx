@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { IMClient, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation } from "./sdk/protocol";
 
@@ -16,12 +16,16 @@ export default function App() {
   const [presence, setPresence] = useState<Record<string, string>>({}); // user -> online/offline
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
   const [typingConv, setTypingConv] = useState<string | null>(null);
+  const [unreadAnchor, setUnreadAnchor] = useState(-1); // 进会话时的已读位点：首条未读=convSeq>anchor；-1 表示无未读
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
+  const msgsRef = useRef<HTMLDivElement | null>(null); // 消息滚动容器
+  const dividerRef = useRef<HTMLDivElement | null>(null); // 未读分割线
+  const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -96,13 +100,17 @@ export default function App() {
     const cid = convIdFor(uid, p);
     setPeer(p);
     currentConvRef.current = cid;
+    // 进会话定位：记录"进入前"的已读位点，据此渲染未读分割线并滚动到它。
+    const conv = conversations.find((c) => c.conv_id === cid);
+    setUnreadAnchor(conv && conv.unread > 0 ? conv.read_seq : -1);
+    pendingScrollRef.current = true;
     clientRef.current?.trackConversation(cid); // 触发增量同步拉历史
     // 已读：把已知最新消息位点上报（新同步进来的由 onMessage 续报）。
     const known = msgsByConv[cid] ?? [];
     const maxSeq = known.reduce((a, m) => Math.max(a, m.convSeq), 0);
     if (maxSeq > 0) clientRef.current?.markRead(cid, maxSeq);
     setPhase("chat");
-  }, [uid, msgsByConv]);
+  }, [uid, msgsByConv, conversations]);
 
   const backToList = useCallback(() => {
     currentConvRef.current = "";
@@ -148,6 +156,27 @@ export default function App() {
   }, [peer, uid]);
 
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
+
+  const convId = peer ? convIdFor(uid, peer) : "";
+  const messages = msgsByConv[convId] ?? [];
+  // 首条未读下标：进会话时 convSeq>anchor 的第一条（用于插分割线）。
+  const firstUnreadIdx =
+    unreadAnchor < 0 ? -1 : messages.findIndex((m) => m.convSeq > unreadAnchor && m.from !== uid);
+
+  // 进会话定位 / 新消息贴底。
+  useLayoutEffect(() => {
+    if (phase !== "chat") return;
+    const box = msgsRef.current;
+    if (!box) return;
+    if (pendingScrollRef.current) {
+      if (messages.length === 0) return; // 等历史/同步到达再定位
+      if (dividerRef.current) dividerRef.current.scrollIntoView({ block: "center" });
+      else box.scrollTop = box.scrollHeight;
+      pendingScrollRef.current = false;
+    } else {
+      box.scrollTop = box.scrollHeight; // 收到/发送消息 → 滚到底
+    }
+  }, [phase, convId, messages.length]);
 
   // ---- 登录 ----
   if (phase === "login") {
@@ -199,8 +228,6 @@ export default function App() {
   }
 
   // ---- 聊天 ----
-  const convId = convIdFor(uid, peer);
-  const messages = msgsByConv[convId] ?? [];
   const readSeq = peerReadSeq[convId] ?? 0;
   const peerOnline = presence[peer] === "online";
   return (
@@ -213,19 +240,24 @@ export default function App() {
         </span>
         <span className="muted">{stateText}</span>
       </header>
-      <div className="msgs">
+      <div className="msgs" ref={msgsRef}>
         {messages.map((m, i) => {
           const mine = m.from === uid;
           const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
           return (
-            <div key={m.clientMsgId ?? m.serverMsgId ?? i} className={`row ${mine ? "me" : "them"}`}>
-              <div className="bubble">{m.content}</div>
-              <div className="meta">
-                {mine
-                  ? m.status === "sending" ? "发送中…"
-                    : m.status === "failed" ? "发送失败 ✗"
-                      : readByPeer ? "已读" : `已送达 ✓ · seq#${m.convSeq}`
-                  : `来自 ${m.from} · seq#${m.convSeq}`}
+            <div key={m.clientMsgId ?? m.serverMsgId ?? i}>
+              {i === firstUnreadIdx && (
+                <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+              )}
+              <div className={`row ${mine ? "me" : "them"}`}>
+                <div className="bubble">{m.content}</div>
+                <div className="meta">
+                  {mine
+                    ? m.status === "sending" ? "发送中…"
+                      : m.status === "failed" ? "发送失败 ✗"
+                        : readByPeer ? "已读" : `已送达 ✓ · seq#${m.convSeq}`
+                    : `来自 ${m.from} · seq#${m.convSeq}`}
+                </div>
               </div>
             </div>
           );
