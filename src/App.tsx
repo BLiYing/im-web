@@ -1,9 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { VList, type VListHandle } from "virtua";
 import { IMClient, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation } from "./sdk/protocol";
 
-type Phase = "login" | "list" | "chat";
+type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -27,7 +26,9 @@ export default function App() {
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
-  const vlistRef = useRef<VListHandle>(null); // 虚拟列表句柄（滚动/定位）
+  const msgsRef = useRef<HTMLDivElement>(null); // 消息滚动容器
+  const dividerRef = useRef<HTMLDivElement>(null); // 未读分割线（进会话定位用）
+  const histAnchorRef = useRef<{ h: number; t: number } | null>(null); // 上滚加载历史前的滚动锚点（保位）
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
@@ -100,7 +101,7 @@ export default function App() {
     clientRef.current = client;
     await client.connect(uid);
     await refreshConversations();
-    setPhase("list");
+    setPhase("app");
   }, [uid, appendMsg, refreshConversations]);
 
   const openChat = useCallback((p: string) => {
@@ -127,17 +128,8 @@ export default function App() {
     // 打开即全部已读（CHAT_UX §6 简化）：上报到 latest，会话列表红点随即清零；
     // 分割线仍用进入前的 readSeq 快照定位，不受影响。
     if (latestSeq > 0) clientRef.current?.markRead(cid, latestSeq);
-    setPhase("chat");
-  }, [uid, msgsByConv, conversations]);
-
-  const backToList = useCallback(() => {
-    currentConvRef.current = "";
-    setPeer("");
-    setNewPeer("");
-    setTypingConv(null);
-    void refreshConversations();
-    setPhase("list");
-  }, [refreshConversations]);
+    void refreshConversations(); // 选会话后刷新列表（清当前会话红点 / 更新其他会话）
+  }, [uid, conversations, refreshConversations]);
 
   const logout = useCallback(() => {
     clientRef.current?.disconnect();
@@ -150,6 +142,13 @@ export default function App() {
     setPeerReadSeq({});
     setPhase("login");
   }, []);
+
+  const deselect = useCallback(() => {
+    currentConvRef.current = "";
+    setPeer("");
+    setTypingConv(null);
+    void refreshConversations();
+  }, [refreshConversations]);
 
   const send = useCallback(() => {
     const text = input.trim();
@@ -184,33 +183,23 @@ export default function App() {
   const firstUnreadIdx =
     entryUnread > 0 ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq) : -1;
 
-  // shift：本次渲染是否在"顶部插入了更早历史"（与上次渲染比 min/max seq）。
-  // 传给 VList 后由 virtua 自动从底部维持滚动位置，反向分页不跳。
-  const renderMin = minSeqOf(messages);
-  const renderMax = maxSeqOf(messages);
-  const shift =
-    !pendingScrollRef.current &&
-    prevMinSeqRef.current > 0 &&
-    renderMin < prevMinSeqRef.current &&
-    renderMax <= prevMaxSeqRef.current;
-
-  // 进会话定位 / 新消息贴底 / 顶部插历史复位锁 / 在上看历史时累加跳转计数。
+  // 进会话定位 / 新消息贴底 / 顶部插历史保位 / 在上看历史累加跳转计数（纯 DOM 滚动）。
   useLayoutEffect(() => {
-    if (phase !== "chat") return;
-    const h = vlistRef.current;
-    if (!h) return;
+    if (phase !== "app" || !convId) return;
+    const box = msgsRef.current;
+    if (!box) return;
     const curMin = minSeqOf(messages);
     const curMax = maxSeqOf(messages);
 
     if (pendingScrollRef.current) {
       if (messages.length === 0) return; // 等锚点窗口到达再定位
-      if (firstUnreadIdx >= 0 && !forceBottomRef.current) {
-        h.scrollToIndex(firstUnreadIdx, { align: "start" }); // 停在首条未读（分割线在其上方）
+      if (firstUnreadIdx >= 0 && !forceBottomRef.current && dividerRef.current) {
+        dividerRef.current.scrollIntoView({ block: "start" }); // 停在首条未读（分割线在其上方）
         wasNearBottomRef.current = false;
         setJumpCount(entryUnreadRef.current);
         setShowJump(entryUnreadRef.current > 0);
       } else {
-        h.scrollToIndex(messages.length - 1, { align: "end" }); // 无未读 / 强制到底
+        box.scrollTop = box.scrollHeight; // 无未读 / 强制到底
         wasNearBottomRef.current = true;
         setShowJump(false);
       }
@@ -221,92 +210,90 @@ export default function App() {
       return;
     }
 
-    // 复位分页锁：顶部插了更老（min 变小）/底部接了更新（max 变大）。
     const wasLoadingNewer = loadingNewerRef.current;
     if (curMin < prevMinSeqRef.current) loadingOlderRef.current = false;
     if (curMax > prevMaxSeqRef.current) loadingNewerRef.current = false;
 
-    // 顶部插入更早历史：位置由 VList 的 shift 维持，不动滚动/计数。
+    // 顶部插入更早历史 → 用插入前后的 scrollHeight 差补偿，保持视觉位置不跳。
     if (curMin < prevMinSeqRef.current && curMax <= prevMaxSeqRef.current) {
+      if (histAnchorRef.current) {
+        box.scrollTop = box.scrollHeight - histAnchorRef.current.h + histAnchorRef.current.t;
+        histAnchorRef.current = null;
+      }
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
       return;
     }
 
-    // 下滚分页加载的更新历史（≤ latest）：插在底部下方，位置不动（virtua 自然保持）。
+    // 下滚分页加载的更新历史（≤ latest）：插在下方，位置不动。
     if (curMax > prevMaxSeqRef.current && curMax <= latestSeqRef.current && wasLoadingNewer) {
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
       return;
     }
 
-    // 真·新消息（live，conv_seq 超过进会话时的 latest）或自己发送。
+    // 真·新消息（live）或自己发送。
     const newPeer = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current).length;
     const lastMine = messages[messages.length - 1]?.from === uid;
     prevMinSeqRef.current = curMin;
     prevMaxSeqRef.current = curMax;
-    if (curMax > latestSeqRef.current) latestSeqRef.current = curMax; // live 推进 latest
+    if (curMax > latestSeqRef.current) latestSeqRef.current = curMax;
 
     if (lastMine) {
-      h.scrollToIndex(messages.length - 1, { align: "end" }); // 自己发 → 贴底
+      box.scrollTop = box.scrollHeight;
       wasNearBottomRef.current = true;
       setShowJump(false);
       setJumpCount(0);
     } else if (newPeer > 0) {
       if (wasNearBottomRef.current) {
-        h.scrollToIndex(messages.length - 1, { align: "end" }); // 已在底部 → 贴底
+        box.scrollTop = box.scrollHeight;
         setShowJump(false);
         setJumpCount(0);
       } else {
-        setJumpCount((n) => n + newPeer); // 在上面看历史 → 累加并显示按钮
+        setJumpCount((n) => n + newPeer);
         setShowJump(true);
       }
     }
   }, [phase, convId, messages.length, uid, firstUnreadIdx]);
 
-  // virtua 的滚动回调：offset = 当前 scrollTop。判断贴底/到顶 + 双向分页。
-  const onVScroll = useCallback(
-    (offset: number) => {
-      const h = vlistRef.current;
-      if (!h) return;
-      const cid = currentConvRef.current;
-      const list = msgsByConv[cid] ?? [];
-      const nearBottomPx = offset >= h.scrollSize - h.viewportSize - 80;
-      const newest = maxSeqOf(list);
-      const oldest = minSeqOf(list);
-      const moreBelow = newest < latestSeqRef.current; // 下方还有未加载的更新历史
-      const atTrueBottom = nearBottomPx && !moreBelow;
-      wasNearBottomRef.current = atTrueBottom;
-      setShowJump(!atTrueBottom);
-      if (atTrueBottom) setJumpCount(0);
+  const onMsgsScroll = useCallback(() => {
+    const box = msgsRef.current;
+    if (!box) return;
+    const cid = currentConvRef.current;
+    const list = msgsByConv[cid] ?? [];
+    const nearBottomPx = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    const newest = maxSeqOf(list);
+    const oldest = minSeqOf(list);
+    const moreBelow = newest < latestSeqRef.current; // 下方还有未加载的更新历史
+    const atTrueBottom = nearBottomPx && !moreBelow;
+    wasNearBottomRef.current = atTrueBottom;
+    setShowJump(!atTrueBottom);
+    if (atTrueBottom) setJumpCount(0);
 
-      const busy = loadingOlderRef.current || loadingNewerRef.current;
-      // 下滚到底 → 加载更新一页（位置不动）。
-      if (nearBottomPx && moreBelow && !busy) {
-        loadingNewerRef.current = true;
-        clientRef.current?.loadNewer(cid, newest);
-      } else if (offset < 200 && oldest > 1 && !busy) {
-        // 上滚到顶 → 加载更早一页（位置由 shift 维持）。
-        loadingOlderRef.current = true;
-        clientRef.current?.loadOlder(cid, oldest);
-      }
-    },
-    [msgsByConv]
-  );
+    const busy = loadingOlderRef.current || loadingNewerRef.current;
+    if (nearBottomPx && moreBelow && !busy) {
+      loadingNewerRef.current = true; // 下滚到底 → 加载更新一页
+      clientRef.current?.loadNewer(cid, newest);
+    } else if (box.scrollTop < 120 && oldest > 1 && !busy) {
+      loadingOlderRef.current = true; // 上滚到顶 → 加载更早一页（保位）
+      histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
+      clientRef.current?.loadOlder(cid, oldest);
+    }
+  }, [msgsByConv]);
 
   const jumpToBottom = useCallback(() => {
-    const h = vlistRef.current;
-    if (!h) return;
+    const box = msgsRef.current;
+    if (!box) return;
     const cid = currentConvRef.current;
     const newest = maxSeqOf(msgsByConv[cid] ?? []);
     if (newest < latestSeqRef.current) {
-      // 下方还有大段未加载（如从很老的未读处直接跳底）→ 重载最近一页再贴底。
+      // 下方还有大段未加载 → 重载最近一页再贴底。
       setEntryUnread(0);
       forceBottomRef.current = true;
       pendingScrollRef.current = true;
       clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current);
     } else {
-      h.scrollTo(h.scrollSize); // 已加载到底 → 直接滚到最底
+      box.scrollTop = box.scrollHeight;
     }
     wasNearBottomRef.current = true;
     setShowJump(false);
@@ -325,10 +312,12 @@ export default function App() {
     );
   }
 
-  // ---- 会话列表 ----
-  if (phase === "list") {
-    return (
-      <div className="screen">
+  // ---- 双栏主界面（左会话列表常驻 + 右聊天详情） ----
+  const readSeq = peerReadSeq[convId] ?? 0;
+  const peerOnline = presence[peer] === "online";
+  return (
+    <div className={`app ${peer ? "has-sel" : "no-sel"}`}>
+      <aside className="sidebar">
         <header>
           <span>会话（{uid} · {stateText}）</span>
           <button className="link" onClick={logout}>退出</button>
@@ -342,7 +331,7 @@ export default function App() {
         <div className="convlist">
           {conversations.length === 0 && <div className="empty">还没有会话，输入对方 uid 发起一个吧</div>}
           {conversations.map((c) => (
-            <div key={c.conv_id} className="convitem" onClick={() => openChat(c.peer)}>
+            <div key={c.conv_id} className={`convitem ${c.peer === peer ? "active" : ""}`} onClick={() => openChat(c.peer)}>
               <div className="avatar">
                 {c.peer.slice(-2)}
                 {presence[c.peer] === "online" && <span className="presence-dot" />}
@@ -358,58 +347,62 @@ export default function App() {
             </div>
           ))}
         </div>
-      </div>
-    );
-  }
+      </aside>
 
-  // ---- 聊天 ----
-  const readSeq = peerReadSeq[convId] ?? 0;
-  const peerOnline = presence[peer] === "online";
-  return (
-    <div className="screen">
-      <header>
-        <button className="link" onClick={backToList}>‹ 会话</button>
-        <span>
-          <span className={`dot ${peerOnline ? "on" : ""}`} /> 与 {peer} 聊天
-          {peerOnline ? "（在线）" : ""}
-        </span>
-        <span className="muted">{stateText}</span>
-      </header>
-      <VList ref={vlistRef} className="msgs" shift={shift} onScroll={onVScroll}>
-        {messages.map((m, i) => {
-          const mine = m.from === uid;
-          const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
-          return (
-            <div className="msg-item" key={m.clientMsgId ?? m.serverMsgId ?? i}>
-              {i === firstUnreadIdx && (
-                <div className="unread-divider"><span>未读消息</span></div>
-              )}
-              <div className={`row ${mine ? "me" : "them"}`}>
-                <div className="bubble">{m.content}</div>
-                <div className="meta">
-                  {mine
-                    ? m.status === "sending" ? "发送中…"
-                      : m.status === "failed" ? "发送失败 ✗"
-                        : readByPeer ? "已读" : `已送达 ✓ · seq#${m.convSeq}`
-                    : `来自 ${m.from} · seq#${m.convSeq}`}
+      {/* chat 面板始终挂载（即使未选会话），让 VList 在 app 加载时就测到稳定高度；
+          未选会话时用 .main-empty 覆盖层遮住。否则条件挂载会让 virtua 在布局未定时测到 0。 */}
+      <main className="main">
+        <div className="chat">
+          <header>
+            {peer && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
+            {peer ? (
+              <span>
+                <span className={`dot ${peerOnline ? "on" : ""}`} /> {peer}
+                {peerOnline ? "（在线）" : ""}
+              </span>
+            ) : (
+              <span className="muted">未选择会话</span>
+            )}
+            <span className="muted">{stateText}</span>
+          </header>
+          <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
+            {messages.map((m, i) => {
+              const mine = m.from === uid;
+              const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
+              return (
+                <div className="msg-item" key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  {i === firstUnreadIdx && (
+                    <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                  )}
+                  <div className={`row ${mine ? "me" : "them"}`}>
+                    <div className="bubble">{m.content}</div>
+                    <div className="meta">
+                      {mine
+                        ? m.status === "sending" ? "发送中…"
+                          : m.status === "failed" ? "发送失败 ✗"
+                            : readByPeer ? "已读" : `已送达 ✓ · seq#${m.convSeq}`
+                        : `来自 ${m.from} · seq#${m.convSeq}`}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          );
-        })}
-      </VList>
-      {showJump && (
-        <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
-          ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
-        </button>
-      )}
-      {typingConv === convId && <div className="typing">对方正在输入…</div>}
-      <footer>
-        <input value={input} placeholder="输入消息，回车发送…"
-          onChange={(e) => onInputChange(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
-        <button onClick={send}>发送</button>
-      </footer>
+              );
+            })}
+          </div>
+          {showJump && peer && (
+            <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
+              ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
+            </button>
+          )}
+          {peer && typingConv === convId && <div className="typing">对方正在输入…</div>}
+          <footer>
+            <input value={input} placeholder={peer ? "输入消息，回车发送…" : "先选择左侧的会话…"} disabled={!peer}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+            <button onClick={send} disabled={!peer}>发送</button>
+          </footer>
+        </div>
+        {!peer && <div className="main-empty">选择左侧的会话开始聊天</div>}
+      </main>
     </div>
   );
 }
