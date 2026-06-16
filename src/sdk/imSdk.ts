@@ -87,7 +87,7 @@ export class IMClient {
       headers: { Authorization: `Bearer ${this.token}`, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...(init?.headers ?? {}) },
     });
     const body = await resp.json();
-    if (body.code !== 0) throw new Error(body.message || `请求失败(${body.code})`);
+    if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message));
     return body.data;
   }
 
@@ -212,7 +212,7 @@ export class IMClient {
     });
     const body = await resp.json();
     if (body.code !== 0 || !body.data?.token) {
-      throw new Error(body.message || "登录失败");
+      throw new Error(friendlyMessage(body.code, body.message || "登录失败"));
     }
     return body.data.token as string;
   }
@@ -348,6 +348,26 @@ export async function registerAccount(username: string, password: string): Promi
   });
   const body = await resp.json();
   if (body.code !== 0) {
-    throw new Error(body.message || "注册失败");
+    throw new Error(friendlyMessage(body.code, body.message || "注册失败"));
   }
+}
+
+/** 业务错误码 → 友好中文（对齐 errcode / iOS IMFriendlyMessageForCode）。未收录回退服务端原文。
+ *  隐私：被拉黑/密码错误等用模糊文案，不暴露"你被对方拉黑了"。 */
+function friendlyMessage(code: number, fallback: string): string {
+  const map: Record<number, string> = {
+    100101: "登录已失效，请重新登录",
+    100102: "登录已失效，请重新登录",
+    200001: "用户不存在",
+    200002: "密码错误",
+    200003: "账号已被封禁",
+    200004: "用户名已被注册",
+    200101: "你们已经是好友了",
+    200102: "暂时无法添加对方为好友", // 被拉黑：不暴露
+    200103: "对方不是你的好友",
+    200104: "不能添加自己为好友",
+    200105: "申请已发出，等待对方同意",
+    200106: "没有待处理的好友申请",
+  };
+  return map[code] || fallback || `请求失败(${code})`;
 }

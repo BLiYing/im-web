@@ -32,6 +32,7 @@ export default function App() {
   const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatar_url: string; phone: string; tags: string } | null>(null); // 编辑资料弹窗（null=关闭）
   const [profileBusy, setProfileBusy] = useState(false);
   const [friendMenu, setFriendMenu] = useState<{ x: number; y: number; userId: string } | null>(null); // 好友行 ⋯ 菜单
+  const [blockedList, setBlockedList] = useState<FriendEntry[] | null>(null); // 黑名单弹窗（null=关闭）
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
@@ -108,6 +109,29 @@ export default function App() {
       if (p) setProfileDraft({ nickname: p.nickname ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
     } catch (e) {
       alert(`加载资料失败：${(e as Error).message}`);
+    }
+  }, []);
+
+  // 打开黑名单弹窗：拉 status=blocked 的关系。
+  const openBlacklist = useCallback(async () => {
+    try {
+      const list = await clientRef.current?.listFriends("blocked");
+      setBlockedList(list ?? []);
+    } catch (e) {
+      alert(`加载黑名单失败：${(e as Error).message}`);
+    }
+  }, []);
+
+  // 解除拉黑：unblock 后从弹窗列表移除。
+  const unblock = useCallback(async (userId: string) => {
+    setBusyUser(userId);
+    try {
+      await clientRef.current?.friendAction("unblock", userId);
+      setBlockedList((prev) => (prev ?? []).filter((f) => f.user_id !== userId));
+    } catch (e) {
+      alert(`解除失败：${(e as Error).message}`);
+    } finally {
+      setBusyUser(null);
     }
   }, []);
 
@@ -547,6 +571,7 @@ export default function App() {
           <span>{uid} · {stateText}</span>
           <span className="header-actions">
             <button className="link" onClick={() => void openProfile()}>资料</button>
+            <button className="link" onClick={() => void openBlacklist()}>黑名单</button>
             <button className="link" onClick={logout}>退出</button>
           </span>
         </header>
@@ -762,6 +787,30 @@ export default function App() {
             <div className="modal-actions">
               <button className="link" onClick={() => setProfileDraft(null)}>取消</button>
               <button className="mini-btn" disabled={profileBusy} onClick={() => void saveProfile()}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {blockedList !== null && (
+        <div className="modal-mask" onClick={() => setBlockedList(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>黑名单（{blockedList.length}）</h3>
+            {blockedList.length === 0 && <div className="empty">没有拉黑的用户</div>}
+            {blockedList.map((f) => (
+              <div key={f.user_id} className="convitem static">
+                <div className="avatar">{(f.nickname || f.user_id).slice(-2)}</div>
+                <div className="convbody">
+                  <div className="convpeer">{f.nickname || f.user_id}</div>
+                  <div className="convlast">{f.user_id}</div>
+                </div>
+                <div className="row-actions">
+                  <button className="mini-btn ghost" disabled={busyUser === f.user_id} onClick={() => void unblock(f.user_id)}>解除</button>
+                </div>
+              </div>
+            ))}
+            <div className="modal-actions">
+              <button className="link" onClick={() => setBlockedList(null)}>关闭</button>
             </div>
           </div>
         </div>
