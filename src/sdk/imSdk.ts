@@ -82,11 +82,10 @@ export class IMClient {
 
   /** 带 Bearer 的 HTTP 调用，统一解析 errcode 信封（code!=0 抛错）。 */
   private async api(path: string, init?: RequestInit): Promise<any> {
-    const resp = await fetch(path, {
+    const body = await fetchJSON(path, {
       ...init,
       headers: { Authorization: `Bearer ${this.token}`, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...(init?.headers ?? {}) },
     });
-    const body = await resp.json();
     if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message));
     return body.data;
   }
@@ -205,12 +204,11 @@ export class IMClient {
 
   /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。 */
   private async fetchToken(): Promise<string> {
-    const resp = await fetch("/api/v1/login", {
+    const body = await fetchJSON("/api/v1/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: this.uid, password: this.password }),
     });
-    const body = await resp.json();
     if (body.code !== 0 || !body.data?.token) {
       throw new Error(friendlyMessage(body.code, body.message || "登录失败"));
     }
@@ -341,14 +339,28 @@ export class IMClient {
 /** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。
  *  独立于连接（注册时还没建 IMClient/socket），故为模块级函数。 */
 export async function registerAccount(username: string, password: string): Promise<void> {
-  const resp = await fetch("/api/v1/register", {
+  const body = await fetchJSON("/api/v1/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  const body = await resp.json();
   if (body.code !== 0) {
     throw new Error(friendlyMessage(body.code, body.message || "注册失败"));
+  }
+}
+
+/** fetch + 解析 JSON，把"连不上 / 空响应"这类传输层失败转成友好中文（区别于业务错误码）。 */
+async function fetchJSON(path: string, init?: RequestInit): Promise<any> {
+  let resp: Response;
+  try {
+    resp = await fetch(path, init);
+  } catch {
+    throw new Error("无法连接服务器，请确认后端已启动"); // fetch reject：网络/连接失败
+  }
+  try {
+    return await resp.json();
+  } catch {
+    throw new Error("服务器无响应，请确认后端已启动"); // 空/非 JSON：原"Unexpected end of JSON input"
   }
 }
 
