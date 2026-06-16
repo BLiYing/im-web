@@ -81,6 +81,22 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convtime { font-size: 12px; color: var(--text-secondary); }
 .convlast { color: var(--text-secondary); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* 左栏 Tab：会话 / 通讯录 */
+.tabs { display: flex; border-bottom: 1px solid var(--line); }
+.tab { flex: 1; padding: var(--space-3) 0; border: 0; background: none; color: var(--text-secondary); font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-badge { display: inline-block; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--badge); color: #fff; font-size: 10px; line-height: 16px; text-align: center; vertical-align: middle; }
+
+/* 通讯录 */
+.contacts { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.section-label { padding: var(--space-2) var(--space-4) var(--space-1); font-size: 12px; color: var(--text-secondary); }
+.convitem.static { cursor: default; }
+.convitem.static:hover { background: none; }
+.row-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
+.mini-btn { padding: 5px 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: #fff; font-size: 13px; cursor: pointer; }
+.mini-btn.ghost { background: var(--bg); color: var(--text-secondary); border: 1px solid var(--line); }
+.mini-btn:disabled { opacity: 0.6; cursor: default; }
+
 /* 聊天消息滚动容器（Telegram 绿壁纸：绿渐变 + 低透明涂鸦平铺）。 */
 .msgs {
   flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) 0;

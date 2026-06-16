@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, type Envelope, type ChatMessage, type Conversation } from "./protocol";
+import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry } from "./protocol";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -73,6 +73,39 @@ export class IMClient {
     const body = await resp.json();
     if (body.code !== 0) throw new Error(body.message || "fetch conversations failed");
     return (body.data?.conversations ?? []) as Conversation[];
+  }
+
+  /** 带 Bearer 的 HTTP 调用，统一解析 errcode 信封（code!=0 抛错）。 */
+  private async api(path: string, init?: RequestInit): Promise<any> {
+    const resp = await fetch(path, {
+      ...init,
+      headers: { Authorization: `Bearer ${this.token}`, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...(init?.headers ?? {}) },
+    });
+    const body = await resp.json();
+    if (body.code !== 0) throw new Error(body.message || `请求失败(${body.code})`);
+    return body.data;
+  }
+
+  /** 找人：按 q 搜索用户（昵称/手机号/uid/标签，后端去 phone、排除自己）。 */
+  async searchUsers(q: string, limit = 20): Promise<UserCard[]> {
+    const data = await this.api(`/api/v1/users/search?q=${encodeURIComponent(q)}&limit=${limit}`);
+    return (data?.users ?? []) as UserCard[];
+  }
+
+  /** 好友/申请列表（status 为空=全部：accepted/pending/requested/blocked）。 */
+  async listFriends(status = ""): Promise<FriendEntry[]> {
+    const data = await this.api(`/api/v1/friends${status ? `?status=${encodeURIComponent(status)}` : ""}`);
+    return (data?.friends ?? []) as FriendEntry[];
+  }
+
+  /** 好友动作（申请/同意/拒绝/拉黑/解黑）：POST /api/v1/friends/{action} body {user_id}。 */
+  async friendAction(action: "request" | "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> {
+    await this.api(`/api/v1/friends/${action}`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
+  }
+
+  /** 删除好友：DELETE /api/v1/friends/{id}。 */
+  async removeFriend(userId: string): Promise<void> {
+    await this.api(`/api/v1/friends/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
   /** 进会话：建立重连基线 + 加载初始可视窗口（见 CHAT_UX §3）。

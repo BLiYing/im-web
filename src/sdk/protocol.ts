@@ -56,6 +56,27 @@ export interface Conversation {
   peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表绿✓✓/灰✓）
 }
 
+/** 用户名片（对齐后端 profile.Card；搜索结果不含 phone）。 */
+export interface UserCard {
+  user_id: string;
+  nickname: string;
+  avatar_url: string;
+  tags: string[];
+  status: string;
+}
+
+/** 好友/申请关系状态（对齐后端 store.Friend*）。 */
+export type FriendStatus = "accepted" | "pending" | "requested" | "blocked";
+
+/** 好友/申请列表项（对齐后端 friend.Entry）。 */
+export interface FriendEntry {
+  user_id: string;
+  nickname: string;
+  avatar_url: string;
+  status: FriendStatus;
+  updated_at: number;
+}
+
 /** 会话 id：两个 uid 规范排序，保证收发双方一致（对齐协议示例 u_{a}_u_{b}）。 */
 export function convIdFor(a: string, b: string): string {
   const [x, y] = [String(a), String(b)].sort();

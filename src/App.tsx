@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { IMClient, type ConnState } from "./sdk/imSdk";
-import { convIdFor, type ChatMessage, type Conversation } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard } from "./sdk/protocol";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
+type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -11,7 +12,6 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [msgsByConv, setMsgsByConv] = useState<Record<string, ChatMessage[]>>({});
   const [peer, setPeer] = useState("");
-  const [newPeer, setNewPeer] = useState("");
   const [input, setInput] = useState("");
   const [presence, setPresence] = useState<Record<string, string>>({}); // user -> online/offline
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
@@ -21,6 +21,11 @@ export default function App() {
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
   const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
+  const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
+  const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
+  const [searchQ, setSearchQ] = useState(""); // 找人搜索框
+  const [searchResults, setSearchResults] = useState<UserCard[] | null>(null); // null=未搜索；[]=搜过无结果
+  const [busyUser, setBusyUser] = useState<string | null>(null); // 正在执行好友动作的对端 uid（防重复点击）
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
@@ -55,6 +60,39 @@ export default function App() {
       /* 忽略 */
     }
   }, []);
+
+  const refreshFriends = useCallback(async () => {
+    try {
+      const list = await clientRef.current?.listFriends();
+      if (list) setFriends(list);
+    } catch {
+      /* 忽略：通讯录加载失败不阻断主流程 */
+    }
+  }, []);
+
+  const doSearch = useCallback(async () => {
+    const q = searchQ.trim();
+    if (!q) { setSearchResults(null); return; }
+    try {
+      const users = await clientRef.current?.searchUsers(q);
+      setSearchResults(users ?? []);
+    } catch (e) {
+      alert(`搜索失败：${(e as Error).message}`);
+    }
+  }, [searchQ]);
+
+  // 好友动作（申请/同意/拒绝/删除）统一走这里：执行 → 刷新关系 → 解锁按钮。
+  const doFriendAction = useCallback(async (userId: string, fn: () => Promise<void>) => {
+    setBusyUser(userId);
+    try {
+      await fn();
+      await refreshFriends();
+    } catch (e) {
+      alert(`操作失败：${(e as Error).message}`);
+    } finally {
+      setBusyUser(null);
+    }
+  }, [refreshFriends]);
 
   const enterApp = useCallback(async () => {
     if (!uid) {
@@ -110,8 +148,9 @@ export default function App() {
     clientRef.current = client;
     await client.connect(uid);
     await refreshConversations();
+    void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations]);
+  }, [uid, appendMsg, refreshConversations, refreshFriends]);
 
   const openChat = useCallback((p: string) => {
     if (!p || p === uid) {
@@ -152,6 +191,10 @@ export default function App() {
     setMsgsByConv({});
     setPresence({});
     setPeerReadSeq({});
+    setFriends([]);
+    setSearchResults(null);
+    setSearchQ("");
+    setTab("chats");
     setPhase("login");
   }, []);
 
@@ -399,21 +442,32 @@ export default function App() {
   // ---- 双栏主界面（左会话列表常驻 + 右聊天详情） ----
   const readSeq = peerReadSeq[convId] ?? 0;
   const peerOnline = presence[peer] === "online";
+
+  // 通讯录派生：我对每个对端的关系状态、收到的申请、已是好友、新申请红点数。
+  const friendStatus = new Map(friends.map((f) => [f.user_id, f.status]));
+  const incoming = friends.filter((f) => f.status === "pending"); // 别人申请我，待我同意/拒绝
+  const accepted = friends.filter((f) => f.status === "accepted").sort((a, b) => b.updated_at - a.updated_at);
+  const incomingCount = incoming.length;
+  const labelOf = (id: string, nick: string) => (nick && nick.trim()) || id; // 有昵称显昵称，否则显 uid
+  const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
+
   return (
     <div className={`app ${peer ? "has-sel" : "no-sel"}`}>
       <aside className="sidebar">
         <header>
-          <span>会话（{uid} · {stateText}）</span>
+          <span>{uid} · {stateText}</span>
           <button className="link" onClick={logout}>退出</button>
         </header>
-        <div className="newchat">
-          <input value={newPeer} placeholder="输入对方 uid 发起会话…"
-            onChange={(e) => setNewPeer(e.target.value.trim())}
-            onKeyDown={(e) => { if (e.key === "Enter") openChat(newPeer); }} />
-          <button onClick={() => openChat(newPeer)}>发起</button>
+        <div className="tabs">
+          <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={() => setTab("chats")}>会话</button>
+          <button className={`tab ${tab === "contacts" ? "active" : ""}`}
+            onClick={() => { setTab("contacts"); void refreshFriends(); }}>
+            通讯录{incomingCount > 0 && <span className="tab-badge">{incomingCount > 99 ? "99+" : incomingCount}</span>}
+          </button>
         </div>
+        {tab === "chats" ? (
         <div className="convlist">
-          {conversations.length === 0 && <div className="empty">还没有会话，输入对方 uid 发起一个吧</div>}
+          {conversations.length === 0 && <div className="empty">还没有会话，去「通讯录」找人发起一个吧</div>}
           {conversations.map((c) => (
             <div key={c.conv_id} className={`convitem ${c.peer === peer ? "active" : ""}`} onClick={() => openChat(c.peer)}>
               <div className="avatar">
@@ -438,6 +492,87 @@ export default function App() {
             </div>
           ))}
         </div>
+        ) : (
+        <div className="contacts">
+          <div className="newchat">
+            <input value={searchQ} placeholder="搜索用户：昵称 / 手机号 / uid / 标签"
+              onChange={(e) => setSearchQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
+            <button onClick={() => void doSearch()}>搜索</button>
+          </div>
+          <div className="convlist">
+            {searchResults !== null && (
+              <>
+                <div className="section-label">搜索结果</div>
+                {searchResults.length === 0 && <div className="empty">没有找到匹配的用户</div>}
+                {searchResults.map((u) => {
+                  const st = friendStatus.get(u.user_id);
+                  return (
+                    <div key={`s-${u.user_id}`} className="convitem static">
+                      <div className="avatar">{labelOf(u.user_id, u.nickname).slice(-2)}</div>
+                      <div className="convbody">
+                        <div className="convpeer">{labelOf(u.user_id, u.nickname)}</div>
+                        <div className="convlast">{u.user_id}{u.tags.length > 0 ? ` · ${u.tags.join(" ")}` : ""}</div>
+                      </div>
+                      <div className="row-actions">
+                        {st === "accepted" ? (
+                          <button className="mini-btn" onClick={() => openFriendChat(u.user_id)}>发消息</button>
+                        ) : st === "requested" ? (
+                          <button className="mini-btn ghost" disabled>已申请</button>
+                        ) : st === "pending" ? (
+                          <button className="mini-btn" disabled={busyUser === u.user_id}
+                            onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("accept", u.user_id))}>同意</button>
+                        ) : st === "blocked" ? (
+                          <button className="mini-btn ghost" disabled>已拉黑</button>
+                        ) : (
+                          <button className="mini-btn" disabled={busyUser === u.user_id}
+                            onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("request", u.user_id))}>加好友</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {incoming.length > 0 && (
+              <>
+                <div className="section-label">新的朋友（{incoming.length}）</div>
+                {incoming.map((f) => (
+                  <div key={`p-${f.user_id}`} className="convitem static">
+                    <div className="avatar">{labelOf(f.user_id, f.nickname).slice(-2)}</div>
+                    <div className="convbody">
+                      <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
+                      <div className="convlast">请求加你为好友</div>
+                    </div>
+                    <div className="row-actions">
+                      <button className="mini-btn" disabled={busyUser === f.user_id}
+                        onClick={() => void doFriendAction(f.user_id, () => clientRef.current!.friendAction("accept", f.user_id))}>同意</button>
+                      <button className="mini-btn ghost" disabled={busyUser === f.user_id}
+                        onClick={() => void doFriendAction(f.user_id, () => clientRef.current!.friendAction("reject", f.user_id))}>拒绝</button>
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
+
+            <div className="section-label">好友（{accepted.length}）</div>
+            {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
+            {accepted.map((f) => (
+              <div key={`f-${f.user_id}`} className="convitem" onClick={() => openFriendChat(f.user_id)}>
+                <div className="avatar">
+                  {labelOf(f.user_id, f.nickname).slice(-2)}
+                  {presence[f.user_id] === "online" && <span className="presence-dot" />}
+                </div>
+                <div className="convbody">
+                  <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
+                  <div className="convlast">{f.user_id}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        )}
       </aside>
 
       {/* chat 面板始终挂载（即使未选会话），让 VList 在 app 加载时就测到稳定高度；
