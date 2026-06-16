@@ -21,6 +21,8 @@ export interface IMClientHandlers {
   onPresence?: (user: string, status: string) => void;
   /** 对端正在输入。 */
   onTyping?: (convId: string, from: string) => void;
+  /** 好友关系变更（申请/同意/拒绝/拉黑/删除）：提示刷新通讯录。 */
+  onFriend?: (event: string, from: string) => void;
 }
 
 export class IMClient {
@@ -250,6 +252,9 @@ export class IMClient {
         break;
       case T.TYPING:
         this.handlers.onTyping?.(d.conv_id, d.from);
+        break;
+      case T.FRIEND:
+        this.handlers.onFriend?.(d.event, d.from);
         break;
       case T.PONG:
         break;

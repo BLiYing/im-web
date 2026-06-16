@@ -182,6 +182,8 @@ export default function App() {
         if (typingTimer.current) clearTimeout(typingTimer.current);
         typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
       },
+      // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
+      onFriend: () => { void refreshFriends(); },
     });
     clientRef.current = client;
     try {
@@ -585,7 +587,7 @@ export default function App() {
         ) : (
         <div className="contacts">
           <div className="newchat">
-            <input value={searchQ} placeholder="搜索用户：昵称 / 手机号 / uid / 标签"
+            <input value={searchQ} placeholder="对方完整 uid 或手机号"
               onChange={(e) => setSearchQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
             <button onClick={() => void doSearch()}>搜索</button>

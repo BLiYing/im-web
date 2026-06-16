@@ -12,6 +12,7 @@ export const T = {
   PRESENCE: "presence",
   SYNC_REQ: "sync_req",
   SYNC_RESP: "sync_resp",
+  FRIEND: "friend",
   ERROR: "error",
 } as const;
 
