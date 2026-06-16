@@ -193,7 +193,11 @@ export default function App() {
         if (ok) void refreshConversations();
       },
       onReceipt: (convId, from, status, upToSeq) => {
-        if (status === "read" && from !== uid) {
+        if (status !== "read") return;
+        if (from === uid) {
+          // 多端已读同步（M1）：我在另一端已读 → 本端列表未读清零（服务端已记位点，刷新即得）。
+          void refreshConversations();
+        } else {
           setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
           // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变绿✓✓（否则要切会话才更新）。
           void refreshConversations();
