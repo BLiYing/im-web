@@ -27,6 +27,7 @@ export class IMClient {
   private ws: WebSocket | null = null;
   private seq = 0;
   private uid = "";
+  private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
   private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
   private state: ConnState = "disconnected";
   private pingTimer: number | null = null;
@@ -50,11 +51,13 @@ export class IMClient {
     return this.uid;
   }
 
-  /** 连接：先登录换 token，再用 ?token= 连 ws。 */
-  async connect(uid: string): Promise<void> {
+  /** 连接：先登录换 token，再用 ?token= 连 ws。password 为空走开发期免密直签。
+   *  首次登录失败（如密码错误）会抛错给调用方显示；之后的断线重连仍静默重试。 */
+  async connect(uid: string, password = ""): Promise<void> {
     this.uid = uid;
+    this.password = password;
     this.manualClose = false;
-    await this.openSocket();
+    await this.openSocket(true);
   }
 
   disconnect(): void {
@@ -167,22 +170,15 @@ export class IMClient {
 
   // ---- 内部 ----
 
-  private async openSocket(): Promise<void> {
+  private async openSocket(throwOnLoginError = false): Promise<void> {
     this.setState("connecting");
     let token: string;
     try {
-      const resp = await fetch("/api/v1/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: this.uid }),
-      });
-      const body = await resp.json();
-      if (body.code !== 0 || !body.data?.token) {
-        throw new Error(body.message || "login failed");
-      }
-      token = body.data.token;
+      token = await this.fetchToken();
       this.token = token;
     } catch (e) {
+      this.setState("disconnected");
+      if (throwOnLoginError) throw e; // 首次登录失败 → 交 UI 显示（密码错误等）
       if (!this.manualClose) this.scheduleReconnect();
       return;
     }
@@ -203,6 +199,20 @@ export class IMClient {
       if (!this.manualClose) this.scheduleReconnect();
     };
     ws.onerror = () => ws.close();
+  }
+
+  /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。 */
+  private async fetchToken(): Promise<string> {
+    const resp = await fetch("/api/v1/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: this.uid, password: this.password }),
+    });
+    const body = await resp.json();
+    if (body.code !== 0 || !body.data?.token) {
+      throw new Error(body.message || "登录失败");
+    }
+    return body.data.token as string;
   }
 
   private onFrame(raw: string): void {
@@ -320,5 +330,19 @@ export class IMClient {
     if (this.state === s) return;
     this.state = s;
     this.handlers.onState?.(s);
+  }
+}
+
+/** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。
+ *  独立于连接（注册时还没建 IMClient/socket），故为模块级函数。 */
+export async function registerAccount(username: string, password: string): Promise<void> {
+  const resp = await fetch("/api/v1/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const body = await resp.json();
+  if (body.code !== 0) {
+    throw new Error(body.message || "注册失败");
   }
 }

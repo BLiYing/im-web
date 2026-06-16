@@ -41,6 +41,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .login label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 .login input { padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-card); font-size: 15px; background: var(--surface); color: var(--text); }
 .login button { padding: 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: #fff; font-size: 15px; cursor: pointer; }
+.login button:disabled { opacity: 0.6; cursor: default; }
+.login button.secondary { background: var(--surface); color: var(--accent); border: 1px solid var(--accent); }
+.auth-err { margin: 0; color: #e0533d; font-size: 13px; }
+.link-inline { display: inline; padding: 0; border: 0; background: none; color: var(--accent); font-size: inherit; cursor: pointer; }
 .hint { font-size: 12px; color: var(--text-secondary); }
 .hint code { background: var(--bubble-them); padding: 1px 5px; border-radius: 4px; }
 

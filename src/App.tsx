@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { IMClient, type ConnState } from "./sdk/imSdk";
+import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard } from "./sdk/protocol";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -8,6 +8,9 @@ type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
   const [uid, setUid] = useState("1001");
+  const [password, setPassword] = useState(""); // 登录密码（空=走开发期免密）
+  const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
+  const [authErr, setAuthErr] = useState(""); // 登录/注册错误文案
   const [state, setState] = useState<ConnState>("disconnected");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [msgsByConv, setMsgsByConv] = useState<Record<string, ChatMessage[]>>({});
@@ -127,11 +130,13 @@ export default function App() {
     }
   }, [profileDraft]);
 
-  const enterApp = useCallback(async () => {
+  const enterApp = useCallback(async (pwd: string) => {
     if (!uid) {
-      alert("请填写 uid");
+      setAuthErr("请填写用户名");
       return;
     }
+    setAuthBusy(true);
+    setAuthErr("");
     const client = new IMClient({
       onState: setState,
       onMessage: (m) => {
@@ -179,11 +184,37 @@ export default function App() {
       },
     });
     clientRef.current = client;
-    await client.connect(uid);
+    try {
+      await client.connect(uid, pwd); // 首次登录失败（密码错误等）会抛错
+    } catch (e) {
+      clientRef.current = null;
+      setAuthBusy(false);
+      setAuthErr((e as Error).message || "登录失败");
+      return;
+    }
     await refreshConversations();
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
+    setAuthBusy(false);
     setPhase("app");
   }, [uid, appendMsg, refreshConversations, refreshFriends]);
+
+  // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
+  const doRegister = useCallback(async () => {
+    if (!uid || password.length < 6) {
+      setAuthErr("用户名必填，密码至少 6 位");
+      return;
+    }
+    setAuthBusy(true);
+    setAuthErr("");
+    try {
+      await registerAccount(uid, password);
+    } catch (e) {
+      setAuthBusy(false);
+      setAuthErr((e as Error).message || "注册失败");
+      return;
+    }
+    await enterApp(password); // 注册成功 → 直接用同一密码登录
+  }, [uid, password, enterApp]);
 
   const openChat = useCallback((p: string) => {
     if (!p || p === uid) {
@@ -228,6 +259,8 @@ export default function App() {
     setSearchResults(null);
     setSearchQ("");
     setTab("chats");
+    setPassword("");
+    setAuthErr("");
     setPhase("login");
   }, []);
 
@@ -478,9 +511,17 @@ export default function App() {
     return (
       <div className="login">
         <h1>IM Web 登录</h1>
-        <label>我的 uid<input value={uid} onChange={(e) => setUid(e.target.value.trim())} /></label>
-        <button onClick={enterApp}>登录</button>
-        <p className="hint">开发期免密登录：填 uid 即可。先启动后端 <code>go run ./cmd/imserver</code>。</p>
+        <label>用户名<input value={uid} autoFocus onChange={(e) => setUid(e.target.value.trim())} /></label>
+        <label>密码<input type="password" value={password} placeholder="≥ 6 位"
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void enterApp(password); }} /></label>
+        {authErr && <p className="auth-err">{authErr}</p>}
+        <button disabled={authBusy} onClick={() => void enterApp(password)}>登录</button>
+        <button className="secondary" disabled={authBusy} onClick={() => void doRegister()}>注册并登录</button>
+        <p className="hint">
+          真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
+          仅调试：<button className="link-inline" disabled={authBusy} onClick={() => void enterApp("")}>免密登录</button>（需后端开启 dev-login）。
+        </p>
       </div>
     );
   }
