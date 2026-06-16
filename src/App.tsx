@@ -125,6 +125,9 @@ export default function App() {
     const conv = conversations.find((c) => c.conv_id === cid);
     const readSeq = conv?.read_seq ?? 0;
     const latestSeq = conv?.latest_conv_seq ?? 0;
+    // 进会话即用服务端已知的对端已读位点给聊天详情播种（否则只靠实时回执：对方早前已读、本标签页没在场时，
+    // 列表显✓✓而详情仍显✓）。取较大值，避免覆盖刚到的更新回执。
+    setPeerReadSeq((prev) => ({ ...prev, [cid]: Math.max(prev[cid] ?? 0, conv?.peer_read_seq ?? 0) }));
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
     setEntryReadSeq(readSeq);
