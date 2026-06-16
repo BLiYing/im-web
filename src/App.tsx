@@ -95,6 +95,8 @@ export default function App() {
       onReceipt: (convId, from, status, upToSeq) => {
         if (status === "read" && from !== uid) {
           setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
+          // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变绿✓✓（否则要切会话才更新）。
+          void refreshConversations();
         }
       },
       onPresence: (user, status) => setPresence((prev) => ({ ...prev, [user]: status })),
