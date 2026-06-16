@@ -65,6 +65,16 @@ export interface UserCard {
   status: string;
 }
 
+/** 本人完整资料（GET /api/v1/users/me，含 phone；对齐 profile.Card）。 */
+export interface MyProfile {
+  user_id: string;
+  nickname: string;
+  avatar_url: string;
+  phone: string;
+  tags: string[];
+  status: string;
+}
+
 /** 好友/申请关系状态（对齐后端 store.Friend*）。 */
 export type FriendStatus = "accepted" | "pending" | "requested" | "blocked";
 

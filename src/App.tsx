@@ -26,6 +26,9 @@ export default function App() {
   const [searchQ, setSearchQ] = useState(""); // 找人搜索框
   const [searchResults, setSearchResults] = useState<UserCard[] | null>(null); // null=未搜索；[]=搜过无结果
   const [busyUser, setBusyUser] = useState<string | null>(null); // 正在执行好友动作的对端 uid（防重复点击）
+  const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatar_url: string; phone: string; tags: string } | null>(null); // 编辑资料弹窗（null=关闭）
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [friendMenu, setFriendMenu] = useState<{ x: number; y: number; userId: string } | null>(null); // 好友行 ⋯ 菜单
 
   const clientRef = useRef<IMClient | null>(null);
   const seenByConv = useRef<Record<string, Set<number>>>({});
@@ -93,6 +96,36 @@ export default function App() {
       setBusyUser(null);
     }
   }, [refreshFriends]);
+
+  // 打开"编辑资料"弹窗：拉本人资料填入草稿（tags 以空格连接成可编辑串）。
+  const openProfile = useCallback(async () => {
+    try {
+      const p = await clientRef.current?.fetchMyProfile();
+      // phone 后端是 omitempty：空时 JSON 无该键 → undefined，须兜底为 ""，否则 input 由非受控变受控告警。
+      if (p) setProfileDraft({ nickname: p.nickname ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
+    } catch (e) {
+      alert(`加载资料失败：${(e as Error).message}`);
+    }
+  }, []);
+
+  // 保存资料：tags 按空格/逗号切分去空，PUT 整体替换。
+  const saveProfile = useCallback(async () => {
+    if (!profileDraft) return;
+    setProfileBusy(true);
+    try {
+      await clientRef.current?.updateMyProfile({
+        nickname: profileDraft.nickname.trim(),
+        avatar_url: profileDraft.avatar_url.trim(),
+        phone: profileDraft.phone.trim(),
+        tags: profileDraft.tags.split(/[\s,]+/).filter(Boolean),
+      });
+      setProfileDraft(null);
+    } catch (e) {
+      alert(`保存失败：${(e as Error).message}`);
+    } finally {
+      setProfileBusy(false);
+    }
+  }, [profileDraft]);
 
   const enterApp = useCallback(async () => {
     if (!uid) {
@@ -249,6 +282,19 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+
+  // 好友 ⋯ 菜单：点空白 / Esc 关闭。
+  useEffect(() => {
+    if (!friendMenu) return;
+    const close = () => setFriendMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFriendMenu(null); };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [friendMenu]);
 
   const onInputChange = useCallback((val: string) => {
     setInput(val);
@@ -456,7 +502,10 @@ export default function App() {
       <aside className="sidebar">
         <header>
           <span>{uid} · {stateText}</span>
-          <button className="link" onClick={logout}>退出</button>
+          <span className="header-actions">
+            <button className="link" onClick={() => void openProfile()}>资料</button>
+            <button className="link" onClick={logout}>退出</button>
+          </span>
         </header>
         <div className="tabs">
           <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={() => setTab("chats")}>会话</button>
@@ -568,6 +617,10 @@ export default function App() {
                   <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
                   <div className="convlast">{f.user_id}</div>
                 </div>
+                <div className="row-actions">
+                  <button className="mini-btn ghost" title="更多"
+                    onClick={(e) => { e.stopPropagation(); setFriendMenu({ x: e.clientX, y: e.clientY, userId: f.user_id }); }}>⋯</button>
+                </div>
               </div>
             ))}
           </div>
@@ -641,6 +694,33 @@ export default function App() {
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => copyMessage(menu.m)}>复制</button>
           <button className="danger" onClick={() => deleteMessage(menu.m)}>删除</button>
+        </div>
+      )}
+
+      {friendMenu && (
+        <div className="ctx-menu" style={{ left: friendMenu.x, top: friendMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.removeFriend(id)); }}>删除好友</button>
+          <button className="danger" onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.friendAction("block", id)); }}>拉黑</button>
+        </div>
+      )}
+
+      {profileDraft && (
+        <div className="modal-mask" onClick={() => setProfileDraft(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>编辑我的资料</h3>
+            <label>昵称<input value={profileDraft.nickname} maxLength={32}
+              onChange={(e) => setProfileDraft({ ...profileDraft, nickname: e.target.value })} /></label>
+            <label>头像 URL<input value={profileDraft.avatar_url}
+              onChange={(e) => setProfileDraft({ ...profileDraft, avatar_url: e.target.value })} /></label>
+            <label>手机号<input value={profileDraft.phone}
+              onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></label>
+            <label>标签（空格或逗号分隔）<input value={profileDraft.tags}
+              onChange={(e) => setProfileDraft({ ...profileDraft, tags: e.target.value })} /></label>
+            <div className="modal-actions">
+              <button className="link" onClick={() => setProfileDraft(null)}>取消</button>
+              <button className="mini-btn" disabled={profileBusy} onClick={() => void saveProfile()}>保存</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

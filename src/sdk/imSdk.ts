@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry } from "./protocol";
+import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile } from "./protocol";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -106,6 +106,18 @@ export class IMClient {
   /** 删除好友：DELETE /api/v1/friends/{id}。 */
   async removeFriend(userId: string): Promise<void> {
     await this.api(`/api/v1/friends/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  }
+
+  /** 读取本人资料（含 phone）：GET /api/v1/users/me。 */
+  async fetchMyProfile(): Promise<MyProfile> {
+    const data = await this.api("/api/v1/users/me");
+    return data as MyProfile;
+  }
+
+  /** 整体更新本人资料（PUT 语义）：PUT /api/v1/users/me。 */
+  async updateMyProfile(p: { nickname: string; avatar_url: string; phone: string; tags: string[] }): Promise<MyProfile> {
+    const data = await this.api("/api/v1/users/me", { method: "PUT", body: JSON.stringify(p) });
+    return data as MyProfile;
   }
 
   /** 进会话：建立重连基线 + 加载初始可视窗口（见 CHAT_UX §3）。
