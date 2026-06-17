@@ -140,6 +140,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .chat footer { display: flex; gap: var(--space-2); padding: 10px var(--space-4); border-top: 1px solid var(--line); }
 .chat footer input { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--text); }
 .chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: #fff; cursor: pointer; }
+/* 拉黑者侧：输入框换成提示横幅 */
+.chat footer.blocked-bar { align-items: center; justify-content: space-between; color: var(--text-secondary); }
 
 /* M2：未读红点 / 在线状态 / 正在输入 */
 .convitem { position: relative; }

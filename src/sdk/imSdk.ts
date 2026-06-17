@@ -27,6 +27,8 @@ export interface IMClientHandlers {
   onFriend?: (event: string, from: string) => void;
   /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。 */
   onAuthError?: (msg: string) => void;
+  /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。 */
+  onMsgRejected?: (clientMsgId: string, msg: string) => void;
 }
 
 /** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
@@ -298,9 +300,17 @@ export class IMClient {
         break;
       case T.PONG:
         break;
-      case T.ERROR:
-        // 业务错误：code/message（见 errcode）。此处简单忽略，UI 可订阅扩展。
+      case T.ERROR: {
+        // 带 client_msg_id 的错误 = 对某条 send_msg 的拒绝（如被拉黑）：标记该条失败 + 提示。
+        const cmid = d.client_msg_id;
+        if (cmid) {
+          const timer = this.sendTimers.get(cmid);
+          if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(cmid); }
+          this.pendingSends.delete(cmid);
+          this.handlers.onMsgRejected?.(cmid, d.message || "发送失败");
+        }
         break;
+      }
     }
   }
 

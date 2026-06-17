@@ -152,12 +152,14 @@ export default function App() {
     try {
       await clientRef.current?.friendAction("unblock", userId);
       setBlockedList((prev) => (prev ?? []).filter((f) => f.user_id !== userId));
+      void refreshFriends(); // 同步主好友态：聊天页"已拉黑"横幅随之消失、输入恢复
+
     } catch (e) {
       alert(`解除失败：${(e as Error).message}`);
     } finally {
       setBusyUser(null);
     }
-  }, []);
+  }, [refreshFriends]);
 
   // 保存资料：tags 按空格/逗号切分去空，PUT 整体替换。
   const saveProfile = useCallback(async () => {
@@ -236,6 +238,17 @@ export default function App() {
       },
       // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
       onFriend: () => { void refreshFriends(); },
+      // 某条消息被拒收（被拉黑）→ 标记该条发送失败 + 提示原因（方向文案由服务端给）。
+      onMsgRejected: (clientMsgId, msg) => {
+        setMsgsByConv((prev) => {
+          const out: Record<string, ChatMessage[]> = {};
+          for (const [cid, list] of Object.entries(prev)) {
+            out[cid] = list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, status: "failed" } : m));
+          }
+          return out;
+        });
+        alert(msg);
+      },
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
       onAuthError: (msg) => {
@@ -600,6 +613,7 @@ export default function App() {
   // ---- 双栏主界面（左会话列表常驻 + 右聊天详情） ----
   const readSeq = peerReadSeq[convId] ?? 0;
   const peerOnline = presence[peer] === "online";
+  const peerBlocked = !!peer && friends.some((f) => f.user_id === peer && f.status === "blocked"); // 我拉黑了对方
 
   // 通讯录派生：我对每个对端的关系状态、收到的申请、已是好友、新申请红点数。
   const friendStatus = new Map(friends.map((f) => [f.user_id, f.status]));
@@ -793,12 +807,20 @@ export default function App() {
             </button>
           )}
           {peer && typingConv === convId && <div className="typing">对方正在输入…</div>}
-          <footer>
-            <input value={input} placeholder={peer ? "输入消息，回车发送…" : "先选择左侧的会话…"} disabled={!peer}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
-            <button onClick={send} disabled={!peer}>发送</button>
-          </footer>
+          {peerBlocked ? (
+            // 拉黑者侧（Telegram 式）：输入框换成"已拉黑，点此解除"横幅，从源头禁止发送。
+            <footer className="blocked-bar">
+              <span>已拉黑对方，无法发送消息</span>
+              <button className="mini-btn" onClick={() => void unblock(peer)}>解除拉黑</button>
+            </footer>
+          ) : (
+            <footer>
+              <input value={input} placeholder={peer ? "输入消息，回车发送…" : "先选择左侧的会话…"} disabled={!peer}
+                onChange={(e) => onInputChange(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+              <button onClick={send} disabled={!peer}>发送</button>
+            </footer>
+          )}
         </div>
         {!peer && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
