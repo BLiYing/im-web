@@ -236,6 +236,9 @@ export default function App() {
       },
       // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
       onFriend: () => { void refreshFriends(); },
+      // 鉴权失效（账号没了/密码错/token 失效）→ 退回登录页（而非无限重连卡"未连接"）。
+      // 先 logout（会清 authErr）再设错误文案，否则提示被 logout 清掉。
+      onAuthError: (msg) => { logout(); setAuthErr(msg); },
     });
     clientRef.current = client;
     try {

@@ -25,6 +25,13 @@ export interface IMClientHandlers {
   onTyping?: (convId: string, from: string) => void;
   /** 好友关系变更（申请/同意/拒绝/拉黑/删除）：提示刷新通讯录。 */
   onFriend?: (event: string, from: string) => void;
+  /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。 */
+  onAuthError?: (msg: string) => void;
+}
+
+/** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
+function isAuthCode(code: number | undefined): boolean {
+  return code === 200001 || code === 200002 || code === 200003 || code === 100101 || code === 100102;
 }
 
 export class IMClient {
@@ -194,7 +201,14 @@ export class IMClient {
     } catch (e) {
       this.setState("disconnected");
       if (throwOnLoginError) throw e; // 首次登录失败 → 交 UI 显示（密码错误等）
-      if (!this.manualClose) this.scheduleReconnect();
+      // 重连：鉴权失效（账号没了/密码错/token 失效）→ 退回登录，不无限重试；网络失败 → 继续重试。
+      const code = (e as { code?: number }).code;
+      if (isAuthCode(code)) {
+        this.manualClose = true; // 停止后续自动重连
+        this.handlers.onAuthError?.((e as Error).message || "登录已失效，请重新登录");
+      } else if (!this.manualClose) {
+        this.scheduleReconnect();
+      }
       return;
     }
 
@@ -224,7 +238,9 @@ export class IMClient {
       body: JSON.stringify({ username: this.uid, password: this.password }),
     });
     if (body.code !== 0 || !body.data?.token) {
-      throw new Error(friendlyMessage(body.code, body.message || "登录失败"));
+      const e = new Error(friendlyMessage(body.code, body.message || "登录失败")) as Error & { code?: number };
+      e.code = body.code; // 带上业务码，供重连区分 鉴权失败 vs 网络失败
+      throw e;
     }
     return body.data.token as string;
   }
