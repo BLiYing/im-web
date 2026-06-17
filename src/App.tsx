@@ -425,10 +425,12 @@ export default function App() {
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
   const convId = peer ? convIdFor(uid, peer) : "";
-  // 按 conv_seq 排序（回填的历史可能晚于实时消息到达）；发送中(convSeq=0)排末尾。
+  // 按时间戳排序（发送中/失败的 convSeq=0 但有发送时刻，故按时间能正确落位——
+  // 否则它们会被挤到末尾，导致"解除拉黑后新发的消息排在更早的失败消息之前"）。
+  // conv_seq 仅作同一毫秒内的次级排序，保证已送达消息间仍按服务端顺序。
   const messages = (msgsByConv[convId] ?? [])
     .slice()
-    .sort((a, b) => (a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER));
+    .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
   const firstUnreadIdx =
     entryUnread > 0 ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq) : -1;
