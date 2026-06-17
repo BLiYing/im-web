@@ -286,6 +286,13 @@ export class IMClient {
       timestamp: d.timestamp || 0,
       status: "received",
     };
+    // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
+    // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，
+    // 避免这条实时消息把 synced 推过空洞、造成中间几条被永久漏掉。
+    const prevSynced = this.syncedSeq.get(msg.convId) ?? 0;
+    if (prevSynced > 0 && msg.convSeq > prevSynced + 1 && this.tracked.has(msg.convId)) {
+      this.sendSyncReq([msg.convId]); // since=prevSynced（此刻尚未 update）→ 拉回 [prevSynced+1 .. ]
+    }
     this.updateSynced(msg.convId, msg.convSeq);
     this.sendReceipt(msg.convId, msg.convSeq);
     void localStore.saveMessage(this.uid, msg); // 收到/同步到的消息落本地库
