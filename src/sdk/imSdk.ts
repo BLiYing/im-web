@@ -16,7 +16,7 @@ export interface IMClientHandlers {
   onState?: (state: ConnState) => void;
   onMessage?: (msg: ChatMessage) => void;
   /** 发送结果：成功时带 server 分配的 convSeq。 */
-  onAck?: (clientMsgId: string, ok: boolean, convSeq: number) => void;
+  onAck?: (clientMsgId: string, ok: boolean, convSeq: number, serverTs?: number) => void;
   /** 对端回执：from 已读/送达到 upToSeq（用于已读双勾）。 */
   onReceipt?: (convId: string, from: string, status: string, upToSeq: number) => void;
   /** 在线状态变化：某用户上线/离线。 */
@@ -269,7 +269,7 @@ export class IMClient {
           });
           this.pendingSends.delete(d.client_msg_id);
         }
-        this.handlers.onAck?.(d.client_msg_id, true, d.conv_seq);
+        this.handlers.onAck?.(d.client_msg_id, true, d.conv_seq, d.timestamp);
         break;
       }
       case T.NEW_MSG:

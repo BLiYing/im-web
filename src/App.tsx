@@ -201,7 +201,7 @@ export default function App() {
         // 任何对端来信都刷新会话列表（双栏下列表常驻：更新最后一条/排序/红点）。
         if (m.from !== uid) void refreshConversations();
       },
-      onAck: (clientMsgId, ok, convSeq) => {
+      onAck: (clientMsgId, ok, convSeq, serverTs) => {
         setMsgsByConv((prev) => {
           const out: Record<string, ChatMessage[]> = {};
           for (const [cid, list] of Object.entries(prev)) {
@@ -210,7 +210,8 @@ export default function App() {
               // 防 sync_resp/carbon 重复回显自己发的：把 ack 拿到的 conv_seq 登记进去重集
               // （new_msg/sync 无 client_msg_id，只能按 conv_seq 去重；与 iOS handleSendResult 一致）。
               if (ok && convSeq > 0) (seenByConv.current[cid] ??= new Set()).add(convSeq);
-              return { ...m, status: ok ? "sent" : "failed", convSeq };
+              // 成功后把时间戳换成服务器时间（消除"乐观发送用客户端钟"在排序上的时钟偏差）。
+              return { ...m, status: ok ? "sent" : "failed", convSeq, timestamp: ok && serverTs ? serverTs : m.timestamp };
             });
           }
           return out;
