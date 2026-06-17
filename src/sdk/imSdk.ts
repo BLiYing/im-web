@@ -290,7 +290,7 @@ export class IMClient {
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，
     // 避免这条实时消息把 synced 推过空洞、造成中间几条被永久漏掉。
     const prevSynced = this.syncedSeq.get(msg.convId) ?? 0;
-    if (prevSynced > 0 && msg.convSeq > prevSynced + 1 && this.tracked.has(msg.convId)) {
+    if (shouldHealGap(prevSynced, msg.convSeq, this.tracked.has(msg.convId))) {
       this.sendSyncReq([msg.convId]); // since=prevSynced（此刻尚未 update）→ 拉回 [prevSynced+1 .. ]
     }
     this.updateSynced(msg.convId, msg.convSeq);
@@ -383,6 +383,12 @@ export class IMClient {
   }
 }
 
+/** 离线空洞自愈判定（纯函数，导出供单测）：实时/同步消息的 conv_seq 跳过了"已同步位点+1"，
+ *  且该会话在跟踪中、且非初始(prevSynced>0) → 需补拉缺口。 */
+export function shouldHealGap(prevSynced: number, incomingConvSeq: number, tracked: boolean): boolean {
+  return tracked && prevSynced > 0 && incomingConvSeq > prevSynced + 1;
+}
+
 /** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。
  *  独立于连接（注册时还没建 IMClient/socket），故为模块级函数。 */
 export async function registerAccount(username: string, password: string): Promise<void> {
@@ -412,8 +418,8 @@ async function fetchJSON(path: string, init?: RequestInit): Promise<any> {
 }
 
 /** 业务错误码 → 友好中文（对齐 errcode / iOS IMFriendlyMessageForCode）。未收录回退服务端原文。
- *  隐私：被拉黑/密码错误等用模糊文案，不暴露"你被对方拉黑了"。 */
-function friendlyMessage(code: number, fallback: string): string {
+ *  隐私：被拉黑/密码错误等用模糊文案，不暴露"你被对方拉黑了"。导出供单测。 */
+export function friendlyMessage(code: number, fallback: string): string {
   const map: Record<number, string> = {
     100101: "登录已失效，请重新登录",
     100102: "登录已失效，请重新登录",
