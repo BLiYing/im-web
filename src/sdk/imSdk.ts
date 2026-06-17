@@ -128,6 +128,14 @@ export class IMClient {
     await this.api(`/api/v1/friends/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
+  /** 举报（AG）：POST /api/v1/reports。targetType=message|user|group。 */
+  async report(targetType: "message" | "user" | "group", targetId: string, reason: string, convId = ""): Promise<void> {
+    await this.api("/api/v1/reports", {
+      method: "POST",
+      body: JSON.stringify({ target_type: targetType, target_id: targetId, conv_id: convId, reason }),
+    });
+  }
+
   /** 读取本人资料（含 phone）：GET /api/v1/users/me。 */
   async fetchMyProfile(): Promise<MyProfile> {
     const data = await this.api("/api/v1/users/me");

@@ -386,6 +386,24 @@ export default function App() {
     setMenu(null);
   }, []);
 
+  // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
+  const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
+    setMenu(null);
+    const what = kind === "message" ? "举报这条消息" : `举报用户 ${m.from}`;
+    const reason = window.prompt(`${what}\n请填写举报理由：`, "");
+    if (reason === null) return; // 取消
+    try {
+      if (kind === "message") {
+        await clientRef.current?.report("message", m.serverMsgId ?? "", reason, m.convId);
+      } else {
+        await clientRef.current?.report("user", m.from, reason);
+      }
+      alert("举报已提交，感谢反馈。");
+    } catch (e) {
+      alert(`举报失败：${(e as Error).message}`);
+    }
+  }, []);
+
   // 菜单打开时：点空白/滚动/Esc 关闭。
   useEffect(() => {
     if (!menu) return;
@@ -848,6 +866,12 @@ export default function App() {
       {menu && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => copyMessage(menu.m)}>复制</button>
+          {menu.m.from !== uid && menu.m.serverMsgId && (
+            <button onClick={() => void reportMessage(menu.m, "message")}>举报消息</button>
+          )}
+          {menu.m.from !== uid && (
+            <button onClick={() => void reportMessage(menu.m, "user")}>举报发送者</button>
+          )}
           <button className="danger" onClick={() => deleteMessage(menu.m)}>删除</button>
         </div>
       )}
