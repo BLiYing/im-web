@@ -134,6 +134,13 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .bmeta .ck { color: var(--meta-time); }
 .bmeta .ck.read { color: var(--check-read); }
 .bmeta .failed { color: #e5484d; }
+/* 发送失败：气泡左侧红色感叹号（微信式）。.row 是纵向列，用 .bubble-line 横向裹住 [❗ 气泡]。 */
+.bubble-line { display: flex; align-items: center; gap: 6px; max-width: 100%; }
+.fail-badge { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; background: #e5484d; color: #fff;
+  font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: default; }
+/* 被拒收等系统提示：该条下方居中灰字（类似"未读消息"分割提示，但无横线）。 */
+.sys-note { display: flex; justify-content: center; margin: 4px 0 8px; }
+.sys-note span { color: var(--text-secondary); font-size: 12px; text-align: center; max-width: 80%; }
 /* 日期分隔胶囊（居中浮于壁纸上）。 */
 .date-pill { display: flex; justify-content: center; margin: 10px 0 6px; }
 .date-pill span { background: var(--date-pill-bg); color: #fff; font-size: 12px; font-weight: 600; padding: 3px 12px; border-radius: 12px; }

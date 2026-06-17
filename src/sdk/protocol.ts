@@ -34,6 +34,8 @@ export interface ChatMessage {
   convSeq: number;
   timestamp: number;
   status: MessageStatus;
+  /** 发送失败时的系统提示（如被拉黑拒收），在该条下方居中显示；微信式，不弹窗。 */
+  note?: string;
 }
 
 /** 会话列表项里的最后一条消息（对齐后端 conversation.MessageView）。 */

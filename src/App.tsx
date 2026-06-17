@@ -239,16 +239,15 @@ export default function App() {
       },
       // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
       onFriend: () => { void refreshFriends(); },
-      // 某条消息被拒收（被拉黑）→ 标记该条发送失败 + 提示原因（方向文案由服务端给）。
+      // 某条消息被拒收（被拉黑）→ 标记该条发送失败 + 把原因挂到该条 note（微信式：红❗+下方居中系统行，不弹窗）。
       onMsgRejected: (clientMsgId, msg) => {
         setMsgsByConv((prev) => {
           const out: Record<string, ChatMessage[]> = {};
           for (const [cid, list] of Object.entries(prev)) {
-            out[cid] = list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, status: "failed" } : m));
+            out[cid] = list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, status: "failed", note: msg } : m));
           }
           return out;
         });
-        alert(msg);
       },
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
@@ -786,20 +785,28 @@ export default function App() {
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
                   )}
                   <div className={`row ${mine ? "me" : "them"}`}>
-                    <div className="bubble"
-                      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
-                      <span className="btext">{m.content}</span>
-                      <span className="bmeta">
-                        {mine ? (
-                          m.status === "sending" ? "发送中…"
-                            : m.status === "failed" ? <span className="failed">发送失败 ✗</span>
-                              : <>{fmtTime(m.timestamp)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
-                        ) : (
-                          fmtTime(m.timestamp)
-                        )}
-                      </span>
+                    <div className="bubble-line">
+                      {mine && m.status === "failed" && (
+                        <span className="fail-badge" title={m.note || "发送失败"}>!</span>
+                      )}
+                      <div className="bubble"
+                        onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
+                        <span className="btext">{m.content}</span>
+                        <span className="bmeta">
+                          {mine ? (
+                            m.status === "sending" ? "发送中…"
+                              : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
+                                : <>{fmtTime(m.timestamp)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+                          ) : (
+                            fmtTime(m.timestamp)
+                          )}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  {mine && m.status === "failed" && m.note && (
+                    <div className="sys-note"><span>{m.note}</span></div>
+                  )}
                 </div>
               );
             })}
