@@ -8,6 +8,7 @@ import * as localStore from "./localStore";
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const SEND_TIMEOUT_MS = 10_000; // 发出后多久没收到 ack 即判定"发送失败"（断网/发不出去）
 
 export type ConnState = "disconnected" | "connecting" | "connected";
 
@@ -40,6 +41,7 @@ export class IMClient {
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
   private pendingSends = new Map<string, { convId: string; content: string; timestamp: number }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
   private readonly contextBefore = 10; // 进会话时未读分割线上方保留的已读上下文条数
   private handlers: IMClientHandlers;
@@ -67,6 +69,9 @@ export class IMClient {
   disconnect(): void {
     this.manualClose = true;
     this.stopPing();
+    this.sendTimers.forEach((t) => clearTimeout(t)); // 退出后别再触发"发送失败"回调
+    this.sendTimers.clear();
+    this.pendingSends.clear();
     this.ws?.close(1000);
     this.ws = null;
     this.setState("disconnected");
@@ -163,6 +168,12 @@ export class IMClient {
   sendText(content: string, to: string, convId: string): string {
     const clientMsgId = crypto.randomUUID();
     this.pendingSends.set(clientMsgId, { convId, content, timestamp: Date.now() }); // ack 后落库
+    // 超时无 ack（断网/发不出去）→ 标"发送失败"、清掉待落库（失败的不入库）。
+    this.sendTimers.set(clientMsgId, window.setTimeout(() => {
+      this.sendTimers.delete(clientMsgId);
+      this.pendingSends.delete(clientMsgId);
+      this.handlers.onAck?.(clientMsgId, false, 0);
+    }, SEND_TIMEOUT_MS));
     const env: Envelope = {
       type: T.SEND_MSG,
       seq: ++this.seq,
@@ -228,6 +239,8 @@ export class IMClient {
     const d = env.data || {};
     switch (env.type) {
       case T.ACK: {
+        const timer = this.sendTimers.get(d.client_msg_id); // ack 到了 → 取消超时判失败
+        if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(d.client_msg_id); }
         this.updateSynced(d.conv_id, d.conv_seq);
         // 自己发的消息（本端不会再经 new_msg 回显）→ ack 拿到 conv_seq 后落库，刷新后仍在。
         const pend = this.pendingSends.get(d.client_msg_id);

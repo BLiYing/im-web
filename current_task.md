@@ -18,6 +18,7 @@
 
 ## 已知坑 / 限制
 - **虚拟化暂回退**：virtua 在双栏「条件挂载 + 嵌套 flex」下视口测 0、渲染空且不自愈 → 现为普通滚动列表（配反向分页常规不卡，狂滚历史时 DOM 累积）。
+- **发送态补"失败"✅（2026-06-17）**：sendText 起 10s 超时计时器，无 ack（断网/发不出去）→ `onAck(false)` 标"发送失败 ✗"且不落库；ack 到则清计时器；disconnect 清所有计时器。浏览器实测：断后端发→10s 后失败；后端恢复发→✓ 不误翻失败。CLIENT_PARITY M0 发送态 Web 🚧→✅。
 - **本地落库 ✅（2026-06-17）**：`src/sdk/localStore.ts`（按 owner 隔离）——①消息落 IndexedDB（收到/同步 + 自己 ack 后）；②会话列表缓存 localStorage（刷新/弱网先秒显）；③**同步位点持久化**：登录/重连从本地最大 conv_seq 续传（`trackConversation`+`syncTracked`），离线期间的新消息登录即增量补回并落库、不重拉历史。`preloadLocal` 预载 + 按 conv_seq 去重。浏览器实测：离线收 2 条 → 重登 → 自动补回、IndexedDB 共 4 条、无重复。
 - **离线空洞自愈 ✅（2026-06-17）**：`processIncoming` 检测 conv_seq 跳号（> 已同步位点+1 且会话在 tracked）→ 用旧位点 `sendSyncReq` 补拉缺口，与 iOS 同逻辑。无回归（顺序消息不误触发）。**注**：该可靠性边界靠断连竞态触发、难手动复现，目前为"对齐 iOS 已验证逻辑 + 无回归"，待 Web 测试基建(Playwright/vitest)后补可重跑用例。
 - **Web 已追平 iOS 本地侧债务**（落库/位点续传/空洞自愈）。
