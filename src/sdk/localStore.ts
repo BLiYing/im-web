@@ -9,7 +9,7 @@ const DB_VERSION = 1;
 const STORE = "messages";
 
 interface MsgRecord {
-  id: string;        // owner|convId|convSeq —— 唯一键，保证同一条幂等覆盖、去重
+  id: string;        // 已确认：owner|convId|convSeq；被拒(convSeq=0)：owner|convId|c:clientMsgId —— 唯一键，幂等覆盖
   ownerConv: string; // owner|convId —— 索引：按会话批量取
   owner: string;
   convId: string;
@@ -18,6 +18,10 @@ interface MsgRecord {
   content: string;
   contentType: string;
   timestamp: number;
+  // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。
+  clientMsgId?: string;
+  status?: "failed";  // 仅落"被拒"失败态；已确认消息不写此字段（读回默认 received）
+  note?: string;      // 系统提示文案（如"消息已发出，但被对方拒收了"）
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -41,24 +45,37 @@ function openDB(): Promise<IDBDatabase> {
 
 const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
 
-/** 保存一条稳定消息（仅 convSeq>0；发送中/失败的临时态不入库）。失败静默。 */
+/** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。失败静默。 */
 export async function saveMessage(owner: string, m: ChatMessage): Promise<void> {
   if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
+  await put(owner, {
+    id: keyOf(owner, m.convId, m.convSeq),
+    ownerConv: `${owner}|${m.convId}`,
+    owner, convId: m.convId, convSeq: m.convSeq,
+    from: m.from, content: m.content, contentType: m.contentType, timestamp: m.timestamp,
+  });
+}
+
+/** 保存一条被拒收的失败消息（被拉黑：服务端永不接受、无 conv_seq）。按 clientMsgId 落库，重进/刷新仍在。 */
+export async function saveRejected(owner: string, m: ChatMessage): Promise<void> {
+  if (!owner || !m.convId || !m.clientMsgId) return;
+  await put(owner, {
+    id: `${owner}|${m.convId}|c:${m.clientMsgId}`, // 与已确认消息的 conv_seq 键不冲突；同 clientMsgId 幂等覆盖
+    ownerConv: `${owner}|${m.convId}`,
+    owner, convId: m.convId, convSeq: 0,
+    from: m.from, content: m.content, contentType: m.contentType, timestamp: m.timestamp,
+    clientMsgId: m.clientMsgId, status: "failed", note: m.note,
+  });
+}
+
+/** 写一条记录（put 幂等）。失败静默——持久化是增强，绝不阻断收发主流程。 */
+async function put(owner: string, rec: MsgRecord): Promise<void> {
+  if (!owner) return;
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put({
-        id: keyOf(owner, m.convId, m.convSeq),
-        ownerConv: `${owner}|${m.convId}`,
-        owner,
-        convId: m.convId,
-        convSeq: m.convSeq,
-        from: m.from,
-        content: m.content,
-        contentType: m.contentType,
-        timestamp: m.timestamp,
-      } as MsgRecord);
+      tx.objectStore(STORE).put(rec);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -79,16 +96,20 @@ export async function loadConversation(owner: string, convId: string): Promise<C
       req.onerror = () => reject(req.error);
     });
     recs.sort((a, b) => a.convSeq - b.convSeq);
-    return recs.map((r) => ({
-      serverMsgId: r.id,
-      convId: r.convId,
-      from: r.from,
-      content: r.content,
-      contentType: r.contentType,
-      convSeq: r.convSeq,
-      timestamp: r.timestamp,
-      status: "received" as const,
-    }));
+    return recs.map((r) =>
+      r.status === "failed"
+        ? {
+            // 被拒收的失败消息：还原失败态 + 系统提示（红❗+下方系统行）。convSeq=0，渲染按 timestamp 落位。
+            clientMsgId: r.clientMsgId,
+            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType,
+            convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
+          }
+        : {
+            serverMsgId: r.id,
+            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType,
+            convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
+          },
+    );
   } catch {
     return [];
   }

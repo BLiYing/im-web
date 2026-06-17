@@ -47,6 +47,7 @@ export default function App() {
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
   const prevMinSeqRef = useRef(0); // 上次渲染的最小 conv_seq（判断顶部是否插了更早历史）
+  const prevLenRef = useRef(0); // 上次渲染的消息条数（区分"新增消息"与"原条状态变更"如被拒收）
   const loadingOlderRef = useRef(false); // 是否正在上滚加载更早历史
   const loadingNewerRef = useRef(false); // 是否正在下滚加载更新历史
   const latestSeqRef = useRef(0); // 该会话服务端最新 conv_seq（判断下方是否还有未加载）
@@ -434,6 +435,10 @@ export default function App() {
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
   const firstUnreadIdx =
     entryUnread > 0 ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq) : -1;
+  // 末条"自己消息"的状态签名：被拒收/ack 会改其 status/note（条数不变），用它当滚动 effect 的依赖，
+  // 否则仅 messages.length 不变 → effect 不重跑 → 系统行变高后不贴底（问题1）。
+  const tail = messages[messages.length - 1];
+  const tailSig = tail && tail.from === uid ? `${tail.status}|${tail.note ?? ""}` : "";
 
   // 进会话定位 / 新消息贴底 / 顶部插历史保位 / 在上看历史累加跳转计数（纯 DOM 滚动）。
   useLayoutEffect(() => {
@@ -442,6 +447,9 @@ export default function App() {
     if (!box) return;
     const curMin = minSeqOf(messages);
     const curMax = maxSeqOf(messages);
+    // 条数是否增加：新增消息=true；仅原条状态变更（被拒收/ack 改 status/note）=false。
+    const grew = messages.length > prevLenRef.current;
+    prevLenRef.current = messages.length;
 
     if (pendingScrollRef.current) {
       if (messages.length === 0) return; // 等锚点窗口到达再定位
@@ -494,10 +502,14 @@ export default function App() {
     if (curMax > latestSeqRef.current) latestSeqRef.current = curMax;
 
     if (lastMine) {
-      box.scrollTop = box.scrollHeight;
-      wasNearBottomRef.current = true;
-      setShowJump(false);
-      setJumpCount(0);
+      // 新发消息始终贴底；末条状态变更（如被拒收挂系统行致变高）仅在原本贴底时贴底，
+      // 不打断已上滚看历史的用户（CHAT_UX §9）。
+      if (grew || wasNearBottomRef.current) {
+        box.scrollTop = box.scrollHeight;
+        wasNearBottomRef.current = true;
+        setShowJump(false);
+        setJumpCount(0);
+      }
     } else if (newPeer > 0) {
       if (wasNearBottomRef.current) {
         box.scrollTop = box.scrollHeight;
@@ -508,7 +520,7 @@ export default function App() {
         setShowJump(true);
       }
     }
-  }, [phase, convId, messages.length, uid, firstUnreadIdx]);
+  }, [phase, convId, messages.length, uid, firstUnreadIdx, tailSig]);
 
   // 可见即读（CHAT_UX §6 完整语义）：扫描在视口内的消息，取最大 conv_seq；超过已滚入位点则节流上报。
   // 同时把"↓N"更新为视口下方仍未读的对端消息数（随滚动递减，滚到底为 0）。

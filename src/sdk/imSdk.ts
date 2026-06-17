@@ -306,8 +306,18 @@ export class IMClient {
         if (cmid) {
           const timer = this.sendTimers.get(cmid);
           if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(cmid); }
+          const note = d.message || "发送失败";
+          // 被拒（如被拉黑）服务端永不接受、无 conv_seq → 把该条按失败态 + 系统提示落库，刷新/重进会话仍在。
+          const pend = this.pendingSends.get(cmid);
+          if (pend) {
+            void localStore.saveRejected(this.uid, {
+              clientMsgId: cmid, convId: pend.convId, from: this.uid,
+              content: pend.content, contentType: "text",
+              convSeq: 0, timestamp: pend.timestamp, status: "failed", note,
+            });
+          }
           this.pendingSends.delete(cmid);
-          this.handlers.onMsgRejected?.(cmid, d.message || "发送失败");
+          this.handlers.onMsgRejected?.(cmid, note);
         }
         break;
       }
