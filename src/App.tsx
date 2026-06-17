@@ -64,6 +64,7 @@ export default function App() {
       const convs = await clientRef.current?.fetchConversations();
       if (convs) {
         setConversations(convs);
+        clientRef.current?.cacheConversations(convs); // 缓存：刷新/离线先秒显
         return convs;
       }
     } catch {
@@ -72,13 +73,17 @@ export default function App() {
     return [];
   }, []);
 
-  // 登录后从本地库（IndexedDB）预载各会话历史 → 打开会话即秒显，刷新不丢已下载的历史。
+  // 登录后从本地库（IndexedDB）预载各会话历史 → 打开会话即秒显，刷新不丢已下载的历史；
+  // 同时把增量同步基线设为本地最大 conv_seq（无本地则用服务端 latest），实现"同步位点持久化"。
   const preloadLocal = useCallback(async (convs: Conversation[]) => {
     const client = clientRef.current;
     if (!client) return;
     const loaded: Record<string, ChatMessage[]> = {};
     for (const c of convs) {
       const local = await client.loadLocal(c.conv_id);
+      const localMax = local.length ? local[local.length - 1].convSeq : 0;
+      // 同步位点：有本地消息→从本地最大续传（重连不重拉历史）；无本地→从 latest（旧历史按需 openChat 再拉）。
+      client.trackConversation(c.conv_id, localMax > 0 ? localMax : (c.latest_conv_seq ?? 0));
       if (local.length === 0) continue;
       loaded[c.conv_id] = local;
       const seen = (seenByConv.current[c.conv_id] ??= new Set());
@@ -241,8 +246,16 @@ export default function App() {
       setAuthErr((e as Error).message || "登录失败");
       return;
     }
+    // 先用缓存的会话列表 + 本地消息秒显（刷新/弱网即时可见）。
+    const cached = client.cachedConversations();
+    if (cached.length) {
+      setConversations(cached);
+      await preloadLocal(cached);
+    }
+    // 再拉服务端最新会话列表，预载本地消息并按本地位点增量同步补新消息。
     const convs = await refreshConversations();
-    void preloadLocal(convs); // 从本地库秒载历史（刷新后打开会话即有）
+    if (convs.length) await preloadLocal(convs);
+    client.syncTracked(); // 从各会话本地/latest 基线补离线期间的新消息（持久化位点续传）
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     setAuthBusy(false);
     setPhase("app");

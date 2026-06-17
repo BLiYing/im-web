@@ -2,7 +2,7 @@
 // 不必每次从服务端重拉全部历史。按 owner（本人 uid）隔离，避免同一浏览器多账号串库。
 // 失败一律静默（持久化是增强，绝不阻断收发主流程）。
 
-import type { ChatMessage } from "./protocol";
+import type { ChatMessage, Conversation } from "./protocol";
 
 const DB_NAME = "im-web";
 const DB_VERSION = 1;
@@ -89,6 +89,32 @@ export async function loadConversation(owner: string, convId: string): Promise<C
       timestamp: r.timestamp,
       status: "received" as const,
     }));
+  } catch {
+    return [];
+  }
+}
+
+// ---- 会话列表缓存（localStorage 单 JSON blob，按 owner）：刷新/离线时先秒显旧列表 ----
+
+const convsKey = (owner: string) => `im-web:convs:${owner}`;
+
+/** 缓存会话列表（每次服务端拉到就覆盖写）。失败静默。 */
+export function saveConversations(owner: string, convs: Conversation[]): void {
+  if (!owner) return;
+  try {
+    localStorage.setItem(convsKey(owner), JSON.stringify(convs));
+  } catch {
+    /* 配额满/隐私模式等：静默 */
+  }
+}
+
+/** 读缓存的会话列表（刷新后先秒显，再被服务端最新覆盖）。无则空数组。 */
+export function loadConversations(owner: string): Conversation[] {
+  if (!owner) return [];
+  try {
+    const s = localStorage.getItem(convsKey(owner));
+    const arr = s ? JSON.parse(s) : [];
+    return Array.isArray(arr) ? (arr as Conversation[]) : [];
   } catch {
     return [];
   }

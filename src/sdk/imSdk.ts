@@ -297,6 +297,27 @@ export class IMClient {
     return localStore.loadConversation(this.uid, convId);
   }
 
+  /** 登记会话用于（重）连后增量同步，并把同步基线设为 max(现有, syncedSeq)。
+   *  syncedSeq 传本地已落库的最大 conv_seq → 重连/刷新只补更新的消息，不重拉历史。 */
+  trackConversation(convId: string, syncedSeq: number): void {
+    if (!convId) return;
+    this.tracked.add(convId);
+    if (syncedSeq > (this.syncedSeq.get(convId) ?? 0)) this.syncedSeq.set(convId, syncedSeq);
+  }
+
+  /** 对所有已登记会话发一次增量同步（从各自基线补新消息）。 */
+  syncTracked(): void {
+    this.sendSyncReq([...this.tracked]);
+  }
+
+  /** 缓存 / 读取会话列表（localStorage，按本人 uid 隔离）。 */
+  cacheConversations(convs: Conversation[]): void {
+    localStore.saveConversations(this.uid, convs);
+  }
+  cachedConversations(): Conversation[] {
+    return localStore.loadConversations(this.uid);
+  }
+
   /** 发送"正在输入"给会话对端（临时态）。 */
   sendTyping(convId: string): void {
     if (convId) this.send({ type: T.TYPING, data: { conv_id: convId } });
