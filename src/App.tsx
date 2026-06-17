@@ -819,20 +819,16 @@ export default function App() {
             </button>
           )}
           {peer && typingConv === convId && <div className="typing">对方正在输入…</div>}
-          {peerBlocked ? (
-            // 拉黑者侧（Telegram 式）：输入框换成"已拉黑，点此解除"横幅，从源头禁止发送。
-            <footer className="blocked-bar">
-              <span>已拉黑对方，无法发送消息</span>
-              <button className="mini-btn" onClick={() => void unblock(peer)}>解除拉黑</button>
-            </footer>
-          ) : (
-            <footer>
-              <input value={input} placeholder={peer ? "输入消息，回车发送…" : "先选择左侧的会话…"} disabled={!peer}
-                onChange={(e) => onInputChange(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
-              <button onClick={send} disabled={!peer}>发送</button>
-            </footer>
+          {peerBlocked && peer && (
+            // 微信式单向：拉黑者仍可发、对方能收到；这里只给一条非阻断提示 + 解除入口，不禁用输入。
+            <div className="block-hint">已将对方加入黑名单（TA 发来的消息会被拒收）<button className="link-inline" onClick={() => void unblock(peer)}>解除拉黑</button></div>
           )}
+          <footer>
+            <input value={input} placeholder={peer ? "输入消息，回车发送…" : "先选择左侧的会话…"} disabled={!peer}
+              onChange={(e) => onInputChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+            <button onClick={send} disabled={!peer}>发送</button>
+          </footer>
         </div>
         {!peer && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
