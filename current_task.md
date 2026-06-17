@@ -17,6 +17,7 @@
 3. 下一里程碑随 iOS：M3 群聊，或多端在线 UI 验证。
 
 ## 已知坑 / 限制
+- **消息排序（2026-06-17）**：改按 `timestamp` 排序（conv_seq 同毫秒次级）——修"失败消息被新消息挤到后面"。乐观发送 ack 后把时间戳换成服务器 `ack.timestamp`，消除客户端时钟偏差影响。规则见 `../IMServer/docs/CHAT_UX.md §1`。
 - **虚拟化暂回退**：virtua 在双栏「条件挂载 + 嵌套 flex」下视口测 0、渲染空且不自愈 → 现为普通滚动列表（配反向分页常规不卡，狂滚历史时 DOM 累积）。
 - **发送态补"失败"✅（2026-06-17）**：sendText 起 10s 超时计时器，无 ack（断网/发不出去）→ `onAck(false)` 标"发送失败 ✗"且不落库；ack 到则清计时器；disconnect 清所有计时器。浏览器实测：断后端发→10s 后失败；后端恢复发→✓ 不误翻失败。CLIENT_PARITY M0 发送态 Web 🚧→✅。
 - **本地落库 ✅（2026-06-17）**：`src/sdk/localStore.ts`（按 owner 隔离）——①消息落 IndexedDB（收到/同步 + 自己 ack 后）；②会话列表缓存 localStorage（刷新/弱网先秒显）；③**同步位点持久化**：登录/重连从本地最大 conv_seq 续传（`trackConversation`+`syncTracked`），离线期间的新消息登录即增量补回并落库、不重拉历史。`preloadLocal` 预载 + 按 conv_seq 去重。浏览器实测：离线收 2 条 → 重登 → 自动补回、IndexedDB 共 4 条、无重复。
