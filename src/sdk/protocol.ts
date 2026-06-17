@@ -88,6 +88,8 @@ export interface FriendEntry {
   avatar_url: string;
   status: FriendStatus;
   updated_at: number;
+  /** 黑名单标记，与 status 正交：我把对方拉黑了。拉黑的好友 status 仍为 accepted、仍在好友列表（带此标记）。 */
+  blocked?: boolean;
 }
 
 /** 会话 id：两个 uid 规范排序，保证收发双方一致（对齐协议示例 u_{a}_u_{b}）。 */

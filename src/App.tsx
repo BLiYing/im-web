@@ -615,10 +615,12 @@ export default function App() {
   // ---- 双栏主界面（左会话列表常驻 + 右聊天详情） ----
   const readSeq = peerReadSeq[convId] ?? 0;
   const peerOnline = presence[peer] === "online";
-  const peerBlocked = !!peer && friends.some((f) => f.user_id === peer && f.status === "blocked"); // 我拉黑了对方
+  const peerBlocked = !!peer && friends.some((f) => f.user_id === peer && f.blocked); // 我拉黑了对方（blocked 标记，与 status 正交）
 
   // 通讯录派生：我对每个对端的关系状态、收到的申请、已是好友、新申请红点数。
-  const friendStatus = new Map(friends.map((f) => [f.user_id, f.status]));
+  // 拉黑的好友 status 仍是 accepted，但搜索结果按"已拉黑"展示，故 blocked 覆盖 status。
+  const friendStatus = new Map(friends.map((f) => [f.user_id, f.blocked ? "blocked" : f.status]));
+  const blockedSet = new Set(friends.filter((f) => f.blocked).map((f) => f.user_id));
   const incoming = friends.filter((f) => f.status === "pending"); // 别人申请我，待我同意/拒绝
   const accepted = friends.filter((f) => f.status === "accepted").sort((a, b) => b.updated_at - a.updated_at);
   const incomingCount = incoming.length;
@@ -743,7 +745,7 @@ export default function App() {
                   {presence[f.user_id] === "online" && <span className="presence-dot" />}
                 </div>
                 <div className="convbody">
-                  <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
+                  <div className="convpeer">{labelOf(f.user_id, f.nickname)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
                   <div className="convlast">{f.user_id}</div>
                 </div>
                 <div className="row-actions">
@@ -845,7 +847,11 @@ export default function App() {
       {friendMenu && (
         <div className="ctx-menu" style={{ left: friendMenu.x, top: friendMenu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.removeFriend(id)); }}>删除好友</button>
-          <button className="danger" onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.friendAction("block", id)); }}>拉黑</button>
+          {blockedSet.has(friendMenu.userId) ? (
+            <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void unblock(id); }}>解除拉黑</button>
+          ) : (
+            <button className="danger" onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.friendAction("block", id)); }}>拉黑</button>
+          )}
         </div>
       )}
 
