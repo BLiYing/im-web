@@ -394,7 +394,8 @@ export default function App() {
     if (reason === null) return; // 取消
     try {
       if (kind === "message") {
-        await clientRef.current?.report("message", m.serverMsgId ?? "", reason, m.convId);
+        // 用 (conv_id, conv_seq) 定位消息：客户端无需持有 server_msg_id（本地库存的是复合键）。
+        await clientRef.current?.report("message", String(m.convSeq), reason, m.convId);
       } else {
         await clientRef.current?.report("user", m.from, reason);
       }
@@ -866,7 +867,7 @@ export default function App() {
       {menu && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => copyMessage(menu.m)}>复制</button>
-          {menu.m.from !== uid && menu.m.serverMsgId && (
+          {menu.m.from !== uid && menu.m.convSeq > 0 && (
             <button onClick={() => void reportMessage(menu.m, "message")}>举报消息</button>
           )}
           {menu.m.from !== uid && (
