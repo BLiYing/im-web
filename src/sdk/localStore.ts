@@ -18,6 +18,7 @@ interface MsgRecord {
   content: string;
   contentType: string;
   timestamp: number;
+  serverMsgId?: string; // 服务端真实消息 id（举报消息等需用真实 id，不能用复合键 id）
   // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。
   clientMsgId?: string;
   status?: "failed";  // 仅落"被拒"失败态；已确认消息不写此字段（读回默认 received）
@@ -53,6 +54,7 @@ export async function saveMessage(owner: string, m: ChatMessage): Promise<void> 
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
     from: m.from, content: m.content, contentType: m.contentType, timestamp: m.timestamp,
+    serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
   });
 }
 
@@ -105,7 +107,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
           }
         : {
-            serverMsgId: r.id,
+            serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
             convId: r.convId, from: r.from, content: r.content, contentType: r.contentType,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
           },

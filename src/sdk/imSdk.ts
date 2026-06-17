@@ -272,8 +272,8 @@ export class IMClient {
         const pend = this.pendingSends.get(d.client_msg_id);
         if (pend && d.conv_seq > 0) {
           void localStore.saveMessage(this.uid, {
-            convId: pend.convId, from: this.uid, content: pend.content, contentType: "text",
-            convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
+            serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
+            contentType: "text", convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
           });
           this.pendingSends.delete(d.client_msg_id);
         }

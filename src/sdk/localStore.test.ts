@@ -17,6 +17,19 @@ describe("localStore 消息（IndexedDB）", () => {
     expect(got[2].from).toBe("b");
   });
 
+  it("保留真实 server_msg_id（举报消息按它定位，不能用复合键）", async () => {
+    await saveMessage("oSid", { serverMsgId: "snow-123", convId: "c1", from: "a", content: "x", contentType: "text", convSeq: 1, timestamp: 1001, status: "received" });
+    const got = await loadConversation("oSid", "c1");
+    expect(got[0].serverMsgId).toBe("snow-123"); // 真实 id，而非 owner|c1|1 复合键
+  });
+
+  it("旧记录无 server_msg_id 时回退复合键（兼容）", async () => {
+    // 直接用不带 serverMsgId 的消息（模拟旧库），载回时 serverMsgId 回退为复合键、不为空。
+    await saveMessage("oOld", msg("c1", 2, "a"));
+    const got = await loadConversation("oOld", "c1");
+    expect(got[0].serverMsgId).toBe("oOld|c1|2");
+  });
+
   it("同一 (owner,conv,seq) 幂等覆盖，不重复", async () => {
     await saveMessage("o2", msg("c1", 1, "a", "first"));
     await saveMessage("o2", msg("c1", 1, "a", "second"));
