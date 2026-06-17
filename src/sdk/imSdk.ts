@@ -3,6 +3,7 @@
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
 import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile } from "./protocol";
+import * as localStore from "./localStore";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -38,6 +39,7 @@ export class IMClient {
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
+  private pendingSends = new Map<string, { convId: string; content: string; timestamp: number }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
   private readonly contextBefore = 10; // 进会话时未读分割线上方保留的已读上下文条数
   private handlers: IMClientHandlers;
@@ -160,6 +162,7 @@ export class IMClient {
   /** 发送文本，返回 client_msg_id。 */
   sendText(content: string, to: string, convId: string): string {
     const clientMsgId = crypto.randomUUID();
+    this.pendingSends.set(clientMsgId, { convId, content, timestamp: Date.now() }); // ack 后落库
     const env: Envelope = {
       type: T.SEND_MSG,
       seq: ++this.seq,
@@ -224,10 +227,20 @@ export class IMClient {
     }
     const d = env.data || {};
     switch (env.type) {
-      case T.ACK:
+      case T.ACK: {
         this.updateSynced(d.conv_id, d.conv_seq);
+        // 自己发的消息（本端不会再经 new_msg 回显）→ ack 拿到 conv_seq 后落库，刷新后仍在。
+        const pend = this.pendingSends.get(d.client_msg_id);
+        if (pend && d.conv_seq > 0) {
+          void localStore.saveMessage(this.uid, {
+            convId: pend.convId, from: this.uid, content: pend.content, contentType: "text",
+            convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
+          });
+          this.pendingSends.delete(d.client_msg_id);
+        }
         this.handlers.onAck?.(d.client_msg_id, true, d.conv_seq);
         break;
+      }
       case T.NEW_MSG:
         this.processIncoming(d);
         break;
@@ -275,7 +288,13 @@ export class IMClient {
     };
     this.updateSynced(msg.convId, msg.convSeq);
     this.sendReceipt(msg.convId, msg.convSeq);
+    void localStore.saveMessage(this.uid, msg); // 收到/同步到的消息落本地库
     this.handlers.onMessage?.(msg);
+  }
+
+  /** 读取某会话的本地持久化消息（IndexedDB），供 UI 启动时秒载。 */
+  loadLocal(convId: string): Promise<ChatMessage[]> {
+    return localStore.loadConversation(this.uid, convId);
   }
 
   /** 发送"正在输入"给会话对端（临时态）。 */

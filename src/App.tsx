@@ -59,13 +59,32 @@ export default function App() {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
   }, []);
 
-  const refreshConversations = useCallback(async () => {
+  const refreshConversations = useCallback(async (): Promise<Conversation[]> => {
     try {
       const convs = await clientRef.current?.fetchConversations();
-      if (convs) setConversations(convs);
+      if (convs) {
+        setConversations(convs);
+        return convs;
+      }
     } catch {
       /* 忽略 */
     }
+    return [];
+  }, []);
+
+  // 登录后从本地库（IndexedDB）预载各会话历史 → 打开会话即秒显，刷新不丢已下载的历史。
+  const preloadLocal = useCallback(async (convs: Conversation[]) => {
+    const client = clientRef.current;
+    if (!client) return;
+    const loaded: Record<string, ChatMessage[]> = {};
+    for (const c of convs) {
+      const local = await client.loadLocal(c.conv_id);
+      if (local.length === 0) continue;
+      loaded[c.conv_id] = local;
+      const seen = (seenByConv.current[c.conv_id] ??= new Set());
+      local.forEach((m) => m.convSeq > 0 && seen.add(m.convSeq)); // 防服务端同步重复回显
+    }
+    if (Object.keys(loaded).length) setMsgsByConv((prev) => ({ ...loaded, ...prev }));
   }, []);
 
   const refreshFriends = useCallback(async () => {
@@ -222,11 +241,12 @@ export default function App() {
       setAuthErr((e as Error).message || "登录失败");
       return;
     }
-    await refreshConversations();
+    const convs = await refreshConversations();
+    void preloadLocal(convs); // 从本地库秒载历史（刷新后打开会话即有）
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations, refreshFriends]);
+  }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends]);
 
   // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
