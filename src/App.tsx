@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard } from "./sdk/protocol";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
+import { formatTime } from "./time";
 import type { LucideIcon } from "lucide-react";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -63,7 +64,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
-  // 通用设置项：theme 已接通真功能；fontSize/timeFormat/sendKey 先存状态(UI)、后续接功能。
+  // 通用设置项：theme（主题）+ timeFormat（时间格式）已接通真功能；fontSize/sendKey 先存状态(UI)、后续接。
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
   const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
   const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
@@ -938,7 +939,7 @@ export default function App() {
                         {c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "✓✓ " : "✓ "}
                       </span>
                     )}
-                    {c.last_message ? fmtTime(c.last_message.timestamp) : ""}
+                    {c.last_message ? formatTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>
                 </div>
                 <div className="convlast">{c.last_message?.content ?? "（无消息）"}</div>
@@ -1208,9 +1209,9 @@ export default function App() {
                           {mine ? (
                             m.status === "sending" ? "发送中…"
                               : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
-                                : <>{fmtTime(m.timestamp)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+                                : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
                           ) : (
-                            fmtTime(m.timestamp)
+                            formatTime(m.timestamp, timeFormat)
                           )}
                         </span>
                       </div>
@@ -1354,8 +1355,3 @@ function minSeqOf(messages: ChatMessage[]): number {
   return m;
 }
 
-function fmtTime(ts: number): string {
-  if (!ts) return "";
-  const d = new Date(ts);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
