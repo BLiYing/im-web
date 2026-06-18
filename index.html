@@ -7,6 +7,10 @@
 </head>
 <body>
   <div id="root"></div>
+  <!-- 主题在首屏绘制前定下，避免浅/深闪烁；与 React 的 theme 状态同读 localStorage('im.theme')。 -->
+  <script>
+    try { document.documentElement.setAttribute("data-theme", localStorage.getItem("im.theme") || "system"); } catch (e) {}
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

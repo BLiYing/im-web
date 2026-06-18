@@ -23,8 +23,17 @@
   --space-3: 12px;
   --space-4: 16px;
 }
+/* 深色取值：手动选 Dark 直接命中；System 由下方 media 在系统深色时命中。改一处两处同步。 */
+:root[data-theme="dark"] {
+  --bg: #16181c; --surface: #1f2227; --line: #2a2e35;
+  --bubble-me: #1f4d2e; --bubble-them: #262d31;
+  --text: #e6e8eb; --text-secondary: #8a929c;
+  --check-read: #7ddc7d; --meta-time: #9fb89a;
+  --wall-top: #0e1a12; --wall-bottom: #16261a;
+  --date-pill-bg: rgba(0, 0, 0, 0.45);
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root[data-theme="system"] {
     --bg: #16181c; --surface: #1f2227; --line: #2a2e35;
     --bubble-me: #1f4d2e; --bubble-them: #262d31;
     --text: #e6e8eb; --text-secondary: #8a929c;
@@ -228,6 +237,19 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .settings-body { flex: 1; overflow-y: auto; padding: var(--space-3) var(--space-2); }
 .settings-group { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); margin-bottom: var(--space-3); overflow: hidden; }
 .settings-group .settings-row { border-radius: 0; }
+/* 通用设置子面板（叠在设置之上） */
+.general-panel { z-index: 40; }
+.icon-btn-spacer { width: 32px; flex-shrink: 0; }
+.range-row { padding: 12px 14px; }
+.range-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.range-row input[type="range"] { width: 100%; accent-color: var(--accent); }
+.radio-row { display: flex; width: 100%; align-items: center; gap: var(--space-3); padding: 12px 14px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; }
+.radio-row:hover { background: var(--bg); }
+.radio-dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--text-secondary); flex-shrink: 0; position: relative; }
+.radio-dot.on { border-color: var(--accent); }
+.radio-dot.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
+.radio-text { display: flex; flex-direction: column; gap: 2px; }
+.row-sub { font-size: 12px; color: var(--text-secondary); }
 .settings-row.info { cursor: default; }
 .settings-row.info .row-label { color: var(--text); }
 .settings-row.info .row-value { margin-left: auto; color: var(--text-secondary); font-size: 12px; }

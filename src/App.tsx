@@ -8,6 +8,7 @@ import {
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
+  Image as ImageIcon,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -61,6 +62,12 @@ export default function App() {
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
+  const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
+  // 通用设置项：theme 已接通真功能；fontSize/timeFormat/sendKey 先存状态(UI)、后续接功能。
+  const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
+  const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
+  const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
+  const [sendKey, setSendKey] = useState<"enter" | "cmd">(() => (localStorage.getItem("im.sendKey") as "enter" | "cmd") || "enter");
 
   const clientRef = useRef<IMClient | null>(null);
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
@@ -584,6 +591,16 @@ export default function App() {
     void loadMyInfo();
   }, [showSettings]);
 
+  // 主题：真功能——写 <html data-theme> 驱动 CSS 变量切换（浅/深/跟随系统）+ 持久化。
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("im.theme", theme);
+  }, [theme]);
+  // 以下先持久化（UI 已生效，对应功能后续接）。
+  useEffect(() => { localStorage.setItem("im.fontSize", String(fontSize)); }, [fontSize]);
+  useEffect(() => { localStorage.setItem("im.timeFormat", timeFormat); }, [timeFormat]);
+  useEffect(() => { localStorage.setItem("im.sendKey", sendKey); }, [sendKey]);
+
   const onInputChange = useCallback((val: string) => {
     setInput(val);
     const now = Date.now();
@@ -844,7 +861,7 @@ export default function App() {
   // Web 版条目与 iOS 版不同——各自镜像对应平台的 Telegram 客户端。
   const settingsGroups: Row[][] = [
     [
-      { id: "general", label: "通用设置", icon: Settings2, chevron: true, onClick: () => comingSoon("通用设置") },
+      { id: "general", label: "通用设置", icon: Settings2, chevron: true, onClick: () => setGeneralOpen(true) },
       { id: "animations", label: "动画与性能", icon: Gauge, chevron: true, onClick: () => comingSoon("动画与性能") },
       { id: "notifications", label: "通知", icon: Bell, chevron: true, onClick: () => comingSoon("通知") },
       { id: "data", label: "数据与存储", icon: Database, chevron: true, onClick: () => comingSoon("数据与存储") },
@@ -1071,6 +1088,57 @@ export default function App() {
                 <label className="edit-field"><span>标签</span>
                   <input value={profileDraft.tags} placeholder="空格或逗号分隔"
                     onChange={(e) => setProfileDraft({ ...profileDraft, tags: e.target.value })} /></label>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 通用设置子面板：设置 ▸ 通用设置进入，叠在设置之上。主题已接通真功能，其余先 UI。 */}
+        {generalOpen && (
+          <div className="settings-panel general-panel">
+            <header className="settings-head">
+              <button className="icon-btn" title="返回" onClick={() => setGeneralOpen(false)}><ChevronLeft size={24} /></button>
+              <span className="settings-title">通用设置</span>
+              <span className="icon-btn-spacer" />
+            </header>
+            <div className="settings-body">
+              <div className="section-label">设置</div>
+              <div className="settings-group">
+                <div className="range-row">
+                  <div className="range-top"><span className="row-label">消息字体大小</span><span className="row-value">{fontSize}</span></div>
+                  <input type="range" min={12} max={24} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} />
+                </div>
+                <button className="settings-row" onClick={() => comingSoon("聊天壁纸")}>
+                  <ImageIcon size={20} className="row-icon" /><span className="row-label">聊天壁纸</span><ChevronRight size={18} className="row-chevron" />
+                </button>
+              </div>
+
+              <div className="section-label">主题</div>
+              <div className="settings-group">
+                {([{ v: "light", t: "浅色" }, { v: "dark", t: "深色" }, { v: "system", t: "跟随系统" }] as const).map((o) => (
+                  <button key={o.v} className="radio-row" onClick={() => setTheme(o.v)}>
+                    <span className={`radio-dot${theme === o.v ? " on" : ""}`} /><span className="row-label">{o.t}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="section-label">时间格式</div>
+              <div className="settings-group">
+                {([{ v: "12", t: "12 小时制" }, { v: "24", t: "24 小时制" }] as const).map((o) => (
+                  <button key={o.v} className="radio-row" onClick={() => setTimeFormat(o.v)}>
+                    <span className={`radio-dot${timeFormat === o.v ? " on" : ""}`} /><span className="row-label">{o.t}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="section-label">键盘</div>
+              <div className="settings-group">
+                {([{ v: "enter", t: "按 Enter 发送", s: "Shift + Enter 换行" }, { v: "cmd", t: "按 Cmd + Enter 发送", s: "Enter 换行" }] as const).map((o) => (
+                  <button key={o.v} className="radio-row" onClick={() => setSendKey(o.v)}>
+                    <span className={`radio-dot${sendKey === o.v ? " on" : ""}`} />
+                    <span className="radio-text"><span className="row-label">{o.t}</span><span className="row-sub">{o.s}</span></span>
+                  </button>
+                ))}
               </div>
             </div>
           </div>
