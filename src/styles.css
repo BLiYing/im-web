@@ -140,7 +140,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   align-items: flex-end; max-width: 100%; color: var(--text); box-shadow: 0 1px 1px rgba(0,0,0,0.08); }
 .me .bubble { background: var(--bubble-me); border-bottom-right-radius: var(--space-1); }
 .them .bubble { background: var(--bubble-them); border-bottom-left-radius: var(--space-1); }
-.btext { white-space: pre-wrap; word-break: break-word; }
+.btext { white-space: pre-wrap; word-break: break-word; font-size: var(--msg-font, 15px); }
 .bmeta { font-size: 11px; color: var(--meta-time); margin-left: var(--space-2); align-self: flex-end; white-space: nowrap; }
 .bmeta .ck { color: var(--meta-time); }
 .bmeta .ck.read { color: var(--check-read); }
@@ -161,9 +161,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 日期分隔胶囊（居中浮于壁纸上）。 */
 .date-pill { display: flex; justify-content: center; margin: 10px 0 6px; }
 .date-pill span { background: var(--date-pill-bg); color: #fff; font-size: 12px; font-weight: 600; padding: 3px 12px; border-radius: 12px; }
-.chat footer { display: flex; gap: var(--space-2); padding: 10px var(--space-4); border-top: 1px solid var(--line); }
-.chat footer input { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--text); }
-.chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: #fff; cursor: pointer; }
+.chat footer { display: flex; align-items: flex-end; gap: var(--space-2); padding: 10px var(--space-4); border-top: 1px solid var(--line); }
+.chat footer textarea { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); color: var(--text); font: inherit; line-height: 1.4; resize: none; overflow-y: auto; max-height: 120px; }
+.chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: #fff; cursor: pointer; flex-shrink: 0; }
 /* 拉黑者侧：输入框换成提示横幅 */
 .chat footer.blocked-bar { align-items: center; justify-content: space-between; color: var(--text-secondary); }
 

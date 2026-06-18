@@ -64,7 +64,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
-  // 通用设置项：theme（主题）+ timeFormat（时间格式）已接通真功能；fontSize/sendKey 先存状态(UI)、后续接。
+  // 通用设置项：theme（主题）/ timeFormat（时间格式）/ fontSize（字体）/ sendKey（发送键）均已接通真功能（壁纸仍占位）。
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
   const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
   const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
@@ -72,6 +72,7 @@ export default function App() {
 
   const clientRef = useRef<IMClient | null>(null);
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
+  const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const seenByConv = useRef<Record<string, Set<number>>>({});
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
@@ -597,10 +598,21 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("im.theme", theme);
   }, [theme]);
-  // 以下先持久化（UI 已生效，对应功能后续接）。
-  useEffect(() => { localStorage.setItem("im.fontSize", String(fontSize)); }, [fontSize]);
+  // 消息字体大小：真功能——写 CSS 变量 --msg-font 驱动消息气泡文本字号 + 持久化。
+  useEffect(() => {
+    localStorage.setItem("im.fontSize", String(fontSize));
+    document.documentElement.style.setProperty("--msg-font", `${fontSize}px`);
+  }, [fontSize]);
   useEffect(() => { localStorage.setItem("im.timeFormat", timeFormat); }, [timeFormat]);
   useEffect(() => { localStorage.setItem("im.sendKey", sendKey); }, [sendKey]);
+
+  // 输入框随内容自适应高度（换行时变高，最多 ~5 行；发送清空后回到单行）。
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input]);
 
   const onInputChange = useCallback((val: string) => {
     setInput(val);
@@ -1235,9 +1247,15 @@ export default function App() {
             <div className="block-hint">已将对方加入黑名单（TA 发来的消息会被拒收）<button className="link-inline" onClick={() => void unblock(peer)}>解除拉黑</button></div>
           )}
           <footer>
-            <input value={input} placeholder={peer ? "输入消息，回车发送…" : "先选择左侧的会话…"} disabled={!peer}
+            <textarea ref={composerRef} value={input} rows={1} disabled={!peer}
+              placeholder={peer ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
               onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
+                // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
+                const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
+                if (shouldSend) { e.preventDefault(); send(); }
+              }} />
             <button onClick={send} disabled={!peer}>发送</button>
           </footer>
         </div>
