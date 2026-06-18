@@ -16,6 +16,8 @@
   --badge: #3e91ff;             /* 未读胶囊蓝（区别于绿在线点/绿勾，对齐 iOS） */
   --radius-bubble: 18px;
   --radius-card: 8px;
+  /* 左栏（会话列表 + 设置面板共用同一列）宽度：随窗口比例伸缩，带上下限，对齐 Telegram Web。 */
+  --sidebar-w: clamp(340px, 27vw, 480px);
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -51,7 +53,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 双栏布局：左会话列表常驻 + 右聊天（Telegram 桌面式）。
    每层 flex 祖先都要 min-height:0 + overflow:hidden，否则 virtua 滚动容器测不到高度、渲染为空。 */
 .app { display: flex; height: 100vh; background: var(--bg); overflow: hidden; }
-.sidebar { width: 320px; flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); overflow: hidden; }
+.sidebar { position: relative; width: var(--sidebar-w); flex-shrink: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); overflow: hidden; }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--surface); overflow: hidden; position: relative; }
 /* 未选会话时覆盖在 chat 之上（chat 始终挂载，保证 VList 早早测到高度）。 */
 .main-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--surface); }
@@ -185,3 +187,67 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .ctx-menu button { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
 .ctx-menu button:hover { background: var(--bg); }
 .ctx-menu button.danger { color: #e5484d; }
+
+/* 侧栏头部：左上角圆头像 + 账号信息（覆盖默认 space-between 布局）。 */
+.sidebar header { justify-content: flex-start; }
+.account-anchor { position: relative; flex-shrink: 0; }
+.account-avatar { width: 32px; height: 32px; padding: 0; border: 0; background: none; cursor: pointer; flex-shrink: 0; }
+.account-avatar-inner { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.account-meta { font-size: 13px; color: var(--text-secondary); font-weight: 400; }
+
+/* 账号气泡卡片 / 通用卡片菜单（比 ctx-menu 宽）。 */
+.menu-card { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; width: 220px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.25); padding: 4px; }
+.chat-head-right { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.chat-anchor { position: relative; }
+.chat-menu { left: auto; right: 0; }
+.modal-hint { color: var(--text-secondary); font-size: 12px; margin: 4px 0 0; }
+.menu-card-row, .settings-row, .entry-row { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 10px 14px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
+.menu-card-row:hover, .settings-row:hover, .entry-row:hover { background: var(--bg); }
+.menu-card-row.danger, .settings-row.danger { color: #e5484d; }
+.row-label { flex: 1; }
+.row-value { color: var(--text-secondary); font-size: 13px; }
+.row-chevron { color: var(--text-secondary); flex-shrink: 0; }
+.row-icon { color: var(--text-secondary); flex-shrink: 0; }
+.menu-icon { color: var(--text-secondary); flex-shrink: 0; }
+.avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+
+/* 通讯录顶部入口 */
+.contact-entries { border-bottom: 1px solid var(--line); padding: var(--space-1) var(--space-2); }
+.entry-row { border-radius: var(--radius-card); }
+
+/* 设置面板：覆盖整个侧栏列 */
+/* 设置/编辑面板：占据侧栏列（absolute 于 .sidebar），右侧聊天保持不动。edit-panel 叠在设置之上。 */
+.settings-panel { position: absolute; inset: 0; z-index: 30; background: var(--bg); display: flex; flex-direction: column; }
+.settings-panel.edit-panel { z-index: 40; }
+.settings-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface); }
+.settings-title { flex: 1; text-align: center; font-weight: 600; font-size: 16px; }
+.icon-btn { width: 32px; height: 32px; flex-shrink: 0; border: 0; background: none; color: var(--text); font-size: 22px; line-height: 1; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.icon-btn:hover { background: var(--bg); }
+.icon-btn.save { color: var(--accent); font-size: 18px; }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.settings-body { flex: 1; overflow-y: auto; padding: var(--space-3) var(--space-2); }
+.settings-group { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); margin-bottom: var(--space-3); overflow: hidden; }
+.settings-group .settings-row { border-radius: 0; }
+.settings-row.info { cursor: default; }
+.settings-row.info .row-label { color: var(--text); }
+.settings-row.info .row-value { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+/* 顶部名片 */
+.settings-profile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-4) 0 var(--space-3); }
+.settings-avatar { width: 84px; height: 84px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 30px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.settings-name { font-size: 18px; font-weight: 600; color: var(--text); }
+.settings-status { font-size: 13px; color: var(--accent); }
+.settings-logout { display: block; width: 100%; margin-top: var(--space-2); padding: 12px; border: 0; background: var(--surface); border-radius: var(--radius-card); color: #e5484d; font-size: 15px; cursor: pointer; }
+.settings-logout:hover { background: var(--bg); }
+/* 编辑资料 */
+.edit-avatar { position: relative; display: block; width: 96px; height: 96px; margin: var(--space-3) auto var(--space-4); padding: 0; border: 0; background: none; cursor: pointer; }
+.edit-avatar-inner { width: 96px; height: 96px; border-radius: 50%; overflow: hidden; background: var(--accent); color: #fff; font-size: 32px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.edit-cam { position: absolute; right: -2px; bottom: -2px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); border: 3px solid var(--bg); color: #fff; display: flex; align-items: center; justify-content: center; }
+.settings-avatar { overflow: hidden; }
+.edit-fields { padding: 0; }
+.edit-field { display: flex; flex-direction: column; gap: 2px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.edit-field:last-child { border-bottom: 0; }
+.edit-field span { font-size: 12px; color: var(--text-secondary); }
+.edit-field input { border: 0; background: none; color: var(--text); font-size: 15px; padding: 4px 0; outline: none; }
+
+/* 轻量浮层提示（开发中等） */
+.toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 90; background: rgba(0,0,0,0.82); color: #fff; padding: var(--space-2) var(--space-4); border-radius: 20px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none; }

@@ -1,9 +1,30 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard } from "./sdk/protocol";
+import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
+import type { LucideIcon } from "lucide-react";
+import {
+  Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
+  MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
+  Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
+  MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
+} from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
+
+// 可复用头像：有 avatar_url（http 或 data: 内联图）→ 渲染 <img>；否则回退首字母圈（现 Web 用统一主色底）。
+// cls 决定尺寸（avatar / settings-avatar / edit-avatar）；children 作为叠加层（如在线点、相机角标）。
+function Avatar({ url, label, cls = "avatar", children }: {
+  url?: string; label: string; cls?: string; children?: React.ReactNode;
+}) {
+  return (
+    <div className={cls}>
+      {url ? <img className="avatar-img" src={url} alt="" /> : (label || "").slice(-2)}
+      {children}
+    </div>
+  );
+}
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -33,8 +54,16 @@ export default function App() {
   const [profileBusy, setProfileBusy] = useState(false);
   const [friendMenu, setFriendMenu] = useState<{ x: number; y: number; userId: string } | null>(null); // 好友行 ⋯ 菜单
   const [blockedList, setBlockedList] = useState<FriendEntry[] | null>(null); // 黑名单弹窗（null=关闭）
+  const [convMenu, setConvMenu] = useState<{ x: number; y: number; c: Conversation } | null>(null); // 会话行右键菜单
+  const [chatMenu, setChatMenu] = useState(false); // 聊天页右上 ⋮ 下拉菜单
+  const [contactDraft, setContactDraft] = useState<{ peer: string; remark: string } | null>(null); // 编辑联系人（备注名）弹窗
+  const [toast, setToast] = useState<string | null>(null); // 轻量浮层提示（如"xx（开发中）"）
+  const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
+  const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
+  const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
 
   const clientRef = useRef<IMClient | null>(null);
+  const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
   const seenByConv = useRef<Record<string, Set<number>>>({});
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
@@ -126,6 +155,14 @@ export default function App() {
     }
   }, [refreshFriends]);
 
+  // 加载本人资料到 myInfo（左上角头像 / 设置页头部共用同一份数据）。失败静默回退首字母圈。
+  const loadMyInfo = useCallback(async () => {
+    try {
+      const p = await clientRef.current?.fetchMyProfile();
+      if (p) setMyInfo({ nickname: p.nickname ?? "", phone: p.phone ?? "", avatar_url: p.avatar_url ?? "" });
+    } catch { /* 忽略：头像回退首字母圈 */ }
+  }, []);
+
   // 打开"编辑资料"弹窗：拉本人资料填入草稿（tags 以空格连接成可编辑串）。
   const openProfile = useCallback(async () => {
     try {
@@ -167,12 +204,14 @@ export default function App() {
     if (!profileDraft) return;
     setProfileBusy(true);
     try {
-      await clientRef.current?.updateMyProfile({
+      const updated = await clientRef.current?.updateMyProfile({
         nickname: profileDraft.nickname.trim(),
         avatar_url: profileDraft.avatar_url.trim(),
         phone: profileDraft.phone.trim(),
         tags: profileDraft.tags.split(/[\s,]+/).filter(Boolean),
       });
+      // 保存后刷新设置页顶部名片（否则头像/昵称仍显旧值）。
+      if (updated) setMyInfo({ nickname: updated.nickname ?? "", phone: updated.phone ?? "", avatar_url: updated.avatar_url ?? "" });
       setProfileDraft(null);
     } catch (e) {
       alert(`保存失败：${(e as Error).message}`);
@@ -180,6 +219,36 @@ export default function App() {
       setProfileBusy(false);
     }
   }, [profileDraft]);
+
+  // 选本机图片做头像：<input type=file> 浏览器自动用当前系统(Mac/Windows/Linux)的原生文件框，无需检测系统。
+  // 读图 → canvas 缩放到 ≤192px → JPEG data URL（超 240KB 再降质，保证 < 后端 256KB 上限）→ 存 avatar_url。
+  const onPickAvatar = useCallback((file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onerror = () => setToast("读取图片失败，请重试");
+    reader.onload = () => {
+      const img = new Image();
+      // 浏览器无法解码该格式（如 HEIC/HEIF）时 onload 不触发 → 提示换 JPG/PNG。
+      img.onerror = () => setToast("无法识别该图片格式，请改用 JPG / PNG");
+      img.onload = () => {
+        const max = 192;
+        let w = img.width, h = img.height;
+        if (w >= h && w > max) { h = Math.round((h * max) / w); w = max; }
+        else if (h > max) { w = Math.round((w * max) / h); h = max; }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, w, h);
+        let q = 0.82;
+        let dataUrl = canvas.toDataURL("image/jpeg", q);
+        while (dataUrl.length > 240 * 1024 && q > 0.4) { q -= 0.15; dataUrl = canvas.toDataURL("image/jpeg", q); }
+        setProfileDraft((d) => (d ? { ...d, avatar_url: dataUrl } : d));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  }, []);
 
   const enterApp = useCallback(async (pwd: string) => {
     if (!uid) {
@@ -279,9 +348,10 @@ export default function App() {
     if (convs.length) await preloadLocal(convs);
     client.syncTracked(); // 从各会话本地/latest 基线补离线期间的新消息（持久化位点续传）
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
+    void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends]);
+  }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends, loadMyInfo]);
 
   // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
@@ -405,6 +475,43 @@ export default function App() {
     }
   }, []);
 
+  // 轻量浮层提示：约 1.8s 自动消失。未接后端的功能统一用它提示"开发中"。
+  const comingSoon = useCallback((label: string) => setToast(`${label}（开发中）`), []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 1800);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  // 会话"设为已读"：把本会话已读位点推到最新，再刷新左侧列表（红点清零）。
+  const markReadConv = useCallback((c: Conversation) => {
+    clientRef.current?.markRead(c.conv_id, c.latest_conv_seq);
+    setConvMenu(null);
+    void refreshConversations();
+  }, [refreshConversations]);
+
+  // 消息菜单动作（数据驱动）：copy/delete/report* 接真实实现，其余 comingSoon。useMemo 避免每次渲染重建。
+  const messageActions = useMemo<MenuAction<{ m: ChatMessage; uid: string }>[]>(
+    () => buildMessageActions({
+      copy: copyMessage,
+      delete: deleteMessage,
+      reportMsg: (m) => void reportMessage(m, "message"),
+      reportUser: (m) => void reportMessage(m, "user"),
+      comingSoon,
+    }),
+    [copyMessage, deleteMessage, reportMessage, comingSoon],
+  );
+
+  // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
+  const conversationActions = useMemo<MenuAction<{ c: Conversation }>[]>(
+    () => buildConversationActions({
+      markRead: markReadConv,
+      delete: (c) => comingSoon(`删除会话 ${c.peer}`),
+      comingSoon,
+    }),
+    [markReadConv, comingSoon],
+  );
+
   // 菜单打开时：点空白/滚动/Esc 关闭。
   useEffect(() => {
     if (!menu) return;
@@ -432,6 +539,50 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
     };
   }, [friendMenu]);
+
+  // 会话右键菜单：点空白/滚动/Esc 关闭（与消息菜单一致）。
+  useEffect(() => {
+    if (!convMenu) return;
+    const close = () => setConvMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setConvMenu(null); };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [convMenu]);
+
+  // 左上角头像卡片：点空白/Esc 关闭。
+  useEffect(() => {
+    if (!accountCard) return;
+    const close = () => setAccountCard(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAccountCard(false); };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [accountCard]);
+
+  // 聊天页 ⋮ 下拉：点空白/Esc 关闭。
+  useEffect(() => {
+    if (!chatMenu) return;
+    const close = () => setChatMenu(false);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setChatMenu(false); };
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", onKey); };
+  }, [chatMenu]);
+
+  // 打开设置时刷新本人资料（与左上角头像共用 loadMyInfo / myInfo）。
+  useEffect(() => {
+    if (!showSettings) return;
+    void loadMyInfo();
+  }, [showSettings]);
 
   const onInputChange = useCallback((val: string) => {
     setInput(val);
@@ -656,18 +807,94 @@ export default function App() {
   const accepted = friends.filter((f) => f.status === "accepted").sort((a, b) => b.updated_at - a.updated_at);
   const incomingCount = incoming.length;
   const labelOf = (id: string, nick: string) => (nick && nick.trim()) || id; // 有昵称显昵称，否则显 uid
+  // 好友显示名优先级：备注名 > 昵称 > uid（§头像/显示名规则）。
+  const friendLabel = (f: FriendEntry) => (f.remark && f.remark.trim()) || (f.nickname && f.nickname.trim()) || f.user_id;
+  // 会话对端显示名优先级：备注 > 昵称 > uid。
+  const convLabel = (c: Conversation) => (c.peer_remark && c.peer_remark.trim()) || (c.peer_nickname && c.peer_nickname.trim()) || c.peer;
+  // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
+  const peerConv = conversations.find((c) => c.peer === peer);
+  const peerLabel = peerConv ? convLabel(peerConv) : peer;
+
+  // 保存好友备注名：写后端 → 刷新会话列表/好友列表（两处显示名随之更新）→ 关弹窗。
+  // 注意：本函数在 login early-return 之后，绝不能用 Hook（useCallback）——否则违反 Hooks 规则导致崩溃。
+  const saveRemark = async () => {
+    if (!contactDraft) return;
+    try {
+      await clientRef.current?.setRemark(contactDraft.peer, contactDraft.remark.trim());
+      setContactDraft(null);
+      void refreshConversations();
+      void refreshFriends();
+    } catch (e) {
+      alert(`保存备注失败：${(e as Error).message}`);
+    }
+  };
   const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
+
+  // 通用菜单行：图标可选、右侧值/箭头可选、danger 红色。account card / settings / contacts entries 共用。
+  type Row = { id: string; label: string; icon?: LucideIcon; value?: string; danger?: boolean; chevron?: boolean; onClick: () => void };
+
+  // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动：加一项 = append 一条）。
+  // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
+  const accountRows: Row[] = [
+    { id: "settings", label: "设置", icon: Settings, chevron: true, onClick: () => setShowSettings(true) },
+    { id: "favorites", label: "收藏消息", icon: Bookmark, chevron: true, onClick: () => comingSoon("收藏消息") },
+  ];
+
+  // 设置列表（对齐 Telegram **Web** 版布局；数据驱动：加一行 = append 一条；接后端 = 换 onClick）。
+  // Web 版条目与 iOS 版不同——各自镜像对应平台的 Telegram 客户端。
+  const settingsGroups: Row[][] = [
+    [
+      { id: "general", label: "通用设置", icon: Settings2, chevron: true, onClick: () => comingSoon("通用设置") },
+      { id: "animations", label: "动画与性能", icon: Gauge, chevron: true, onClick: () => comingSoon("动画与性能") },
+      { id: "notifications", label: "通知", icon: Bell, chevron: true, onClick: () => comingSoon("通知") },
+      { id: "data", label: "数据与存储", icon: Database, chevron: true, onClick: () => comingSoon("数据与存储") },
+      { id: "privacy", label: "隐私与安全", icon: Lock, chevron: true, onClick: () => void openBlacklist() },
+      { id: "folders", label: "聊天文件夹", icon: Folder, chevron: true, onClick: () => comingSoon("聊天文件夹") },
+      { id: "devices", label: "已登录设备", icon: MonitorSmartphone, chevron: true, onClick: () => comingSoon("已登录设备") },
+      { id: "language", label: "语言", icon: Languages, value: "简体中文", chevron: true, onClick: () => comingSoon("语言") },
+      { id: "stickers", label: "贴纸与表情", icon: Smile, chevron: true, onClick: () => comingSoon("贴纸与表情") },
+    ],
+  ];
+
+  // 设置页顶部名片下的资料卡（手机号/用户名）。
+  const settingsInfoRows: Row[] = [
+    { id: "phone", label: myInfo?.phone || "未设置", icon: Phone, value: "手机号", onClick: () => void openProfile() },
+    { id: "username", label: `@${uid}`, icon: AtSign, value: "用户名", onClick: () => void openProfile() },
+  ];
+
+  // 通讯录顶部入口行（数据驱动）。
+  const contactEntries: Row[] = [
+    { id: "groups", label: "群聊", icon: Users, chevron: true, onClick: () => comingSoon("群聊") },
+    { id: "official", label: "公众号", icon: Megaphone, chevron: true, onClick: () => comingSoon("公众号") },
+    { id: "service", label: "服务号", icon: Headphones, chevron: true, onClick: () => comingSoon("服务号") },
+  ];
+
+  // 通用行渲染（cls 区分容器样式）。
+  const renderRow = (r: Row, cls: string) => (
+    <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}`} onClick={r.onClick}>
+      {r.icon && <r.icon size={20} className="row-icon" />}
+      <span className="row-label">{r.label}</span>
+      {r.value && <span className="row-value">{r.value}</span>}
+      {r.chevron && <ChevronRight size={18} className="row-chevron" />}
+    </button>
+  );
 
   return (
     <div className={`app ${peer ? "has-sel" : "no-sel"}`}>
       <aside className="sidebar">
         <header>
-          <span>{uid} · {stateText}</span>
-          <span className="header-actions">
-            <button className="link" onClick={() => void openProfile()}>资料</button>
-            <button className="link" onClick={() => void openBlacklist()}>黑名单</button>
-            <button className="link" onClick={logout}>退出</button>
-          </span>
+          <div className="account-anchor">
+            <button className="account-avatar" title="账号"
+              onClick={(e) => { e.stopPropagation(); setAccountCard((v) => !v); }}>
+              <Avatar url={myInfo?.avatar_url} label={myInfo?.nickname || uid} cls="account-avatar-inner" />
+            </button>
+            {accountCard && (
+              <div className="menu-card" onClick={(e) => e.stopPropagation()}>
+                {accountRows.map((r) => renderRow(r, "menu-card-row"))}
+              </div>
+            )}
+          </div>
+          <span className="account-meta">{uid} · {stateText}</span>
         </header>
         <div className="tabs">
           <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={() => setTab("chats")}>会话</button>
@@ -680,14 +907,14 @@ export default function App() {
         <div className="convlist">
           {conversations.length === 0 && <div className="empty">还没有会话，去「通讯录」找人发起一个吧</div>}
           {conversations.map((c) => (
-            <div key={c.conv_id} className={`convitem ${c.peer === peer ? "active" : ""}`} onClick={() => openChat(c.peer)}>
-              <div className="avatar">
-                {c.peer.slice(-2)}
+            <div key={c.conv_id} className={`convitem ${c.peer === peer ? "active" : ""}`} onClick={() => openChat(c.peer)}
+              onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
+              <Avatar url={c.peer_avatar_url} label={convLabel(c)}>
                 {presence[c.peer] === "online" && <span className="presence-dot" />}
-              </div>
+              </Avatar>
               <div className="convbody">
                 <div className="convtop">
-                  <span className="convpeer">{c.peer}</span>
+                  <span className="convpeer">{convLabel(c)}</span>
                   <span className="convtime">
                     {c.last_message?.from === uid && (
                       <span className={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "convck read" : "convck"}>
@@ -711,6 +938,9 @@ export default function App() {
               onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
             <button onClick={() => void doSearch()}>搜索</button>
           </div>
+          <div className="contact-entries">
+            {contactEntries.map((r) => renderRow(r, "entry-row"))}
+          </div>
           <div className="convlist">
             {searchResults !== null && (
               <>
@@ -720,7 +950,7 @@ export default function App() {
                   const st = friendStatus.get(u.user_id);
                   return (
                     <div key={`s-${u.user_id}`} className="convitem static">
-                      <div className="avatar">{labelOf(u.user_id, u.nickname).slice(-2)}</div>
+                      <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname)} />
                       <div className="convbody">
                         <div className="convpeer">{labelOf(u.user_id, u.nickname)}</div>
                         <div className="convlast">{u.user_id}{u.tags.length > 0 ? ` · ${u.tags.join(" ")}` : ""}</div>
@@ -751,7 +981,7 @@ export default function App() {
                 <div className="section-label">新的朋友（{incoming.length}）</div>
                 {incoming.map((f) => (
                   <div key={`p-${f.user_id}`} className="convitem static">
-                    <div className="avatar">{labelOf(f.user_id, f.nickname).slice(-2)}</div>
+                    <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname)} />
                     <div className="convbody">
                       <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
                       <div className="convlast">请求加你为好友</div>
@@ -771,12 +1001,11 @@ export default function App() {
             {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
             {accepted.map((f) => (
               <div key={`f-${f.user_id}`} className="convitem" onClick={() => openFriendChat(f.user_id)}>
-                <div className="avatar">
-                  {labelOf(f.user_id, f.nickname).slice(-2)}
+                <Avatar url={f.avatar_url} label={friendLabel(f)}>
                   {presence[f.user_id] === "online" && <span className="presence-dot" />}
-                </div>
+                </Avatar>
                 <div className="convbody">
-                  <div className="convpeer">{labelOf(f.user_id, f.nickname)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
+                  <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
                   <div className="convlast">{f.user_id}</div>
                 </div>
                 <div className="row-actions">
@@ -788,6 +1017,64 @@ export default function App() {
           </div>
         </div>
         )}
+
+        {/* 设置面板：占据侧栏列（绝对定位），右侧聊天 .main 保持不动、可继续聊（对齐 Telegram Web）。 */}
+        {showSettings && (
+          <div className="settings-panel">
+            <header className="settings-head">
+              <button className="icon-btn" title="返回" onClick={() => setShowSettings(false)}><ChevronLeft size={24} /></button>
+              <span className="settings-title">设置</span>
+              <button className="icon-btn" title="编辑资料" onClick={() => void openProfile()}><SquarePen size={20} /></button>
+            </header>
+            <div className="settings-body">
+              <div className="settings-profile">
+                <Avatar url={myInfo?.avatar_url} label={myInfo?.nickname || uid} cls="settings-avatar" />
+                <div className="settings-name">{myInfo?.nickname || uid}</div>
+                <div className="settings-status">{stateText}</div>
+              </div>
+              <div className="settings-group">
+                {settingsInfoRows.map((r) => renderRow(r, "settings-row info"))}
+              </div>
+              {settingsGroups.map((group, gi) => (
+                <div key={gi} className="settings-group">
+                  {group.map((r) => renderRow(r, "settings-row"))}
+                </div>
+              ))}
+              <button className="settings-logout" onClick={logout}>退出登录</button>
+            </div>
+          </div>
+        )}
+
+        {/* 编辑资料面板：经设置页铅笔进入，叠在设置面板之上（对齐 Telegram Web「Edit profile」）。 */}
+        {profileDraft && (
+          <div className="settings-panel edit-panel">
+            <header className="settings-head">
+              <button className="icon-btn" title="返回" onClick={() => setProfileDraft(null)}><ChevronLeft size={24} /></button>
+              <span className="settings-title">编辑资料</span>
+              <button className="icon-btn save" title="保存" disabled={profileBusy} onClick={() => void saveProfile()}><Check size={22} /></button>
+            </header>
+            <div className="settings-body">
+              {/* 点头像 → 选本机图片（隐藏的 file input，浏览器自动用系统原生文件框，跨平台无需检测系统）。 */}
+              <button className="edit-avatar" title="更换头像" onClick={() => avatarFileRef.current?.click()}>
+                <Avatar url={profileDraft.avatar_url} label={profileDraft.nickname || uid} cls="edit-avatar-inner" />
+                <span className="edit-cam"><SquarePen size={15} /></span>
+              </button>
+              <input ref={avatarFileRef} type="file" accept="image/*" hidden
+                onChange={(e) => { onPickAvatar(e.target.files?.[0]); e.target.value = ""; }} />
+              <div className="settings-group edit-fields">
+                <label className="edit-field"><span>昵称</span>
+                  <input value={profileDraft.nickname} maxLength={32}
+                    onChange={(e) => setProfileDraft({ ...profileDraft, nickname: e.target.value })} /></label>
+                <label className="edit-field"><span>手机号</span>
+                  <input value={profileDraft.phone}
+                    onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></label>
+                <label className="edit-field"><span>标签</span>
+                  <input value={profileDraft.tags} placeholder="空格或逗号分隔"
+                    onChange={(e) => setProfileDraft({ ...profileDraft, tags: e.target.value })} /></label>
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* chat 面板始终挂载（即使未选会话），让 VList 在 app 加载时就测到稳定高度；
@@ -798,13 +1085,37 @@ export default function App() {
             {peer && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
             {peer ? (
               <span>
-                <span className={`dot ${peerOnline ? "on" : ""}`} /> {peer}
+                <span className={`dot ${peerOnline ? "on" : ""}`} /> {peerLabel}
                 {peerOnline ? "（在线）" : ""}
               </span>
             ) : (
               <span className="muted">未选择会话</span>
             )}
-            <span className="muted">{stateText}</span>
+            <span className="chat-head-right">
+              <span className="muted">{stateText}</span>
+              {peer && (
+                <span className="chat-anchor">
+                  <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
+                  {chatMenu && (
+                    <div className="menu-card chat-menu" onClick={(e) => e.stopPropagation()}>
+                      {[
+                        { id: "edit", label: "编辑联系人", icon: SquarePen, run: () => setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
+                        { id: "call", label: "视频通话", icon: Video, run: () => comingSoon("视频通话") },
+                        { id: "mute", label: "静音", icon: BellOff, run: () => comingSoon("静音") },
+                        { id: "select", label: "选择消息", icon: CheckSquare, run: () => comingSoon("选择消息") },
+                        { id: "block", label: "屏蔽用户", icon: Ban, run: () => comingSoon("屏蔽用户") },
+                        { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => comingSoon("删除会话") },
+                      ].map((r) => (
+                        <button key={r.id} className={`menu-card-row${r.danger ? " danger" : ""}`}
+                          onClick={() => { setChatMenu(false); r.run(); }}>
+                          <r.icon size={18} className="row-icon" /><span className="row-label">{r.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </span>
+              )}
+            </span>
           </header>
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
             {messages.map((m, i) => {
@@ -866,14 +1177,25 @@ export default function App() {
 
       {menu && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => copyMessage(menu.m)}>复制</button>
-          {menu.m.from !== uid && menu.m.convSeq > 0 && (
-            <button onClick={() => void reportMessage(menu.m, "message")}>举报消息</button>
-          )}
-          {menu.m.from !== uid && (
-            <button onClick={() => void reportMessage(menu.m, "user")}>举报发送者</button>
-          )}
-          <button className="danger" onClick={() => deleteMessage(menu.m)}>删除</button>
+          {messageActions
+            .filter((a) => a.visible({ m: menu.m, uid }))
+            .map((a) => (
+              <button key={a.id} className={a.danger ? "danger" : undefined}
+                onClick={() => { a.run({ m: menu.m, uid }); setMenu(null); }}>
+                {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
+            ))}
+        </div>
+      )}
+
+      {convMenu && (
+        <div className="ctx-menu" style={{ left: convMenu.x, top: convMenu.y }} onClick={(e) => e.stopPropagation()}>
+          {conversationActions
+            .filter((a) => a.visible({ c: convMenu.c }))
+            .map((a) => (
+              <button key={a.id} className={a.danger ? "danger" : undefined}
+                onClick={() => { a.run({ c: convMenu.c }); setConvMenu(null); }}>
+                {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
+            ))}
         </div>
       )}
 
@@ -888,21 +1210,16 @@ export default function App() {
         </div>
       )}
 
-      {profileDraft && (
-        <div className="modal-mask" onClick={() => setProfileDraft(null)}>
+      {contactDraft && (
+        <div className="modal-mask" onClick={() => setContactDraft(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>编辑我的资料</h3>
-            <label>昵称<input value={profileDraft.nickname} maxLength={32}
-              onChange={(e) => setProfileDraft({ ...profileDraft, nickname: e.target.value })} /></label>
-            <label>头像 URL<input value={profileDraft.avatar_url}
-              onChange={(e) => setProfileDraft({ ...profileDraft, avatar_url: e.target.value })} /></label>
-            <label>手机号<input value={profileDraft.phone}
-              onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></label>
-            <label>标签（空格或逗号分隔）<input value={profileDraft.tags}
-              onChange={(e) => setProfileDraft({ ...profileDraft, tags: e.target.value })} /></label>
+            <h3>编辑联系人</h3>
+            <label>备注名（Notes）<input value={contactDraft.remark} maxLength={32} placeholder="设置备注名"
+              onChange={(e) => setContactDraft({ ...contactDraft, remark: e.target.value })} /></label>
+            <div className="modal-hint">备注名仅你可见，显示优先级高于对方昵称。</div>
             <div className="modal-actions">
-              <button className="link" onClick={() => setProfileDraft(null)}>取消</button>
-              <button className="mini-btn" disabled={profileBusy} onClick={() => void saveProfile()}>保存</button>
+              <button className="link" onClick={() => setContactDraft(null)}>取消</button>
+              <button className="mini-btn" onClick={() => void saveRemark()}>保存</button>
             </div>
           </div>
         </div>
@@ -915,9 +1232,9 @@ export default function App() {
             {blockedList.length === 0 && <div className="empty">没有拉黑的用户</div>}
             {blockedList.map((f) => (
               <div key={f.user_id} className="convitem static">
-                <div className="avatar">{(f.nickname || f.user_id).slice(-2)}</div>
+                <Avatar url={f.avatar_url} label={friendLabel(f)} />
                 <div className="convbody">
-                  <div className="convpeer">{f.nickname || f.user_id}</div>
+                  <div className="convpeer">{friendLabel(f)}</div>
                   <div className="convlast">{f.user_id}</div>
                 </div>
                 <div className="row-actions">
@@ -931,6 +1248,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }

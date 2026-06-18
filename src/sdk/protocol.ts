@@ -52,6 +52,9 @@ export interface ConvLastMessage {
 export interface Conversation {
   conv_id: string;
   peer: string;
+  peer_nickname?: string;   // 对端昵称（空则回退 uid）
+  peer_remark?: string;     // 我对对端的备注名（显示优先级最高，仅自己可见）
+  peer_avatar_url?: string; // 对端头像（data:/http，空则回退首字母圈）
   last_message: ConvLastMessage | null;
   latest_conv_seq: number;
   unread: number;
@@ -85,6 +88,7 @@ export type FriendStatus = "accepted" | "pending" | "requested" | "blocked";
 export interface FriendEntry {
   user_id: string;
   nickname: string;
+  remark?: string; // 我对该好友的私有备注名（显示优先级高于昵称）
   avatar_url: string;
   status: FriendStatus;
   updated_at: number;
