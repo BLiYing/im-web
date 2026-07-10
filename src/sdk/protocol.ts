@@ -13,6 +13,7 @@ export const T = {
   SYNC_REQ: "sync_req",
   SYNC_RESP: "sync_resp",
   FRIEND: "friend",
+  GROUP: "group",
   ERROR: "error",
 } as const;
 
@@ -29,6 +30,8 @@ export interface ChatMessage {
   serverMsgId?: string;
   convId: string;
   from: string;
+  /** 发送者昵称（仅群聊消息带，服务端冗余下发；空回退 uid）。 */
+  fromNickname?: string;
   content: string;
   contentType: string;
   convSeq: number;
@@ -42,6 +45,7 @@ export interface ChatMessage {
 export interface ConvLastMessage {
   server_msg_id: string;
   from: string;
+  from_nickname?: string; // 发送者昵称（仅群聊填：预览"昵称: 内容"）
   content_type: string;
   content: string;
   conv_seq: number;
@@ -51,6 +55,10 @@ export interface ConvLastMessage {
 /** 会话列表项（对齐后端 conversation.Summary）。 */
 export interface Conversation {
   conv_id: string;
+  is_group?: boolean;   // true=群聊（用 name/avatar_url/member_count），false=单聊（用 peer*）
+  name?: string;        // 群名（仅群聊）
+  avatar_url?: string;  // 群头像（仅群聊，空则回退群名首字母）
+  member_count?: number; // 群成员数（仅群聊）
   peer: string;
   peer_nickname?: string;   // 对端昵称（空则回退 uid）
   peer_remark?: string;     // 我对对端的备注名（显示优先级最高，仅自己可见）
@@ -94,6 +102,38 @@ export interface FriendEntry {
   updated_at: number;
   /** 黑名单标记，与 status 正交：我把对方拉黑了。拉黑的好友 status 仍为 accepted、仍在好友列表（带此标记）。 */
   blocked?: boolean;
+}
+
+/** 群成员角色（对齐后端 store.GroupRole*）。 */
+export type GroupRole = "owner" | "admin" | "member";
+
+/** 群成员（对齐后端 group.MemberView）。 */
+export interface GroupMember {
+  user_id: string;
+  nickname: string;
+  avatar_url: string;
+  role: GroupRole;
+  joined_at: number;
+}
+
+/** 群资料 + 成员列表（对齐后端 group.Info；conv_id 即群 topic_id）。 */
+export interface GroupInfo {
+  conv_id: string;
+  name: string;
+  owner: string;
+  avatar_url: string;
+  created_at: number;
+  my_role: GroupRole;
+  members: GroupMember[];
+}
+
+/** 我的群列表项（对齐后端 group.Summary）。 */
+export interface GroupSummary {
+  conv_id: string;
+  name: string;
+  owner: string;
+  avatar_url: string;
+  created_at: number;
 }
 
 /** 会话 id：两个 uid 规范排序，保证收发双方一致（对齐协议示例 u_{a}_u_{b}）。 */

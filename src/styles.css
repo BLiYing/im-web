@@ -273,3 +273,35 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 /* 轻量浮层提示（开发中等） */
 .toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 90; background: rgba(0,0,0,0.82); color: #fff; padding: var(--space-2) var(--space-4); border-radius: 20px; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); pointer-events: none; }
+
+/* ---- 群聊（M3-4）---- */
+/* 群聊气泡内发送者昵称（对方消息顶部一行，主色小字，对齐 Telegram） */
+.sender-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+/* 聊天页群标题按钮（点击看群资料） */
+.chat-title-btn { border: 0; background: none; color: var(--text); font-size: inherit; font-weight: 600; cursor: pointer; padding: 4px 8px; border-radius: var(--radius-card); }
+.chat-title-btn:hover { background: var(--bg); }
+/* 角色徽章：群主/管理员 */
+.role-badge { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; background: var(--bg); color: var(--text-secondary); border: 1px solid var(--line); vertical-align: 1px; }
+.role-badge.owner { background: rgba(76, 166, 76, 0.15); color: var(--accent); border-color: transparent; }
+.me-tag { margin-left: 6px; font-size: 11px; color: var(--text-secondary); }
+/* 群资料弹窗 */
+.group-modal { width: 360px; max-height: min(560px, calc(100vh - 64px)); }
+.group-head { display: flex; align-items: center; gap: var(--space-3); }
+.group-head-info { min-width: 0; }
+.group-name { display: flex; align-items: center; gap: 4px; font-size: 16px; font-weight: 600; }
+.group-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+.group-actions { display: flex; gap: var(--space-2); }
+.group-actions .mini-btn { display: inline-flex; align-items: center; gap: 4px; }
+.group-actions .menu-icon { color: inherit; }
+.danger-text { color: #e5484d !important; }
+/* 弹窗内可滚动列表（成员/好友多选/群列表） */
+.modal-list { overflow-y: auto; max-height: 300px; margin: 0 calc(-1 * var(--space-4)); }
+.modal-list .convitem { padding: var(--space-2) var(--space-4); }
+/* 好友多选行（建群/邀请） */
+.check-row { display: flex; width: 100%; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-4); border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; }
+.check-row:hover { background: var(--bg); }
+.check-row .avatar { width: 32px; height: 32px; font-size: 12px; }
+.checkbox { width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--line); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; }
+.checkbox.on { background: var(--accent); border-color: var(--accent); }
+.mini-btn.wide { display: flex; width: 100%; align-items: center; justify-content: center; gap: 4px; padding: 8px; }
+.mini-btn.wide .menu-icon { color: inherit; }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary } from "./sdk/protocol";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
 import { formatTime } from "./time";
 import type { LucideIcon } from "lucide-react";
@@ -9,7 +9,7 @@ import {
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
-  Image as ImageIcon,
+  Image as ImageIcon, UserPlus, LogOut, Info,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -65,6 +65,16 @@ export default function App() {
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
   // 通用设置项：theme（主题）/ timeFormat（时间格式）/ fontSize（字体）/ sendKey（发送键）均已接通真功能（壁纸仍占位）。
+  // ---- 群聊（M3-4）----
+  const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
+  const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
+  const [groupPanel, setGroupPanel] = useState<string | null>(null); // 群资料弹窗（conv_id；null=关闭）
+  const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
+  const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
+  const [createBusy, setCreateBusy] = useState(false);
+  const [memberMenu, setMemberMenu] = useState<{ x: number; y: number; convId: string; m: GroupMember } | null>(null); // 成员行 ⋯ 菜单
+  const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
+  const [typingFrom, setTypingFrom] = useState(""); // 正在输入的对端 uid（群聊显示"谁"在输入）
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
   const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
   const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
@@ -139,6 +149,45 @@ export default function App() {
       /* 忽略：通讯录加载失败不阻断主流程 */
     }
   }, []);
+
+  // 拉群资料进缓存（best-effort）：失败（被移出/群没了）则清缓存。返回最新资料或 null。
+  const refreshGroupInfo = useCallback(async (cid: string): Promise<GroupInfo | null> => {
+    try {
+      const info = await clientRef.current?.fetchGroup(cid);
+      if (info) setGroupInfos((prev) => ({ ...prev, [cid]: info }));
+      return info ?? null;
+    } catch {
+      setGroupInfos((prev) => {
+        const { [cid]: _drop, ...rest } = prev;
+        return rest;
+      });
+      return null;
+    }
+  }, []);
+
+  // 打开群会话：与 openChat 同一套进会话定位逻辑，只是标识从 peer 换成 conv_id。
+  const openGroupChat = useCallback((cid: string) => {
+    if (!cid) return;
+    setPeer("");
+    setGroupConvId(cid);
+    currentConvRef.current = cid;
+    const conv = conversations.find((c) => c.conv_id === cid);
+    const readSeq = conv?.read_seq ?? 0;
+    const latestSeq = conv?.latest_conv_seq ?? 0;
+    setEntryUnread(conv?.unread ?? 0);
+    entryUnreadRef.current = conv?.unread ?? 0;
+    setEntryReadSeq(readSeq);
+    latestSeqRef.current = latestSeq;
+    pendingScrollRef.current = true;
+    forceBottomRef.current = false;
+    setShowJump(false);
+    setJumpCount(0);
+    maxReadReportedRef.current = readSeq;
+    pendingReadRef.current = readSeq;
+    clientRef.current?.openConversation(cid, readSeq, latestSeq);
+    void refreshGroupInfo(cid); // 群资料：标题成员数 / 气泡昵称回退 / 资料面板
+    void refreshConversations();
+  }, [conversations, refreshConversations, refreshGroupInfo]);
 
   const doSearch = useCallback(async () => {
     const q = searchQ.trim();
@@ -313,11 +362,25 @@ export default function App() {
       onTyping: (convId, from) => {
         if (from === uid) return;
         setTypingConv(convId);
+        setTypingFrom(from); // 群聊显示"谁"在输入
         if (typingTimer.current) clearTimeout(typingTimer.current);
         typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
       },
       // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
       onFriend: () => { void refreshFriends(); },
+      // 群成员/资料实时变更：刷新会话列表 + 该群资料缓存；自己被移出 → 提示并退出该会话。
+      onGroup: (event, cid, _from, target) => {
+        void refreshConversations();
+        void refreshGroupInfo(cid); // 被移出时 fetch 报 300203 → 自动清缓存
+        if (event === "remove" && target === uid) {
+          setToast("你已被移出群聊");
+          setGroupPanel((p) => (p === cid ? null : p));
+          if (currentConvRef.current === cid) {
+            currentConvRef.current = "";
+            setGroupConvId("");
+          }
+        }
+      },
       // 某条消息被拒收（被拉黑）→ 标记该条发送失败 + 把原因挂到该条 note（微信式：红❗+下方居中系统行，不弹窗）。
       onMsgRejected: (clientMsgId, msg) => {
         setMsgsByConv((prev) => {
@@ -360,7 +423,7 @@ export default function App() {
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends, loadMyInfo]);
+  }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends, loadMyInfo, refreshGroupInfo]);
 
   // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
@@ -387,6 +450,7 @@ export default function App() {
     }
     const cid = convIdFor(uid, p);
     setPeer(p);
+    setGroupConvId(""); // 切回单聊模式
     currentConvRef.current = cid;
     // 进会话定位（CHAT_UX §3）：以 read_seq 为锚点——有未读则停在首条未读，否则到最新。
     const conv = conversations.find((c) => c.conv_id === cid);
@@ -425,12 +489,17 @@ export default function App() {
     setTab("chats");
     setPassword("");
     setAuthErr("");
+    setGroupConvId("");
+    setGroupInfos({});
+    setGroupPanel(null);
+    setGroupsModal(null);
     setPhase("login");
   }, []);
 
   const deselect = useCallback(() => {
     currentConvRef.current = "";
     setPeer("");
+    setGroupConvId("");
     setTypingConv(null);
     void refreshConversations();
   }, [refreshConversations]);
@@ -438,15 +507,15 @@ export default function App() {
   const send = useCallback(() => {
     const text = input.trim();
     const client = clientRef.current;
-    if (!text || !client || !peer) return;
-    const convId = convIdFor(uid, peer);
-    const clientMsgId = client.sendText(text, peer, convId);
-    appendMsg(convId, {
-      clientMsgId, convId, from: uid, content: text, contentType: "text",
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    if (!text || !client || !cid) return;
+    const clientMsgId = client.sendText(text, peer, cid); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
+    appendMsg(cid, {
+      clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
       convSeq: 0, timestamp: Date.now(), status: "sending",
     });
     setInput("");
-  }, [input, peer, uid, appendMsg]);
+  }, [input, peer, groupConvId, uid, appendMsg]);
 
   // 本地删除一条消息（仅本端：从内存列表 + 去重集移除，不影响对端）。
   const deleteMessage = useCallback((m: ChatMessage) => {
@@ -564,6 +633,21 @@ export default function App() {
     };
   }, [convMenu]);
 
+  // 群成员 ⋯ 菜单：点空白/滚动/Esc 关闭。
+  useEffect(() => {
+    if (!memberMenu) return;
+    const close = () => setMemberMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMemberMenu(null); };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [memberMenu]);
+
   // 左上角头像卡片：点空白/Esc 关闭。
   useEffect(() => {
     if (!accountCard) return;
@@ -617,15 +701,16 @@ export default function App() {
   const onInputChange = useCallback((val: string) => {
     setInput(val);
     const now = Date.now();
-    if (val && peer && now - lastTypingSent.current > 2000) {
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    if (val && cid && now - lastTypingSent.current > 2000) {
       lastTypingSent.current = now;
-      clientRef.current?.sendTyping(convIdFor(uid, peer));
+      clientRef.current?.sendTyping(cid);
     }
-  }, [peer, uid]);
+  }, [peer, groupConvId, uid]);
 
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
-  const convId = peer ? convIdFor(uid, peer) : "";
+  const convId = peer ? convIdFor(uid, peer) : groupConvId;
   // 按时间戳排序（发送中/失败的 convSeq=0 但有发送时刻，故按时间能正确落位——
   // 否则它们会被挤到末尾，导致"解除拉黑后新发的消息排在更早的失败消息之前"）。
   // conv_seq 仅作同一毫秒内的次级排序，保证已送达消息间仍按服务端顺序。
@@ -845,6 +930,116 @@ export default function App() {
   const peerConv = conversations.find((c) => c.peer === peer);
   const peerLabel = peerConv ? convLabel(peerConv) : peer;
 
+  // ---- 群聊派生 + 动作（早退 return 之后：全部普通函数，禁用 Hook）----
+  const isGroupChat = !!groupConvId;
+  const activeGroupInfo = groupConvId ? groupInfos[groupConvId] : undefined;
+  const activeGroupConv = groupConvId ? conversations.find((c) => c.conv_id === groupConvId) : undefined;
+  const chatTitle = isGroupChat ? (activeGroupInfo?.name || activeGroupConv?.name || "群聊") : peerLabel;
+  const chatMemberCount = activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
+  // 群成员昵称（气泡/正在输入回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
+  const memberNick = (cid: string, id: string): string => {
+    const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
+    return (m?.nickname && m.nickname.trim()) || "";
+  };
+  const senderLabel = (m: ChatMessage): string => m.fromNickname || memberNick(m.convId, m.from) || m.from;
+  // 会话列表项显示名/头像/预览（群聊 vs 单聊）。
+  const convDisplayLabel = (c: Conversation) => (c.is_group ? (c.name || "群聊") : convLabel(c));
+  const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
+  const convPreview = (c: Conversation): string => {
+    if (!c.last_message) return "（无消息）";
+    if (!c.is_group) return c.last_message.content;
+    const who = c.last_message.from === uid ? "我" : (c.last_message.from_nickname || c.last_message.from);
+    return `${who}: ${c.last_message.content}`;
+  };
+
+  // 群动作统一包装：执行 → 刷新群资料 + 会话列表；失败 alert。
+  const doGroupAction = async (cid: string, fn: () => Promise<void>) => {
+    try {
+      await fn();
+      void refreshGroupInfo(cid);
+      void refreshConversations();
+    } catch (e) {
+      alert(`操作失败：${(e as Error).message}`);
+    }
+  };
+
+  // 打开「群聊」列表弹窗（通讯录入口）。
+  const openGroupsModal = async () => {
+    try {
+      const list = await clientRef.current?.listGroups();
+      setGroupsModal(list ?? []);
+    } catch (e) {
+      alert(`加载群列表失败：${(e as Error).message}`);
+    }
+  };
+
+  // 打开群资料弹窗（拉最新资料）。
+  const openGroupPanel = (cid: string) => {
+    setGroupPanel(cid);
+    void refreshGroupInfo(cid);
+  };
+
+  // 建群：校验 → POST → 进入新群会话。
+  const doCreateGroup = async () => {
+    if (!createDraft) return;
+    const name = createDraft.name.trim();
+    if (!name) { setToast("请输入群名"); return; }
+    if (createDraft.selected.length === 0) { setToast("请至少选择一位好友"); return; }
+    setCreateBusy(true);
+    try {
+      const info = await clientRef.current!.createGroup(name, createDraft.selected);
+      setGroupInfos((prev) => ({ ...prev, [info.conv_id]: info }));
+      setCreateDraft(null);
+      setGroupsModal(null);
+      setTab("chats");
+      await refreshConversations();
+      openGroupChat(info.conv_id);
+    } catch (e) {
+      alert(`建群失败：${(e as Error).message}`);
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  // 退出群聊（群主会被服务端拦：需先转让）。
+  const doLeaveGroup = async (cid: string) => {
+    if (!window.confirm("确定退出该群聊？")) return;
+    try {
+      await clientRef.current!.leaveGroup(cid);
+      setGroupPanel(null);
+      setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
+      if (currentConvRef.current === cid) deselect();
+      void refreshConversations();
+    } catch (e) {
+      alert(`退出失败：${(e as Error).message}`);
+    }
+  };
+
+  // 改群名（群主/管理员）：轻量 prompt，回车确定。
+  const doRenameGroup = async (gp: GroupInfo) => {
+    const name = window.prompt("群名（1~30 字）", gp.name);
+    if (name === null || !name.trim() || name.trim() === gp.name) return;
+    await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url));
+  };
+
+  // 邀请成员：提交选中的好友。
+  const doInvite = async () => {
+    if (!inviteDraft || inviteDraft.selected.length === 0) { setToast("请选择要邀请的好友"); return; }
+    const { convId: cid, selected } = inviteDraft;
+    try {
+      await clientRef.current!.inviteToGroup(cid, selected);
+      setInviteDraft(null);
+      void refreshGroupInfo(cid);
+      void refreshConversations();
+    } catch (e) {
+      alert(`邀请失败：${(e as Error).message}`);
+    }
+  };
+
+  // 成员行是否显示 ⋯ 管理菜单：不能管自己；owner 管所有人，admin 只管普通成员。
+  const canManageMember = (gp: GroupInfo, m: GroupMember): boolean =>
+    m.user_id !== uid && (gp.my_role === "owner" || (gp.my_role === "admin" && m.role === "member"));
+
   // 保存好友备注名：写后端 → 刷新会话列表/好友列表（两处显示名随之更新）→ 关弹窗。
   // 注意：本函数在 login early-return 之后，绝不能用 Hook（useCallback）——否则违反 Hooks 规则导致崩溃。
   const saveRemark = async () => {
@@ -894,7 +1089,7 @@ export default function App() {
 
   // 通讯录顶部入口行（数据驱动）。
   const contactEntries: Row[] = [
-    { id: "groups", label: "群聊", icon: Users, chevron: true, onClick: () => comingSoon("群聊") },
+    { id: "groups", label: "群聊", icon: Users, chevron: true, onClick: () => void openGroupsModal() },
     { id: "official", label: "公众号", icon: Megaphone, chevron: true, onClick: () => comingSoon("公众号") },
     { id: "service", label: "服务号", icon: Headphones, chevron: true, onClick: () => comingSoon("服务号") },
   ];
@@ -910,7 +1105,7 @@ export default function App() {
   );
 
   return (
-    <div className={`app ${peer ? "has-sel" : "no-sel"}`}>
+    <div className={`app ${peer || groupConvId ? "has-sel" : "no-sel"}`}>
       <aside className="sidebar">
         <header>
           <div className="account-anchor">
@@ -937,16 +1132,17 @@ export default function App() {
         <div className="convlist">
           {conversations.length === 0 && <div className="empty">还没有会话，去「通讯录」找人发起一个吧</div>}
           {conversations.map((c) => (
-            <div key={c.conv_id} className={`convitem ${c.peer === peer ? "active" : ""}`} onClick={() => openChat(c.peer)}
+            <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""}`}
+              onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
               onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
-              <Avatar url={c.peer_avatar_url} label={convLabel(c)}>
-                {presence[c.peer] === "online" && <span className="presence-dot" />}
+              <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)}>
+                {!c.is_group && presence[c.peer] === "online" && <span className="presence-dot" />}
               </Avatar>
               <div className="convbody">
                 <div className="convtop">
-                  <span className="convpeer">{convLabel(c)}</span>
+                  <span className="convpeer">{convDisplayLabel(c)}</span>
                   <span className="convtime">
-                    {c.last_message?.from === uid && (
+                    {!c.is_group && c.last_message?.from === uid && (
                       <span className={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "convck read" : "convck"}>
                         {c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "✓✓ " : "✓ "}
                       </span>
@@ -954,7 +1150,7 @@ export default function App() {
                     {c.last_message ? formatTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>
                 </div>
-                <div className="convlast">{c.last_message?.content ?? "（无消息）"}</div>
+                <div className="convlast">{convPreview(c)}</div>
               </div>
               {c.unread > 0 && <span className="badge">{c.unread > 99 ? "99+" : c.unread}</span>}
             </div>
@@ -1163,8 +1359,13 @@ export default function App() {
       <main className="main">
         <div className="chat">
           <header>
-            {peer && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
-            {peer ? (
+            {(peer || isGroupChat) && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
+            {isGroupChat ? (
+              // 群聊标题：群名 + 成员数，点击打开群资料（对齐 Telegram 点标题看资料）。
+              <button className="chat-title-btn" title="查看群资料" onClick={() => openGroupPanel(groupConvId)}>
+                {chatTitle}{chatMemberCount > 0 ? `（${chatMemberCount}人）` : ""}
+              </button>
+            ) : peer ? (
               <span>
                 <span className={`dot ${peerOnline ? "on" : ""}`} /> {peerLabel}
                 {peerOnline ? "（在线）" : ""}
@@ -1174,20 +1375,25 @@ export default function App() {
             )}
             <span className="chat-head-right">
               <span className="muted">{stateText}</span>
-              {peer && (
+              {(peer || isGroupChat) && (
                 <span className="chat-anchor">
                   <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
                   {chatMenu && (
                     <div className="menu-card chat-menu" onClick={(e) => e.stopPropagation()}>
-                      {[
+                      {(isGroupChat ? [
+                        { id: "info", label: "群资料", icon: Info, run: () => openGroupPanel(groupConvId) },
+                        { id: "invite", label: "邀请成员", icon: UserPlus, run: () => setInviteDraft({ convId: groupConvId, selected: [] }) },
+                        { id: "mute", label: "静音", icon: BellOff, run: () => comingSoon("静音") },
+                        { id: "leave", label: "退出群聊", icon: LogOut, danger: true, run: () => void doLeaveGroup(groupConvId) },
+                      ] : [
                         { id: "edit", label: "编辑联系人", icon: SquarePen, run: () => setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
                         { id: "call", label: "视频通话", icon: Video, run: () => comingSoon("视频通话") },
                         { id: "mute", label: "静音", icon: BellOff, run: () => comingSoon("静音") },
                         { id: "select", label: "选择消息", icon: CheckSquare, run: () => comingSoon("选择消息") },
                         { id: "block", label: "屏蔽用户", icon: Ban, run: () => comingSoon("屏蔽用户") },
                         { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => comingSoon("删除会话") },
-                      ].map((r) => (
-                        <button key={r.id} className={`menu-card-row${r.danger ? " danger" : ""}`}
+                      ]).map((r) => (
+                        <button key={r.id} className={`menu-card-row${"danger" in r && r.danger ? " danger" : ""}`}
                           onClick={() => { setChatMenu(false); r.run(); }}>
                           <r.icon size={18} className="row-icon" /><span className="row-label">{r.label}</span>
                         </button>
@@ -1216,6 +1422,7 @@ export default function App() {
                       )}
                       <div className="bubble"
                         onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
+                        {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
                         <span className="btext">{m.content}</span>
                         <span className="bmeta">
                           {mine ? (
@@ -1236,19 +1443,23 @@ export default function App() {
               );
             })}
           </div>
-          {showJump && peer && (
+          {showJump && convId && (
             <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
               ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
             </button>
           )}
-          {peer && typingConv === convId && <div className="typing">对方正在输入…</div>}
+          {convId && typingConv === convId && (
+            <div className="typing">
+              {isGroupChat ? `${memberNick(convId, typingFrom) || typingFrom} 正在输入…` : "对方正在输入…"}
+            </div>
+          )}
           {peerBlocked && peer && (
             // 微信式单向：拉黑者仍可发、对方能收到；这里只给一条非阻断提示 + 解除入口，不禁用输入。
             <div className="block-hint">已将对方加入黑名单（TA 发来的消息会被拒收）<button className="link-inline" onClick={() => void unblock(peer)}>解除拉黑</button></div>
           )}
           <footer>
-            <textarea ref={composerRef} value={input} rows={1} disabled={!peer}
-              placeholder={peer ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
+            <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
+              placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
               onChange={(e) => onInputChange(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
@@ -1256,10 +1467,10 @@ export default function App() {
                 const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
                 if (shouldSend) { e.preventDefault(); send(); }
               }} />
-            <button onClick={send} disabled={!peer}>发送</button>
+            <button onClick={send} disabled={!convId}>发送</button>
           </footer>
         </div>
-        {!peer && <div className="main-empty">选择左侧的会话开始聊天</div>}
+        {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
 
       {menu && (
@@ -1335,6 +1546,198 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* 「群聊」列表弹窗（通讯录入口）：我的群 + 创建群聊。 */}
+      {groupsModal !== null && (
+        <div className="modal-mask" onClick={() => setGroupsModal(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>群聊（{groupsModal.length}）</h3>
+            <button className="mini-btn wide" onClick={() => setCreateDraft({ name: "", selected: [] })}>
+              <UserPlus size={16} className="menu-icon" />创建群聊
+            </button>
+            {groupsModal.length === 0 && <div className="empty">还没有加入任何群聊</div>}
+            <div className="modal-list">
+              {groupsModal.map((g) => (
+                <div key={g.conv_id} className="convitem"
+                  onClick={() => { setGroupsModal(null); setTab("chats"); openGroupChat(g.conv_id); }}>
+                  <Avatar url={g.avatar_url} label={g.name} />
+                  <div className="convbody">
+                    <div className="convpeer">{g.name}</div>
+                    <div className="convlast">{g.owner === uid ? "我是群主" : `群主 ${g.owner}`}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="link" onClick={() => setGroupsModal(null)}>关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 建群弹窗：群名 + 好友多选。 */}
+      {createDraft && (
+        <div className="modal-mask" onClick={() => setCreateDraft(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>创建群聊</h3>
+            <label>群名<input value={createDraft.name} maxLength={30} placeholder="1~30 字" autoFocus
+              onChange={(e) => setCreateDraft({ ...createDraft, name: e.target.value })} /></label>
+            <div className="section-label">选择好友（已选 {createDraft.selected.length}）</div>
+            {accepted.length === 0 && <div className="empty">还没有好友，先去通讯录添加吧</div>}
+            <div className="modal-list">
+              {accepted.map((f) => {
+                const on = createDraft.selected.includes(f.user_id);
+                return (
+                  <button key={f.user_id} className="check-row"
+                    onClick={() => setCreateDraft({
+                      ...createDraft,
+                      selected: on ? createDraft.selected.filter((x) => x !== f.user_id) : [...createDraft.selected, f.user_id],
+                    })}>
+                    <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
+                    <Avatar url={f.avatar_url} label={friendLabel(f)} />
+                    <span className="row-label">{friendLabel(f)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="modal-actions">
+              <button className="link" onClick={() => setCreateDraft(null)}>取消</button>
+              <button className="mini-btn" disabled={createBusy} onClick={() => void doCreateGroup()}>创建</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 群资料弹窗：群名/成员数 + 邀请/退群 + 成员列表（按 my_role 显隐管理操作）。 */}
+      {groupPanel && (() => {
+        const gp = groupInfos[groupPanel];
+        return (
+          <div className="modal-mask" onClick={() => setGroupPanel(null)}>
+            <div className="modal group-modal" onClick={(e) => e.stopPropagation()}>
+              {!gp ? (
+                <div className="empty">加载群资料…</div>
+              ) : (
+                <>
+                  <div className="group-head">
+                    <Avatar url={gp.avatar_url} label={gp.name} />
+                    <div className="group-head-info">
+                      <div className="group-name">
+                        {gp.name}
+                        {gp.my_role !== "member" && (
+                          <button className="icon-btn" title="修改群名" onClick={() => void doRenameGroup(gp)}><SquarePen size={16} /></button>
+                        )}
+                      </div>
+                      <div className="group-sub">{gp.members.length} 位成员</div>
+                    </div>
+                  </div>
+                  <div className="group-actions">
+                    <button className="mini-btn" onClick={() => setInviteDraft({ convId: gp.conv_id, selected: [] })}>
+                      <UserPlus size={15} className="menu-icon" />邀请成员
+                    </button>
+                    <button className="mini-btn ghost danger-text" onClick={() => void doLeaveGroup(gp.conv_id)}>
+                      <LogOut size={15} className="menu-icon" />退出群聊
+                    </button>
+                  </div>
+                  <div className="section-label">成员（{gp.members.length}）</div>
+                  <div className="modal-list">
+                    {gp.members.map((m) => (
+                      <div key={m.user_id} className="convitem static">
+                        <Avatar url={m.avatar_url} label={m.nickname || m.user_id} />
+                        <div className="convbody">
+                          <div className="convpeer">
+                            {m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}
+                            {m.role === "owner" && <span className="role-badge owner">群主</span>}
+                            {m.role === "admin" && <span className="role-badge">管理员</span>}
+                          </div>
+                          <div className="convlast">{m.user_id}</div>
+                        </div>
+                        {canManageMember(gp, m) && (
+                          <div className="row-actions">
+                            <button className="mini-btn ghost" title="管理"
+                              onClick={(e) => { e.stopPropagation(); setMemberMenu({ x: e.clientX, y: e.clientY, convId: gp.conv_id, m }); }}>⋯</button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="modal-actions">
+                <button className="link" onClick={() => setGroupPanel(null)}>关闭</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 邀请成员弹窗：不在群内的好友多选。 */}
+      {inviteDraft && (() => {
+        const inGroup = new Set((groupInfos[inviteDraft.convId]?.members ?? []).map((m) => m.user_id));
+        const candidates = accepted.filter((f) => !inGroup.has(f.user_id));
+        return (
+          <div className="modal-mask" onClick={() => setInviteDraft(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>邀请成员</h3>
+              {candidates.length === 0 && <div className="empty">好友都已在群里了</div>}
+              <div className="modal-list">
+                {candidates.map((f) => {
+                  const on = inviteDraft.selected.includes(f.user_id);
+                  return (
+                    <button key={f.user_id} className="check-row"
+                      onClick={() => setInviteDraft({
+                        ...inviteDraft,
+                        selected: on ? inviteDraft.selected.filter((x) => x !== f.user_id) : [...inviteDraft.selected, f.user_id],
+                      })}>
+                      <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
+                      <Avatar url={f.avatar_url} label={friendLabel(f)} />
+                      <span className="row-label">{friendLabel(f)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="modal-actions">
+                <button className="link" onClick={() => setInviteDraft(null)}>取消</button>
+                <button className="mini-btn" disabled={inviteDraft.selected.length === 0} onClick={() => void doInvite()}>
+                  邀请{inviteDraft.selected.length > 0 ? `（${inviteDraft.selected.length}）` : ""}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 群成员管理 ⋯ 菜单（按角色矩阵显隐；服务端仍会二次校验）。 */}
+      {memberMenu && (() => {
+        const gp = groupInfos[memberMenu.convId];
+        const m = memberMenu.m;
+        const cid = memberMenu.convId;
+        if (!gp) return null;
+        const run = (fn: () => Promise<void>) => { setMemberMenu(null); void doGroupAction(cid, fn); };
+        return (
+          <div className="ctx-menu" style={{ left: memberMenu.x, top: memberMenu.y }} onClick={(e) => e.stopPropagation()}>
+            {gp.my_role === "owner" && m.role === "member" && (
+              <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "admin"))}>设为管理员</button>
+            )}
+            {gp.my_role === "owner" && m.role === "admin" && (
+              <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "member"))}>撤销管理员</button>
+            )}
+            {gp.my_role === "owner" && (
+              <button onClick={() => {
+                setMemberMenu(null);
+                if (window.confirm(`确定把群主转让给 ${m.nickname || m.user_id}？你将变为普通成员。`)) {
+                  void doGroupAction(cid, () => clientRef.current!.transferGroup(cid, m.user_id));
+                }
+              }}>转让群主</button>
+            )}
+            <button className="danger" onClick={() => {
+              setMemberMenu(null);
+              if (window.confirm(`确定把 ${m.nickname || m.user_id} 移出群聊？`)) {
+                void doGroupAction(cid, () => clientRef.current!.removeGroupMember(cid, m.user_id));
+              }
+            }}>移出群聊</button>
+          </div>
+        );
+      })()}
 
       {toast && <div className="toast">{toast}</div>}
     </div>

@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile } from "./protocol";
+import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary } from "./protocol";
 import * as localStore from "./localStore";
 
 const PING_INTERVAL_MS = 25_000;
@@ -25,6 +25,8 @@ export interface IMClientHandlers {
   onTyping?: (convId: string, from: string) => void;
   /** 好友关系变更（申请/同意/拒绝/拉黑/删除）：提示刷新通讯录。 */
   onFriend?: (event: string, from: string) => void;
+  /** 群成员/资料变更（invite/leave/remove/role/transfer/profile）：提示刷新该群与会话列表。 */
+  onGroup?: (event: string, convId: string, from: string, target: string) => void;
   /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。 */
   onAuthError?: (msg: string) => void;
   /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。 */
@@ -131,6 +133,65 @@ export class IMClient {
   /** 设置好友备注名（空串=清除）：POST /api/v1/friends/remark。 */
   async setRemark(userId: string, remark: string): Promise<void> {
     await this.api(`/api/v1/friends/remark`, { method: "POST", body: JSON.stringify({ user_id: userId, remark }) });
+  }
+
+  // ---- 群聊（M3）----
+
+  /** 建群：owner=自己，memberIds=初始成员。返回群资料+成员。 */
+  async createGroup(name: string, memberIds: string[], avatarUrl = ""): Promise<GroupInfo> {
+    return (await this.api("/api/v1/groups", {
+      method: "POST",
+      body: JSON.stringify({ name, avatar_url: avatarUrl, member_ids: memberIds }),
+    })) as GroupInfo;
+  }
+
+  /** 我的群列表。 */
+  async listGroups(): Promise<GroupSummary[]> {
+    const data = await this.api("/api/v1/groups");
+    return (data?.groups ?? []) as GroupSummary[];
+  }
+
+  /** 群资料 + 成员（须为群成员）。 */
+  async fetchGroup(convId: string): Promise<GroupInfo> {
+    return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`)) as GroupInfo;
+  }
+
+  /** 改群资料（群主/管理员）。 */
+  async updateGroup(convId: string, name: string, avatarUrl: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`, {
+      method: "PUT", body: JSON.stringify({ name, avatar_url: avatarUrl }),
+    });
+  }
+
+  /** 邀请入群（任意成员可邀）。 */
+  async inviteToGroup(convId: string, memberIds: string[]): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members`, {
+      method: "POST", body: JSON.stringify({ member_ids: memberIds }),
+    });
+  }
+
+  /** 退群（群主须先转让）。 */
+  async leaveGroup(convId: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/me`, { method: "DELETE" });
+  }
+
+  /** 移除成员（须权限高于对方）。 */
+  async removeGroupMember(convId: string, userId: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
+  }
+
+  /** 设/撤管理员（仅群主）：role=admin|member。 */
+  async setGroupRole(convId: string, userId: string, role: "admin" | "member"): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}/role`, {
+      method: "PUT", body: JSON.stringify({ role }),
+    });
+  }
+
+  /** 转让群主（仅群主；原群主降为普通成员）。 */
+  async transferGroup(convId: string, userId: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/transfer`, {
+      method: "POST", body: JSON.stringify({ user_id: userId }),
+    });
   }
 
   /** 举报（AG）：POST /api/v1/reports。targetType=message|user|group。 */
@@ -311,6 +372,9 @@ export class IMClient {
       case T.FRIEND:
         this.handlers.onFriend?.(d.event, d.from);
         break;
+      case T.GROUP:
+        this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "");
+        break;
       case T.PONG:
         break;
       case T.ERROR: {
@@ -342,6 +406,7 @@ export class IMClient {
       serverMsgId: d.server_msg_id,
       convId: d.conv_id,
       from: d.from,
+      fromNickname: d.from_nickname || undefined, // 群消息冗余带发送者昵称（空不占字段）
       content: typeof d.content === "string" ? d.content : "",
       contentType: d.content_type || "text",
       convSeq: d.conv_seq || 0,
@@ -495,6 +560,11 @@ export function friendlyMessage(code: number, fallback: string): string {
     200104: "不能添加自己为好友",
     200105: "申请已发出，等待对方同意",
     200106: "没有待处理的好友申请",
+    300201: "群不存在",
+    300202: "群名不能为空且不超过 30 字",
+    300203: "你不在该群中",
+    // 300204 不映射：服务端会带具体原因（如"群主需先转让群主再退群"），透传更有用。
+    300205: "群成员已达上限",
   };
   return map[code] || fallback || `请求失败(${code})`;
 }

@@ -9,6 +9,14 @@ describe("friendlyMessage 错误码友好中文", () => {
     expect(friendlyMessage(200104, "x")).toBe("不能添加自己为好友");
     expect(friendlyMessage(100101, "invalid token")).toBe("登录已失效，请重新登录");
   });
+  it("群错误码映射为中文", () => {
+    expect(friendlyMessage(300203, "not a group member")).toBe("你不在该群中");
+    expect(friendlyMessage(300202, "invalid group name")).toBe("群名不能为空且不超过 30 字");
+    expect(friendlyMessage(300205, "group member limit exceeded")).toBe("群成员已达上限");
+  });
+  it("300204 不映射：透传服务端具体原因（如群主需先转让）", () => {
+    expect(friendlyMessage(300204, "群主需先转让群主再退群")).toBe("群主需先转让群主再退群");
+  });
   it("未收录码回退服务端原文", () => {
     expect(friendlyMessage(999999, "服务端原文")).toBe("服务端原文");
   });
