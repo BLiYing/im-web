@@ -949,6 +949,7 @@ export default function App() {
   const convPreview = (c: Conversation): string => {
     if (!c.last_message) return "（无消息）";
     if (!c.is_group) return c.last_message.content;
+    if (c.last_message.content_type === "system") return c.last_message.content; // 系统消息无发送者前缀
     const who = c.last_message.from === uid ? "我" : (c.last_message.from_nickname || c.last_message.from);
     return `${who}: ${c.last_message.content}`;
   };
@@ -1410,6 +1411,18 @@ export default function App() {
               const mine = m.from === uid;
               const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
               const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
+              // 系统消息（群邀请/移除/转让/禁言等留痕）：居中灰字，无气泡/勾/菜单。
+              if (m.contentType === "system") {
+                return (
+                  <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                    {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
+                    {i === firstUnreadIdx && (
+                      <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                    )}
+                    <div className="sys-line"><span>{m.content}</span></div>
+                  </div>
+                );
+              }
               return (
                 <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
                   {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
