@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch } from "./protocol";
 import * as localStore from "./localStore";
 
 const PING_INTERVAL_MS = 25_000;
@@ -31,6 +31,10 @@ export interface IMClientHandlers {
   onAuthError?: (msg: string) => void;
   /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。 */
   onMsgRejected?: (clientMsgId: string, msg: string) => void;
+  /** 消息操作（撤回/编辑/置顶）应用到某条消息：UI 据 patch 更新该条（convSeq 定位）。 */
+  onMsgOp?: (convId: string, targetConvSeq: number, patch: MsgOpPatch) => void;
+  /** 我发起的消息操作被拒（如撤回超时 300008）：回滚提示。 */
+  onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
 }
 
 /** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
@@ -52,6 +56,7 @@ export class IMClient {
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
   private pendingSends = new Map<string, { convId: string; content: string; timestamp: number }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
   private readonly contextBefore = 10; // 进会话时未读分割线上方保留的已读上下文条数
@@ -266,6 +271,37 @@ export class IMClient {
     return clientMsgId;
   }
 
+  /** 撤回自己的消息（M4-1）。发出 msg_op；成功由服务端广播回 msg_op 帧应用，失败（超窗等）回 onMsgOpFailed。 */
+  recallMessage(convId: string, targetConvSeq: number): string {
+    return this.sendMsgOp(OP.RECALL, convId, targetConvSeq, {});
+  }
+
+  /** 发一条 msg_op（撤回/编辑/置顶），返回其 client_msg_id（供对账/回滚）。 */
+  private sendMsgOp(op: string, convId: string, targetConvSeq: number, extra: { content?: string; pinned?: boolean }): string {
+    const clientMsgId = crypto.randomUUID();
+    this.pendingOps.set(clientMsgId, { op, convId, targetConvSeq });
+    this.send({
+      type: T.MSG_OP, seq: ++this.seq,
+      data: { op, conv_id: convId, target_conv_seq: targetConvSeq, client_msg_id: clientMsgId, ...extra },
+    });
+    return clientMsgId;
+  }
+
+  /** 应用一条消息操作到本地（落库 + 通知 UI）。data 来自实时 msg_op 帧或 sync 的 msg_op 事件行负载。 */
+  private applyMsgOp(data: { op?: string; conv_id?: string; target_conv_seq?: number; content?: string; client_msg_id?: string }): void {
+    const convId = data.conv_id || "";
+    const target = data.target_conv_seq || 0;
+    if (!convId || !target) return;
+    let patch: MsgOpPatch;
+    if (data.op === OP.RECALL) patch = { recalledAt: Date.now() };
+    else if (data.op === OP.EDIT) patch = { editedAt: Date.now(), content: data.content ?? "" };
+    else if (data.op === OP.PIN) patch = { pinnedAt: Date.now() };
+    else return; // 未知 op：忽略不崩
+    void localStore.applyMsgOpLocal(this.uid, convId, target, patch);
+    if (data.client_msg_id) this.pendingOps.delete(data.client_msg_id); // 我方操作成功回执
+    this.handlers.onMsgOp?.(convId, target, patch);
+  }
+
   // ---- 内部 ----
 
   private async openSocket(throwOnLoginError = false): Promise<void> {
@@ -375,11 +411,21 @@ export class IMClient {
       case T.GROUP:
         this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "");
         break;
+      case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶）：应用到本地
+        this.applyMsgOp(d);
+        break;
       case T.PONG:
         break;
       case T.ERROR: {
-        // 带 client_msg_id 的错误 = 对某条 send_msg 的拒绝（如被拉黑）：标记该条失败 + 提示。
         const cmid = d.client_msg_id;
+        // 消息操作被拒（如撤回超时 300008）：回滚提示，不动消息本身。
+        const op = cmid ? this.pendingOps.get(cmid) : undefined;
+        if (op) {
+          this.pendingOps.delete(cmid);
+          this.handlers.onMsgOpFailed?.(op.op, op.convId, op.targetConvSeq, d.message || "操作失败");
+          break;
+        }
+        // 带 client_msg_id 的错误 = 对某条 send_msg 的拒绝（如被拉黑）：标记该条失败 + 提示。
         if (cmid) {
           const timer = this.sendTimers.get(cmid);
           if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(cmid); }
@@ -402,6 +448,16 @@ export class IMClient {
   }
 
   private processIncoming(d: any): void {
+    // msg_op 事件行（撤回/编辑/置顶，来自 sync 补拉）：应用其效果、不作气泡渲染、不入库为消息。
+    if (d.content_type === "msg_op") {
+      this.updateSynced(d.conv_id, d.conv_seq);
+      try {
+        this.applyMsgOp(JSON.parse(typeof d.content === "string" ? d.content : "{}"));
+      } catch {
+        /* 非法负载：忽略不崩 */
+      }
+      return;
+    }
     const msg: ChatMessage = {
       serverMsgId: d.server_msg_id,
       convId: d.conv_id,
@@ -412,6 +468,11 @@ export class IMClient {
       convSeq: d.conv_seq || 0,
       timestamp: d.timestamp || 0,
       status: "received",
+      // 直加载/同步已带派生状态（服务端冗余下发）：撤回消息直接渲染墓碑，不依赖回放 op 事件。
+      recalledAt: d.recalled_at || undefined,
+      recalledBy: d.recalled_by || undefined,
+      editedAt: d.edited_at || undefined,
+      pinnedAt: d.pinned_at || undefined,
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

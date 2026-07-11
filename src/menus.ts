@@ -29,9 +29,18 @@ function isText(m: ChatMessage): boolean {
   return m.contentType === "text" && !!m.content;
 }
 
+/** 撤回可见时间窗（微信式 2min，与后端 Hub.recallWindow 对齐；服务端为准，此处仅避免必然失败的入口）。 */
+export const RECALL_WINDOW_MS = 2 * 60 * 1000;
+
+/** 是否可撤回：本人已确认消息、未撤回、在时间窗内。 */
+function canRecall(m: ChatMessage, uid: string): boolean {
+  return m.from === uid && m.convSeq > 0 && !m.recalledAt && Date.now() - m.timestamp <= RECALL_WINDOW_MS;
+}
+
 /** 消息菜单的真实处理器集合：copy/delete/report* / markRead 接真实实现，其余统一走 comingSoon。 */
 export interface MessageHandlers {
   copy: (m: ChatMessage) => void;
+  recall: (m: ChatMessage) => void;
   delete: (m: ChatMessage) => void;
   reportMsg: (m: ChatMessage) => void;
   reportUser: (m: ChatMessage) => void;
@@ -56,7 +65,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "reply", label: "引用", icon: Reply, visible: () => true, run: () => h.comingSoon("引用") },
     { id: "forward", label: "转发", icon: Forward, visible: () => true, run: () => h.comingSoon("转发") },
     { id: "favorite", label: "收藏", icon: Bookmark, visible: () => true, run: () => h.comingSoon("收藏") },
-    { id: "recall", label: "撤回", icon: Undo2, visible: (c) => c.m.from === c.uid && c.m.convSeq > 0, run: () => h.comingSoon("撤回") },
+    { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: () => true, run: () => h.comingSoon("多选") },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m), run: () => h.comingSoon("翻译") },
     { id: "reportMsg", label: "举报消息", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },

@@ -23,6 +23,11 @@ interface MsgRecord {
   clientMsgId?: string;
   status?: "failed";  // 仅落"被拒"失败态；已确认消息不写此字段（读回默认 received）
   note?: string;      // 系统提示文案（如"消息已发出，但被对方拒收了"）
+  // M4 消息操作派生状态（撤回/编辑/置顶）：由 applyMsgOpLocal 就地更新，读回还原到 ChatMessage。
+  recalledAt?: number;
+  recalledBy?: string;
+  editedAt?: number;
+  pinnedAt?: number;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -55,7 +60,39 @@ export async function saveMessage(owner: string, m: ChatMessage): Promise<void> 
     owner, convId: m.convId, convSeq: m.convSeq,
     from: m.from, content: m.content, contentType: m.contentType, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
+    recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
   });
+}
+
+/** 把一次消息操作（撤回/编辑/置顶）就地应用到已落库消息（按 conv_seq 定位）。记录不存在则忽略。 */
+export async function applyMsgOpLocal(
+  owner: string, convId: string, convSeq: number,
+  patch: { recalledAt?: number; recalledBy?: string; editedAt?: number; pinnedAt?: number; content?: string },
+): Promise<void> {
+  if (!owner || !convId || !convSeq) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const os = tx.objectStore(STORE);
+      const getReq = os.get(keyOf(owner, convId, convSeq));
+      getReq.onsuccess = () => {
+        const rec = getReq.result as MsgRecord | undefined;
+        if (rec) {
+          if (patch.recalledAt !== undefined) rec.recalledAt = patch.recalledAt;
+          if (patch.recalledBy !== undefined) rec.recalledBy = patch.recalledBy;
+          if (patch.editedAt !== undefined) rec.editedAt = patch.editedAt;
+          if (patch.pinnedAt !== undefined) rec.pinnedAt = patch.pinnedAt;
+          if (patch.content !== undefined) rec.content = patch.content;
+          os.put(rec);
+        }
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    /* 持久化失败不影响主流程 */
+  }
 }
 
 /** 保存一条被拒收的失败消息（被拉黑：服务端永不接受、无 conv_seq）。按 clientMsgId 落库，重进/刷新仍在。 */
@@ -110,6 +147,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
             convId: r.convId, from: r.from, content: r.content, contentType: r.contentType,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
+            recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
           },
     );
   } catch {

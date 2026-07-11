@@ -392,6 +392,17 @@ export default function App() {
           return out;
         });
       },
+      // 消息操作（撤回/编辑/置顶）应用到某条消息（按 conv_seq 定位）→ 就地打补丁（撤回→墓碑，编辑→改文本）。
+      onMsgOp: (cid, targetSeq, patch) => {
+        setMsgsByConv((prev) => {
+          const list = prev[cid];
+          if (!list) return prev;
+          return { ...prev, [cid]: list.map((m) => (m.convSeq === targetSeq ? { ...m, ...patch } : m)) };
+        });
+        void refreshConversations(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
+      },
+      // 我发起的操作被拒（如撤回超时 300008）→ toast 提示（不改消息本身）。
+      onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
       onAuthError: (msg) => {
@@ -535,6 +546,12 @@ export default function App() {
     setMenu(null);
   }, []);
 
+  // 撤回自己的消息（M4-1）：发 msg_op；成功由服务端广播回 msg_op 帧应用（onMsgOp），失败（超窗）toast。
+  const recallMessage = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    if (m.convSeq > 0) clientRef.current?.recallMessage(m.convId, m.convSeq);
+  }, []);
+
   // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
     setMenu(null);
@@ -573,12 +590,13 @@ export default function App() {
   const messageActions = useMemo<MenuAction<{ m: ChatMessage; uid: string }>[]>(
     () => buildMessageActions({
       copy: copyMessage,
+      recall: recallMessage,
       delete: deleteMessage,
       reportMsg: (m) => void reportMessage(m, "message"),
       reportUser: (m) => void reportMessage(m, "user"),
       comingSoon,
     }),
-    [copyMessage, deleteMessage, reportMessage, comingSoon],
+    [copyMessage, recallMessage, deleteMessage, reportMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
@@ -948,6 +966,11 @@ export default function App() {
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
   const convPreview = (c: Conversation): string => {
     if (!c.last_message) return "（无消息）";
+    // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
+    if (c.last_message.recalled_at) {
+      const who = c.last_message.from === uid ? "你" : (c.is_group ? (c.last_message.from_nickname || c.last_message.from) : "对方");
+      return `${who}撤回了一条消息`;
+    }
     if (!c.is_group) return c.last_message.content;
     if (c.last_message.content_type === "system") return c.last_message.content; // 系统消息无发送者前缀
     const who = c.last_message.from === uid ? "我" : (c.last_message.from_nickname || c.last_message.from);
@@ -1420,6 +1443,24 @@ export default function App() {
                       <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
                     )}
                     <div className="sys-line"><span>{m.content}</span></div>
+                  </div>
+                );
+              }
+              // 撤回消息（M4-1）：居中系统行"撤回了一条消息"，隐藏原气泡；本人文本可"重新编辑"回填输入框。
+              if (m.recalledAt) {
+                const canReEdit = mine && m.contentType === "text" && !!m.content;
+                return (
+                  <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                    {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
+                    {i === firstUnreadIdx && (
+                      <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                    )}
+                    <div className="sys-line">
+                      <span>{mine ? "你撤回了一条消息" : `${isGroupChat ? senderLabel(m) : "对方"}撤回了一条消息`}</span>
+                      {canReEdit && (
+                        <button className="reedit-btn" onClick={() => setInput(m.content)}>重新编辑</button>
+                      )}
+                    </div>
                   </div>
                 );
               }

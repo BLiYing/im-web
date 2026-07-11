@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { saveMessage, saveRejected, loadConversation, saveConversations, loadConversations } from "./localStore";
+import { saveMessage, saveRejected, applyMsgOpLocal, loadConversation, saveConversations, loadConversations } from "./localStore";
 import type { ChatMessage, Conversation } from "./protocol";
 
 const msg = (convId: string, seq: number, from: string, content = "x"): ChatMessage => ({
@@ -41,6 +41,27 @@ describe("localStore 消息（IndexedDB）", () => {
   it("convSeq<=0（发送中/失败）不入库", async () => {
     await saveMessage("o3", msg("c1", 0, "a"));
     expect((await loadConversation("o3", "c1")).length).toBe(0);
+  });
+
+  it("applyMsgOpLocal 撤回：就地置 recalledAt，载回带撤回态", async () => {
+    await saveMessage("oOp", msg("c1", 1, "a", "secret"));
+    await applyMsgOpLocal("oOp", "c1", 1, { recalledAt: 9999, recalledBy: "a" });
+    const got = await loadConversation("oOp", "c1");
+    expect(got[0].recalledAt).toBe(9999);
+    expect(got[0].recalledBy).toBe("a");
+  });
+
+  it("applyMsgOpLocal 编辑：改 content + editedAt", async () => {
+    await saveMessage("oOp2", msg("c1", 1, "a", "old"));
+    await applyMsgOpLocal("oOp2", "c1", 1, { editedAt: 8888, content: "new" });
+    const got = await loadConversation("oOp2", "c1");
+    expect(got[0].content).toBe("new");
+    expect(got[0].editedAt).toBe(8888);
+  });
+
+  it("applyMsgOpLocal 目标不存在时忽略（不新建行）", async () => {
+    await applyMsgOpLocal("oOp3", "c1", 7, { recalledAt: 1 });
+    expect((await loadConversation("oOp3", "c1")).length).toBe(0);
   });
 
   it("被拒收消息（convSeq=0）按 clientMsgId 落库，还原失败态+系统提示", async () => {

@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
+  copy: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
 };
 const convHandlers = { markRead: vi.fn(), delete: vi.fn(), comingSoon: vi.fn() };
 
@@ -34,12 +34,15 @@ describe("buildMessageActions", () => {
     ]);
   });
 
-  it("撤回仅在 m.from===uid && convSeq>0 时可见", () => {
+  it("撤回仅在 本人 && 已落库 && 未撤回 && 2min 窗口内 可见", () => {
     const actions = buildMessageActions(msgHandlers);
     const find = (ctx: MessageCtx) => actions.find((a) => a.id === "recall")!.visible(ctx);
-    expect(find({ m: msg({ from: "1001", convSeq: 5 }), uid: "1001" })).toBe(true);  // 我发的、已落库
-    expect(find({ m: msg({ from: "2002", convSeq: 5 }), uid: "1001" })).toBe(false); // 对方发的
-    expect(find({ m: msg({ from: "1001", convSeq: 0 }), uid: "1001" })).toBe(false); // 我发的、未落库
+    const now = Date.now();
+    expect(find({ m: msg({ from: "1001", convSeq: 5, timestamp: now }), uid: "1001" })).toBe(true);  // 我发的、刚发
+    expect(find({ m: msg({ from: "2002", convSeq: 5, timestamp: now }), uid: "1001" })).toBe(false); // 对方发的
+    expect(find({ m: msg({ from: "1001", convSeq: 0, timestamp: now }), uid: "1001" })).toBe(false); // 未落库
+    expect(find({ m: msg({ from: "1001", convSeq: 5, timestamp: now - 3 * 60 * 1000 }), uid: "1001" })).toBe(false); // 超 2min
+    expect(find({ m: msg({ from: "1001", convSeq: 5, timestamp: now, recalledAt: now }), uid: "1001" })).toBe(false); // 已撤回
   });
 
   it("举报项仅对对方消息可见；删除/复制对自己消息也可见", () => {

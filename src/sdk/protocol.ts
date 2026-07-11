@@ -14,8 +14,12 @@ export const T = {
   SYNC_RESP: "sync_resp",
   FRIEND: "friend",
   GROUP: "group",
+  MSG_OP: "msg_op",
   ERROR: "error",
 } as const;
+
+/** 消息操作 op（对齐后端 protocol.MsgOp*）。 */
+export const OP = { RECALL: "recall", EDIT: "edit", PIN: "pin" } as const;
 
 export interface Envelope {
   type: string;
@@ -39,6 +43,20 @@ export interface ChatMessage {
   status: MessageStatus;
   /** 发送失败时的系统提示（如被拉黑拒收），在该条下方居中显示；微信式，不弹窗。 */
   note?: string;
+  /** M4 消息操作派生状态（只在被操作过的消息上出现）。 */
+  recalledAt?: number;  // >0=已撤回（渲染居中系统行"撤回了一条消息"，隐藏原气泡）
+  recalledBy?: string;  // 撤回操作者 uid
+  editedAt?: number;    // >0=已编辑（标"已编辑"，M4-5）
+  pinnedAt?: number;    // >0=聊天内置顶（M4）
+}
+
+/** msg_op 应用到某条消息的补丁（撤回/编辑/置顶）。 */
+export interface MsgOpPatch {
+  recalledAt?: number;
+  recalledBy?: string;
+  editedAt?: number;
+  pinnedAt?: number;
+  content?: string; // edit：新文本
 }
 
 /** 会话列表项里的最后一条消息（对齐后端 conversation.MessageView）。 */
@@ -50,6 +68,7 @@ export interface ConvLastMessage {
   content: string;
   conv_seq: number;
   timestamp: number;
+  recalled_at?: number; // >0=最后一条是撤回消息（预览显示"撤回了一条消息"，原文已脱敏）
 }
 
 /** 会话列表项（对齐后端 conversation.Summary）。 */
