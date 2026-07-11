@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
 import { formatTime } from "./time";
 import type { LucideIcon } from "lucide-react";
@@ -49,6 +49,7 @@ export default function App() {
   const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
+  const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
@@ -545,6 +546,35 @@ export default function App() {
     setReplyTo(m);
   }, []);
 
+  // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
+  const favoriteMessage = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    void (async () => {
+      try {
+        await clientRef.current?.addFavorite({
+          content_type: m.contentType, content: m.content,
+          source_conv_id: m.convId, source_conv_seq: m.convSeq, source_from: m.from,
+        });
+        setToast("已收藏");
+      } catch (e) { setToast(`收藏失败：${(e as Error).message}`); }
+    })();
+  }, []);
+  // 打开收藏列表弹窗。
+  const openFavorites = useCallback(() => {
+    void (async () => {
+      try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
+      catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
+    })();
+  }, []);
+  const removeFavorite = useCallback((id: number) => {
+    void (async () => {
+      try {
+        await clientRef.current?.deleteFavorite(id);
+        setFavorites((prev) => (prev ? prev.filter((f) => f.id !== id) : prev));
+      } catch (e) { setToast(`删除失败：${(e as Error).message}`); }
+    })();
+  }, []);
+
   // 转发（M4-3）：打开会话选择器，选目标后逐条转发（带 forward_from 溯源）。
   const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwarding([m]); }, []);
   // 进入多选态（M4-3）：预选当前消息。
@@ -667,6 +697,7 @@ export default function App() {
       copy: copyMessage,
       reply: replyMessage,
       forward: forwardMessage,
+      favorite: favoriteMessage,
       multiSelect: enterSelectMode,
       recall: recallMessage,
       delete: deleteMessage,
@@ -674,7 +705,7 @@ export default function App() {
       reportUser: (m) => void reportMessage(m, "user"),
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
@@ -1165,7 +1196,7 @@ export default function App() {
   // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
   const accountRows: Row[] = [
     { id: "settings", label: "设置", icon: Settings, chevron: true, onClick: () => setShowSettings(true) },
-    { id: "favorites", label: "收藏消息", icon: Bookmark, chevron: true, onClick: () => comingSoon("收藏消息") },
+    { id: "favorites", label: "收藏消息", icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
   ];
 
   // 设置列表（对齐 Telegram **Web** 版布局；数据驱动：加一行 = append 一条；接后端 = 换 onClick）。
@@ -1635,6 +1666,25 @@ export default function App() {
         </div>
         {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
+
+      {favorites && (
+        // 收藏列表（M4-4）：内容快照 + 删除；原消息撤回/删除后仍在。
+        <div className="modal-mask" onClick={() => setFavorites(null)}>
+          <div className="modal fav-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">我的收藏（{favorites.length}）</div>
+            <div className="fav-list">
+              {favorites.length === 0 && <div className="fwd-empty">还没有收藏</div>}
+              {favorites.map((f) => (
+                <div key={f.id} className="fav-item">
+                  <div className="fav-content">{f.content}</div>
+                  <button className="fav-del" title="删除收藏" onClick={() => removeFavorite(f.id)}>✕</button>
+                </div>
+              ))}
+            </div>
+            <button className="modal-close" onClick={() => setFavorites(null)}>关闭</button>
+          </div>
+        </div>
+      )}
 
       {forwarding && (
         // 转发会话选择器（M4-3）：从会话列表选目标，逐条转发。

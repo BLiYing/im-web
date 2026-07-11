@@ -42,6 +42,7 @@ export interface MessageHandlers {
   copy: (m: ChatMessage) => void;
   reply: (m: ChatMessage) => void;
   forward: (m: ChatMessage) => void;
+  favorite: (m: ChatMessage) => void;
   multiSelect: (m: ChatMessage) => void;
   recall: (m: ChatMessage) => void;
   delete: (m: ChatMessage) => void;
@@ -67,7 +68,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m), run: (c) => h.copy(c.m) },
     { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
     { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
-    { id: "favorite", label: "收藏", icon: Bookmark, visible: () => true, run: () => h.comingSoon("收藏") },
+    { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.favorite(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m), run: () => h.comingSoon("翻译") },

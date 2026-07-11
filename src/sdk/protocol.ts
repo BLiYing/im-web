@@ -59,6 +59,17 @@ export interface ReplyTo {
   preview: string;
 }
 
+/** 一条收藏（对齐后端 store.Favorite，M4-4）。内容快照，不引用原 conv_seq。 */
+export interface Favorite {
+  id: number;
+  content_type: string;
+  content: string;
+  source_conv_id: string;
+  source_conv_seq: number;
+  source_from: string;
+  created_at: number;
+}
+
 /** msg_op 应用到某条消息的补丁（撤回/编辑/置顶）。 */
 export interface MsgOpPatch {
   recalledAt?: number;

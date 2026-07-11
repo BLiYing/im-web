@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
 import * as localStore from "./localStore";
 
 const PING_INTERVAL_MS = 25_000;
@@ -197,6 +197,22 @@ export class IMClient {
     await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/transfer`, {
       method: "POST", body: JSON.stringify({ user_id: userId }),
     });
+  }
+
+  // ---- 收藏（M4-4）----
+
+  /** 收藏一条内容（快照）：POST /api/v1/favorites。 */
+  async addFavorite(f: { content_type?: string; content: string; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
+    await this.api("/api/v1/favorites", { method: "POST", body: JSON.stringify(f) });
+  }
+  /** 我的收藏列表：GET /api/v1/favorites。 */
+  async listFavorites(): Promise<Favorite[]> {
+    const data = await this.api("/api/v1/favorites");
+    return (data?.favorites ?? []) as Favorite[];
+  }
+  /** 删除收藏：DELETE /api/v1/favorites/{id}。 */
+  async deleteFavorite(id: number): Promise<void> {
+    await this.api(`/api/v1/favorites/${id}`, { method: "DELETE" });
   }
 
   /** 举报（AG）：POST /api/v1/reports。targetType=message|user|group。 */
