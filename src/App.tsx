@@ -371,9 +371,10 @@ export default function App() {
       // 群成员/资料实时变更：刷新会话列表 + 该群资料缓存；自己被移出 → 提示并退出该会话。
       onGroup: (event, cid, _from, target) => {
         void refreshConversations();
-        void refreshGroupInfo(cid); // 被移出时 fetch 报 300203 → 自动清缓存
-        if (event === "remove" && target === uid) {
-          setToast("你已被移出群聊");
+        if (event !== "dissolve") void refreshGroupInfo(cid); // 被移出时 fetch 报 300203 → 自动清缓存；解散后群已不存在，无需再拉
+        // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
+        if ((event === "remove" && target === uid) || event === "dissolve") {
+          setToast(event === "dissolve" ? "该群已被解散" : "你已被移出群聊");
           setGroupPanel((p) => (p === cid ? null : p));
           if (currentConvRef.current === cid) {
             currentConvRef.current = "";
