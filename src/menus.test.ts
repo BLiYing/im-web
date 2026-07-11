@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
 };
 const convHandlers = { markRead: vi.fn(), delete: vi.fn(), comingSoon: vi.fn() };
 

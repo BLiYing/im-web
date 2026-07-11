@@ -41,6 +41,8 @@ function canRecall(m: ChatMessage, uid: string): boolean {
 export interface MessageHandlers {
   copy: (m: ChatMessage) => void;
   reply: (m: ChatMessage) => void;
+  forward: (m: ChatMessage) => void;
+  multiSelect: (m: ChatMessage) => void;
   recall: (m: ChatMessage) => void;
   delete: (m: ChatMessage) => void;
   reportMsg: (m: ChatMessage) => void;
@@ -64,10 +66,10 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
   return [
     { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m), run: (c) => h.copy(c.m) },
     { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
-    { id: "forward", label: "转发", icon: Forward, visible: () => true, run: () => h.comingSoon("转发") },
+    { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
     { id: "favorite", label: "收藏", icon: Bookmark, visible: () => true, run: () => h.comingSoon("收藏") },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
-    { id: "multiSelect", label: "多选", icon: CheckSquare, visible: () => true, run: () => h.comingSoon("多选") },
+    { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m), run: () => h.comingSoon("翻译") },
     { id: "reportMsg", label: "举报消息", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
     { id: "reportUser", label: "举报发送者", icon: Flag, visible: (c) => c.m.from !== c.uid, run: (c) => h.reportUser(c.m) },

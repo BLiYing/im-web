@@ -55,7 +55,7 @@ export class IMClient {
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
-  private pendingSends = new Map<string, { convId: string; content: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -252,12 +252,12 @@ export class IMClient {
     this.send({ type: T.SYNC_REQ, seq: ++this.seq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
   }
 
-  /** 发送文本，返回 client_msg_id。replyTo 非空时为引用回复（M4-2）。 */
-  sendText(content: string, to: string, convId: string, replyTo?: { convSeq: number; preview: string }): string {
+  /** 发送文本，返回 client_msg_id。opts.replyTo=引用回复（M4-2）；opts.forwardFrom=转发溯源（M4-3）。 */
+  sendText(content: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string }): string {
     const clientMsgId = crypto.randomUUID();
-    // ack 后落库：记住引用定位/快照（本端即时预览，重进会话仍在）。
+    // ack 后落库：记住引用定位/快照 + 转发溯源（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, timestamp: Date.now(),
-      replyToConvSeq: replyTo?.convSeq, replySnapshot: replyTo?.preview });
+      replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom });
     // 超时无 ack（断网/发不出去）→ 标"发送失败"、清掉待落库（失败的不入库）。
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
@@ -265,7 +265,8 @@ export class IMClient {
       this.handlers.onAck?.(clientMsgId, false, 0);
     }, SEND_TIMEOUT_MS));
     const data: Record<string, unknown> = { client_msg_id: clientMsgId, conv_id: convId, to, content_type: "text", content };
-    if (replyTo && replyTo.convSeq > 0) { data.reply_to = { conv_seq: replyTo.convSeq }; }
+    if (opts?.replyTo && opts.replyTo.convSeq > 0) { data.reply_to = { conv_seq: opts.replyTo.convSeq }; }
+    if (opts?.forwardFrom) { data.forward_from = opts.forwardFrom; }
     this.send({ type: T.SEND_MSG, seq: ++this.seq, data });
     return clientMsgId;
   }
@@ -375,7 +376,7 @@ export class IMClient {
           void localStore.saveMessage(this.uid, {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
             contentType: "text", convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
-            replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot,
+            replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, forwardFrom: pend.forwardFrom,
           });
           this.pendingSends.delete(d.client_msg_id);
         }
@@ -475,6 +476,7 @@ export class IMClient {
       pinnedAt: d.pinned_at || undefined,
       replyToConvSeq: d.reply_to_conv_seq || undefined,
       replySnapshot: d.reply_snapshot || undefined,
+      forwardFrom: d.forward_from || undefined,
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

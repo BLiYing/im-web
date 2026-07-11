@@ -48,6 +48,9 @@ export default function App() {
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
   const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
+  const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
+  const [selectMode, setSelectMode] = useState(false); // 多选态
+  const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
   const [searchQ, setSearchQ] = useState(""); // 找人搜索框
@@ -526,7 +529,7 @@ export default function App() {
     const rt = replyTo && replyTo.convSeq > 0
       ? { convSeq: replyTo.convSeq, preview: (replyTo.content || "").slice(0, 60) }
       : undefined;
-    const clientMsgId = client.sendText(text, peer, cid, rt); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
+    const clientMsgId = client.sendText(text, peer, cid, rt ? { replyTo: rt } : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
     appendMsg(cid, {
       clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
       convSeq: 0, timestamp: Date.now(), status: "sending",
@@ -541,6 +544,53 @@ export default function App() {
     setMenu(null);
     setReplyTo(m);
   }, []);
+
+  // 转发（M4-3）：打开会话选择器，选目标后逐条转发（带 forward_from 溯源）。
+  const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwarding([m]); }, []);
+  // 进入多选态（M4-3）：预选当前消息。
+  const enterSelectMode = useCallback((m: ChatMessage) => {
+    setMenu(null); setSelectMode(true);
+    setSelected(new Set(m.convSeq > 0 ? [m.convSeq] : []));
+  }, []);
+  const exitSelectMode = useCallback(() => { setSelectMode(false); setSelected(new Set()); }, []);
+  const toggleSelected = useCallback((seq: number) => {
+    setSelected((prev) => { const n = new Set(prev); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
+  }, []);
+  // 执行转发：把 forwarding 里的消息逐条发到 target 会话（forward_from 保留原始出处）。
+  const doForwardTo = useCallback((target: Conversation) => {
+    const client = clientRef.current;
+    const msgs = forwarding;
+    if (!client || !msgs) return;
+    for (const m of msgs) {
+      if (!m.content || m.recalledAt) continue;
+      const origin = m.forwardFrom || m.fromNickname || m.from; // 转发链保留最初作者
+      const clientMsgId = client.sendText(m.content, target.is_group ? "" : target.peer, target.conv_id, { forwardFrom: origin });
+      // 乐观上屏到目标会话（转发到当前会话时立即可见；ack 后转 sent）。
+      appendMsg(target.conv_id, {
+        clientMsgId, convId: target.conv_id, from: uid, content: m.content, contentType: "text",
+        convSeq: 0, timestamp: Date.now(), status: "sending", forwardFrom: origin,
+      });
+    }
+    setForwarding(null);
+    exitSelectMode();
+    setToast(`已转发到 ${target.is_group ? (target.name || "群聊") : (target.peer_remark || target.peer_nickname || target.peer)}`);
+  }, [forwarding, exitSelectMode, appendMsg, uid]);
+  // 多选批量转发：收集选中的消息，打开选择器。
+  const forwardSelected = useCallback(() => {
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    const list = (msgsByConv[cid] ?? []).filter((m) => m.convSeq > 0 && selected.has(m.convSeq) && !m.recalledAt);
+    if (list.length > 0) setForwarding(list);
+  }, [msgsByConv, peer, uid, groupConvId, selected]);
+  // 多选批量删除（仅本端）。
+  const deleteSelected = useCallback(() => {
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    setMsgsByConv((prev) => {
+      const list = (prev[cid] ?? []).filter((m) => !(m.convSeq > 0 && selected.has(m.convSeq)));
+      return { ...prev, [cid]: list };
+    });
+    selected.forEach((s) => seenByConv.current[cid]?.delete(s));
+    exitSelectMode();
+  }, [peer, uid, groupConvId, selected, exitSelectMode]);
 
   // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
   const jumpToSeq = useCallback((seq: number) => {
@@ -616,13 +666,15 @@ export default function App() {
     () => buildMessageActions({
       copy: copyMessage,
       reply: replyMessage,
+      forward: forwardMessage,
+      multiSelect: enterSelectMode,
       recall: recallMessage,
       delete: deleteMessage,
       reportMsg: (m) => void reportMessage(m, "message"),
       reportUser: (m) => void reportMessage(m, "user"),
       comingSoon,
     }),
-    [copyMessage, replyMessage, recallMessage, deleteMessage, reportMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
@@ -1496,14 +1548,19 @@ export default function App() {
                   {i === firstUnreadIdx && (
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
                   )}
-                  <div className={`row ${mine ? "me" : "them"}`}>
+                  <div className={`row ${mine ? "me" : "them"}${selectMode ? " selecting" : ""}`}
+                    onClick={selectMode && m.convSeq > 0 ? () => toggleSelected(m.convSeq) : undefined}>
+                    {selectMode && (
+                      <span className={`sel-check${selected.has(m.convSeq) ? " on" : ""}`}>{selected.has(m.convSeq) ? "✓" : ""}</span>
+                    )}
                     <div className="bubble-line">
                       {mine && m.status === "failed" && (
                         <span className="fail-badge" title={m.note || "发送失败"}>!</span>
                       )}
                       <div className="bubble"
-                        onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
+                        onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                         {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
+                        {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                         {m.replyToConvSeq ? (
                           <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
                             <span className="quote-text">{m.replySnapshot || "原消息"}</span>
@@ -1553,21 +1610,49 @@ export default function App() {
               <button className="reply-cancel" onClick={() => setReplyTo(null)} title="取消引用">✕</button>
             </div>
           )}
-          <footer>
-            <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
-              placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
-              onChange={(e) => onInputChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
-                // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
-                const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
-                if (shouldSend) { e.preventDefault(); send(); }
-              }} />
-            <button onClick={send} disabled={!convId}>发送</button>
-          </footer>
+          {selectMode ? (
+            // 多选态工具栏（M4-3）：批量 转发/删除，替换输入区。
+            <footer className="select-bar">
+              <button className="link-inline" onClick={exitSelectMode}>取消</button>
+              <span className="select-count">已选 {selected.size}</span>
+              <button disabled={selected.size === 0} onClick={forwardSelected}>转发</button>
+              <button className="danger" disabled={selected.size === 0} onClick={deleteSelected}>删除</button>
+            </footer>
+          ) : (
+            <footer>
+              <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
+                placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
+                onChange={(e) => onInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
+                  // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
+                  const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
+                  if (shouldSend) { e.preventDefault(); send(); }
+                }} />
+              <button onClick={send} disabled={!convId}>发送</button>
+            </footer>
+          )}
         </div>
         {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
+
+      {forwarding && (
+        // 转发会话选择器（M4-3）：从会话列表选目标，逐条转发。
+        <div className="modal-mask" onClick={() => setForwarding(null)}>
+          <div className="modal fwd-picker" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">转发到（{forwarding.length} 条）</div>
+            <div className="fwd-list">
+              {conversations.length === 0 && <div className="fwd-empty">暂无会话</div>}
+              {conversations.map((c) => (
+                <button key={c.conv_id} className="fwd-item" onClick={() => doForwardTo(c)}>
+                  {convDisplayLabel(c)}
+                </button>
+              ))}
+            </div>
+            <button className="modal-close" onClick={() => setForwarding(null)}>取消</button>
+          </div>
+        </div>
+      )}
 
       {menu && (
         <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>

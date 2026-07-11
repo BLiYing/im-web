@@ -159,7 +159,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .reedit-btn { background: none; border: none; color: var(--accent, #4caf50); font-size: 12px; cursor: pointer; padding: 0; }
 .reedit-btn:hover { text-decoration: underline; }
 /* 引用回复（M4-2）：气泡内引用条 + 输入框上方引用预览。 */
-.quote-bar { border-left: 3px solid var(--accent, #4caf50); padding: 2px 8px; margin-bottom: 4px; background: rgba(0,0,0,0.05); border-radius: 4px; cursor: pointer; max-width: 100%; }
+.quote-bar { flex-basis: 100%; border-left: 3px solid var(--accent, #4caf50); padding: 2px 8px; margin-bottom: 4px; background: rgba(0,0,0,0.05); border-radius: 4px; cursor: pointer; max-width: 100%; box-sizing: border-box; }
 .quote-text { font-size: 12px; color: var(--text-secondary); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply-compose { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-left: 3px solid var(--accent, #4caf50); background: var(--panel-bg, rgba(0,0,0,0.04)); border-radius: 6px; margin: 0 8px 6px; }
 .reply-compose-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -169,6 +169,20 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 跳转到被引用原消息时的高亮闪烁。 */
 .msg-item.flash > .row > .bubble-line > .bubble, .flash .bubble { animation: quoteflash 1.2s ease; }
 @keyframes quoteflash { 0%,100% { background-color: inherit; } 30% { background-color: rgba(76,175,80,0.35); } }
+/* 转发溯源（M4-3）："转发自 X"小字，气泡顶部。 */
+.forward-from { flex-basis: 100%; font-size: 12px; color: var(--text-secondary); margin-bottom: 2px; }
+/* 多选（M4-3）：行内勾选圈 + 底部批量工具栏。 */
+.row.selecting { cursor: pointer; align-items: center; }
+.sel-check { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--line); margin: 0 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; }
+.sel-check.on { background: var(--accent, #4caf50); border-color: var(--accent, #4caf50); }
+.select-bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.select-bar .select-count { flex: 1; color: var(--text-secondary); font-size: 13px; }
+/* 转发会话选择器。 */
+.fwd-picker { max-height: 70vh; }
+.fwd-list { overflow-y: auto; max-height: 46vh; display: flex; flex-direction: column; margin: 0 calc(-1 * var(--space-4)); }
+.fwd-item { text-align: left; padding: 10px var(--space-4); background: none; border: none; color: var(--text); cursor: pointer; font-size: 15px; }
+.fwd-item:hover { background: var(--hover, rgba(0,0,0,0.05)); }
+.fwd-empty { padding: 16px; color: var(--text-secondary); text-align: center; }
 /* 好友列表里"已拉黑"小标签（拉黑≠解绑：好友仍在列表，带此标记）。 */
 .tag-blocked { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600;
   color: #e5484d; background: rgba(229,72,77,0.12); vertical-align: middle; }
