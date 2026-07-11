@@ -5,7 +5,7 @@ import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
-  Pin, BellOff, CheckCheck,
+  Pin, BellOff, CheckCheck, Pencil,
 } from "lucide-react";
 
 /** 一个菜单项：id 稳定标识、label 文案、icon 图标、danger 红色危险样式、visible 按上下文决定是否显示、run 执行。 */
@@ -43,6 +43,8 @@ export interface MessageHandlers {
   reply: (m: ChatMessage) => void;
   forward: (m: ChatMessage) => void;
   favorite: (m: ChatMessage) => void;
+  edit: (m: ChatMessage) => void;
+  translate: (m: ChatMessage) => void;
   multiSelect: (m: ChatMessage) => void;
   recall: (m: ChatMessage) => void;
   delete: (m: ChatMessage) => void;
@@ -70,8 +72,9 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
     { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.favorite(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
+    { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0, run: (c) => h.multiSelect(c.m) },
-    { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m), run: () => h.comingSoon("翻译") },
+    { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
     { id: "reportMsg", label: "举报消息", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
     { id: "reportUser", label: "举报发送者", icon: Flag, visible: (c) => c.m.from !== c.uid, run: (c) => h.reportUser(c.m) },
     { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.m) },

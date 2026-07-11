@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
 };
 const convHandlers = { markRead: vi.fn(), delete: vi.fn(), comingSoon: vi.fn() };
 
@@ -29,7 +29,7 @@ describe("buildMessageActions", () => {
   it("返回固定顺序的全部 id", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
-      "copy", "reply", "forward", "favorite", "recall",
+      "copy", "reply", "forward", "favorite", "recall", "edit",
       "multiSelect", "translate", "reportMsg", "reportUser", "delete",
     ]);
   });

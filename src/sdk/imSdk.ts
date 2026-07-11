@@ -215,6 +215,12 @@ export class IMClient {
     await this.api(`/api/v1/favorites/${id}`, { method: "DELETE" });
   }
 
+  /** 翻译文本（M4-5）：POST /api/v1/translate → 译文（服务端代理 + 缓存）。 */
+  async translate(text: string, targetLang = "zh"): Promise<string> {
+    const data = await this.api("/api/v1/translate", { method: "POST", body: JSON.stringify({ text, target_lang: targetLang }) });
+    return (data?.translation ?? "") as string;
+  }
+
   /** 举报（AG）：POST /api/v1/reports。targetType=message|user|group。 */
   async report(targetType: "message" | "user" | "group", targetId: string, reason: string, convId = ""): Promise<void> {
     await this.api("/api/v1/reports", {
@@ -290,6 +296,11 @@ export class IMClient {
   /** 撤回自己的消息（M4-1）。发出 msg_op；成功由服务端广播回 msg_op 帧应用，失败（超窗等）回 onMsgOpFailed。 */
   recallMessage(convId: string, targetConvSeq: number): string {
     return this.sendMsgOp(OP.RECALL, convId, targetConvSeq, {});
+  }
+
+  /** 编辑自己的文本消息（M4-5）。成功由服务端广播回 msg_op 帧应用（内容+已编辑标）。 */
+  editMessage(convId: string, targetConvSeq: number, content: string): string {
+    return this.sendMsgOp(OP.EDIT, convId, targetConvSeq, { content });
   }
 
   /** 发一条 msg_op（撤回/编辑/置顶），返回其 client_msg_id（供对账/回滚）。 */

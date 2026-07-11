@@ -48,6 +48,8 @@ export default function App() {
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
   const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
+  const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null); // 正在编辑的消息（M4-5，编辑态）
+  const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
   const [selectMode, setSelectMode] = useState(false); // 多选态
@@ -526,6 +528,12 @@ export default function App() {
     const client = clientRef.current;
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!text || !client || !cid) return;
+    // 编辑态（M4-5）：发 msg_op edit 而非新消息；内容由服务端广播回 onMsgOp 更新。
+    if (editingMsg && editingMsg.convSeq > 0) {
+      client.editMessage(cid, editingMsg.convSeq, text);
+      setEditingMsg(null); setInput("");
+      return;
+    }
     // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（服务端会冻结权威快照给收件方）。
     const rt = replyTo && replyTo.convSeq > 0
       ? { convSeq: replyTo.convSeq, preview: (replyTo.content || "").slice(0, 60) }
@@ -538,7 +546,7 @@ export default function App() {
     });
     setInput("");
     setReplyTo(null);
-  }, [input, peer, groupConvId, uid, appendMsg, replyTo]);
+  }, [input, peer, groupConvId, uid, appendMsg, replyTo, editingMsg]);
 
   // 引用某条消息（M4-2）：进入引用态（输入框上方显示引用条，发送时带上）。
   const replyMessage = useCallback((m: ChatMessage) => {
@@ -657,6 +665,24 @@ export default function App() {
     if (m.convSeq > 0) clientRef.current?.recallMessage(m.convId, m.convSeq);
   }, []);
 
+  // 编辑自己的文本消息（M4-5）：进入编辑态（回填输入框，发送时走 msg_op edit）。
+  const editMessage = useCallback((m: ChatMessage) => {
+    setMenu(null); setReplyTo(null);
+    setEditingMsg(m); setInput(m.content);
+  }, []);
+
+  // 翻译一条消息（M4-5）：调服务端翻译接口，译文挂气泡下方。
+  const translateMessage = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    if (m.convSeq <= 0) return;
+    void (async () => {
+      try {
+        const t = await clientRef.current?.translate(m.content);
+        if (t) setTranslations((prev) => ({ ...prev, [m.convSeq]: t }));
+      } catch (e) { setToast(`翻译失败：${(e as Error).message}`); }
+    })();
+  }, []);
+
   // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
     setMenu(null);
@@ -698,6 +724,8 @@ export default function App() {
       reply: replyMessage,
       forward: forwardMessage,
       favorite: favoriteMessage,
+      edit: editMessage,
+      translate: translateMessage,
       multiSelect: enterSelectMode,
       recall: recallMessage,
       delete: deleteMessage,
@@ -705,7 +733,7 @@ export default function App() {
       reportUser: (m) => void reportMessage(m, "user"),
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
@@ -1599,6 +1627,7 @@ export default function App() {
                         ) : null}
                         <span className="btext">{m.content}</span>
                         <span className="bmeta">
+                          {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
                           {mine ? (
                             m.status === "sending" ? "发送中…"
                               : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
@@ -1609,6 +1638,9 @@ export default function App() {
                         </span>
                       </div>
                     </div>
+                    {m.convSeq > 0 && translations[m.convSeq] && (
+                      <div className="translation"><span>{translations[m.convSeq]}</span></div>
+                    )}
                   </div>
                   {mine && m.status === "failed" && m.note && (
                     <div className="sys-note"><span>{m.note}</span></div>
@@ -1630,6 +1662,16 @@ export default function App() {
           {peerBlocked && peer && (
             // 微信式单向：拉黑者仍可发、对方能收到；这里只给一条非阻断提示 + 解除入口，不禁用输入。
             <div className="block-hint">已将对方加入黑名单（TA 发来的消息会被拒收）<button className="link-inline" onClick={() => void unblock(peer)}>解除拉黑</button></div>
+          )}
+          {editingMsg && (
+            // 编辑态条（M4-5）：输入框上方显示"编辑消息" + 取消（恢复普通发送）。
+            <div className="reply-compose">
+              <div className="reply-compose-text">
+                <span className="reply-who">编辑消息</span>
+                <span className="reply-snippet">{(editingMsg.content || "").slice(0, 80)}</span>
+              </div>
+              <button className="reply-cancel" onClick={() => { setEditingMsg(null); setInput(""); }} title="取消编辑">✕</button>
+            </div>
           )}
           {replyTo && (
             // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消。

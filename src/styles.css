@@ -188,6 +188,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: var(--panel-bg, rgba(0,0,0,0.04)); border-radius: 8px; }
 .fav-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
 .fav-del { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; }
+/* 编辑标记 + 译文（M4-5）。 */
+.edited-tag { color: var(--meta-time); font-size: 11px; }
+.translation { display: flex; margin: 2px 0 4px; }
+.me .translation { justify-content: flex-end; }
+.translation span { max-width: 75%; font-size: 13px; color: var(--text-secondary); background: rgba(0,0,0,0.05); border-radius: 8px; padding: 4px 8px; white-space: pre-wrap; word-break: break-word; }
 /* 好友列表里"已拉黑"小标签（拉黑≠解绑：好友仍在列表，带此标记）。 */
 .tag-blocked { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600;
   color: #e5484d; background: rgba(229,72,77,0.12); vertical-align: middle; }
