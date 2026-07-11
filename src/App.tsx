@@ -992,6 +992,14 @@ export default function App() {
     }
   }, [phase, convId, messages.length, uid, firstUnreadIdx, tailSig]);
 
+  // 图片/视频是异步加载的：贴底 useLayoutEffect 触发时元素高度≈0，加载完成后气泡才撑高，
+  // 而依赖数组里没有值随之改变 → effect 不重跑 → 媒体被挤出视口下方（发图/发视频不贴底，问题2）。
+  // 故媒体加载完成后，若此前处于贴底状态则再贴一次底。图片(onLoad)/视频(onLoadedData)共用此回调。
+  const onMediaLoad = useCallback(() => {
+    const box = msgsRef.current;
+    if (box && wasNearBottomRef.current) box.scrollTop = box.scrollHeight;
+  }, []);
+
   // 可见即读（CHAT_UX §6 完整语义）：扫描在视口内的消息，取最大 conv_seq；超过已滚入位点则节流上报。
   // 同时把"↓N"更新为视口下方仍未读的对端消息数（随滚动递减，滚到底为 0）。
   const markVisibleRead = useCallback(() => {
@@ -1659,9 +1667,9 @@ export default function App() {
                           </div>
                         ) : null}
                         {m.contentType === "image" ? (
-                          <img className="msg-image" src={m.content} alt="图片" onClick={() => setViewerImage(m.content)} />
+                          <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} onClick={() => setViewerImage(m.content)} />
                         ) : m.contentType === "video" ? (
-                          <video className="msg-image" src={m.content} controls />
+                          <video className="msg-image" src={m.content} controls onLoadedData={onMediaLoad} />
                         ) : m.contentType === "file" ? (
                           <a className="msg-file" href={m.content} target="_blank" rel="noreferrer">📎 文件</a>
                         ) : (
