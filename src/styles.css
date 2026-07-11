@@ -158,6 +158,17 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 撤回消息的"重新编辑"链接按钮（微信式，紧随撤回系统行）。 */
 .reedit-btn { background: none; border: none; color: var(--accent, #4caf50); font-size: 12px; cursor: pointer; padding: 0; }
 .reedit-btn:hover { text-decoration: underline; }
+/* 引用回复（M4-2）：气泡内引用条 + 输入框上方引用预览。 */
+.quote-bar { border-left: 3px solid var(--accent, #4caf50); padding: 2px 8px; margin-bottom: 4px; background: rgba(0,0,0,0.05); border-radius: 4px; cursor: pointer; max-width: 100%; }
+.quote-text { font-size: 12px; color: var(--text-secondary); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-compose { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-left: 3px solid var(--accent, #4caf50); background: var(--panel-bg, rgba(0,0,0,0.04)); border-radius: 6px; margin: 0 8px 6px; }
+.reply-compose-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.reply-who { font-size: 12px; color: var(--accent, #4caf50); }
+.reply-snippet { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-cancel { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; }
+/* 跳转到被引用原消息时的高亮闪烁。 */
+.msg-item.flash > .row > .bubble-line > .bubble, .flash .bubble { animation: quoteflash 1.2s ease; }
+@keyframes quoteflash { 0%,100% { background-color: inherit; } 30% { background-color: rgba(76,175,80,0.35); } }
 /* 好友列表里"已拉黑"小标签（拉黑≠解绑：好友仍在列表，带此标记）。 */
 .tag-blocked { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600;
   color: #e5484d; background: rgba(229,72,77,0.12); vertical-align: middle; }

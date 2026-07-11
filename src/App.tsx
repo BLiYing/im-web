@@ -47,6 +47,7 @@ export default function App() {
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
   const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
   const [searchQ, setSearchQ] = useState(""); // 找人搜索框
@@ -521,13 +522,37 @@ export default function App() {
     const client = clientRef.current;
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!text || !client || !cid) return;
-    const clientMsgId = client.sendText(text, peer, cid); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
+    // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（服务端会冻结权威快照给收件方）。
+    const rt = replyTo && replyTo.convSeq > 0
+      ? { convSeq: replyTo.convSeq, preview: (replyTo.content || "").slice(0, 60) }
+      : undefined;
+    const clientMsgId = client.sendText(text, peer, cid, rt); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
     appendMsg(cid, {
       clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
       convSeq: 0, timestamp: Date.now(), status: "sending",
+      replyToConvSeq: rt?.convSeq, replySnapshot: rt?.preview,
     });
     setInput("");
-  }, [input, peer, groupConvId, uid, appendMsg]);
+    setReplyTo(null);
+  }, [input, peer, groupConvId, uid, appendMsg, replyTo]);
+
+  // 引用某条消息（M4-2）：进入引用态（输入框上方显示引用条，发送时带上）。
+  const replyMessage = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    setReplyTo(m);
+  }, []);
+
+  // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
+  const jumpToSeq = useCallback((seq: number) => {
+    const el = msgsRef.current?.querySelector(`[data-seq="${seq}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("flash");
+      window.setTimeout(() => el.classList.remove("flash"), 1200);
+    } else {
+      setToast("原消息不在当前视图");
+    }
+  }, []);
 
   // 本地删除一条消息（仅本端：从内存列表 + 去重集移除，不影响对端）。
   const deleteMessage = useCallback((m: ChatMessage) => {
@@ -590,13 +615,14 @@ export default function App() {
   const messageActions = useMemo<MenuAction<{ m: ChatMessage; uid: string }>[]>(
     () => buildMessageActions({
       copy: copyMessage,
+      reply: replyMessage,
       recall: recallMessage,
       delete: deleteMessage,
       reportMsg: (m) => void reportMessage(m, "message"),
       reportUser: (m) => void reportMessage(m, "user"),
       comingSoon,
     }),
-    [copyMessage, recallMessage, deleteMessage, reportMessage, comingSoon],
+    [copyMessage, replyMessage, recallMessage, deleteMessage, reportMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
@@ -1478,6 +1504,11 @@ export default function App() {
                       <div className="bubble"
                         onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                         {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
+                        {m.replyToConvSeq ? (
+                          <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
+                            <span className="quote-text">{m.replySnapshot || "原消息"}</span>
+                          </div>
+                        ) : null}
                         <span className="btext">{m.content}</span>
                         <span className="bmeta">
                           {mine ? (
@@ -1511,6 +1542,16 @@ export default function App() {
           {peerBlocked && peer && (
             // 微信式单向：拉黑者仍可发、对方能收到；这里只给一条非阻断提示 + 解除入口，不禁用输入。
             <div className="block-hint">已将对方加入黑名单（TA 发来的消息会被拒收）<button className="link-inline" onClick={() => void unblock(peer)}>解除拉黑</button></div>
+          )}
+          {replyTo && (
+            // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消。
+            <div className="reply-compose">
+              <div className="reply-compose-text">
+                <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
+                <span className="reply-snippet">{(replyTo.content || "").slice(0, 80)}</span>
+              </div>
+              <button className="reply-cancel" onClick={() => setReplyTo(null)} title="取消引用">✕</button>
+            </div>
           )}
           <footer>
             <textarea ref={composerRef} value={input} rows={1} disabled={!convId}

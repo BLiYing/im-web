@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
 };
 const convHandlers = { markRead: vi.fn(), delete: vi.fn(), comingSoon: vi.fn() };
 
@@ -62,7 +62,7 @@ describe("buildMessageActions", () => {
     actions.find((a) => a.id === "copy")!.run(ctx);
     expect(msgHandlers.copy).toHaveBeenCalledWith(ctx.m);
     actions.find((a) => a.id === "reply")!.run(ctx);
-    expect(msgHandlers.comingSoon).toHaveBeenCalledWith("引用");
+    expect(msgHandlers.reply).toHaveBeenCalledWith(ctx.m);
   });
 });
 

@@ -28,6 +28,8 @@ interface MsgRecord {
   recalledBy?: string;
   editedAt?: number;
   pinnedAt?: number;
+  replyToConvSeq?: number;
+  replySnapshot?: string;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -61,6 +63,7 @@ export async function saveMessage(owner: string, m: ChatMessage): Promise<void> 
     from: m.from, content: m.content, contentType: m.contentType, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
+    replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot,
   });
 }
 
@@ -148,6 +151,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             convId: r.convId, from: r.from, content: r.content, contentType: r.contentType,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
+            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot,
           },
     );
   } catch {

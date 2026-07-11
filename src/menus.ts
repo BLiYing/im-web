@@ -40,6 +40,7 @@ function canRecall(m: ChatMessage, uid: string): boolean {
 /** 消息菜单的真实处理器集合：copy/delete/report* / markRead 接真实实现，其余统一走 comingSoon。 */
 export interface MessageHandlers {
   copy: (m: ChatMessage) => void;
+  reply: (m: ChatMessage) => void;
   recall: (m: ChatMessage) => void;
   delete: (m: ChatMessage) => void;
   reportMsg: (m: ChatMessage) => void;
@@ -62,7 +63,7 @@ export interface ConversationHandlers {
 export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[] {
   return [
     { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m), run: (c) => h.copy(c.m) },
-    { id: "reply", label: "引用", icon: Reply, visible: () => true, run: () => h.comingSoon("引用") },
+    { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
     { id: "forward", label: "转发", icon: Forward, visible: () => true, run: () => h.comingSoon("转发") },
     { id: "favorite", label: "收藏", icon: Bookmark, visible: () => true, run: () => h.comingSoon("收藏") },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },

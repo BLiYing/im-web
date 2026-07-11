@@ -48,6 +48,14 @@ export interface ChatMessage {
   recalledBy?: string;  // 撤回操作者 uid
   editedAt?: number;    // >0=已编辑（标"已编辑"，M4-5）
   pinnedAt?: number;    // >0=聊天内置顶（M4）
+  replyToConvSeq?: number; // 引用回复的目标 conv_seq（点击跳转，M4-2）
+  replySnapshot?: string;  // 引用目标的降级快照（气泡顶部引用条）
+}
+
+/** 引用回复定位（发送时上行只带 convSeq，preview 为本端即时预览；服务端会冻结权威快照）。 */
+export interface ReplyTo {
+  convSeq: number;
+  preview: string;
 }
 
 /** msg_op 应用到某条消息的补丁（撤回/编辑/置顶）。 */
