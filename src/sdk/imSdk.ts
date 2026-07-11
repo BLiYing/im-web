@@ -55,7 +55,7 @@ export class IMClient {
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
-  private pendingSends = new Map<string, { convId: string; content: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -276,17 +276,36 @@ export class IMClient {
 
   /** 发送文本，返回 client_msg_id。opts.replyTo=引用回复（M4-2）；opts.forwardFrom=转发溯源（M4-3）。 */
   sendText(content: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string }): string {
+    return this.sendContent(content, "text", to, convId, opts);
+  }
+
+  /** 发送富媒体（图片/文件，M4-6）：content=已上传的 URL，contentType=image|video|file。 */
+  sendMedia(url: string, contentType: string, to: string, convId: string): string {
+    return this.sendContent(url, contentType, to, convId);
+  }
+
+  /** 上传图片/文件（M4-6）：multipart → {url, contentType}。 */
+  async uploadFile(file: File): Promise<{ url: string; contentType: string }> {
+    const fd = new FormData();
+    fd.append("file", file);
+    const resp = await fetch("/api/v1/upload", { method: "POST", headers: { Authorization: `Bearer ${this.token}` }, body: fd });
+    const body = await resp.json().catch(() => ({ code: -1 }));
+    if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message || "上传失败"));
+    return { url: body.data.url as string, contentType: body.data.content_type as string };
+  }
+
+  /** 共用发送通道：content + content_type + 可选引用/转发。 */
+  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string }): string {
     const clientMsgId = crypto.randomUUID();
-    // ack 后落库：记住引用定位/快照 + 转发溯源（本端即时预览，重进会话仍在）。
-    this.pendingSends.set(clientMsgId, { convId, content, timestamp: Date.now(),
+    // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源（本端即时预览，重进会话仍在）。
+    this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
       replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom });
-    // 超时无 ack（断网/发不出去）→ 标"发送失败"、清掉待落库（失败的不入库）。
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
       this.handlers.onAck?.(clientMsgId, false, 0);
     }, SEND_TIMEOUT_MS));
-    const data: Record<string, unknown> = { client_msg_id: clientMsgId, conv_id: convId, to, content_type: "text", content };
+    const data: Record<string, unknown> = { client_msg_id: clientMsgId, conv_id: convId, to, content_type: contentType, content };
     if (opts?.replyTo && opts.replyTo.convSeq > 0) { data.reply_to = { conv_seq: opts.replyTo.convSeq }; }
     if (opts?.forwardFrom) { data.forward_from = opts.forwardFrom; }
     this.send({ type: T.SEND_MSG, seq: ++this.seq, data });
@@ -402,7 +421,7 @@ export class IMClient {
         if (pend && d.conv_seq > 0) {
           void localStore.saveMessage(this.uid, {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
-            contentType: "text", convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
+            contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, forwardFrom: pend.forwardFrom,
           });
           this.pendingSends.delete(d.client_msg_id);

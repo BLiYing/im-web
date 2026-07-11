@@ -193,6 +193,14 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .translation { display: flex; margin: 2px 0 4px; }
 .me .translation { justify-content: flex-end; }
 .translation span { max-width: 75%; font-size: 13px; color: var(--text-secondary); background: rgba(0,0,0,0.05); border-radius: 8px; padding: 4px 8px; white-space: pre-wrap; word-break: break-word; }
+/* 富媒体（M4-6）：图片/视频气泡 + 文件链接 + 附件面板 + 大图查看。 */
+.msg-image { max-width: 220px; max-height: 260px; border-radius: 8px; cursor: pointer; display: block; }
+.msg-file { color: var(--accent, #4caf50); text-decoration: none; }
+.attach-btn { font-size: 20px; line-height: 1; background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0 6px; }
+.attach-panel { display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.attach-item { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 14px; }
+.attach-item:hover { background: var(--hover, rgba(0,0,0,0.05)); }
+.image-viewer { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
 /* 好友列表里"已拉黑"小标签（拉黑≠解绑：好友仍在列表，带此标记）。 */
 .tag-blocked { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600;
   color: #e5484d; background: rgba(229,72,77,0.12); vertical-align: middle; }

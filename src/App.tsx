@@ -52,6 +52,8 @@ export default function App() {
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
+  const [attachPanel, setAttachPanel] = useState(false); // 附件面板（图片或视频/文件，M4-6）
+  const [viewerImage, setViewerImage] = useState<string | null>(null); // 图片大图查看（null=关闭）
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
@@ -553,6 +555,33 @@ export default function App() {
     setMenu(null);
     setReplyTo(m);
   }, []);
+
+  // 上传并发送图片/文件（M4-6）：上传 → 发 content_type=image|video|file 消息（content=URL）+ 乐观上屏。
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadAndSend = useCallback(async (file: File) => {
+    const client = clientRef.current;
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    if (!client || !cid) return;
+    try {
+      const { url, contentType } = await client.uploadFile(file);
+      const clientMsgId = client.sendMedia(url, contentType, peer, cid);
+      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, convSeq: 0, timestamp: Date.now(), status: "sending" });
+    } catch (e) { setToast(`发送失败：${(e as Error).message}`); }
+  }, [peer, groupConvId, uid, appendMsg]);
+  // 附件面板项（数据驱动，M4-6）：加入口 = 数组加一行。Web 只图片或视频 / 文件。
+  const attachItems = useMemo(() => [
+    { id: "media", label: "图片或视频", accept: "image/*,video/*" },
+    { id: "file", label: "文件", accept: "*/*" },
+  ], []);
+  const pickFile = useCallback((accept: string) => {
+    setAttachPanel(false);
+    const inp = fileInputRef.current;
+    if (inp) { inp.accept = accept; inp.value = ""; inp.click(); }
+  }, []);
+  const onFilePicked = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) void uploadAndSend(f);
+  }, [uploadAndSend]);
 
   // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
   const favoriteMessage = useCallback((m: ChatMessage) => {
@@ -1101,6 +1130,8 @@ export default function App() {
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）。
   const convDisplayLabel = (c: Conversation) => (c.is_group ? (c.name || "群聊") : convLabel(c));
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
+  const mediaPreview = (ct: string): string | null =>
+    ct === "image" ? "[图片]" : ct === "video" ? "[视频]" : ct === "file" ? "[文件]" : null;
   const convPreview = (c: Conversation): string => {
     if (!c.last_message) return "（无消息）";
     // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
@@ -1108,10 +1139,12 @@ export default function App() {
       const who = c.last_message.from === uid ? "你" : (c.is_group ? (c.last_message.from_nickname || c.last_message.from) : "对方");
       return `${who}撤回了一条消息`;
     }
-    if (!c.is_group) return c.last_message.content;
+    const media = mediaPreview(c.last_message.content_type); // 图片/视频/文件 → [图片] 等
+    const text = media ?? c.last_message.content;
+    if (!c.is_group) return text;
     if (c.last_message.content_type === "system") return c.last_message.content; // 系统消息无发送者前缀
     const who = c.last_message.from === uid ? "我" : (c.last_message.from_nickname || c.last_message.from);
-    return `${who}: ${c.last_message.content}`;
+    return `${who}: ${text}`;
   };
 
   // 群动作统一包装：执行 → 刷新群资料 + 会话列表；失败 alert。
@@ -1625,7 +1658,15 @@ export default function App() {
                             <span className="quote-text">{m.replySnapshot || "原消息"}</span>
                           </div>
                         ) : null}
-                        <span className="btext">{m.content}</span>
+                        {m.contentType === "image" ? (
+                          <img className="msg-image" src={m.content} alt="图片" onClick={() => setViewerImage(m.content)} />
+                        ) : m.contentType === "video" ? (
+                          <video className="msg-image" src={m.content} controls />
+                        ) : m.contentType === "file" ? (
+                          <a className="msg-file" href={m.content} target="_blank" rel="noreferrer">📎 文件</a>
+                        ) : (
+                          <span className="btext">{m.content}</span>
+                        )}
                         <span className="bmeta">
                           {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
                           {mine ? (
@@ -1692,22 +1733,41 @@ export default function App() {
               <button className="danger" disabled={selected.size === 0} onClick={deleteSelected}>删除</button>
             </footer>
           ) : (
-            <footer>
-              <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
-                placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
-                onChange={(e) => onInputChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
-                  // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
-                  const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
-                  if (shouldSend) { e.preventDefault(); send(); }
-                }} />
-              <button onClick={send} disabled={!convId}>发送</button>
-            </footer>
+            <>
+              {attachPanel && convId && (
+                // 附件面板（M4-6，数据驱动）：图片或视频 / 文件。
+                <div className="attach-panel">
+                  {attachItems.map((it) => (
+                    <button key={it.id} className="attach-item" onClick={() => pickFile(it.accept)}>{it.label}</button>
+                  ))}
+                </div>
+              )}
+              <footer>
+                <button className="attach-btn" disabled={!convId} title="附件" onClick={() => setAttachPanel((v) => !v)}>＋</button>
+                <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={onFilePicked} />
+                <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
+                  placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
+                  onChange={(e) => onInputChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
+                    // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
+                    const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
+                    if (shouldSend) { e.preventDefault(); send(); }
+                  }} />
+                <button onClick={send} disabled={!convId}>发送</button>
+              </footer>
+            </>
           )}
         </div>
         {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
+
+      {viewerImage && (
+        // 图片大图查看（M4-6）：点击遮罩关闭。
+        <div className="modal-mask" onClick={() => setViewerImage(null)}>
+          <img className="image-viewer" src={viewerImage} alt="大图" onClick={(e) => e.stopPropagation()} />
+        </div>
+      )}
 
       {favorites && (
         // 收藏列表（M4-4）：内容快照 + 删除；原消息撤回/删除后仍在。
