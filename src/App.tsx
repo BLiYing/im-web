@@ -363,6 +363,10 @@ export default function App() {
     pendingReadRef.current = readSeq;
     clientRef.current?.openConversation(cid, readSeq, latestSeq);
     void refreshGroupInfo(cid); // 群资料：标题成员数 / 气泡昵称回退 / 资料面板
+    // 进会话即清手动"标未读"（IM 通行做法）；多端经 conv_update 同步。
+    if (conv?.marked_unread) {
+      void clientRef.current?.updateConvSettings(cid, { pinned_at: conv.pinned_at ?? 0, muted: !!conv.muted, marked_unread: false }).then(() => refreshConversations()).catch(() => {});
+    }
     void refreshConversations();
   }, [conversations, refreshConversations, refreshGroupInfo]);
 
@@ -673,6 +677,10 @@ export default function App() {
     maxReadReportedRef.current = readSeq;
     pendingReadRef.current = readSeq;
     clientRef.current?.openConversation(cid, readSeq, latestSeq); // 加载锚点窗口，余下双向分页
+    // 进会话即清手动"标未读"（IM 通行做法：打开视为已处理）；多端经 conv_update 同步。
+    if (conv?.marked_unread) {
+      void clientRef.current?.updateConvSettings(cid, { pinned_at: conv.pinned_at ?? 0, muted: !!conv.muted, marked_unread: false }).then(() => refreshConversations()).catch(() => {});
+    }
     void refreshConversations(); // 选会话后刷新列表（更新其他会话 / 排序）
   }, [uid, conversations, refreshConversations]);
 
