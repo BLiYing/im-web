@@ -67,7 +67,7 @@ function AlbumGrid({ members, timeLabel, onOpen, onMenu }: {
                 onClick={() => onOpen(m)}
                 onContextMenu={(e) => onMenu(e, m)}>
                 {m.contentType === "video"
-                  ? <video src={m.content} muted preload="metadata" />
+                  ? (m.posterUrl ? <img src={m.posterUrl} alt="" /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" />)
                   : <img src={m.content} alt="" />}
                 {m.contentType === "video" && <span className="play-badge">▶</span>}
                 {m.status === "sending" && m.convSeq === 0 && <span className="album-tile-dim"><span className="album-spinner" /></span>}
@@ -86,7 +86,7 @@ function AlbumGrid({ members, timeLabel, onOpen, onMenu }: {
 function QuoteThumb({ m }: { m?: ChatMessage }) {
   if (!m || m.recalledAt) return null;
   if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
-  if (m.contentType === "video") return <video className="quote-thumb" src={m.content} muted preload="metadata" />;
+  if (m.contentType === "video") return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
   return null;
 }
 
@@ -187,6 +187,39 @@ function loadSession(): { uid: string; pwd: string } | null {
     const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
     return s && typeof s.uid === "string" && s.uid ? { uid: s.uid, pwd: typeof s.pwd === "string" ? s.pwd : "" } : null;
   } catch { return null; }
+}
+
+/** 从视频文件抓取首帧封面（JPEG File），供上传作视频消息封面（M4+）。
+ *  浏览器解不了码（如 HEVC）或抓帧失败 → 返回 null（消息则无封面，收端回退 <video>）。 */
+function captureVideoPoster(file: File): Promise<File | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    let done = false;
+    const finish = (result: File | null) => { if (done) return; done = true; URL.revokeObjectURL(url); resolve(result); };
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    video.onloadeddata = () => { try { video.currentTime = Math.min(0.1, (video.duration || 0.2) / 2); } catch { finish(null); } };
+    video.onseeked = () => {
+      const w = video.videoWidth, h = video.videoHeight;
+      if (!w || !h) { finish(null); return; }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { finish(null); return; }
+      ctx.drawImage(video, 0, 0, w, h);
+      canvas.toBlob((blob) => finish(blob ? new File([blob], "poster.jpg", { type: "image/jpeg" }) : null), "image/jpeg", 0.8);
+    };
+    video.onerror = () => finish(null); // 解不了码（HEVC 等）
+    window.setTimeout(() => finish(null), 8000); // 兜底超时，避免卡住发送
+  });
+}
+
+/** 视频回退 <video> 的 src：非 blob 时追加 #t=0.1，促使浏览器画出首帧（无 poster 封面时的兜底）。 */
+function videoFrameSrc(url: string): string {
+  return url && !url.startsWith("blob:") ? url + "#t=0.1" : url;
 }
 
 export default function App() {
@@ -747,7 +780,7 @@ export default function App() {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!client || !cid || files.length === 0) return;
     const groupId = files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined;
-    const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f) }));
+    const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined }));
     for (const l of locals) {
       appendMsg(cid, {
         clientMsgId: l.localId, convId: cid, from: uid, content: l.blobUrl,
@@ -755,18 +788,27 @@ export default function App() {
         convSeq: 0, timestamp: Date.now(), status: "sending", groupId,
       });
     }
+    // 视频：先在本地抓首帧 → 立刻用 blob 封面显示（发送端不必等上传就见封面）；抓到的 File 复用做上传。
+    await Promise.all(locals.map(async (l) => {
+      if (!l.f.type.startsWith("video/")) return;
+      const pf = await captureVideoPoster(l.f);
+      if (pf) { l.posterFile = pf; l.posterBlobUrl = URL.createObjectURL(pf); patchMsg(cid, l.localId, { posterUrl: l.posterBlobUrl }); }
+    }));
     for (let i = 0; i < locals.length; i++) {
       const l = locals[i];
       try {
         const { url, contentType } = await client.uploadFile(l.f);
-        const clientMsgId = client.sendMedia(url, contentType, peer, cid, { groupId });
-        patchMsg(cid, l.localId, { clientMsgId, content: url, contentType });
+        // 视频封面：上传本地已抓的首帧图，随消息带 poster URL（收端直显免解码）；上传失败则保留本地 blob 封面不阻塞。
+        let poster: string | undefined;
+        if (l.posterFile) { try { poster = (await client.uploadFile(l.posterFile)).url; } catch { /* 封面上传失败：保留本地 blob 封面 */ } }
+        const clientMsgId = client.sendMedia(url, contentType, peer, cid, { groupId, poster });
+        patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl });
       } catch (e) {
         patchMsg(cid, l.localId, { status: "failed" });
         setToast(`第 ${i + 1} 项发送失败：${(e as Error).message}`);
       }
       // 延迟释放 blob：等重渲染切到服务器 URL 后再回收，避免闪图（失败格保留本地图直至刷新）。
-      window.setTimeout(() => URL.revokeObjectURL(l.blobUrl), 60_000);
+      window.setTimeout(() => { URL.revokeObjectURL(l.blobUrl); if (l.posterBlobUrl) URL.revokeObjectURL(l.posterBlobUrl); }, 60_000);
     }
   }, [peer, groupConvId, uid, appendMsg, patchMsg]);
 
@@ -817,8 +859,13 @@ export default function App() {
     if (!client || !cid) return;
     try {
       const { url, contentType } = await client.uploadFile(file);
-      const clientMsgId = client.sendMedia(url, contentType, peer, cid);
-      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, convSeq: 0, timestamp: Date.now(), status: "sending" });
+      let poster: string | undefined;
+      if (contentType === "video") {
+        const pf = await captureVideoPoster(file);
+        if (pf) { try { poster = (await client.uploadFile(pf)).url; } catch { /* 封面上传失败：不阻塞 */ } }
+      }
+      const clientMsgId = client.sendMedia(url, contentType, peer, cid, poster ? { poster } : undefined);
+      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, convSeq: 0, timestamp: Date.now(), status: "sending", posterUrl: poster });
     } catch (e) { setToast(`发送失败：${(e as Error).message}`); }
   }, [peer, groupConvId, uid, appendMsg]);
 
@@ -2049,7 +2096,9 @@ export default function App() {
                         ) : m.contentType === "video" ? (
                           // 不自动播放：气泡内显首帧 + 播放角标，点击进全屏查看器（镜像 iOS）。
                           <span className="msg-video-wrap" onClick={() => setViewer({ m })}>
-                            <video className="msg-image" src={m.content} preload="metadata" muted onLoadedData={onMediaLoad} />
+                            {m.posterUrl
+                              ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
+                              : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />}
                             <span className="play-badge">▶</span>
                           </span>
                         ) : m.contentType === "chat_record" ? (
@@ -2231,7 +2280,7 @@ export default function App() {
                 .map((mm) => (
                   <div key={mm.clientMsgId} className="gallery-item" onClick={() => setViewer({ m: mm, fromGallery: true })}>
                     {mm.contentType === "video"
-                      ? <><video src={mm.content} preload="metadata" muted /><span className="play-badge">▶</span></>
+                      ? <>{mm.posterUrl ? <img src={mm.posterUrl} alt="" /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted />}<span className="play-badge">▶</span></>
                       : <img src={mm.content} alt="" />}
                   </div>
                 ))}
@@ -2254,7 +2303,7 @@ export default function App() {
                       <img className="fav-thumb" src={f.content} alt="图片" onClick={() => { setFavorites(null); setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
                     ) : f.content_type === "video" ? (
                       <span className="fav-thumb-wrap" onClick={() => { setFavorites(null); setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
-                        <video className="fav-thumb" src={f.content} preload="metadata" muted /><span className="play-badge">▶</span>
+                        <video className="fav-thumb" src={videoFrameSrc(f.content)} preload="metadata" muted /><span className="play-badge">▶</span>
                       </span>
                     ) : f.content_type === "file" ? (
                       <a className="msg-file" href={f.content} download={fileNameFromContent(f.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(f.content)}</a>
@@ -2310,7 +2359,7 @@ export default function App() {
                     <img className="record-item-media" src={it.c} alt="图片" onClick={() => { setRecordView(null); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
                   ) : it.ct === "video" ? (
                     <span className="fav-thumb-wrap" onClick={() => { setRecordView(null); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
-                      <video className="record-item-media" src={it.c} preload="metadata" muted /><span className="play-badge">▶</span>
+                      <video className="record-item-media" src={videoFrameSrc(it.c)} preload="metadata" muted /><span className="play-badge">▶</span>
                     </span>
                   ) : it.ct === "file" ? (
                     <a className="msg-file" href={it.c} download={fileNameFromContent(it.c)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(it.c)}</a>
