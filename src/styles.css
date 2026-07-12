@@ -402,7 +402,14 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 /* ---- 群聊（M3-4）---- */
 /* 群聊发送者昵称：气泡上方独立一行（不在气泡内），主色小字，左缩进对齐气泡文本，与气泡留间距（对齐 iOS / Telegram） */
-.sender-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--accent); margin: 0 0 3px 10px; }
+.sender-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--accent); margin: 0 0 3px 8px; }
+/* 群聊对方消息 Telegram 式布局：左侧头像列 + 昵称/气泡竖排；头像贴末条气泡底，连续同发送者仅末条显示。 */
+.them-wrap { display: flex; align-items: flex-end; gap: 6px; max-width: 100%; }
+.avatar-col { width: 28px; flex-shrink: 0; align-self: flex-end; }       /* 空占位也保留头像列宽，连续消息气泡对齐 */
+.bubble-avatar { width: 28px; height: 28px; font-size: 11px; }
+.them-stack { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+/* 连续段非首条：收紧与上一条的间距，视觉成组。 */
+.msg-item.grouped { padding-top: 0; }
 /* 聊天页群标题按钮（点击看群资料） */
 .chat-title-btn { border: 0; background: none; color: var(--text); font-size: inherit; font-weight: 600; cursor: pointer; padding: 4px 8px; border-radius: var(--radius-card); }
 .chat-title-btn:hover { background: var(--bg); }

@@ -1532,6 +1532,29 @@ export default function App() {
     return (m?.nickname && m.nickname.trim()) || "";
   };
   const senderLabel = (m: ChatMessage): string => m.fromNickname || memberNick(m.convId, m.from) || m.from;
+  // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
+  const senderAvatar = (m: ChatMessage): string | undefined =>
+    groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
+  // 两条消息是否属于同一「连续段」：同发送者、非系统/撤回、同一天（跨天有日期分隔断段）。
+  const sameSenderRun = (a?: ChatMessage, b?: ChatMessage): boolean =>
+    !!a && !!b && a.from === b.from && a.from !== uid &&
+    a.contentType !== "system" && b.contentType !== "system" &&
+    !a.recalledAt && !b.recalledAt && isSameDay(a.timestamp, b.timestamp);
+  // 上/下一「可见消息」（跳过相册零高从行；多选态相册展开为独立行则不跳）——用于连续段首/末判定。
+  const prevVisibleMsg = (list: ChatMessage[], i: number): ChatMessage | undefined => {
+    for (let j = i - 1; j >= 0; j--) {
+      if (!selectMode && isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
+      return list[j];
+    }
+    return undefined;
+  };
+  const nextVisibleMsg = (list: ChatMessage[], i: number): ChatMessage | undefined => {
+    for (let j = i + 1; j < list.length; j++) {
+      if (!selectMode && isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
+      return list[j];
+    }
+    return undefined;
+  };
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）。
   const convDisplayLabel = (c: Conversation) => (c.is_group ? (c.name || "群聊") : convLabel(c));
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
@@ -2015,6 +2038,11 @@ export default function App() {
               const mine = m.from === uid;
               const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
               const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
+              // Telegram 式连续消息分组（群聊对方）：连续同发送者只首条显名、末条显头像；非首条收紧上间距。
+              const grpThem = isGroupChat && !mine;
+              const showSender = grpThem && !sameSenderRun(prevVisibleMsg(messages, i), m);
+              const showAvatar = grpThem && !sameSenderRun(m, nextVisibleMsg(messages, i));
+              const grouped = grpThem && sameSenderRun(prevVisibleMsg(messages, i), m);
               // 系统消息（群邀请/移除/转让/禁言等留痕）：居中灰字，无气泡/勾/菜单。
               if (m.contentType === "system") {
                 return (
@@ -2050,23 +2078,98 @@ export default function App() {
                 if (!isAlbumLeader(messages, i)) return null;
                 const members = albumMembers(messages, m.groupId!);
                 const last = members[members.length - 1];
+                const grid = (
+                  <AlbumGrid members={members}
+                    timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
+                    onOpen={(mm) => { if (mm.convSeq > 0 || mm.status !== "sending") setViewer({ m: mm }); }}
+                    onMenu={(e, mm) => { e.preventDefault(); if (mm.convSeq > 0) setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                );
                 return (
-                  <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
                     {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                     {i === firstUnreadIdx && (
                       <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
                     )}
                     <div className={`row ${mine ? "me" : "them"}`}>
-                      <AlbumGrid members={members}
-                        timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
-                        onOpen={(mm) => { if (mm.convSeq > 0 || mm.status !== "sending") setViewer({ m: mm }); }}
-                        onMenu={(e, mm) => { e.preventDefault(); if (mm.convSeq > 0) setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                      {grpThem ? (
+                        <div className="them-wrap">
+                          <div className="avatar-col">
+                            {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} />}
+                          </div>
+                          <div className="them-stack">
+                            {showSender && <span className="sender-name">{senderLabel(m)}</span>}
+                            {grid}
+                          </div>
+                        </div>
+                      ) : grid}
                     </div>
                   </div>
                 );
               }
+              const bubbleBlock = (
+                <>
+                  <div className="bubble-line">
+                    {mine && m.status === "failed" && (
+                      <span className="fail-badge" title={m.note || "发送失败"}>!</span>
+                    )}
+                    <div className="bubble"
+                      onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
+                      {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
+                      {m.replyToConvSeq ? (
+                        // 引用条：被引用的是图片/视频时内嵌小缩略图（与输入区引用预览一致，用户反馈 #1）。
+                        <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
+                          <QuoteThumb m={messages.find((x) => x.convSeq === m.replyToConvSeq)} />
+                          <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
+                        </div>
+                      ) : null}
+                      {m.contentType === "image" ? (
+                        <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} onClick={() => setViewer({ m })} />
+                      ) : m.contentType === "video" ? (
+                        // 不自动播放：气泡内显首帧 + 播放角标，点击进全屏查看器（镜像 iOS）。
+                        <span className="msg-video-wrap" onClick={() => setViewer({ m })}>
+                          {m.posterUrl
+                            ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
+                            : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />}
+                          <span className="play-badge">▶</span>
+                        </span>
+                      ) : m.contentType === "chat_record" ? (
+                        // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
+                        (() => { const r = parseChatRecord(m.content); return (
+                          <div className="record-card" onClick={() => setRecordView(r)}>
+                            <div className="record-title">{r.t}</div>
+                            <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
+                              <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
+                            ))}</div>
+                            <div className="record-foot">聊天记录</div>
+                          </div>
+                        ); })()
+                      ) : m.contentType === "file" ? (
+                        <a className="msg-file" href={m.content} download={fileNameFromContent(m.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(m.content)}</a>
+                      ) : isUrlText(m.content) ? (
+                        // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
+                        <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
+                      ) : (
+                        <span className="btext">{m.content}</span>
+                      )}
+                      <span className="bmeta">
+                        {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
+                        {mine ? (
+                          m.status === "sending" ? "发送中…"
+                            : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
+                              : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+                        ) : (
+                          formatTime(m.timestamp, timeFormat)
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                  {m.convSeq > 0 && translations[m.convSeq] && (
+                    <div className="translation"><span>{translations[m.convSeq]}</span></div>
+                  )}
+                </>
+              );
               return (
-                <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
                   {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                   {i === firstUnreadIdx && (
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
@@ -2076,65 +2179,18 @@ export default function App() {
                     {selectMode && (
                       <span className={`sel-check${selected.has(m.convSeq) ? " on" : ""}`}>{selected.has(m.convSeq) ? "✓" : ""}</span>
                     )}
-                    {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
-                    <div className="bubble-line">
-                      {mine && m.status === "failed" && (
-                        <span className="fail-badge" title={m.note || "发送失败"}>!</span>
-                      )}
-                      <div className="bubble"
-                        onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
-                        {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
-                        {m.replyToConvSeq ? (
-                          // 引用条：被引用的是图片/视频时内嵌小缩略图（与输入区引用预览一致，用户反馈 #1）。
-                          <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
-                            <QuoteThumb m={messages.find((x) => x.convSeq === m.replyToConvSeq)} />
-                            <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
-                          </div>
-                        ) : null}
-                        {m.contentType === "image" ? (
-                          <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} onClick={() => setViewer({ m })} />
-                        ) : m.contentType === "video" ? (
-                          // 不自动播放：气泡内显首帧 + 播放角标，点击进全屏查看器（镜像 iOS）。
-                          <span className="msg-video-wrap" onClick={() => setViewer({ m })}>
-                            {m.posterUrl
-                              ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
-                              : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />}
-                            <span className="play-badge">▶</span>
-                          </span>
-                        ) : m.contentType === "chat_record" ? (
-                          // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
-                          (() => { const r = parseChatRecord(m.content); return (
-                            <div className="record-card" onClick={() => setRecordView(r)}>
-                              <div className="record-title">{r.t}</div>
-                              <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
-                                <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
-                              ))}</div>
-                              <div className="record-foot">聊天记录</div>
-                            </div>
-                          ); })()
-                        ) : m.contentType === "file" ? (
-                          <a className="msg-file" href={m.content} download={fileNameFromContent(m.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(m.content)}</a>
-                        ) : isUrlText(m.content) ? (
-                          // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
-                          <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
-                        ) : (
-                          <span className="btext">{m.content}</span>
-                        )}
-                        <span className="bmeta">
-                          {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
-                          {mine ? (
-                            m.status === "sending" ? "发送中…"
-                              : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
-                                : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
-                          ) : (
-                            formatTime(m.timestamp, timeFormat)
-                          )}
-                        </span>
+                    {grpThem ? (
+                      // 群聊对方：左侧头像列（连续段末条显头像）+ 昵称（连续段首条）在气泡上方。
+                      <div className="them-wrap">
+                        <div className="avatar-col">
+                          {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} />}
+                        </div>
+                        <div className="them-stack">
+                          {showSender && <span className="sender-name">{senderLabel(m)}</span>}
+                          {bubbleBlock}
+                        </div>
                       </div>
-                    </div>
-                    {m.convSeq > 0 && translations[m.convSeq] && (
-                      <div className="translation"><span>{translations[m.convSeq]}</span></div>
-                    )}
+                    ) : bubbleBlock}
                   </div>
                   {mine && m.status === "failed" && m.note && (
                     <div className="sys-note"><span>{m.note}</span></div>
