@@ -2076,13 +2076,13 @@ export default function App() {
                     {selectMode && (
                       <span className={`sel-check${selected.has(m.convSeq) ? " on" : ""}`}>{selected.has(m.convSeq) ? "✓" : ""}</span>
                     )}
+                    {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
                     <div className="bubble-line">
                       {mine && m.status === "failed" && (
                         <span className="fail-badge" title={m.note || "发送失败"}>!</span>
                       )}
                       <div className="bubble"
                         onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
-                        {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
                         {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                         {m.replyToConvSeq ? (
                           // 引用条：被引用的是图片/视频时内嵌小缩略图（与输入区引用预览一致，用户反馈 #1）。
