@@ -5,7 +5,7 @@ import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
-  Pin, BellOff, CheckCheck, Pencil,
+  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil,
 } from "lucide-react";
 
 /** 一个菜单项：id 稳定标识、label 文案、icon 图标、danger 红色危险样式、visible 按上下文决定是否显示、run 执行。 */
@@ -53,11 +53,13 @@ export interface MessageHandlers {
   comingSoon: (label: string) => void;
 }
 
-/** 会话菜单的真实处理器集合：markRead/delete 接真实实现，其余走 comingSoon。 */
+/** 会话菜单的真实处理器集合（M4.5 全部接后端）：置顶/免打扰切换、标已读/未读、删除会话。 */
 export interface ConversationHandlers {
+  setPinned: (c: Conversation, pinned: boolean) => void;
+  setMuted: (c: Conversation, muted: boolean) => void;
   markRead: (c: Conversation) => void;
+  markUnread: (c: Conversation) => void;
   delete: (c: Conversation) => void;
-  comingSoon: (label: string) => void;
 }
 
 /**
@@ -67,10 +69,12 @@ export interface ConversationHandlers {
  */
 export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[] {
   return [
-    { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m), run: (c) => h.copy(c.m) },
+    // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发）。
+    { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image", run: (c) => h.copy(c.m) },
     { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
     { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
-    { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.favorite(c.m) },
+    // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
+    { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0, run: (c) => h.multiSelect(c.m) },
@@ -82,14 +86,19 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
 }
 
 /**
- * 构建会话右键菜单项（固定顺序）：置顶 / 静音 / 设为已读 / 删除。
- * 设为已读仅在有未读时显示；未接后端的项走 comingSoon。
+ * 构建会话右键菜单项（固定顺序，M4.5 全接后端，与 iOS conversationActionsFor: 对齐）：
+ * 置顶↔取消置顶 / 静音↔取消静音 / 设为已读↔标为未读 / 删除。
+ * 置顶/静音/已读未读是**切换对**：每对按会话当前状态只显示其一（visible 互斥）。危险项「删除」放最后（destructive-last）。
  */
 export function buildConversationActions(h: ConversationHandlers): MenuAction<ConvCtx>[] {
   return [
-    { id: "pin", label: "置顶", icon: Pin, visible: () => true, run: () => h.comingSoon("置顶") },
-    { id: "mute", label: "静音", icon: BellOff, visible: () => true, run: () => h.comingSoon("静音") },
-    { id: "markRead", label: "设为已读", icon: CheckCheck, visible: (c) => c.c.unread > 0, run: (c) => h.markRead(c.c) },
+    { id: "pin", label: "置顶", icon: Pin, visible: (c) => !c.c.pinned_at, run: (c) => h.setPinned(c.c, true) },
+    { id: "unpin", label: "取消置顶", icon: PinOff, visible: (c) => !!c.c.pinned_at, run: (c) => h.setPinned(c.c, false) },
+    { id: "mute", label: "静音", icon: BellOff, visible: (c) => !c.c.muted, run: (c) => h.setMuted(c.c, true) },
+    { id: "unmute", label: "取消静音", icon: Bell, visible: (c) => !!c.c.muted, run: (c) => h.setMuted(c.c, false) },
+    // 已读↔未读：有未读数或被手动标未读 → 「设为已读」；否则（已读态）→ 「标为未读」。
+    { id: "markRead", label: "设为已读", icon: CheckCheck, visible: (c) => c.c.unread > 0 || !!c.c.marked_unread, run: (c) => h.markRead(c.c) },
+    { id: "markUnread", label: "标为未读", icon: Circle, visible: (c) => c.c.unread === 0 && !c.c.marked_unread, run: (c) => h.markUnread(c.c) },
     { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.c) },
   ];
 }

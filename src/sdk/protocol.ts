@@ -15,6 +15,7 @@ export const T = {
   FRIEND: "friend",
   GROUP: "group",
   MSG_OP: "msg_op",
+  CONV_UPDATE: "conv_update",
   ERROR: "error",
 } as const;
 
@@ -51,6 +52,7 @@ export interface ChatMessage {
   replyToConvSeq?: number; // 引用回复的目标 conv_seq（点击跳转，M4-2）
   replySnapshot?: string;  // 引用目标的降级快照（气泡顶部引用条）
   forwardFrom?: string;    // 转发溯源"转发自 X"（M4-3）
+  groupId?: string;        // 相册分组 ID（M4+）：同批多图/视频聚簇渲染宫格；空=普通消息
 }
 
 /** 引用回复定位（发送时上行只带 convSeq，preview 为本端即时预览；服务端会冻结权威快照）。 */
@@ -107,6 +109,20 @@ export interface Conversation {
   unread: number;
   read_seq: number; // 本人已读位点（首条未读 = convSeq > read_seq 的第一条）
   peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表绿✓✓/灰✓）
+  // M4.5 会话级设置（每用户私有；conv_update 帧多端同步）：
+  pinned_at?: number;      // 置顶时间（0/缺省=未置顶；已置顶排在列表顶，越大越靠上）
+  muted?: boolean;         // 免打扰（弱提示不响铃）
+  marked_unread?: boolean; // 手动标为未读（红点，不计数）
+}
+
+/** conv_update 帧负载（下行，M4.5-1）：会话级设置变更的完整状态，多端同步覆盖本地。 */
+export interface ConvUpdate {
+  conv_id: string;
+  action: "settings" | "delete";
+  pinned_at: number;
+  muted: boolean;
+  marked_unread: boolean;
+  cleared_at?: number; // 仅 action=delete 带：删除位点
 }
 
 /** 用户名片（对齐后端 profile.Card；搜索结果不含 phone）。 */

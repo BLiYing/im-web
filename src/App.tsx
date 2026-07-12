@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
+import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -9,7 +10,8 @@ import {
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
-  Image as ImageIcon, UserPlus, LogOut, Info,
+  Image as ImageIcon, UserPlus, LogOut, Info, Pin,
+  Download, LayoutGrid, MoreHorizontal,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -28,10 +30,171 @@ function Avatar({ url, label, cls = "avatar", children }: {
   );
 }
 
+/** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
+const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
+
+/** 服务端冻结的英文媒体快照（[image]/[video]/[file]）本地化为中文（与 iOS IMLocalizeSnippet 对齐）。 */
+const localizeSnippet = (s: string) =>
+  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]" : s === "[file]" ? "[文件]" : s;
+
+/** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。 */
+const replyPreviewOf = (m: ChatMessage): string =>
+  m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
+  : m.contentType === "file" ? "[文件]" : (m.content || "").slice(0, 60);
+
+/** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
+ *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
+function AlbumGrid({ members, timeLabel, onOpen, onMenu }: {
+  members: ChatMessage[];
+  timeLabel: string;
+  onOpen: (m: ChatMessage) => void;
+  onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
+}) {
+  const W = 240, GAP = 2;
+  const pattern = albumRowPattern(members.length);
+  let idx = 0;
+  const rows = pattern.map((cols) => members.slice(idx, (idx += cols)));
+  return (
+    <div className="album-grid" style={{ width: W }}>
+      {rows.map((row, ri) => {
+        const tileW = (W - (row.length - 1) * GAP) / row.length;
+        const tileH = row.length === 1 ? 150 : tileW;
+        return (
+          <div className="album-row" key={ri} style={{ gap: GAP, marginTop: ri === 0 ? 0 : GAP }}>
+            {row.map((m) => (
+              <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className="album-tile"
+                style={{ width: row.length === 1 ? W : tileW, height: tileH }}
+                onClick={() => onOpen(m)}
+                onContextMenu={(e) => onMenu(e, m)}>
+                {m.contentType === "video"
+                  ? <video src={m.content} muted preload="metadata" />
+                  : <img src={m.content} alt="" />}
+                {m.contentType === "video" && <span className="play-badge">▶</span>}
+                {m.status === "sending" && m.convSeq === 0 && <span className="album-tile-dim"><span className="album-spinner" /></span>}
+                {m.status === "failed" && <span className="album-tile-dim"><span className="album-fail">!</span></span>}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+      <span className="album-meta">{timeLabel}</span>
+    </div>
+  );
+}
+
+/** 引用条内的媒体小缩略图（图片 <img> / 视频首帧 <video>），无媒体返回 null。 */
+function QuoteThumb({ m }: { m?: ChatMessage }) {
+  if (!m || m.recalledAt) return null;
+  if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
+  if (m.contentType === "video") return <video className="quote-thumb" src={m.content} muted preload="metadata" />;
+  return null;
+}
+
+/** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题, items=[{n发送者, ct类型, c内容/URL}]。 */
+type RecordItem = { n: string; ct: string; c: string };
+type ChatRecord = { t: string; items: RecordItem[] };
+function parseChatRecord(content: string): ChatRecord {
+  try {
+    const o = JSON.parse(content);
+    if (o && typeof o === "object") return { t: typeof o.t === "string" ? o.t : "聊天记录", items: Array.isArray(o.items) ? o.items : [] };
+  } catch { /* 非法 JSON */ }
+  return { t: "聊天记录", items: [] };
+}
+const recordItemPreview = (it: RecordItem): string =>
+  it.ct === "image" ? "[图片]" : it.ct === "video" ? "[视频]" : it.ct === "file" ? "[文件]" : it.c;
+
+/** 从文件消息 URL 取原始显示名：存储名 <随机>__<原名>.<ext> → 取 "__" 之后并解码（与后端/iOS 对齐）。 */
+function fileNameFromContent(content: string): string {
+  const last = content.split("/").pop() || content;
+  let decoded = last;
+  try { decoded = decodeURIComponent(last); } catch { /* 保留原串 */ }
+  const i = decoded.indexOf("__");
+  return i >= 0 && i + 2 < decoded.length ? decoded.slice(i + 2) : decoded;
+}
+
+/** 把图片写入系统剪贴板（浏览器剪贴板图片仅稳定支持 image/png → 用 canvas 转 PNG）。失败抛错由调用方回退复制链接。 */
+async function copyImageToClipboard(url: string): Promise<void> {
+  const blob = await (await fetch(url)).blob();
+  const bmp = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bmp.width; canvas.height = bmp.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  ctx.drawImage(bmp, 0, 0);
+  const png: Blob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
+type LinkPreview = { url: string; title?: string; description?: string; image?: string; site_name?: string };
+const linkPreviewCache = new Map<string, LinkPreview | null>(); // 进程内缓存（含负缓存 null=抓取失败）
+
+/** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。 */
+function LinkCard({ url, fetchPreview, onMediaLoad }: { url: string; fetchPreview: (u: string) => Promise<LinkPreview>; onMediaLoad?: () => void }) {
+  const [p, setP] = useState<LinkPreview | null | undefined>(linkPreviewCache.get(url));
+  useEffect(() => {
+    if (linkPreviewCache.has(url)) { setP(linkPreviewCache.get(url)); return; }
+    let alive = true;
+    fetchPreview(url)
+      .then((res) => { linkPreviewCache.set(url, res); if (alive) setP(res); })
+      .catch(() => { linkPreviewCache.set(url, null); if (alive) setP(null); });
+    return () => { alive = false; };
+  }, [url, fetchPreview]);
+  let host = ""; try { host = new URL(url).hostname; } catch { /* */ }
+  const hasCard = !!(p && (p.title || p.image));
+  return (
+    <span className="url-msg">
+      <a className="btext msg-link" href={url} target="_blank" rel="noreferrer">{url}</a>
+      {hasCard && (
+        <a className="link-card" href={url} target="_blank" rel="noreferrer">
+          {p!.image && <img className="link-card-img" src={p!.image} alt="" onLoad={onMediaLoad} />}
+          <div className="link-card-body">
+            <div className="link-card-title">{p!.title || url}</div>
+            {p!.description && <div className="link-card-desc">{p!.description}</div>}
+            <div className="link-card-site">{p!.site_name || host}</div>
+          </div>
+        </a>
+      )}
+    </span>
+  );
+}
+
+/** 可复用的锚定弹出菜单：以 (x,y) 为锚点，若超出视口右/下边界则自动向左/上翻转（右键消息/会话菜单共用）。 */
+function AnchoredMenu({ x, y, className, children }: { x: number; y: number; className?: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const margin = 8;
+    let left = x, top = y;
+    if (left + r.width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - r.width - margin);
+    if (top + r.height > window.innerHeight - margin) top = Math.max(margin, y - r.height); // 下方放不下 → 上翻
+    setPos({ left, top });
+  }, [x, y]);
+  return (
+    <div ref={ref} className={className} style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
+      {children}
+    </div>
+  );
+}
+
+/** 保持登录（与 iOS IMSessionStore 一致的 dev 骨架）：登录成功落 localStorage，刷新后静默重登。
+ *  存凭据而非 token——token 24h 过期且断线重连本就要用密码重新换 token；生产应换更安全的方案。 */
+const SESSION_KEY = "im.session";
+function loadSession(): { uid: string; pwd: string } | null {
+  try {
+    const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    return s && typeof s.uid === "string" && s.uid ? { uid: s.uid, pwd: typeof s.pwd === "string" ? s.pwd : "" } : null;
+  } catch { return null; }
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
-  const [uid, setUid] = useState("1001");
+  const [uid, setUid] = useState(() => loadSession()?.uid || "1001");
   const [password, setPassword] = useState(""); // 登录密码（空=走开发期免密）
+  const restoreRef = useRef<{ uid: string; pwd: string } | null>(loadSession()); // 待静默重登的已存会话
+  const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
   const [authErr, setAuthErr] = useState(""); // 登录/注册错误文案
   const [state, setState] = useState<ConnState>("disconnected");
@@ -51,9 +214,14 @@ export default function App() {
   const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null); // 正在编辑的消息（M4-5，编辑态）
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
+  const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
+  const [recordView, setRecordView] = useState<ChatRecord | null>(null); // 合并转发详情弹窗
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
   const [attachPanel, setAttachPanel] = useState(false); // 附件面板（图片或视频/文件，M4-6）
-  const [viewerImage, setViewerImage] = useState<string | null>(null); // 图片大图查看（null=关闭）
+  // 媒体查看器（镜像 iOS）：图片/视频全屏 + 下载/媒体库/更多；fromGallery=从媒体库进入（不再显示媒体库按钮）。
+  const [viewer, setViewer] = useState<{ m: ChatMessage; fromGallery?: boolean } | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false); // 会话媒体库（蒙层网格）
+  const [viewerMore, setViewerMore] = useState(false);   // 查看器「更多」浮层（hover 显示）
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
@@ -412,6 +580,8 @@ export default function App() {
       },
       // 我发起的操作被拒（如撤回超时 300008）→ toast 提示（不改消息本身）。
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
+      // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
+      onConvUpdate: () => { void refreshConversations(); },
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
       onAuthError: (msg) => {
@@ -442,9 +612,20 @@ export default function App() {
     client.syncTracked(); // 从各会话本地/latest 基线补离线期间的新消息（持久化位点续传）
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
     setAuthBusy(false);
     setPhase("app");
   }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends, loadMyInfo, refreshGroupInfo]);
+
+  // 静默恢复登录（Web #4）：挂载后若有已存会话 → 直接用存储凭据重登（成功直达主界面；
+  // 失败回登录页但不清凭据——网络临时不通时下次刷新仍能自动重登，对齐 iOS）。
+  useEffect(() => {
+    const r = restoreRef.current;
+    if (!r || phase !== "login") return;
+    restoreRef.current = null;
+    void enterApp(r.pwd).finally(() => setRestoring(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
@@ -496,6 +677,7 @@ export default function App() {
   }, [uid, conversations, refreshConversations]);
 
   const logout = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY); // 显式退出/鉴权失效才清会话；网络失败不清（下次刷新仍自动重登）
     clientRef.current?.disconnect();
     clientRef.current = null;
     seenByConv.current = {};
@@ -525,20 +707,83 @@ export default function App() {
     void refreshConversations();
   }, [refreshConversations]);
 
+  // 粘贴图片（Web #2）：Ctrl/Cmd+V 粘贴剪贴板中的图片 → 输入区上方预览 → 发送时作为图片上传。
+  const [pastedImages, setPastedImages] = useState<{ file: File; url: string }[]>([]);
+  const addPastedImages = useCallback((files: File[]) => {
+    if (files.length) setPastedImages((prev) => [...prev, ...files.map((f) => ({ file: f, url: URL.createObjectURL(f) }))]);
+  }, []);
+  const removePastedImage = useCallback((idx: number) => {
+    setPastedImages((prev) => { const nx = prev.slice(); const [rm] = nx.splice(idx, 1); if (rm) URL.revokeObjectURL(rm.url); return nx; });
+  }, []);
+  const onComposerPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const imgs = Array.from(e.clipboardData?.items ?? [])
+      .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => !!f);
+    if (imgs.length) { e.preventDefault(); addPastedImages(imgs); }
+  }, [addPastedImages]);
+
+  // 按 clientMsgId 就地打补丁（相册批量发送：本地占位 → 上传完成换服务器 URL/真 ID）。
+  const patchMsg = useCallback((cid: string, clientMsgId: string, patch: Partial<ChatMessage>) => {
+    setMsgsByConv((prev) => {
+      const list = prev[cid];
+      if (!list) return prev;
+      return { ...prev, [cid]: list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, ...patch } : m)) };
+    });
+  }, []);
+
+  // 相册批量发送（M4+）：**选完秒上屏**——每张先用本地 blob URL 占位（≥2 张共享 group_id → 宫格聚簇），
+  // 逐张上传后原地替换为服务器 URL 并走 socket 发送（带 group_id）；单张失败标该格不阻塞后续。
+  const sendMediaBatch = useCallback(async (files: File[]) => {
+    const client = clientRef.current;
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    if (!client || !cid || files.length === 0) return;
+    const groupId = files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined;
+    const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f) }));
+    for (const l of locals) {
+      appendMsg(cid, {
+        clientMsgId: l.localId, convId: cid, from: uid, content: l.blobUrl,
+        contentType: l.f.type.startsWith("video/") ? "video" : "image",
+        convSeq: 0, timestamp: Date.now(), status: "sending", groupId,
+      });
+    }
+    for (let i = 0; i < locals.length; i++) {
+      const l = locals[i];
+      try {
+        const { url, contentType } = await client.uploadFile(l.f);
+        const clientMsgId = client.sendMedia(url, contentType, peer, cid, { groupId });
+        patchMsg(cid, l.localId, { clientMsgId, content: url, contentType });
+      } catch (e) {
+        patchMsg(cid, l.localId, { status: "failed" });
+        setToast(`第 ${i + 1} 项发送失败：${(e as Error).message}`);
+      }
+      // 延迟释放 blob：等重渲染切到服务器 URL 后再回收，避免闪图（失败格保留本地图直至刷新）。
+      window.setTimeout(() => URL.revokeObjectURL(l.blobUrl), 60_000);
+    }
+  }, [peer, groupConvId, uid, appendMsg, patchMsg]);
+
   const send = useCallback(() => {
     const text = input.trim();
     const client = clientRef.current;
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
-    if (!text || !client || !cid) return;
+    if (!client || !cid) return;
+    // 先发已粘贴的图片（Web #2）：走相册批量通道（≥2 张聚簇成宫格，秒上屏 + 逐张上传）。
+    if (pastedImages.length) {
+      const imgs = pastedImages;
+      setPastedImages([]);
+      void sendMediaBatch(imgs.map((pi) => pi.file));
+      for (const pi of imgs) { window.setTimeout(() => URL.revokeObjectURL(pi.url), 60_000); }
+    }
+    if (!text) return;
     // 编辑态（M4-5）：发 msg_op edit 而非新消息；内容由服务端广播回 onMsgOp 更新。
     if (editingMsg && editingMsg.convSeq > 0) {
       client.editMessage(cid, editingMsg.convSeq, text);
       setEditingMsg(null); setInput("");
       return;
     }
-    // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（服务端会冻结权威快照给收件方）。
+    // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（媒体→[图片]等；服务端会冻结权威快照给收件方）。
     const rt = replyTo && replyTo.convSeq > 0
-      ? { convSeq: replyTo.convSeq, preview: (replyTo.content || "").slice(0, 60) }
+      ? { convSeq: replyTo.convSeq, preview: replyPreviewOf(replyTo) }
       : undefined;
     const clientMsgId = client.sendText(text, peer, cid, rt ? { replyTo: rt } : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
     appendMsg(cid, {
@@ -548,7 +793,7 @@ export default function App() {
     });
     setInput("");
     setReplyTo(null);
-  }, [input, peer, groupConvId, uid, appendMsg, replyTo, editingMsg]);
+  }, [input, peer, groupConvId, uid, appendMsg, replyTo, editingMsg, pastedImages, sendMediaBatch]);
 
   // 引用某条消息（M4-2）：进入引用态（输入框上方显示引用条，发送时带上）。
   const replyMessage = useCallback((m: ChatMessage) => {
@@ -568,6 +813,7 @@ export default function App() {
       appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, convSeq: 0, timestamp: Date.now(), status: "sending" });
     } catch (e) { setToast(`发送失败：${(e as Error).message}`); }
   }, [peer, groupConvId, uid, appendMsg]);
+
   // 附件面板项（数据驱动，M4-6）：加入口 = 数组加一行。Web 只图片或视频 / 文件。
   const attachItems = useMemo(() => [
     { id: "media", label: "图片或视频", accept: "image/*,video/*" },
@@ -576,12 +822,15 @@ export default function App() {
   const pickFile = useCallback((accept: string) => {
     setAttachPanel(false);
     const inp = fileInputRef.current;
-    if (inp) { inp.accept = accept; inp.value = ""; inp.click(); }
+    if (inp) { inp.accept = accept; inp.multiple = accept !== "*/*"; inp.value = ""; inp.click(); } // 图片/视频可多选（相册）
   }, []);
   const onFilePicked = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) void uploadAndSend(f);
-  }, [uploadAndSend]);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    const allMedia = files.every((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (allMedia) { void sendMediaBatch(files); } // 多张媒体 → 相册宫格（M4+）
+    else { for (const f of files) void uploadAndSend(f); }
+  }, [uploadAndSend, sendMediaBatch]);
 
   // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
   const favoriteMessage = useCallback((m: ChatMessage) => {
@@ -613,7 +862,13 @@ export default function App() {
   }, []);
 
   // 转发（M4-3）：打开会话选择器，选目标后逐条转发（带 forward_from 溯源）。
-  const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwarding([m]); }, []);
+  // 链接富预览抓取（供 LinkCard；稳定引用避免重复请求）。
+  const fetchLinkPreview = useCallback(async (url: string): Promise<LinkPreview> => {
+    const c = clientRef.current;
+    if (!c) throw new Error("未连接");
+    return c.linkPreview(url);
+  }, []);
+  const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwardMode("each"); setForwarding([m]); }, []);
   // 进入多选态（M4-3）：预选当前消息。
   const enterSelectMode = useCallback((m: ChatMessage) => {
     setMenu(null); setSelectMode(true);
@@ -623,30 +878,47 @@ export default function App() {
   const toggleSelected = useCallback((seq: number) => {
     setSelected((prev) => { const n = new Set(prev); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
   }, []);
-  // 执行转发：把 forwarding 里的消息逐条发到 target 会话（forward_from 保留原始出处）。
+  // 执行转发：逐条（保留各自类型）或合并（打包 chat_record 一条）发到 target 会话。
   const doForwardTo = useCallback((target: Conversation) => {
     const client = clientRef.current;
     const msgs = forwarding;
     if (!client || !msgs) return;
-    for (const m of msgs) {
-      if (!m.content || m.recalledAt) continue;
-      const origin = m.forwardFrom || m.fromNickname || m.from; // 转发链保留最初作者
-      const clientMsgId = client.sendText(m.content, target.is_group ? "" : target.peer, target.conv_id, { forwardFrom: origin });
-      // 乐观上屏到目标会话（转发到当前会话时立即可见；ack 后转 sent）。
-      appendMsg(target.conv_id, {
-        clientMsgId, convId: target.conv_id, from: uid, content: m.content, contentType: "text",
-        convSeq: 0, timestamp: Date.now(), status: "sending", forwardFrom: origin,
-      });
+    const to = target.is_group ? "" : target.peer;
+    // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
+    const nameOf = (m: ChatMessage) => (m.from === uid ? uid : (m.fromNickname || groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.nickname || m.from));
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+
+    if (forwardMode === "merged" && msgs.length > 0) {
+      const items: RecordItem[] = msgs
+        .filter((m) => m.content && !m.recalledAt && m.contentType !== "system")
+        .map((m) => ({ n: nameOf(m), ct: m.contentType || "text", c: m.content }));
+      const names = new Set(items.map((i) => i.n));
+      const title = names.size <= 1 ? `${[...names][0] || "聊天"} 的聊天记录` : "群聊的聊天记录";
+      const json = JSON.stringify({ t: title, items });
+      const clientMsgId = client.sendMedia(json, "chat_record", to, target.conv_id);
+      pushOptimistic(clientMsgId, json, "chat_record");
+    } else {
+      for (const m of msgs) {
+        if (!m.content || m.recalledAt) continue;
+        const origin = m.forwardFrom || m.fromNickname || m.from; // 转发链保留最初作者
+        const ct = m.contentType || "text";
+        // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
+        const clientMsgId = ct === "text"
+          ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
+          : client.sendMedia(m.content, ct, to, target.conv_id, { forwardFrom: origin });
+        pushOptimistic(clientMsgId, m.content, ct, origin);
+      }
     }
     setForwarding(null);
     exitSelectMode();
     setToast(`已转发到 ${target.is_group ? (target.name || "群聊") : (target.peer_remark || target.peer_nickname || target.peer)}`);
-  }, [forwarding, exitSelectMode, appendMsg, uid]);
+  }, [forwarding, forwardMode, groupInfos, exitSelectMode, appendMsg, uid]);
   // 多选批量转发：收集选中的消息，打开选择器。
   const forwardSelected = useCallback(() => {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     const list = (msgsByConv[cid] ?? []).filter((m) => m.convSeq > 0 && selected.has(m.convSeq) && !m.recalledAt);
-    if (list.length > 0) setForwarding(list);
+    if (list.length > 0) { setForwardMode("each"); setForwarding(list); }
   }, [msgsByConv, peer, uid, groupConvId, selected]);
   // 多选批量删除（仅本端）。
   const deleteSelected = useCallback(() => {
@@ -684,8 +956,14 @@ export default function App() {
   }, []);
 
   const copyMessage = useCallback((m: ChatMessage) => {
-    void navigator.clipboard?.writeText(m.content);
     setMenu(null);
+    // 图片：复制真实图片字节（可粘贴回输入框直接发图）；失败或非图片：复制文本/URL。
+    if (m.contentType === "image") {
+      copyImageToClipboard(m.content).then(() => setToast("已复制图片"))
+        .catch(() => { void navigator.clipboard?.writeText(m.content); setToast("已复制链接"); });
+      return;
+    }
+    void navigator.clipboard?.writeText(m.content);
   }, []);
 
   // 撤回自己的消息（M4-1）：发 msg_op；成功由服务端广播回 msg_op 帧应用（onMsgOp），失败（超窗）toast。
@@ -739,12 +1017,64 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // 会话"设为已读"：把本会话已读位点推到最新，再刷新左侧列表（红点清零）。
+  // 会话"设为已读"：推进已读位点（清未读数）+ 清除手动"标未读"标记，再刷新列表。
   const markReadConv = useCallback((c: Conversation) => {
-    clientRef.current?.markRead(c.conv_id, c.latest_conv_seq);
     setConvMenu(null);
-    void refreshConversations();
+    void (async () => {
+      try {
+        if (c.unread > 0) clientRef.current?.markRead(c.conv_id, c.latest_conv_seq);
+        if (c.marked_unread) {
+          await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted: !!c.muted, marked_unread: false });
+        }
+        await refreshConversations();
+      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+    })();
   }, [refreshConversations]);
+
+  // 会话"标为未读"：手动置红点（不改已读位点，不计数）。
+  const markUnreadConv = useCallback((c: Conversation) => {
+    setConvMenu(null);
+    void (async () => {
+      try {
+        await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted: !!c.muted, marked_unread: true });
+        await refreshConversations();
+      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+    })();
+  }, [refreshConversations]);
+
+  // 会话置顶/取消置顶：pinned_at=现在/0（后端据此把置顶会话排在列表顶）。
+  const setConvPinned = useCallback((c: Conversation, pinned: boolean) => {
+    setConvMenu(null);
+    void (async () => {
+      try {
+        await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: pinned ? Date.now() : 0, muted: !!c.muted, marked_unread: !!c.marked_unread });
+        await refreshConversations();
+      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+    })();
+  }, [refreshConversations]);
+
+  // 会话免打扰/取消：muted 切换（弱提示，不改红点/未读）。
+  const setConvMuted = useCallback((c: Conversation, muted: boolean) => {
+    setConvMenu(null);
+    void (async () => {
+      try {
+        await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted, marked_unread: !!c.marked_unread });
+        await refreshConversations();
+      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+    })();
+  }, [refreshConversations]);
+
+  // 删除会话（仅本人，后端记 cleared_at 不删消息）：若删的是当前打开会话则退出，否则刷新列表。
+  const deleteConv = useCallback((c: Conversation) => {
+    setConvMenu(null);
+    void (async () => {
+      try {
+        await clientRef.current?.deleteConversation(c.conv_id);
+        if (currentConvRef.current === c.conv_id) deselect(); // deselect 内部会 refreshConversations
+        else await refreshConversations();
+      } catch (e) { setToast(`删除失败：${(e as Error).message}`); }
+    })();
+  }, [refreshConversations, deselect]);
 
   // 消息菜单动作（数据驱动）：copy/delete/report* 接真实实现，其余 comingSoon。useMemo 避免每次渲染重建。
   const messageActions = useMemo<MenuAction<{ m: ChatMessage; uid: string }>[]>(
@@ -765,14 +1095,16 @@ export default function App() {
     [copyMessage, replyMessage, forwardMessage, favoriteMessage, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
   );
 
-  // 会话菜单动作（数据驱动）：markRead/delete 接真实实现（删除暂走 comingSoon），其余 comingSoon。
+  // 会话菜单动作（数据驱动，M4.5 全接后端）：置顶/免打扰切换、标已读/未读、删除会话。
   const conversationActions = useMemo<MenuAction<{ c: Conversation }>[]>(
     () => buildConversationActions({
+      setPinned: setConvPinned,
+      setMuted: setConvMuted,
       markRead: markReadConv,
-      delete: (c) => comingSoon(`删除会话 ${c.peer}`),
-      comingSoon,
+      markUnread: markUnreadConv,
+      delete: deleteConv,
     }),
-    [markReadConv, comingSoon],
+    [setConvPinned, setConvMuted, markReadConv, markUnreadConv, deleteConv],
   );
 
   // 菜单打开时：点空白/滚动/Esc 关闭。
@@ -1084,6 +1416,15 @@ export default function App() {
 
   // ---- 登录 ----
   if (phase === "login") {
+    if (restoring) {
+      // 恢复登录过渡态（Web #4）：有已存会话时不闪登录表单，静默重登成功直达主界面。
+      return (
+        <div className="login">
+          <h1>IM Web</h1>
+          <p className="hint">正在恢复登录（{uid}）…</p>
+        </div>
+      );
+    }
     return (
       <div className="login">
         <h1>IM Web 登录</h1>
@@ -1122,6 +1463,7 @@ export default function App() {
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
   const peerConv = conversations.find((c) => c.peer === peer);
   const peerLabel = peerConv ? convLabel(peerConv) : peer;
+  const groupConv = conversations.find((c) => c.conv_id === groupConvId); // 当前群会话（供头部菜单静音/删除，M4.5）
 
   // ---- 群聊派生 + 动作（早退 return 之后：全部普通函数，禁用 Hook）----
   const isGroupChat = !!groupConvId;
@@ -1139,7 +1481,7 @@ export default function App() {
   const convDisplayLabel = (c: Conversation) => (c.is_group ? (c.name || "群聊") : convLabel(c));
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
   const mediaPreview = (ct: string): string | null =>
-    ct === "image" ? "[图片]" : ct === "video" ? "[视频]" : ct === "file" ? "[文件]" : null;
+    ct === "image" ? "[图片]" : ct === "video" ? "[视频]" : ct === "file" ? "[文件]" : ct === "chat_record" ? "[聊天记录]" : null;
   const convPreview = (c: Conversation): string => {
     if (!c.last_message) return "（无消息）";
     // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
@@ -1335,7 +1677,7 @@ export default function App() {
         <div className="convlist">
           {conversations.length === 0 && <div className="empty">还没有会话，去「通讯录」找人发起一个吧</div>}
           {conversations.map((c) => (
-            <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""}`}
+            <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""}`}
               onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
               onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
               <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)}>
@@ -1343,7 +1685,11 @@ export default function App() {
               </Avatar>
               <div className="convbody">
                 <div className="convtop">
-                  <span className="convpeer">{convDisplayLabel(c)}</span>
+                  <span className="convpeer">
+                    {c.pinned_at ? <Pin size={12} className="conv-pin" /> : null}
+                    {convDisplayLabel(c)}
+                    {c.muted ? <BellOff size={12} className="conv-mute" /> : null}
+                  </span>
                   <span className="convtime">
                     {!c.is_group && c.last_message?.from === uid && (
                       <span className={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "convck read" : "convck"}>
@@ -1355,7 +1701,9 @@ export default function App() {
                 </div>
                 <div className="convlast">{convPreview(c)}</div>
               </div>
-              {c.unread > 0 && <span className="badge">{c.unread > 99 ? "99+" : c.unread}</span>}
+              {c.unread > 0
+                ? <span className={`badge ${c.muted ? "muted" : ""}`}>{c.unread > 99 ? "99+" : c.unread}</span>
+                : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label="未读" /> : null}
             </div>
           ))}
         </div>
@@ -1586,15 +1934,15 @@ export default function App() {
                       {(isGroupChat ? [
                         { id: "info", label: "群资料", icon: Info, run: () => openGroupPanel(groupConvId) },
                         { id: "invite", label: "邀请成员", icon: UserPlus, run: () => setInviteDraft({ convId: groupConvId, selected: [] }) },
-                        { id: "mute", label: "静音", icon: BellOff, run: () => comingSoon("静音") },
+                        { id: "mute", label: groupConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (groupConv) setConvMuted(groupConv, !groupConv.muted); } },
                         { id: "leave", label: "退出群聊", icon: LogOut, danger: true, run: () => void doLeaveGroup(groupConvId) },
                       ] : [
                         { id: "edit", label: "编辑联系人", icon: SquarePen, run: () => setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
                         { id: "call", label: "视频通话", icon: Video, run: () => comingSoon("视频通话") },
-                        { id: "mute", label: "静音", icon: BellOff, run: () => comingSoon("静音") },
+                        { id: "mute", label: peerConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (peerConv) setConvMuted(peerConv, !peerConv.muted); } },
                         { id: "select", label: "选择消息", icon: CheckSquare, run: () => comingSoon("选择消息") },
                         { id: "block", label: "屏蔽用户", icon: Ban, run: () => comingSoon("屏蔽用户") },
-                        { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => comingSoon("删除会话") },
+                        { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => { if (peerConv) deleteConv(peerConv); } },
                       ]).map((r) => (
                         <button key={r.id} className={`menu-card-row${"danger" in r && r.danger ? " danger" : ""}`}
                           onClick={() => { setChatMenu(false); r.run(); }}>
@@ -1642,6 +1990,26 @@ export default function App() {
                   </div>
                 );
               }
+              // 相册宫格（M4+）：同 group_id 聚簇——主行渲染整个宫格，从行跳过；多选态展开为独立行（逐条可勾选）。
+              if (!selectMode && isAlbumMember(m)) {
+                if (!isAlbumLeader(messages, i)) return null;
+                const members = albumMembers(messages, m.groupId!);
+                const last = members[members.length - 1];
+                return (
+                  <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                    {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
+                    {i === firstUnreadIdx && (
+                      <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                    )}
+                    <div className={`row ${mine ? "me" : "them"}`}>
+                      <AlbumGrid members={members}
+                        timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
+                        onOpen={(mm) => { if (mm.convSeq > 0 || mm.status !== "sending") setViewer({ m: mm }); }}
+                        onMenu={(e, mm) => { e.preventDefault(); if (mm.convSeq > 0) setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
                   {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
@@ -1662,16 +2030,36 @@ export default function App() {
                         {isGroupChat && !mine && <span className="sender-name">{senderLabel(m)}</span>}
                         {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                         {m.replyToConvSeq ? (
+                          // 引用条：被引用的是图片/视频时内嵌小缩略图（与输入区引用预览一致，用户反馈 #1）。
                           <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
-                            <span className="quote-text">{m.replySnapshot || "原消息"}</span>
+                            <QuoteThumb m={messages.find((x) => x.convSeq === m.replyToConvSeq)} />
+                            <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
                           </div>
                         ) : null}
                         {m.contentType === "image" ? (
-                          <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} onClick={() => setViewerImage(m.content)} />
+                          <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} onClick={() => setViewer({ m })} />
                         ) : m.contentType === "video" ? (
-                          <video className="msg-image" src={m.content} controls onLoadedData={onMediaLoad} />
+                          // 不自动播放：气泡内显首帧 + 播放角标，点击进全屏查看器（镜像 iOS）。
+                          <span className="msg-video-wrap" onClick={() => setViewer({ m })}>
+                            <video className="msg-image" src={m.content} preload="metadata" muted onLoadedData={onMediaLoad} />
+                            <span className="play-badge">▶</span>
+                          </span>
+                        ) : m.contentType === "chat_record" ? (
+                          // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
+                          (() => { const r = parseChatRecord(m.content); return (
+                            <div className="record-card" onClick={() => setRecordView(r)}>
+                              <div className="record-title">{r.t}</div>
+                              <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
+                                <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
+                              ))}</div>
+                              <div className="record-foot">聊天记录</div>
+                            </div>
+                          ); })()
                         ) : m.contentType === "file" ? (
-                          <a className="msg-file" href={m.content} target="_blank" rel="noreferrer">📎 文件</a>
+                          <a className="msg-file" href={m.content} download={fileNameFromContent(m.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(m.content)}</a>
+                        ) : isUrlText(m.content) ? (
+                          // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
+                          <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
                         ) : (
                           <span className="btext">{m.content}</span>
                         )}
@@ -1723,11 +2111,12 @@ export default function App() {
             </div>
           )}
           {replyTo && (
-            // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消。
+            // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消；图片/视频显示小缩略图。
             <div className="reply-compose">
+              <QuoteThumb m={replyTo} />
               <div className="reply-compose-text">
                 <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
-                <span className="reply-snippet">{(replyTo.content || "").slice(0, 80)}</span>
+                <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>
               </div>
               <button className="reply-cancel" onClick={() => setReplyTo(null)} title="取消引用">✕</button>
             </div>
@@ -1750,12 +2139,24 @@ export default function App() {
                   ))}
                 </div>
               )}
+              {pastedImages.length > 0 && (
+                // 粘贴图片预览条（Web #2）：缩略图 + 移除，点发送即作为图片消息上传。
+                <div className="paste-preview">
+                  {pastedImages.map((pi, i) => (
+                    <div key={pi.url} className="paste-thumb">
+                      <img src={pi.url} alt="待发送图片" />
+                      <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <footer>
                 <button className="attach-btn" disabled={!convId} title="附件" onClick={() => setAttachPanel((v) => !v)}>＋</button>
                 <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={onFilePicked} />
                 <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
                   placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
                   onChange={(e) => onInputChange(e.target.value)}
+                  onPaste={onComposerPaste}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
                     // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
@@ -1770,10 +2171,64 @@ export default function App() {
         {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
 
-      {viewerImage && (
-        // 图片大图查看（M4-6）：点击遮罩关闭。
-        <div className="modal-mask" onClick={() => setViewerImage(null)}>
-          <img className="image-viewer" src={viewerImage} alt="大图" onClick={(e) => e.stopPropagation()} />
+      {viewer && (
+        // 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（hover 浮层 6 功能）。点击遮罩关闭。
+        <div className="modal-mask" onClick={() => { setViewer(null); setViewerMore(false); }}>
+          {viewer.m.contentType === "video" ? (
+            <video className="image-viewer" src={viewer.m.content} controls onClick={(e) => e.stopPropagation()} />
+          ) : (
+            <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => e.stopPropagation()} />
+          )}
+          <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
+            <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>
+            {!viewer.fromGallery && (
+              <button className="viewer-btn" title="媒体库" onClick={() => setGalleryOpen(true)}><LayoutGrid size={18} /></button>
+            )}
+            <div className="viewer-more-wrap" onMouseEnter={() => setViewerMore(true)} onMouseLeave={() => setViewerMore(false)}>
+              <button className="viewer-btn" title="更多"><MoreHorizontal size={18} /></button>
+              {viewerMore && (
+                <div className="viewer-more-pop">
+                  <button onClick={() => { const seq = viewer.m.convSeq; setViewer(null); setGalleryOpen(false); if (seq > 0) jumpToSeq(seq); }}>定位到聊天位置</button>
+                  <button onClick={() => favoriteMessage(viewer.m)}>收藏</button>
+                  <a href={viewer.m.content} download>下载</a>
+                  <button onClick={() => {
+                    // 图片：复制图片字节（可粘贴回输入框直接发图）；视频等：复制链接。
+                    if (viewer.m.contentType === "image") {
+                      copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))
+                        .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接"); });
+                    } else {
+                      void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
+                    }
+                  }}>复制</button>
+                  <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); setForwarding([mm]); }}>转发</button>
+                  <button className="danger" onClick={() => { deleteMessage(viewer.m); setViewer(null); }}>删除</button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {galleryOpen && (
+        // 会话媒体库：蒙层 + 时间序网格；点击复用查看器（fromGallery=不再显示媒体库按钮）。
+        <div className="modal-mask" onClick={() => setGalleryOpen(false)}>
+          <div className="gallery-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">图片与视频</div>
+            <div className="gallery-grid">
+              {messages.filter((mm) => (mm.contentType === "image" || mm.contentType === "video") && !mm.recalledAt).length === 0 && (
+                <div className="fwd-empty">暂无图片或视频</div>
+              )}
+              {messages
+                .filter((mm) => (mm.contentType === "image" || mm.contentType === "video") && !mm.recalledAt)
+                .map((mm) => (
+                  <div key={mm.clientMsgId} className="gallery-item" onClick={() => setViewer({ m: mm, fromGallery: true })}>
+                    {mm.contentType === "video"
+                      ? <><video src={mm.content} preload="metadata" muted /><span className="play-badge">▶</span></>
+                      : <img src={mm.content} alt="" />}
+                  </div>
+                ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1786,7 +2241,21 @@ export default function App() {
               {favorites.length === 0 && <div className="fwd-empty">还没有收藏</div>}
               {favorites.map((f) => (
                 <div key={f.id} className="fav-item">
-                  <div className="fav-content">{f.content}</div>
+                  <div className="fav-content">
+                    {f.content_type === "image" ? (
+                      <img className="fav-thumb" src={f.content} alt="图片" onClick={() => { setFavorites(null); setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
+                    ) : f.content_type === "video" ? (
+                      <span className="fav-thumb-wrap" onClick={() => { setFavorites(null); setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
+                        <video className="fav-thumb" src={f.content} preload="metadata" muted /><span className="play-badge">▶</span>
+                      </span>
+                    ) : f.content_type === "file" ? (
+                      <a className="msg-file" href={f.content} download={fileNameFromContent(f.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(f.content)}</a>
+                    ) : isUrlText(f.content) ? (
+                      <a className="msg-link" href={f.content} target="_blank" rel="noreferrer">{f.content}</a>
+                    ) : (
+                      f.content
+                    )}
+                  </div>
                   <button className="fav-del" title="删除收藏" onClick={() => removeFavorite(f.id)}>✕</button>
                 </div>
               ))}
@@ -1801,6 +2270,12 @@ export default function App() {
         <div className="modal-mask" onClick={() => setForwarding(null)}>
           <div className="modal fwd-picker" onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">转发到（{forwarding.length} 条）</div>
+            {forwarding.length > 1 && (
+              <div className="fwd-mode">
+                <button className={forwardMode === "each" ? "on" : ""} onClick={() => setForwardMode("each")}>逐条转发</button>
+                <button className={forwardMode === "merged" ? "on" : ""} onClick={() => setForwardMode("merged")}>合并转发</button>
+              </div>
+            )}
             <div className="fwd-list">
               {conversations.length === 0 && <div className="fwd-empty">暂无会话</div>}
               {conversations.map((c) => (
@@ -1814,8 +2289,36 @@ export default function App() {
         </div>
       )}
 
+      {recordView && (
+        // 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器。
+        <div className="modal-mask" onClick={() => setRecordView(null)}>
+          <div className="modal record-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">{recordView.t}</div>
+            <div className="record-list">
+              {recordView.items.map((it, i) => (
+                <div key={i} className="record-item">
+                  <div className="record-item-name">{it.n}</div>
+                  {it.ct === "image" ? (
+                    <img className="record-item-media" src={it.c} alt="图片" onClick={() => { setRecordView(null); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
+                  ) : it.ct === "video" ? (
+                    <span className="fav-thumb-wrap" onClick={() => { setRecordView(null); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
+                      <video className="record-item-media" src={it.c} preload="metadata" muted /><span className="play-badge">▶</span>
+                    </span>
+                  ) : it.ct === "file" ? (
+                    <a className="msg-file" href={it.c} download={fileNameFromContent(it.c)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(it.c)}</a>
+                  ) : (
+                    <div className="record-item-text">{it.c}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button className="modal-close" onClick={() => setRecordView(null)}>关闭</button>
+          </div>
+        </div>
+      )}
+
       {menu && (
-        <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+        <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
           {messageActions
             .filter((a) => a.visible({ m: menu.m, uid }))
             .map((a) => (
@@ -1823,11 +2326,11 @@ export default function App() {
                 onClick={() => { a.run({ m: menu.m, uid }); setMenu(null); }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}
-        </div>
+        </AnchoredMenu>
       )}
 
       {convMenu && (
-        <div className="ctx-menu" style={{ left: convMenu.x, top: convMenu.y }} onClick={(e) => e.stopPropagation()}>
+        <AnchoredMenu x={convMenu.x} y={convMenu.y} className="ctx-menu">
           {conversationActions
             .filter((a) => a.visible({ c: convMenu.c }))
             .map((a) => (
@@ -1835,7 +2338,7 @@ export default function App() {
                 onClick={() => { a.run({ c: convMenu.c }); setConvMenu(null); }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}
-        </div>
+        </AnchoredMenu>
       )}
 
       {friendMenu && (

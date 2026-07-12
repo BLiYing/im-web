@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
 import * as localStore from "./localStore";
 
 const PING_INTERVAL_MS = 25_000;
@@ -35,6 +35,8 @@ export interface IMClientHandlers {
   onMsgOp?: (convId: string, targetConvSeq: number, patch: MsgOpPatch) => void;
   /** 我发起的消息操作被拒（如撤回超时 300008）：回滚提示。 */
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
+  /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
+  onConvUpdate?: (u: ConvUpdate) => void;
 }
 
 /** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
@@ -55,7 +57,7 @@ export class IMClient {
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string; groupId?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -113,6 +115,11 @@ export class IMClient {
     return body.data;
   }
 
+  /** 链接富预览：抓取 URL 的 OG 元信息（后端带 SSRF 防护 + 缓存）。失败抛错，调用方回退纯链接。 */
+  async linkPreview(url: string): Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }> {
+    return await this.api(`/api/v1/link-preview?url=${encodeURIComponent(url)}`);
+  }
+
   /** 找人：按 q 搜索用户（昵称/手机号/uid/标签，后端去 phone、排除自己）。 */
   async searchUsers(q: string, limit = 20): Promise<UserCard[]> {
     const data = await this.api(`/api/v1/users/search?q=${encodeURIComponent(q)}&limit=${limit}`);
@@ -138,6 +145,18 @@ export class IMClient {
   /** 设置好友备注名（空串=清除）：POST /api/v1/friends/remark。 */
   async setRemark(userId: string, remark: string): Promise<void> {
     await this.api(`/api/v1/friends/remark`, { method: "POST", body: JSON.stringify({ user_id: userId, remark }) });
+  }
+
+  // ---- 会话管理（M4.5）----
+
+  /** 更新会话级设置（置顶/免打扰/标未读，整体替换）：PUT /api/v1/conversations/{id}/settings。 */
+  async updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> {
+    await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/settings`, { method: "PUT", body: JSON.stringify(s) });
+  }
+
+  /** 删除会话（仅本人，记 cleared_at 不删消息）：DELETE /api/v1/conversations/{id}。 */
+  async deleteConversation(convId: string): Promise<void> {
+    await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
   }
 
   // ---- 群聊（M3）----
@@ -279,9 +298,10 @@ export class IMClient {
     return this.sendContent(content, "text", to, convId, opts);
   }
 
-  /** 发送富媒体（图片/文件，M4-6）：content=已上传的 URL，contentType=image|video|file。 */
-  sendMedia(url: string, contentType: string, to: string, convId: string): string {
-    return this.sendContent(url, contentType, to, convId);
+  /** 发送富媒体（图片/文件，M4-6）：content=已上传的 URL，contentType=image|video|file。
+   *  opts.forwardFrom=转发溯源；opts.groupId=相册分组（M4+，同批多图/视频共享 → 两端聚簇渲染宫格）。 */
+  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: { forwardFrom?: string; groupId?: string }): string {
+    return this.sendContent(url, contentType, to, convId, opts);
   }
 
   /** 上传图片/文件（M4-6）：multipart → {url, contentType}。 */
@@ -295,11 +315,11 @@ export class IMClient {
   }
 
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
-  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string }): string {
+  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string; groupId?: string }): string {
     const clientMsgId = crypto.randomUUID();
-    // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源（本端即时预览，重进会话仍在）。
+    // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
-      replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom });
+      replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
@@ -308,6 +328,7 @@ export class IMClient {
     const data: Record<string, unknown> = { client_msg_id: clientMsgId, conv_id: convId, to, content_type: contentType, content };
     if (opts?.replyTo && opts.replyTo.convSeq > 0) { data.reply_to = { conv_seq: opts.replyTo.convSeq }; }
     if (opts?.forwardFrom) { data.forward_from = opts.forwardFrom; }
+    if (opts?.groupId) { data.group_id = opts.groupId; }
     this.send({ type: T.SEND_MSG, seq: ++this.seq, data });
     return clientMsgId;
   }
@@ -423,6 +444,7 @@ export class IMClient {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
             contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, forwardFrom: pend.forwardFrom,
+            groupId: pend.groupId,
           });
           this.pendingSends.delete(d.client_msg_id);
         }
@@ -460,6 +482,13 @@ export class IMClient {
         break;
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶）：应用到本地
         this.applyMsgOp(d);
+        break;
+      case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
+        this.handlers.onConvUpdate?.({
+          conv_id: d.conv_id, action: d.action,
+          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, marked_unread: !!d.marked_unread,
+          cleared_at: d.cleared_at ?? 0,
+        });
         break;
       case T.PONG:
         break;
@@ -523,6 +552,7 @@ export class IMClient {
       replyToConvSeq: d.reply_to_conv_seq || undefined,
       replySnapshot: d.reply_snapshot || undefined,
       forwardFrom: d.forward_from || undefined,
+      groupId: d.group_id || undefined,
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

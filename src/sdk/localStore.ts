@@ -31,6 +31,7 @@ interface MsgRecord {
   replyToConvSeq?: number;
   replySnapshot?: string;
   forwardFrom?: string;
+  groupId?: string; // 相册分组（M4+）
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -65,6 +66,7 @@ export async function saveMessage(owner: string, m: ChatMessage): Promise<void> 
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, forwardFrom: m.forwardFrom,
+    groupId: m.groupId,
   });
 }
 
@@ -153,6 +155,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, forwardFrom: r.forwardFrom,
+            groupId: r.groupId,
           },
     );
   } catch {

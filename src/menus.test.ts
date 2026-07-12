@@ -20,7 +20,7 @@ function conv(over: Partial<Conversation>): Conversation {
 const msgHandlers = {
   copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
 };
-const convHandlers = { markRead: vi.fn(), delete: vi.fn(), comingSoon: vi.fn() };
+const convHandlers = { setPinned: vi.fn(), setMuted: vi.fn(), markRead: vi.fn(), markUnread: vi.fn(), delete: vi.fn() };
 
 const visibleIds = <C>(actions: { id: string; visible: (c: C) => boolean }[], ctx: C) =>
   actions.filter((a) => a.visible(ctx)).map((a) => a.id);
@@ -67,16 +67,46 @@ describe("buildMessageActions", () => {
 });
 
 describe("buildConversationActions", () => {
-  it("返回固定顺序的全部 id", () => {
+  it("返回固定顺序的全部 id（置顶/免打扰/已读未读为切换对）", () => {
     expect(buildConversationActions(convHandlers).map((a) => a.id)).toEqual([
-      "pin", "mute", "markRead", "delete",
+      "pin", "unpin", "mute", "unmute", "markRead", "markUnread", "delete",
     ]);
   });
 
-  it("设为已读仅在 unread>0 时可见", () => {
+  it("置顶↔取消置顶按 pinned_at 互斥可见", () => {
     const actions = buildConversationActions(convHandlers);
-    const find = (ctx: ConvCtx) => actions.find((a) => a.id === "markRead")!.visible(ctx);
-    expect(find({ c: conv({ unread: 3 }) })).toBe(true);
-    expect(find({ c: conv({ unread: 0 }) })).toBe(false);
+    expect(visibleIds(actions, { c: conv({ pinned_at: 0 }) })).toContain("pin");
+    expect(visibleIds(actions, { c: conv({ pinned_at: 0 }) })).not.toContain("unpin");
+    expect(visibleIds(actions, { c: conv({ pinned_at: 123 }) })).toContain("unpin");
+    expect(visibleIds(actions, { c: conv({ pinned_at: 123 }) })).not.toContain("pin");
+  });
+
+  it("静音↔取消静音按 muted 互斥可见", () => {
+    const actions = buildConversationActions(convHandlers);
+    expect(visibleIds(actions, { c: conv({ muted: false }) })).toContain("mute");
+    expect(visibleIds(actions, { c: conv({ muted: true }) })).toContain("unmute");
+    expect(visibleIds(actions, { c: conv({ muted: true }) })).not.toContain("mute");
+  });
+
+  it("设为已读在 有未读 或 手动标未读 时可见；标为未读在 已读态 可见", () => {
+    const actions = buildConversationActions(convHandlers);
+    const vis = (ctx: ConvCtx, id: string) => actions.find((a) => a.id === id)!.visible(ctx);
+    expect(vis({ c: conv({ unread: 3 }) }, "markRead")).toBe(true);
+    expect(vis({ c: conv({ unread: 0, marked_unread: true }) }, "markRead")).toBe(true);
+    expect(vis({ c: conv({ unread: 0, marked_unread: false }) }, "markRead")).toBe(false);
+    expect(vis({ c: conv({ unread: 0, marked_unread: false }) }, "markUnread")).toBe(true);
+    expect(vis({ c: conv({ unread: 3 }) }, "markUnread")).toBe(false);
+    expect(vis({ c: conv({ unread: 0, marked_unread: true }) }, "markUnread")).toBe(false);
+  });
+
+  it("run 路由到真实处理器（切换传入目标状态）", () => {
+    const actions = buildConversationActions(convHandlers);
+    const c0 = conv({ pinned_at: 0, muted: false });
+    actions.find((a) => a.id === "pin")!.run({ c: c0 });
+    expect(convHandlers.setPinned).toHaveBeenCalledWith(c0, true);
+    actions.find((a) => a.id === "mute")!.run({ c: c0 });
+    expect(convHandlers.setMuted).toHaveBeenCalledWith(c0, true);
+    actions.find((a) => a.id === "delete")!.run({ c: c0 });
+    expect(convHandlers.delete).toHaveBeenCalledWith(c0);
   });
 });

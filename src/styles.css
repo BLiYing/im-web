@@ -159,7 +159,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .reedit-btn { background: none; border: none; color: var(--accent, #4caf50); font-size: 12px; cursor: pointer; padding: 0; }
 .reedit-btn:hover { text-decoration: underline; }
 /* 引用回复（M4-2）：气泡内引用条 + 输入框上方引用预览。 */
-.quote-bar { flex-basis: 100%; border-left: 3px solid var(--accent, #4caf50); padding: 2px 8px; margin-bottom: 4px; background: rgba(0,0,0,0.05); border-radius: 4px; cursor: pointer; max-width: 100%; box-sizing: border-box; }
+.quote-bar { flex-basis: 100%; display: flex; align-items: center; gap: 6px; border-left: 3px solid var(--accent, #4caf50); padding: 2px 8px; margin-bottom: 4px; background: rgba(0,0,0,0.05); border-radius: 4px; cursor: pointer; max-width: 100%; box-sizing: border-box; }
+.quote-thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; flex: none; display: block; }
 .quote-text { font-size: 12px; color: var(--text-secondary); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply-compose { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-left: 3px solid var(--accent, #4caf50); background: var(--panel-bg, rgba(0,0,0,0.04)); border-radius: 6px; margin: 0 8px 6px; }
 .reply-compose-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -172,7 +173,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 转发溯源（M4-3）："转发自 X"小字，气泡顶部。 */
 .forward-from { flex-basis: 100%; font-size: 12px; color: var(--text-secondary); margin-bottom: 2px; }
 /* 多选（M4-3）：行内勾选圈 + 底部批量工具栏。 */
-.row.selecting { cursor: pointer; align-items: center; }
+/* 多选态：勾选框统一固定在最左，气泡仍保持自己/对方的左右侧（微信/TG 式）。 */
+.row.selecting { flex-direction: row; align-items: center; max-width: 100%; width: 100%; margin: 0; cursor: pointer; }
+.row.selecting .bubble-line { flex: 1 1 auto; }
+.row.me.selecting .bubble-line { justify-content: flex-end; }
+.row.them.selecting .bubble-line { justify-content: flex-start; }
 .sel-check { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--line); margin: 0 8px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: #fff; }
 .sel-check.on { background: var(--accent, #4caf50); border-color: var(--accent, #4caf50); }
 .select-bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
@@ -187,6 +192,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-list { overflow-y: auto; max-height: 50vh; display: flex; flex-direction: column; gap: 6px; }
 .fav-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: var(--panel-bg, rgba(0,0,0,0.04)); border-radius: 8px; }
 .fav-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
+.fav-thumb { max-width: 120px; max-height: 120px; border-radius: 6px; cursor: pointer; display: block; }
+.fav-thumb-wrap { position: relative; display: inline-block; cursor: pointer; }
 .fav-del { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; }
 /* 编辑标记 + 译文（M4-5）。 */
 .edited-tag { color: var(--meta-time); font-size: 11px; }
@@ -201,6 +208,70 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .attach-item { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; font-size: 14px; }
 .attach-item:hover { background: var(--hover, rgba(0,0,0,0.05)); }
 .image-viewer { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+
+/* 媒体查看器工具条（右下：下载/媒体库/更多，镜像 iOS） */
+.viewer-bar { position: fixed; right: 24px; bottom: 24px; display: flex; gap: 12px; align-items: center; }
+.viewer-btn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: rgba(0,0,0,0.55); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.viewer-btn:hover { background: rgba(0,0,0,0.75); }
+.viewer-more-wrap { position: relative; }
+.viewer-more-pop { position: absolute; right: 0; bottom: 48px; min-width: 160px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.28); padding: 4px; display: flex; flex-direction: column; }
+.viewer-more-pop button, .viewer-more-pop a { display: block; width: 100%; padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; text-decoration: none; }
+.viewer-more-pop button:hover, .viewer-more-pop a:hover { background: var(--bg); }
+.viewer-more-pop .danger { color: #e5484d; }
+
+/* 气泡内视频：首帧 + 居中播放角标（不自动播放，点击进查看器） */
+.msg-video-wrap { position: relative; display: inline-block; cursor: pointer; }
+.play-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 26px; text-shadow: 0 1px 6px rgba(0,0,0,0.6); pointer-events: none; }
+
+/* 会话媒体库（蒙层网格） */
+.gallery-panel { width: min(640px, 92vw); max-height: 80vh; overflow-y: auto; background: var(--surface); border-radius: 12px; padding: 16px; }
+.gallery-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.gallery-item { position: relative; aspect-ratio: 1; cursor: pointer; overflow: hidden; border-radius: 6px; background: var(--bg); }
+.gallery-item img, .gallery-item video { width: 100%; height: 100%; object-fit: cover; }
+
+/* 纯 URL 消息：链接样式 */
+.msg-link { color: #1a73e8; text-decoration: underline; word-break: break-all; }
+.url-msg { display: flex; flex-direction: column; gap: 6px; max-width: 100%; }
+.paste-preview { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+.paste-thumb { position: relative; }
+.paste-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: block; border: 1px solid var(--line); }
+.paste-remove { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; font-size: 11px; line-height: 18px; padding: 0; cursor: pointer; }
+/* 相册宫格（M4+）：同 group_id 多图/视频合并成一个 Telegram 式宫格 */
+.album-grid { position: relative; border-radius: 12px; overflow: hidden; }
+.album-row { display: flex; }
+.album-tile { position: relative; overflow: hidden; cursor: pointer; background: var(--line, #ddd); }
+.album-tile img, .album-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.album-tile .play-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.album-tile-dim { position: absolute; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; }
+.album-spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.35); border-top-color: #fff; animation: album-spin 0.9s linear infinite; }
+@keyframes album-spin { to { transform: rotate(360deg); } }
+.album-fail { width: 26px; height: 26px; border-radius: 50%; background: #e5484d; color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.album-meta { position: absolute; right: 6px; bottom: 6px; padding: 1px 7px; border-radius: 9px; background: rgba(0,0,0,0.45); color: #fff; font-size: 11px; pointer-events: none; }
+
+/* 链接富预览卡片（OG） */
+.link-card { display: flex; flex-direction: column; width: 260px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; text-decoration: none; color: inherit; background: var(--surface); }
+.link-card-img { width: 100%; height: 130px; object-fit: cover; display: block; }
+.link-card-body { padding: 8px 10px; }
+.link-card-title { font-weight: 600; font-size: 14px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.link-card-desc { font-size: 12px; color: var(--text-soft, #888); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.link-card-site { font-size: 11px; color: var(--text-soft, #999); margin-top: 5px; }
+
+/* 合并转发卡片 */
+.record-card { width: 220px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+.record-title { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.record-preview { font-size: 12px; color: var(--text-soft, #888); }
+.record-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.record-foot { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 11px; color: var(--text-soft, #888); }
+.record-modal { width: min(520px, 92vw); max-height: 80vh; overflow-y: auto; }
+.record-item { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.record-item-name { font-size: 13px; font-weight: 600; color: var(--text-soft, #888); margin-bottom: 4px; }
+.record-item-media { max-width: 200px; max-height: 200px; border-radius: 6px; cursor: pointer; display: block; }
+.record-item-text { white-space: pre-wrap; word-break: break-word; }
+
+/* 转发模式切换（逐条/合并） */
+.fwd-mode { display: flex; gap: 8px; margin: 8px 0; }
+.fwd-mode button { flex: 1; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--text); cursor: pointer; }
+.fwd-mode button.on { background: var(--accent, #4caf50); color: #fff; border-color: var(--accent, #4caf50); }
 /* 好友列表里"已拉黑"小标签（拉黑≠解绑：好友仍在列表，带此标记）。 */
 .tag-blocked { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; font-weight: 600;
   color: #e5484d; background: rgba(229,72,77,0.12); vertical-align: middle; }
@@ -224,6 +295,12 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convck { color: var(--text-secondary); }
 .convck.read { color: var(--check-read); }
 .badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--badge); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+/* 会话管理指示（M4.5）：置顶左侧强调条、置顶/免打扰小图标、免打扰红点转灰、手动标未读小圆点。 */
+.convitem.pinned { box-shadow: inset 3px 0 0 var(--accent); }
+.conv-pin { color: var(--accent); vertical-align: -1px; margin-right: 3px; }
+.conv-mute { color: var(--text-secondary); vertical-align: -1px; margin-left: 4px; }
+.badge.muted { background: var(--text-secondary); }
+.badge.dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; }
 /* 未读分割线（Telegram 风格的"未读消息"）。 */
 .unread-divider { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0; color: var(--text-secondary); font-size: 12px; }
 .unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
