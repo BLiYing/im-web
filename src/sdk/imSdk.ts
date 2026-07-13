@@ -199,6 +199,11 @@ export class IMClient {
     await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/me`, { method: "DELETE" });
   }
 
+  /** 解散群（仅群主）：DELETE /api/v1/groups/{id} → 广播 dissolve，全体退群。 */
+  async dissolveGroup(convId: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`, { method: "DELETE" });
+  }
+
   /** 移除成员（须权限高于对方）。 */
   async removeGroupMember(convId: string, userId: string): Promise<void> {
     await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });

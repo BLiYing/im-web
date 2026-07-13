@@ -164,6 +164,26 @@ export async function loadConversation(owner: string, convId: string): Promise<C
   }
 }
 
+/** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。失败静默。 */
+export async function clearMessages(owner: string, convId: string): Promise<void> {
+  if (!owner || !convId) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      const store = tx.objectStore(STORE);
+      const req = store.index("ownerConv").getAllKeys(`${owner}|${convId}`);
+      req.onsuccess = () => {
+        for (const key of (req.result as IDBValidKey[]) ?? []) store.delete(key);
+      };
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    /* 静默：清本地缓存失败不影响主流程 */
+  }
+}
+
 // ---- 会话列表缓存（localStorage 单 JSON blob，按 owner）：刷新/离线时先秒显旧列表 ----
 
 const convsKey = (owner: string) => `im-web:convs:${owner}`;

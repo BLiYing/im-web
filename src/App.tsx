@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
+import { loadConversation, clearMessages } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
@@ -12,6 +13,7 @@ import {
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
   Download, LayoutGrid, MoreHorizontal,
+  Search, Camera, FileText, Link2, MessageCircle, X,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -278,7 +280,12 @@ export default function App() {
   // ---- 群聊（M3-4）----
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
-  const [groupPanel, setGroupPanel] = useState<string | null>(null); // 群资料弹窗（conv_id；null=关闭）
+  // 会话详情面板（右侧抽屉，对齐 iOS IMChatDetailViewController；单聊/群聊共用）。null=关闭。
+  const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string } | null>(null);
+  const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "links">("media");
+  const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
+  const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/占位项）
+  const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
   const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
   const [createBusy, setCreateBusy] = useState(false);
@@ -589,7 +596,7 @@ export default function App() {
         // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
         if ((event === "remove" && target === uid) || event === "dissolve") {
           setToast(event === "dissolve" ? "该群已被解散" : "你已被移出群聊");
-          setGroupPanel((p) => (p === cid ? null : p));
+          setDetail((d) => (d?.convId === cid ? null : d));
           if (currentConvRef.current === cid) {
             currentConvRef.current = "";
             setGroupConvId("");
@@ -735,7 +742,7 @@ export default function App() {
     setAuthErr("");
     setGroupConvId("");
     setGroupInfos({});
-    setGroupPanel(null);
+    setDetail(null);
     setGroupsModal(null);
     setPhase("login");
   }, []);
@@ -1596,10 +1603,63 @@ export default function App() {
     }
   };
 
-  // 打开群资料弹窗（拉最新资料）。
+  // 加载详情页签数据源（本地历史消息，供 媒体/文件/链接 页签过滤）。
+  const loadDetailMsgs = (cid: string) => {
+    void loadConversation(uid, cid).then(setDetailMsgs).catch(() => setDetailMsgs([]));
+  };
+
+  // 打开群聊详情面板（拉最新资料 + 本地消息）。默认页签=成员（对齐 iOS 群聊成员恒第一）。
   const openGroupPanel = (cid: string) => {
-    setGroupPanel(cid);
+    setManageOpen(false); setDetailMore(false); setDetailTab("members");
+    setDetail({ convId: cid, isGroup: true });
+    setDetailMsgs([]); loadDetailMsgs(cid);
     void refreshGroupInfo(cid);
+  };
+
+  // 打开单聊详情面板（对方资料）。默认页签=媒体。
+  const openPeerDetail = (peer: string) => {
+    if (!peer || peer === uid) return;
+    const cid = convIdFor(uid, peer);
+    setManageOpen(false); setDetailMore(false); setDetailTab("media");
+    setDetail({ convId: cid, isGroup: false, peer });
+    setDetailMsgs([]); loadDetailMsgs(cid);
+  };
+
+  // 清空聊天记录（仅本机，对齐 iOS）：清 IndexedDB → 通知聊天区刷新 → 关面板。
+  const doClearHistory = (cid: string) => {
+    if (!window.confirm("清空聊天记录？将删除此会话在本机的全部消息，且无法恢复。")) return;
+    void (async () => {
+      await clearMessages(uid, cid);
+      setMsgsByConv((prev) => ({ ...prev, [cid]: [] })); // 内存同步清空（当前会话/缓存）
+      setDetailMsgs([]);
+      setToast("聊天记录已清空");
+    })();
+  };
+
+  // 解散群（仅群主，二次确认）。
+  const doDissolveGroup = (cid: string) => {
+    if (!window.confirm("删除并解散该群？所有成员将被移出，且不可恢复。")) return;
+    void (async () => {
+      try {
+        await clientRef.current!.dissolveGroup(cid);
+        setDetail(null);
+        setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
+        if (currentConvRef.current === cid) deselect();
+        void refreshConversations();
+      } catch (e) { alert(`解散失败：${(e as Error).message}`); }
+    })();
+  };
+
+  // 单聊拉黑/取消拉黑（拉黑二次确认）。
+  const doToggleBlock = (peer: string, block: boolean) => {
+    if (block && !window.confirm("拉黑该联系人？拉黑后将不再收到对方消息。")) return;
+    void (async () => {
+      try {
+        await clientRef.current!.friendAction(block ? "block" : "unblock", peer);
+        void refreshFriends();
+        setToast(block ? "已拉黑" : "已取消拉黑");
+      } catch (e) { alert(`操作失败：${(e as Error).message}`); }
+    })();
   };
 
   // 建群：校验 → POST → 进入新群会话。
@@ -1629,7 +1689,7 @@ export default function App() {
     if (!window.confirm("确定退出该群聊？")) return;
     try {
       await clientRef.current!.leaveGroup(cid);
-      setGroupPanel(null);
+      setDetail(null);
       setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
       if (currentConvRef.current === cid) deselect();
       void refreshConversations();
@@ -1643,6 +1703,25 @@ export default function App() {
     const name = window.prompt("群名（1~30 字）", gp.name);
     if (name === null || !name.trim() || name.trim() === gp.name) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url));
+  };
+
+  // 设置群头像（仅群主/管理员）：选图片 → 上传 → updateGroup 带新 URL。
+  const pickGroupAvatar = (gp: GroupInfo) => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      void (async () => {
+        try {
+          setToast("上传中…");
+          const { url } = await clientRef.current!.uploadFile(file);
+          await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url));
+          setToast("群头像已更新");
+        } catch (e) { alert(`设置群头像失败：${(e as Error).message}`); }
+      })();
+    };
+    input.click();
   };
 
   // 邀请成员：提交选中的好友。
@@ -1995,10 +2074,11 @@ export default function App() {
                 {chatTitle}{chatMemberCount > 0 ? `（${chatMemberCount}人）` : ""}
               </button>
             ) : peer ? (
-              <span>
+              // 点标题看对方资料（对齐 Telegram/iOS 点标题进详情页）。
+              <button className="chat-title-btn" title="查看资料" onClick={() => openPeerDetail(peer)}>
                 <span className={`dot ${peerOnline ? "on" : ""}`} /> {peerLabel}
                 {peerOnline ? "（在线）" : ""}
-              </span>
+              </button>
             ) : (
               <span className="muted">未选择会话</span>
             )}
@@ -2565,64 +2645,198 @@ export default function App() {
         </div>
       )}
 
-      {/* 群资料弹窗：群名/成员数 + 邀请/退群 + 成员列表（按 my_role 显隐管理操作）。 */}
-      {groupPanel && (() => {
-        const gp = groupInfos[groupPanel];
+      {/* 会话详情抽屉（对齐 iOS IMChatDetailViewController）：单聊/群聊共用——头部 + 操作排 + 设置 + 页签。 */}
+      {detail && (() => {
+        const d = detail;
+        const conv = conversations.find((c) => c.conv_id === d.convId);
+        const gp = d.isGroup ? groupInfos[d.convId] : undefined;
+        const canManage = !!gp && gp.my_role !== "member";
+        const isOwner = !!gp && gp.my_role === "owner";
+        const title = d.isGroup ? (gp?.name ?? conv?.name ?? "群聊")
+          : (conv?.peer_remark || conv?.peer_nickname || d.peer || "");
+        const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url) : conv?.peer_avatar_url;
+        const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (d.peer ?? "");
+        const pinned = (conv?.pinned_at ?? 0) > 0;
+        const muted = !!conv?.muted;
+        const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
+        // 页签数据（本地历史）
+        const media = detailMsgs.filter((m) => m.contentType === "image" || m.contentType === "video")
+          .sort((a, b) => b.convSeq - a.convSeq);
+        const files = detailMsgs.filter((m) => m.contentType === "file").sort((a, b) => b.convSeq - a.convSeq);
+        const links = detailMsgs.filter((m) => isUrlText(m.content)).sort((a, b) => b.convSeq - a.convSeq);
+        const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
+          ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }]
+          : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }];
+        const activeTab = tabs.some((t) => t.k === detailTab) ? detailTab : tabs[0].k;
+        const close = () => { setDetail(null); setDetailMore(false); setManageOpen(false); };
+
         return (
-          <div className="modal-mask" onClick={() => setGroupPanel(null)}>
-            <div className="modal group-modal" onClick={(e) => e.stopPropagation()}>
-              {!gp ? (
-                <div className="empty">加载群资料…</div>
+          <div className="detail-mask" onClick={close}>
+            <aside className="detail-panel" onClick={(e) => e.stopPropagation()}>
+              <button className="detail-close" title="关闭" onClick={close}><X size={20} /></button>
+
+              {manageOpen && gp ? (
+                /* ---- 群管理二级视图（改名 / 群头像 / 占位项） ---- */
+                <div className="detail-manage">
+                  <div className="detail-manage-head">
+                    <button className="icon-btn" onClick={() => setManageOpen(false)}><ChevronLeft size={20} /></button>
+                    <span>群管理</span>
+                  </div>
+                  <div className="detail-manage-avatar">
+                    <button className="detail-manage-avatar-btn" onClick={() => pickGroupAvatar(gp)}>
+                      <Avatar url={gp.avatar_url} label={gp.name} cls="detail-avatar" />
+                      <span className="detail-manage-cam"><Camera size={18} /></span>
+                    </button>
+                    <div className="detail-manage-caption">设置新头像</div>
+                  </div>
+                  <div className="detail-card">
+                    <button className="detail-row" onClick={() => void doRenameGroup(gp)}>
+                      <span className="detail-row-ic"><SquarePen size={18} /></span><span>群名称</span>
+                      <span className="detail-row-val">{gp.name}</span><ChevronRight size={16} className="detail-row-chev" />
+                    </button>
+                    <div className="detail-row disabled"><span className="detail-row-ic"><Info size={18} /></span><span>简介</span><span className="detail-row-val muted">即将上线</span></div>
+                  </div>
+                  <div className="detail-card">
+                    {[["进群确认"], ["全员禁言"], ["自定义壁纸"]].map(([label]) => (
+                      <div key={label} className="detail-row disabled"><span className="detail-row-ic"><Lock size={18} /></span><span>{label}</span><span className="detail-row-val muted">即将上线</span></div>
+                    ))}
+                  </div>
+                  <div className="detail-foot-note">进群确认 / 全员禁言 / 自定义壁纸即将上线（待后端）。</div>
+                </div>
               ) : (
                 <>
-                  <div className="group-head">
-                    <Avatar url={gp.avatar_url} label={gp.name} />
-                    <div className="group-head-info">
-                      <div className="group-name">
-                        {gp.name}
-                        {gp.my_role !== "member" && (
-                          <button className="icon-btn" title="修改群名" onClick={() => void doRenameGroup(gp)}><SquarePen size={16} /></button>
-                        )}
-                      </div>
-                      <div className="group-sub">{gp.members.length} 位成员</div>
+                  {/* ---- 头部：头像 + 名 + 副标题 ---- */}
+                  <div className="detail-header">
+                    <div className="detail-avatar-wrap">
+                      <Avatar url={avatarUrl} label={title} cls="detail-avatar" />
+                      {canManage && (
+                        <button className="detail-cam" title="设置群头像" onClick={() => pickGroupAvatar(gp!)}><Camera size={15} /></button>
+                      )}
+                    </div>
+                    <div className="detail-name">{title}</div>
+                    <div className="detail-sub">{subtitle}</div>
+                  </div>
+
+                  {/* ---- 操作排 pills ---- */}
+                  <div className="detail-pills">
+                    {!d.isGroup && (
+                      <button className="detail-pill" onClick={() => { close(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
+                    )}
+                    {!d.isGroup && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
+                    {!d.isGroup && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
+                    <button className="detail-pill" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /><span>搜索</span></button>
+                    <div className="detail-pill-anchor">
+                      <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
+                      {detailMore && (
+                        <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
+                          <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
+                          {!d.isGroup && (
+                            <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
+                          )}
+                          {d.isGroup && (
+                            <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />退出群组</button>
+                          )}
+                          {isOwner && (
+                            <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />删除群组</button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="group-actions">
-                    <button className="mini-btn" onClick={() => setInviteDraft({ convId: gp.conv_id, selected: [] })}>
-                      <UserPlus size={15} className="menu-icon" />邀请成员
-                    </button>
-                    <button className="mini-btn ghost danger-text" onClick={() => void doLeaveGroup(gp.conv_id)}>
-                      <LogOut size={15} className="menu-icon" />退出群聊
-                    </button>
+
+                  {/* ---- 设置：置顶 / 免打扰 (+群管理) ---- */}
+                  <div className="detail-card">
+                    <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>置顶聊天</span>
+                      <button className={`switch ${pinned ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvPinned(conv, !pinned)} /></div>
+                    <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>消息免打扰</span>
+                      <button className={`switch ${muted ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvMuted(conv, !muted)} /></div>
+                    {canManage && (
+                      <button className="detail-row" onClick={() => setManageOpen(true)}>
+                        <span className="detail-row-ic"><Settings2 size={18} /></span><span>群管理</span>
+                        <span className="detail-row-val muted">仅群主/管理员</span><ChevronRight size={16} className="detail-row-chev" />
+                      </button>
+                    )}
                   </div>
-                  <div className="section-label">成员（{gp.members.length}）</div>
-                  <div className="modal-list">
-                    {gp.members.map((m) => (
-                      <div key={m.user_id} className="convitem static">
-                        <Avatar url={m.avatar_url} label={m.nickname || m.user_id} />
-                        <div className="convbody">
-                          <div className="convpeer">
-                            {m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}
+
+                  {/* ---- 单聊：备注名 / 用户名 ---- */}
+                  {!d.isGroup && (
+                    <div className="detail-card">
+                      <button className="detail-row" onClick={() => setContactDraft({ peer: d.peer!, remark: conv?.peer_remark ?? "" })}>
+                        <span className="detail-row-ic"><SquarePen size={18} /></span><span>备注名</span>
+                        <span className="detail-row-val">{conv?.peer_remark || "点击设置"}</span><ChevronRight size={16} className="detail-row-chev" />
+                      </button>
+                      <div className="detail-row"><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">{d.peer}</span></div>
+                    </div>
+                  )}
+
+                  {/* ---- 页签 ---- */}
+                  <div className="detail-tabs">
+                    {tabs.map((t) => (
+                      <button key={t.k} className={`detail-tab ${activeTab === t.k ? "active" : ""}`} onClick={() => setDetailTab(t.k)}>{t.label}</button>
+                    ))}
+                  </div>
+                  <div className="detail-tabbody">
+                    {activeTab === "members" && gp && (
+                      <div className="detail-members">
+                        <button className="detail-row accent" onClick={() => setInviteDraft({ convId: gp.conv_id, selected: [] })}>
+                          <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
+                        </button>
+                        {gp.members.map((m) => (
+                          <div key={m.user_id} className="detail-member"
+                            onClick={() => m.user_id !== uid && openPeerDetail(m.user_id)} role="button">
+                            <Avatar url={m.avatar_url} label={m.nickname || m.user_id} />
+                            <div className="detail-member-body">
+                              <div className="detail-member-name">{m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
+                              <div className="detail-member-sub">{m.user_id}</div>
+                            </div>
                             {m.role === "owner" && <span className="role-badge owner">群主</span>}
                             {m.role === "admin" && <span className="role-badge">管理员</span>}
+                            {canManageMember(gp, m) && (
+                              <button className="mini-btn ghost" title="管理"
+                                onClick={(e) => { e.stopPropagation(); setMemberMenu({ x: e.clientX, y: e.clientY, convId: gp.conv_id, m }); }}>⋯</button>
+                            )}
                           </div>
-                          <div className="convlast">{m.user_id}</div>
-                        </div>
-                        {canManageMember(gp, m) && (
-                          <div className="row-actions">
-                            <button className="mini-btn ghost" title="管理"
-                              onClick={(e) => { e.stopPropagation(); setMemberMenu({ x: e.clientX, y: e.clientY, convId: gp.conv_id, m }); }}>⋯</button>
-                          </div>
-                        )}
+                        ))}
                       </div>
-                    ))}
+                    )}
+                    {activeTab === "media" && (
+                      media.length === 0 ? <div className="detail-empty">暂无媒体</div> : (
+                        <div className="detail-media-grid">
+                          {media.map((m) => (
+                            <button key={m.serverMsgId || m.convSeq} className="detail-media-tile" onClick={() => setViewer({ m })}>
+                              <img src={m.contentType === "video" ? (m.posterUrl || m.content) : m.content} alt="" />
+                              {m.contentType === "video" && <span className="detail-media-play">▶</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    )}
+                    {activeTab === "files" && (
+                      files.length === 0 ? <div className="detail-empty">暂无文件</div> : (
+                        <div className="detail-filelist">
+                          {files.map((m) => (
+                            <a key={m.serverMsgId || m.convSeq} className="detail-fileitem" href={m.content} target="_blank" rel="noreferrer">
+                              <FileText size={18} /><span className="detail-file-name">{decodeURIComponent((m.content.split("/").pop() || "文件").split("?")[0])}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )
+                    )}
+                    {activeTab === "links" && (
+                      links.length === 0 ? <div className="detail-empty">暂无链接</div> : (
+                        <div className="detail-filelist">
+                          {links.map((m) => (
+                            <a key={m.serverMsgId || m.convSeq} className="detail-linkitem" href={m.content} target="_blank" rel="noreferrer">
+                              <Link2 size={16} /><span className="detail-file-name">{m.content}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )
+                    )}
                   </div>
                 </>
               )}
-              <div className="modal-actions">
-                <button className="link" onClick={() => setGroupPanel(null)}>关闭</button>
-              </div>
-            </div>
+            </aside>
           </div>
         );
       })()}
