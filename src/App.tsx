@@ -1482,6 +1482,7 @@ export default function App() {
       // 恢复登录过渡态（Web #4）：有已存会话时不闪登录表单，静默重登成功直达主界面。
       return (
         <div className="login">
+          <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
           <h1>IM Web</h1>
           <p className="hint">正在恢复登录（{uid}）…</p>
         </div>
@@ -1489,6 +1490,7 @@ export default function App() {
     }
     return (
       <div className="login">
+        <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
         <h1>IM Web 登录</h1>
         <label>用户名<input value={uid} autoFocus onChange={(e) => setUid(e.target.value.trim())} /></label>
         <label>密码<input type="password" value={password} placeholder="≥ 6 位"
@@ -2946,4 +2948,3 @@ function minSeqOf(messages: ChatMessage[]): number {
   for (const x of messages) if (x.convSeq > 0 && (m === 0 || x.convSeq < m)) m = x.convSeq;
   return m;
 }
-
