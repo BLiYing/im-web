@@ -738,6 +738,11 @@ export default function App() {
     setSearchResults(null);
     setSearchQ("");
     setTab("chats");
+    // 登录页不保留任何已登录态面板；否则重新登录后设置面板会继续覆盖左栏。
+    setShowSettings(false);
+    setProfileDraft(null);
+    setGeneralOpen(false);
+    setMyInfo(null);
     setPassword("");
     setAuthErr("");
     setGroupConvId("");
