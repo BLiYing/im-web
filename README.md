@@ -33,6 +33,9 @@ npm run build
 
 ## 日志与诊断
 
+完整规则见 [`docs/LOGGING.md`](docs/LOGGING.md)，跨端共同契约见
+[`../IMServer/docs/LOGGING.md`](../IMServer/docs/LOGGING.md)。
+
 浏览器日志统一使用 `IM.APP`、`IM.HTTP`、`IM.WS`、`IM.STORE`、`IM.UI` Tag。所有 API
 请求自动携带 `X-Request-ID`，请求与响应使用同一个 `req` 关联，并记录方法、路径、状态码、
 耗时、字节数和经过脱敏的正文。
