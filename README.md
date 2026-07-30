@@ -1,33 +1,52 @@
 # im-web
 
-IM 用户 **Web 客户端**（React + TypeScript + Vite）。与 iOS 端功能对齐，协议以 `IMServer/docs/PROTOCOL.md` 为准，进度见 `IMServer/docs/ROADMAP.md` / `CLIENT_PARITY.md`。
+IM 用户 Web 客户端（React + TypeScript + Vite），与 iOS 客户端共用 IMServer 协议。
 
 ## 结构
-```
+
+```text
 src/
-├── sdk/            协议 SDK（@im/sdk 雏形，对应 iOS 的 IMSocketManager）
-│   ├── protocol.ts 协议常量与类型
-│   └── imSdk.ts    IMClient：登录/连接/收发/心跳/重连/增量同步/回执
-├── App.tsx         UI：登录 + 聊天（薄，调 SDK）
+├── logging/        统一日志、HTTP 正文脱敏
+├── sdk/            协议 SDK、HTTP/WS、本地存储
+├── App.tsx         UI（只调用 SDK）
 ├── main.tsx
 └── styles.css
 ```
-SDK 与 UI 分层：聊天能力沉淀在 `sdk/`，界面只调用它。
 
-## 开发运行
+SDK 与 UI 分层：聊天能力沉淀在 `sdk/`，界面不直接拼协议帧。
+
+## 开发
+
 ```bash
-# 1. 先起后端（另一个终端）
-cd ../IMServer && go run ./cmd/imserver        # :8080
+# 先启动后端
+cd ../IMServer && go run ./cmd/imserver
 
-# 2. 起 Web（dev server :5173，已配置把 /api 与 /ws 代理到 :8080）
+# 再启动 Web
+cd ../im-web
 npm install
 npm run dev
+npm test
+npm run build
 ```
-浏览器开 http://localhost:5173 ，登录页填「我的 uid / 对方 uid」（如 1001 / 1002）。双开两个浏览器标签页用不同 uid 即可互发。
 
-## 现状（M1 起步）
-- ✅ 协议 SDK 雏形：JWT 登录换 token、WS 连接、send→ack、new_msg 接收、心跳、退避重连、`sync_req/sync_resp` 增量同步、按 conv_seq 去重、送达回执。
-- ✅ 登录页 + 聊天页（发送态、气泡、连接状态）。
-- ⬜ 会话列表页、本地缓存、已读/未读、群聊等：按 ROADMAP 各阶段与 iOS 同步补齐。
+开发服务器会把 `/api`、`/uploads` 和 `/ws` 代理到 `http://localhost:8080`。
 
-> 注：仓库尚未关联远程。建好 GitHub 仓库后 `git remote add origin <url> && git push -u origin main`。
+## 日志与诊断
+
+浏览器日志统一使用 `IM.APP`、`IM.HTTP`、`IM.WS`、`IM.STORE`、`IM.UI` Tag。所有 API
+请求自动携带 `X-Request-ID`，请求与响应使用同一个 `req` 关联，并记录方法、路径、状态码、
+耗时、字节数和经过脱敏的正文。
+
+- password、token、Authorization、cookie、phone、secret 始终隐藏。
+- JSON 内嵌 Data URI、上传文件和二进制只记录类型与大小。
+- 单条正文最多 16 KB。
+- Debug 输出脱敏后的业务正文；生产构建默认只输出 warn/error，且隐藏业务正文。
+- 内存中最多保留最近 500 条日志，不写入 localStorage。
+
+开发时可在浏览器控制台执行：
+
+```js
+await IMDiagnostics.copyLogs() // 复制诊断日志
+IMDiagnostics.exportLogs()     // 返回 JSON Lines 文本
+IMDiagnostics.clearLogs()      // 清空内存日志
+```

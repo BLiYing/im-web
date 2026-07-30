@@ -1,8 +1,9 @@
 // 本地消息持久化（IndexedDB）。对齐 iOS 的 IMDatabase：消息按会话落库，刷新/重连后从本地秒载，
 // 不必每次从服务端重拉全部历史。按 owner（本人 uid）隔离，避免同一浏览器多账号串库。
-// 失败一律静默（持久化是增强，绝不阻断收发主流程）。
+// 失败记录 IM.STORE warn，但持久化是增强，绝不阻断收发主流程。
 
 import type { ChatMessage, Conversation } from "./protocol";
+import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
 const DB_VERSION = 1;
@@ -56,7 +57,7 @@ function openDB(): Promise<IDBDatabase> {
 
 const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
 
-/** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。失败静默。 */
+/** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。 */
 export async function saveMessage(owner: string, m: ChatMessage): Promise<void> {
   if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
   await put(owner, {
@@ -97,8 +98,8 @@ export async function applyMsgOpLocal(
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-  } catch {
-    /* 持久化失败不影响主流程 */
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "message_operation_write_failed", { conv_id: convId, conv_seq: convSeq, error });
   }
 }
 
@@ -114,7 +115,7 @@ export async function saveRejected(owner: string, m: ChatMessage): Promise<void>
   });
 }
 
-/** 写一条记录（put 幂等）。失败静默——持久化是增强，绝不阻断收发主流程。 */
+/** 写一条记录（put 幂等）。失败只记日志——持久化是增强，绝不阻断收发主流程。 */
 async function put(owner: string, rec: MsgRecord): Promise<void> {
   if (!owner) return;
   try {
@@ -125,12 +126,17 @@ async function put(owner: string, rec: MsgRecord): Promise<void> {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-  } catch {
-    /* 持久化失败不影响主流程 */
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "message_write_failed", {
+      conv_id: rec.convId,
+      conv_seq: rec.convSeq,
+      content_type: rec.contentType,
+      error,
+    });
   }
 }
 
-/** 取某会话的本地消息（按 conv_seq 升序）。失败/无库返回空。 */
+/** 取某会话的本地消息（按 conv_seq 升序）。失败记日志并返回空。 */
 export async function loadConversation(owner: string, convId: string): Promise<ChatMessage[]> {
   if (!owner || !convId) return [];
   try {
@@ -159,12 +165,13 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             groupId: r.groupId, posterUrl: r.posterUrl,
           },
     );
-  } catch {
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "conversation_load_failed", { conv_id: convId, error });
     return [];
   }
 }
 
-/** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。失败静默。 */
+/** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。 */
 export async function clearMessages(owner: string, convId: string): Promise<void> {
   if (!owner || !convId) return;
   try {
@@ -179,8 +186,8 @@ export async function clearMessages(owner: string, convId: string): Promise<void
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
-  } catch {
-    /* 静默：清本地缓存失败不影响主流程 */
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "conversation_clear_failed", { conv_id: convId, error });
   }
 }
 
@@ -188,13 +195,13 @@ export async function clearMessages(owner: string, convId: string): Promise<void
 
 const convsKey = (owner: string) => `im-web:convs:${owner}`;
 
-/** 缓存会话列表（每次服务端拉到就覆盖写）。失败静默。 */
+/** 缓存会话列表（每次服务端拉到就覆盖写）。失败记日志但不阻断。 */
 export function saveConversations(owner: string, convs: Conversation[]): void {
   if (!owner) return;
   try {
     localStorage.setItem(convsKey(owner), JSON.stringify(convs));
-  } catch {
-    /* 配额满/隐私模式等：静默 */
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "conversation_cache_write_failed", { count: convs.length, error });
   }
 }
 
@@ -205,7 +212,8 @@ export function loadConversations(owner: string): Conversation[] {
     const s = localStorage.getItem(convsKey(owner));
     const arr = s ? JSON.parse(s) : [];
     return Array.isArray(arr) ? (arr as Conversation[]) : [];
-  } catch {
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "conversation_cache_read_failed", { error });
     return [];
   }
 }

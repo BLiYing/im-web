@@ -15,3 +15,6 @@ npm-debug.log*
 .idea/
 .vscode/
 *.local
+
+# Codex Code Graph 本地索引（机器相关缓存）
+/.codegraph/

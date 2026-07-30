@@ -4,6 +4,8 @@
 
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
 import * as localStore from "./localStore";
+import { LOG_TAG, logger } from "../logging/logger";
+import { tracedFetch } from "./http";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -81,10 +83,12 @@ export class IMClient {
     this.uid = uid;
     this.password = password;
     this.manualClose = false;
+    logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid });
     await this.openSocket(true);
   }
 
   disconnect(): void {
+    logger.info(LOG_TAG.ws, "disconnect_requested", { user_id: this.uid });
     this.manualClose = true;
     this.stopPing();
     this.sendTimers.forEach((t) => clearTimeout(t)); // 退出后别再触发"发送失败"回调
@@ -97,7 +101,7 @@ export class IMClient {
 
   /** 拉取当前用户的会话列表（GET /api/v1/conversations，带 Bearer token）。 */
   async fetchConversations(): Promise<Conversation[]> {
-    const resp = await fetch("/api/v1/conversations", {
+    const resp = await tracedFetch("/api/v1/conversations", {
       headers: { Authorization: `Bearer ${this.token}` },
     });
     const body = await resp.json();
@@ -313,7 +317,7 @@ export class IMClient {
   async uploadFile(file: File): Promise<{ url: string; contentType: string }> {
     const fd = new FormData();
     fd.append("file", file);
-    const resp = await fetch("/api/v1/upload", { method: "POST", headers: { Authorization: `Bearer ${this.token}` }, body: fd });
+    const resp = await tracedFetch("/api/v1/upload", { method: "POST", headers: { Authorization: `Bearer ${this.token}` }, body: fd });
     const body = await resp.json().catch(() => ({ code: -1 }));
     if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message || "上传失败"));
     return { url: body.data.url as string, contentType: body.data.content_type as string };
@@ -328,6 +332,12 @@ export class IMClient {
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
+      logger.warn(LOG_TAG.ws, "ack_timeout", {
+        client_msg_id: clientMsgId,
+        conv_id: convId,
+        content_type: contentType,
+        timeout_ms: SEND_TIMEOUT_MS,
+      });
       this.handlers.onAck?.(clientMsgId, false, 0);
     }, SEND_TIMEOUT_MS));
     const data: Record<string, unknown> = { client_msg_id: clientMsgId, conv_id: convId, to, content_type: contentType, content };
@@ -379,12 +389,21 @@ export class IMClient {
 
   private async openSocket(throwOnLoginError = false): Promise<void> {
     this.setState("connecting");
+    logger.info(LOG_TAG.ws, "connecting", {
+      user_id: this.uid,
+      attempt: this.reconnectAttempts + 1,
+    });
     let token: string;
     try {
       token = await this.fetchToken();
       this.token = token;
     } catch (e) {
       this.setState("disconnected");
+      logger.warn(LOG_TAG.ws, "login_failed", {
+        user_id: this.uid,
+        code: (e as { code?: number }).code,
+        message: (e as Error).message,
+      });
       if (throwOnLoginError) throw e; // 首次登录失败 → 交 UI 显示（密码错误等）
       // 重连：鉴权失效（账号没了/密码错/token 失效）→ 退回登录，不无限重试；网络失败 → 继续重试。
       const code = (e as { code?: number }).code;
@@ -401,18 +420,32 @@ export class IMClient {
     const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
     this.ws = ws;
     ws.onopen = () => {
+      logger.info(LOG_TAG.ws, "connected", {
+        user_id: this.uid,
+        tracked_conversations: this.tracked.size,
+      });
       this.reconnectAttempts = 0;
       this.setState("connected");
       this.startPing();
       this.sendSyncReq([...this.tracked]); // 重连补偿
     };
     ws.onmessage = (ev) => this.onFrame(ev.data);
-    ws.onclose = () => {
+    ws.onclose = (event) => {
+      logger.warn(LOG_TAG.ws, "disconnected", {
+        user_id: this.uid,
+        code: event.code,
+        reason: event.reason || "-",
+        clean: event.wasClean,
+        manual: this.manualClose,
+      });
       this.stopPing();
       this.setState("disconnected");
       if (!this.manualClose) this.scheduleReconnect();
     };
-    ws.onerror = () => ws.close();
+    ws.onerror = () => {
+      logger.warn(LOG_TAG.ws, "socket_error", { user_id: this.uid });
+      ws.close();
+    };
   }
 
   /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。 */
@@ -435,6 +468,7 @@ export class IMClient {
     try {
       env = JSON.parse(raw);
     } catch {
+      logger.warn(LOG_TAG.ws, "invalid_frame", { bytes: new TextEncoder().encode(raw).byteLength });
       return;
     }
     const d = env.data || {};
@@ -446,6 +480,12 @@ export class IMClient {
         // 自己发的消息（本端不会再经 new_msg 回显）→ ack 拿到 conv_seq 后落库，刷新后仍在。
         const pend = this.pendingSends.get(d.client_msg_id);
         if (pend && d.conv_seq > 0) {
+          logger.info(LOG_TAG.ws, "ack_received", {
+            client_msg_id: d.client_msg_id,
+            conv_id: d.conv_id,
+            conv_seq: d.conv_seq,
+            duration_ms: Math.max(0, Date.now() - pend.timestamp),
+          });
           void localStore.saveMessage(this.uid, {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
             contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
@@ -504,6 +544,13 @@ export class IMClient {
         const op = cmid ? this.pendingOps.get(cmid) : undefined;
         if (op) {
           this.pendingOps.delete(cmid);
+          logger.warn(LOG_TAG.ws, "message_operation_rejected", {
+            client_msg_id: cmid,
+            operation: op.op,
+            conv_id: op.convId,
+            code: d.code,
+            message: d.message,
+          });
           this.handlers.onMsgOpFailed?.(op.op, op.convId, op.targetConvSeq, d.message || "操作失败");
           break;
         }
@@ -515,6 +562,13 @@ export class IMClient {
           // 被拒（如被拉黑）服务端永不接受、无 conv_seq → 把该条按失败态 + 系统提示落库，刷新/重进会话仍在。
           const pend = this.pendingSends.get(cmid);
           if (pend) {
+            logger.warn(LOG_TAG.ws, "message_rejected", {
+              client_msg_id: cmid,
+              conv_id: pend.convId,
+              content_type: pend.contentType,
+              code: d.code,
+              message: note,
+            });
             void localStore.saveRejected(this.uid, {
               clientMsgId: cmid, convId: pend.convId, from: this.uid,
               content: pend.content, contentType: "text",
@@ -566,6 +620,11 @@ export class IMClient {
     // 避免这条实时消息把 synced 推过空洞、造成中间几条被永久漏掉。
     const prevSynced = this.syncedSeq.get(msg.convId) ?? 0;
     if (shouldHealGap(prevSynced, msg.convSeq, this.tracked.has(msg.convId))) {
+      logger.warn(LOG_TAG.ws, "sequence_gap_detected", {
+        conv_id: msg.convId,
+        previous_seq: prevSynced,
+        incoming_seq: msg.convSeq,
+      });
       this.sendSyncReq([msg.convId]); // since=prevSynced（此刻尚未 update）→ 拉回 [prevSynced+1 .. ]
     }
     this.updateSynced(msg.convId, msg.convSeq);
@@ -629,7 +688,16 @@ export class IMClient {
   }
 
   private send(env: Envelope): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(env));
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(env));
+      return;
+    }
+    if (env.type !== T.PING && env.type !== T.TYPING) {
+      logger.warn(LOG_TAG.ws, "send_skipped_not_connected", {
+        type: env.type,
+        state: this.state,
+      });
+    }
   }
 
   private startPing(): void {
@@ -646,6 +714,10 @@ export class IMClient {
   private scheduleReconnect(): void {
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
     this.reconnectAttempts++;
+    logger.info(LOG_TAG.ws, "reconnect_scheduled", {
+      attempt: this.reconnectAttempts,
+      delay_ms: delay,
+    });
     window.setTimeout(() => {
       if (!this.manualClose) void this.openSocket();
     }, delay);
@@ -653,6 +725,7 @@ export class IMClient {
 
   private setState(s: ConnState): void {
     if (this.state === s) return;
+    logger.debug(LOG_TAG.ws, "state_changed", { from: this.state, to: s });
     this.state = s;
     this.handlers.onState?.(s);
   }
@@ -681,7 +754,7 @@ export async function registerAccount(username: string, password: string): Promi
 async function fetchJSON(path: string, init?: RequestInit): Promise<any> {
   let resp: Response;
   try {
-    resp = await fetch(path, init);
+    resp = await tracedFetch(path, init);
   } catch {
     throw new Error("无法连接服务器，请确认后端已启动"); // fetch reject：网络/连接失败
   }
