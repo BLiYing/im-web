@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { loadConversation, clearMessages } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
@@ -13,11 +13,98 @@ import {
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
   Download, LayoutGrid, MoreHorizontal,
-  Search, Camera, FileText, Link2, MessageCircle, X,
+  Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
+export type WallpaperChoice =
+  | { kind: "preset"; value: string }
+  | { kind: "image"; value: string }
+  | { kind: "color"; value: string };
+
+export const DEFAULT_WALLPAPER: WallpaperChoice = { kind: "preset", value: "meadow" };
+export const WALLPAPER_PRESETS = [
+  { id: "meadow", label: "青绿涂鸦", css: "radial-gradient(circle at 18% 20%, #d8eba9 0 2%, transparent 3%), radial-gradient(circle at 75% 68%, #b8d98a 0 3%, transparent 4%), linear-gradient(145deg, #dceca8, #83c9a8)" },
+  { id: "lagoon", label: "蓝色海湾", css: "radial-gradient(circle at 70% 18%, #d8ffff 0 8%, transparent 30%), linear-gradient(145deg, #0aa4c4, #7be6dc 48%, #087db7)" },
+  { id: "leaf", label: "翡翠叶脉", css: "repeating-linear-gradient(18deg, transparent 0 16px, rgba(255,255,255,.16) 17px 19px), linear-gradient(135deg, #0c6f3d, #95db35)" },
+  { id: "violet", label: "紫色流光", css: "radial-gradient(circle at 20% 20%, #ff9fdc, transparent 34%), radial-gradient(circle at 78% 70%, #7357ff, transparent 38%), linear-gradient(145deg, #28275d, #b664d8)" },
+  { id: "lighthouse", label: "深海灯塔", css: "linear-gradient(170deg, #0a5583 0 42%, #e7c174 43% 48%, #23465c 49% 100%)" },
+  { id: "desert", label: "日落沙丘", css: "radial-gradient(circle at 75% 15%, #ffd59d 0 8%, transparent 9%), linear-gradient(155deg, #ffb066 0 44%, #d8673d 45% 65%, #7d3c5b)" },
+  { id: "islands", label: "珊瑚群岛", css: "radial-gradient(ellipse at 22% 35%, #fff0c4 0 7%, transparent 8%), radial-gradient(ellipse at 68% 63%, #d7fff5 0 9%, transparent 10%), linear-gradient(135deg, #30b9c1, #9df1dd)" },
+  { id: "water", label: "清澈水面", css: "repeating-radial-gradient(ellipse at 20% 20%, rgba(255,255,255,.25) 0 2px, transparent 3px 16px), linear-gradient(145deg, #00a8c5, #8eeadf)" },
+  { id: "forest", label: "森林光斑", css: "radial-gradient(circle at 25% 18%, rgba(255,255,210,.85) 0 3%, transparent 18%), radial-gradient(circle at 70% 62%, rgba(190,255,180,.55) 0 5%, transparent 24%), linear-gradient(145deg, #174d39, #87b968)" },
+  { id: "paper", label: "暖色纸张", css: "repeating-linear-gradient(8deg, rgba(130,90,30,.05) 0 1px, transparent 1px 9px), linear-gradient(145deg, #fff7db, #e7c481)" },
+  { id: "shore", label: "安静海滩", css: "linear-gradient(168deg, #8ed8d1 0 48%, #e6d7ac 49% 68%, #6cb6aa 69%)" },
+  { id: "mountain", label: "雪山蓝天", css: "linear-gradient(165deg, #55aee8 0 55%, #f4d9c2 56% 64%, #715d83 65% 78%, #38465d 79%)" },
+] as const;
+
+function loadWallpaper(): WallpaperChoice {
+  try {
+    const value = JSON.parse(localStorage.getItem("im.wallpaper") || "null") as WallpaperChoice | null;
+    if (value && ["preset", "image", "color"].includes(value.kind) && typeof value.value === "string") return value;
+  } catch { /* 非法偏好回退默认值 */ }
+  return DEFAULT_WALLPAPER;
+}
+
+export function wallpaperCSS(choice: WallpaperChoice): string {
+  if (choice.kind === "image") return `url("${choice.value}") center / cover no-repeat`;
+  if (choice.kind === "color") return choice.value;
+  return WALLPAPER_PRESETS.find((item) => item.id === choice.value)?.css ?? WALLPAPER_PRESETS[0].css;
+}
+
+type HSVColor = { h: number; s: number; v: number };
+
+const COLOR_PRESETS = [
+  "#e8edf1", "#acc8dc", "#1493cd",
+  "#c7e5ca", "#c5e5a4", "#65b46d",
+  "#d0d3af", "#aaad9d", "#898183",
+  "#f7d2a5", "#f7b269", "#df8750",
+  "#cad7e8", "#c8acd3", "#168f9a",
+] as const;
+
+const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
+
+export function hsvToHex({ h, s, v }: HSVColor): string {
+  const hue = ((h % 360) + 360) % 360;
+  const sat = clamp(s) / 100;
+  const val = clamp(v) / 100;
+  const chroma = val * sat;
+  const x = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
+  const m = val - chroma;
+  const [r, g, b] = hue < 60 ? [chroma, x, 0]
+    : hue < 120 ? [x, chroma, 0]
+    : hue < 180 ? [0, chroma, x]
+    : hue < 240 ? [0, x, chroma]
+    : hue < 300 ? [x, 0, chroma]
+    : [chroma, 0, x];
+  return `#${[r, g, b].map((part) => Math.round((part + m) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function hexToHSV(value: string): HSVColor {
+  const match = /^#?([0-9a-f]{6})$/i.exec(value.trim());
+  if (!match) return { h: 156, s: 32, v: 49 };
+  const [r, g, b] = [0, 2, 4].map((offset) => parseInt(match[1].slice(offset, offset + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let h = 0;
+  if (delta) {
+    if (max === r) h = 60 * (((g - b) / delta) % 6);
+    else if (max === g) h = 60 * ((b - r) / delta + 2);
+    else h = 60 * ((r - g) / delta + 4);
+  }
+  return {
+    h: (h + 360) % 360,
+    s: max ? (delta / max) * 100 : 0,
+    v: max * 100,
+  };
+}
+
+function hexToRGB(value: string): string {
+  const normalized = hsvToHex(hexToHSV(value)).slice(1);
+  return [0, 2, 4].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16)).join(", ");
+}
 
 // 可复用头像：有 avatar_url（http 或 data: 内联图）→ 渲染 <img>；否则回退首字母圈（现 Web 用统一主色底）。
 // cls 决定尺寸（avatar / settings-avatar / edit-avatar）；children 作为叠加层（如在线点、相机角标）。
@@ -276,7 +363,12 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
-  // 通用设置项：theme（主题）/ timeFormat（时间格式）/ fontSize（字体）/ sendKey（发送键）均已接通真功能（壁纸仍占位）。
+  const [wallpaperOpen, setWallpaperOpen] = useState(false); // 通用设置 ▸ 聊天壁纸
+  const [wallpaper, setWallpaper] = useState<WallpaperChoice>(loadWallpaper);
+  const [wallpaperBlur, setWallpaperBlur] = useState(() => localStorage.getItem("im.wallpaperBlur") === "1");
+  const [wallpaperColorOpen, setWallpaperColorOpen] = useState(false);
+  const [colorHSV, setColorHSV] = useState<HSVColor>(() => hexToHSV("#567e71"));
+  // 通用设置项：theme / timeFormat / fontSize / sendKey / wallpaper 均为本机真功能。
   // ---- 群聊（M3-4）----
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
@@ -299,6 +391,7 @@ export default function App() {
 
   const clientRef = useRef<IMClient | null>(null);
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
+  const wallpaperFileRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const seenByConv = useRef<Record<string, Set<number>>>({});
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
@@ -742,6 +835,8 @@ export default function App() {
     setShowSettings(false);
     setProfileDraft(null);
     setGeneralOpen(false);
+    setWallpaperOpen(false);
+    setWallpaperColorOpen(false);
     setMyInfo(null);
     setPassword("");
     setAuthErr("");
@@ -1273,6 +1368,63 @@ export default function App() {
   }, [fontSize]);
   useEffect(() => { localStorage.setItem("im.timeFormat", timeFormat); }, [timeFormat]);
   useEffect(() => { localStorage.setItem("im.sendKey", sendKey); }, [sendKey]);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--chat-wallpaper", wallpaperCSS(wallpaper));
+    try {
+      localStorage.setItem("im.wallpaper", JSON.stringify(wallpaper));
+    } catch {
+      setToast("图片较大，壁纸仅在本次页面有效");
+    }
+  }, [wallpaper]);
+  useEffect(() => {
+    document.documentElement.style.setProperty("--wallpaper-blur", wallpaperBlur ? "10px" : "0px");
+    document.documentElement.style.setProperty("--wallpaper-scale", wallpaperBlur ? "1.06" : "1");
+    localStorage.setItem("im.wallpaperBlur", wallpaperBlur ? "1" : "0");
+  }, [wallpaperBlur]);
+
+  const pickWallpaperImage = (file?: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setToast("请选择图片文件");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setToast("图片不能超过 8 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setWallpaper({ kind: "image", value: reader.result });
+    };
+    reader.onerror = () => setToast("读取图片失败");
+    reader.readAsDataURL(file);
+  };
+
+  const resetWallpaper = () => {
+    setWallpaper(DEFAULT_WALLPAPER);
+    setWallpaperBlur(false);
+  };
+
+  const applyWallpaperColor = (next: HSVColor) => {
+    const normalized = { h: clamp(next.h, 0, 360), s: clamp(next.s), v: clamp(next.v) };
+    setColorHSV(normalized);
+    setWallpaper({ kind: "color", value: hsvToHex(normalized) });
+  };
+
+  const openWallpaperColor = () => {
+    setColorHSV(hexToHSV(wallpaper.kind === "color" ? wallpaper.value : "#567e71"));
+    setWallpaperColorOpen(true);
+  };
+
+  const updateColorFromSpectrum = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    applyWallpaperColor({
+      h: colorHSV.h,
+      s: clamp(((event.clientX - rect.left) / rect.width) * 100),
+      v: clamp(100 - ((event.clientY - rect.top) / rect.height) * 100),
+    });
+  };
 
   // 输入框随内容自适应高度（换行时变高，最多 ~5 行；发送清空后回到单行）。
   useEffect(() => {
@@ -1540,6 +1692,12 @@ export default function App() {
   const activeGroupConv = groupConvId ? conversations.find((c) => c.conv_id === groupConvId) : undefined;
   const chatTitle = isGroupChat ? (activeGroupInfo?.name || activeGroupConv?.name || "群聊") : peerLabel;
   const chatMemberCount = activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
+  const chatAvatarURL = isGroupChat
+    ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
+    : peerConv?.peer_avatar_url;
+  const chatSubtitle = isGroupChat
+    ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员` : "群聊")
+    : (peerOnline ? "在线" : "最近上线");
   // 群成员昵称（气泡/正在输入回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
   const memberNick = (cid: string, id: string): string => {
     const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
@@ -1770,7 +1928,7 @@ export default function App() {
   // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动：加一项 = append 一条）。
   // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
   const accountRows: Row[] = [
-    { id: "settings", label: "设置", icon: Settings, chevron: true, onClick: () => setShowSettings(true) },
+    { id: "settings", label: "设置", icon: Settings, chevron: true, onClick: () => { setAccountCard(false); setShowSettings(true); } },
     { id: "favorites", label: "收藏消息", icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
   ];
 
@@ -2032,7 +2190,7 @@ export default function App() {
                   <div className="range-top"><span className="row-label">消息字体大小</span><span className="row-value">{fontSize}</span></div>
                   <input type="range" min={12} max={24} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} />
                 </div>
-                <button className="settings-row" onClick={() => comingSoon("聊天壁纸")}>
+                <button className="settings-row" onClick={() => setWallpaperOpen(true)}>
                   <ImageIcon size={20} className="row-icon" /><span className="row-label">聊天壁纸</span><ChevronRight size={18} className="row-chevron" />
                 </button>
               </div>
@@ -2067,6 +2225,98 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {wallpaperOpen && (
+          <div className="settings-panel wallpaper-panel">
+            <header className="settings-head wallpaper-head">
+              <button className="icon-btn" title="返回" onClick={() => setWallpaperOpen(false)}><ChevronLeft size={24} /></button>
+              <span className="settings-title">聊天壁纸</span>
+              <span className="icon-btn-spacer" />
+            </header>
+            <div className="settings-body wallpaper-body">
+              <div className="wallpaper-actions">
+                <button className="wallpaper-action" onClick={() => wallpaperFileRef.current?.click()}>
+                  <Camera size={24} /><span>上传图片</span>
+                </button>
+                <button className="wallpaper-action" onClick={openWallpaperColor}>
+                  <Pipette size={24} /><span>设置颜色</span>
+                </button>
+                <button className="wallpaper-action" onClick={resetWallpaper}>
+                  <Star size={24} /><span>恢复默认</span>
+                </button>
+                <button className="wallpaper-action" onClick={() => setWallpaperBlur((value) => !value)}>
+                  <span className={`wallpaper-check${wallpaperBlur ? " on" : ""}`}>{wallpaperBlur && <Check size={17} />}</span>
+                  <span>模糊</span>
+                </button>
+              </div>
+              <input ref={wallpaperFileRef} type="file" accept="image/*" hidden
+                onChange={(event) => {
+                  pickWallpaperImage(event.target.files?.[0]);
+                  event.target.value = "";
+                }} />
+              <div className="wallpaper-grid">
+                {WALLPAPER_PRESETS.map((item) => {
+                  const selected = wallpaper.kind === "preset" && wallpaper.value === item.id;
+                  return (
+                    <button key={item.id} className={`wallpaper-tile${selected ? " selected" : ""}`}
+                      title={item.label} aria-label={`使用${item.label}壁纸`}
+                      style={{ background: item.css } as CSSProperties}
+                      onClick={() => setWallpaper({ kind: "preset", value: item.id })}>
+                      {selected && <span className="wallpaper-selected"><Check size={18} /></span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {wallpaperColorOpen && (
+          <div className="settings-panel wallpaper-color-panel">
+            <header className="settings-head wallpaper-head">
+              <button className="icon-btn" title="返回" onClick={() => setWallpaperColorOpen(false)}><ChevronLeft size={24} /></button>
+              <span className="settings-title">设置颜色</span>
+              <span className="icon-btn-spacer" />
+            </header>
+            <div className="settings-body wallpaper-color-body">
+              <div className="color-editor-card" style={{ "--picker-hue": `${colorHSV.h}` } as CSSProperties}>
+                <div className="color-spectrum"
+                  role="slider" aria-label="调整颜色饱和度和亮度" aria-valuenow={Math.round(colorHSV.v)}
+                  onPointerDown={updateColorFromSpectrum}
+                  onPointerMove={(event) => { if (event.buttons === 1) updateColorFromSpectrum(event); }}>
+                  <span className="color-cursor"
+                    style={{ left: `${colorHSV.s}%`, top: `${100 - colorHSV.v}%` }} />
+                </div>
+                <input className="hue-slider" type="range" min="0" max="360" value={colorHSV.h}
+                  aria-label="调整色相"
+                  onChange={(event) => applyWallpaperColor({ ...colorHSV, h: Number(event.target.value) })} />
+                <div className="color-values">
+                  <label>
+                    <span>HEX</span>
+                    <input value={hsvToHex(colorHSV)} readOnly />
+                  </label>
+                  <label>
+                    <span>RGB</span>
+                    <input value={hexToRGB(hsvToHex(colorHSV))} readOnly />
+                  </label>
+                </div>
+              </div>
+              <div className="color-preset-grid">
+                {COLOR_PRESETS.map((color) => {
+                  const selected = hsvToHex(colorHSV).toLowerCase() === color;
+                  return (
+                    <button key={color} className={`color-preset${selected ? " selected" : ""}`}
+                      title={color} aria-label={`使用颜色 ${color}`}
+                      style={{ background: color }}
+                      onClick={() => applyWallpaperColor(hexToHSV(color))}>
+                      {selected && <Check size={20} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* chat 面板始终挂载（即使未选会话），让 VList 在 app 加载时就测到稳定高度；
@@ -2075,25 +2325,26 @@ export default function App() {
         <div className="chat">
           <header>
             {(peer || isGroupChat) && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
-            {isGroupChat ? (
-              // 群聊标题：群名 + 成员数，点击打开群资料（对齐 Telegram 点标题看资料）。
-              <button className="chat-title-btn" title="查看群资料" onClick={() => openGroupPanel(groupConvId)}>
-                {chatTitle}{chatMemberCount > 0 ? `（${chatMemberCount}人）` : ""}
-              </button>
-            ) : peer ? (
-              // 点标题看对方资料（对齐 Telegram/iOS 点标题进详情页）。
-              <button className="chat-title-btn" title="查看资料" onClick={() => openPeerDetail(peer)}>
-                <span className={`dot ${peerOnline ? "on" : ""}`} /> {peerLabel}
-                {peerOnline ? "（在线）" : ""}
+            {(isGroupChat || peer) ? (
+              <button className="chat-identity"
+                title={isGroupChat ? "查看群资料" : "查看资料"}
+                onClick={() => isGroupChat ? openGroupPanel(groupConvId) : openPeerDetail(peer)}>
+                <Avatar url={chatAvatarURL} label={chatTitle} cls="chat-avatar" />
+                <span className="chat-identity-copy">
+                  <span className="chat-title">{chatTitle}</span>
+                  <span className="chat-subtitle">{chatSubtitle}</span>
+                </span>
               </button>
             ) : (
               <span className="muted">未选择会话</span>
             )}
             <span className="chat-head-right">
-              <span className="muted">{stateText}</span>
               {(peer || isGroupChat) && (
-                <span className="chat-anchor">
-                  <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
+                <>
+                  <button className="icon-btn" title="搜索" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /></button>
+                  {!isGroupChat && <button className="icon-btn" title="呼叫" onClick={() => comingSoon("语音通话")}><Phone size={20} /></button>}
+                  <span className="chat-anchor">
+                    <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
                   {chatMenu && (
                     <div className="menu-card chat-menu" onClick={(e) => e.stopPropagation()}>
                       {(isGroupChat ? [
@@ -2116,7 +2367,8 @@ export default function App() {
                       ))}
                     </div>
                   )}
-                </span>
+                  </span>
+                </>
               )}
             </span>
           </header>
@@ -2680,7 +2932,12 @@ export default function App() {
         return (
           <div className="detail-mask" onClick={close}>
             <aside className="detail-panel" onClick={(e) => e.stopPropagation()}>
-              <button className="detail-close" title="关闭" onClick={close}><X size={20} /></button>
+              {!manageOpen && (
+                <>
+                  <button className="detail-close" title="关闭" onClick={close}><X size={20} /></button>
+                  <div className="detail-topbar">{d.isGroup ? "群组信息" : "用户信息"}</div>
+                </>
+              )}
 
               {manageOpen && gp ? (
                 /* ---- 群管理二级视图（改名 / 群头像 / 占位项） ---- */

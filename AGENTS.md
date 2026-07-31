@@ -8,6 +8,8 @@
   `../IMServer/docs/CHAT_UX.md` 为准。
 - Web 日志实现见 `docs/LOGGING.md`，三端共同日志契约见
   `../IMServer/docs/LOGGING.md`。
+- **新增或修改任何 UI 前必须读取 `docs/UI_COLOR.md`**；颜色、间距和圆角统一使用
+  根级 CSS 语义令牌，禁止业务组件散落颜色字面量或依赖未声明变量的 fallback。
 
 ## 硬性约定
 
