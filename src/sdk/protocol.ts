@@ -40,6 +40,8 @@ export interface ChatMessage {
   content: string;
   contentType: string;
   fileName?: string;
+  /** file 消息原始字节数；界面只格式化，不重新下载计算。 */
+  fileSize?: number;
   convSeq: number;
   timestamp: number;
   status: MessageStatus;

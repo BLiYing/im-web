@@ -19,6 +19,7 @@ interface MsgRecord {
   content: string;
   contentType: string;
   fileName?: string;
+  fileSize?: number;
   timestamp: number;
   serverMsgId?: string; // 服务端真实消息 id（举报消息等需用真实 id，不能用复合键 id）
   // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。
@@ -65,7 +66,7 @@ export async function saveMessage(owner: string, m: ChatMessage): Promise<void> 
     id: keyOf(owner, m.convId, m.convSeq),
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
-    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, timestamp: m.timestamp,
+    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, forwardFrom: m.forwardFrom,
@@ -154,12 +155,12 @@ export async function loadConversation(owner: string, convId: string): Promise<C
         ? {
             // 被拒收的失败消息：还原失败态 + 系统提示（红❗+下方系统行）。convSeq=0，渲染按 timestamp 落位。
             clientMsgId: r.clientMsgId,
-            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName,
+            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize,
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
-            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName,
+            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, forwardFrom: r.forwardFrom,

@@ -288,7 +288,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .msg-image { max-width: 220px; max-height: 260px; border-radius: 8px; cursor: pointer; display: block; }
 .file-type-icon { display: block; flex: 0 0 auto; overflow: visible; }
 .msg-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; color: var(--accent); text-decoration: none; }
-.msg-file > span { min-width: 0; overflow-wrap: anywhere; }
+.msg-file-body { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.msg-file-name { min-width: 0; overflow-wrap: anywhere; }
+.msg-file-size { color: var(--text-secondary); font-size: 12px; line-height: 1.2; }
 .attach-anchor { position: relative; flex: 0 0 auto; align-self: flex-end; }
 .chat footer .attach-btn { width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); font-size: 28px; font-weight: 300; line-height: 1; cursor: pointer; }
 .chat footer .attach-btn:hover, .chat footer .attach-btn[aria-expanded="true"] { background: var(--surface-hover); color: var(--accent); }
@@ -805,7 +807,9 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-fileitem + .detail-fileitem, .detail-linkitem + .detail-linkitem { border-top: 1px solid var(--separator); }
 .detail-fileitem:hover, .detail-linkitem:hover { background: var(--surface-hover); }
 .detail-linkitem { color: var(--accent); }
-.detail-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.detail-file-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.detail-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.detail-file-size { color: var(--text-secondary); font-size: 12px; }
 .detail-empty { text-align: center; color: var(--text-secondary); padding: 32px 0; font-size: 14px; }
 
 /* 群管理二级视图 */

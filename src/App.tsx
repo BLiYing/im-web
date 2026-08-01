@@ -7,6 +7,7 @@ import { buildMessageActions, buildConversationActions, type MenuAction } from "
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { formatFileSize } from "./fileMetadata";
 import type { LucideIcon } from "lucide-react";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -995,16 +996,16 @@ export default function App() {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!client || !cid) return;
     try {
-      const { url, contentType: uploadedContentType } = await client.uploadFile(file);
+      const { url, contentType: uploadedContentType, size } = await client.uploadFile(file);
       const contentType = attachmentContentType(pickMode, uploadedContentType);
       let poster: string | undefined;
       if (pickMode === "media" && contentType === "video") {
         const pf = await captureVideoPoster(file);
         if (pf) { try { poster = (await client.uploadFile(pf)).url; } catch { /* 封面上传失败：不阻塞 */ } }
       }
-      const options = contentType === "file" ? { fileName: file.name } : (poster ? { poster } : undefined);
+      const options = contentType === "file" ? { fileName: file.name, fileSize: size } : (poster ? { poster } : undefined);
       const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
-      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, fileName: contentType === "file" ? file.name : undefined, convSeq: 0, timestamp: Date.now(), status: "sending", posterUrl: poster });
+      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, fileName: contentType === "file" ? file.name : undefined, fileSize: contentType === "file" ? size : undefined, convSeq: 0, timestamp: Date.now(), status: "sending", posterUrl: poster });
     } catch (e) { setToast(`发送失败：${(e as Error).message}`); }
   }, [peer, groupConvId, uid, appendMsg]);
 
@@ -1082,8 +1083,8 @@ export default function App() {
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => (m.from === uid ? uid : (m.fromNickname || groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.nickname || m.from));
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
     if (forwardMode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
@@ -1102,8 +1103,8 @@ export default function App() {
         // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
         const clientMsgId = ct === "text"
           ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
-          : client.sendMedia(m.content, ct, to, target.conv_id, { forwardFrom: origin, fileName: m.fileName });
-        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName);
+          : client.sendMedia(m.content, ct, to, target.conv_id, { forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize });
+        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize);
       }
     }
     setForwarding(null);
@@ -2518,8 +2519,11 @@ export default function App() {
                         ); })()
                       ) : m.contentType === "file" ? (
                         <a className="msg-file" href={m.content} download={m.fileName} target="_blank" rel="noreferrer">
-                          <FileTypeIcon name={m.fileName} size={30} />
-                          <span>{m.fileName}</span>
+                          <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
+                          <span className="msg-file-body">
+                            <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
+                            {formatFileSize(m.fileSize) && <span className="msg-file-size">{formatFileSize(m.fileSize)}</span>}
+                          </span>
                         </a>
                       ) : isUrlText(m.content) ? (
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
@@ -3133,8 +3137,11 @@ export default function App() {
                         <div className="detail-filelist">
                           {files.map((m) => (
                             <a key={m.serverMsgId || m.convSeq} className="detail-fileitem" href={m.content} target="_blank" rel="noreferrer">
-                              <FileTypeIcon name={m.fileName} size={34} />
-                              <span className="detail-file-name">{m.fileName}</span>
+                              <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={34} />
+                              <span className="detail-file-body">
+                                <span className="detail-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
+                                {formatFileSize(m.fileSize) && <span className="detail-file-size">{formatFileSize(m.fileSize)}</span>}
+                              </span>
                             </a>
                           ))}
                         </div>

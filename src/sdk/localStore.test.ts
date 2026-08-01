@@ -23,13 +23,14 @@ describe("localStore 消息（IndexedDB）", () => {
     expect(got[0].serverMsgId).toBe("snow-123"); // 真实 id，而非 owner|c1|1 复合键
   });
 
-  it("文件消息刷新后保留原始文件名", async () => {
+  it("文件消息刷新后保留原始文件名和字节数", async () => {
     await saveMessage("oFile", {
       serverMsgId: "file-1", convId: "c1", from: "a", content: "/uploads/photo-uuid",
-      contentType: "file", fileName: "photo.png", convSeq: 1, timestamp: 1001, status: "received",
+      contentType: "file", fileName: "photo.png", fileSize: 7340032, convSeq: 1, timestamp: 1001, status: "received",
     });
     const got = await loadConversation("oFile", "c1");
     expect(got[0].fileName).toBe("photo.png");
+    expect(got[0].fileSize).toBe(7340032);
   });
 
   it("旧记录无 server_msg_id 时回退复合键（兼容）", async () => {
