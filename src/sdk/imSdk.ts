@@ -59,7 +59,7 @@ export class IMClient {
   private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string; groupId?: string; poster?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string; groupId?: string; poster?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -309,7 +309,7 @@ export class IMClient {
 
   /** 发送富媒体（图片/文件，M4-6）：content=已上传的 URL，contentType=image|video|file。
    *  opts.forwardFrom=转发溯源；opts.groupId=相册分组；opts.poster=视频封面首帧 URL（M4+，收端直显免解码）。 */
-  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: { forwardFrom?: string; groupId?: string; poster?: string }): string {
+  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: { forwardFrom?: string; groupId?: string; poster?: string; fileName?: string }): string {
     return this.sendContent(url, contentType, to, convId, opts);
   }
 
@@ -324,11 +324,11 @@ export class IMClient {
   }
 
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
-  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string; groupId?: string; poster?: string }): string {
+  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string; groupId?: string; poster?: string; fileName?: string }): string {
     const clientMsgId = crypto.randomUUID();
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
-      replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster });
+      fileName: opts?.fileName, replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
@@ -345,6 +345,7 @@ export class IMClient {
     if (opts?.forwardFrom) { data.forward_from = opts.forwardFrom; }
     if (opts?.groupId) { data.group_id = opts.groupId; }
     if (opts?.poster) { data.poster = opts.poster; }
+    if (contentType === "file" && opts?.fileName) { data.file_name = opts.fileName; }
     this.send({ type: T.SEND_MSG, seq: ++this.seq, data });
     return clientMsgId;
   }
@@ -489,6 +490,7 @@ export class IMClient {
           void localStore.saveMessage(this.uid, {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
             contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
+            fileName: pend.fileName,
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, forwardFrom: pend.forwardFrom,
             groupId: pend.groupId, posterUrl: pend.poster,
           });
@@ -601,6 +603,7 @@ export class IMClient {
       fromNickname: d.from_nickname || undefined, // 群消息冗余带发送者昵称（空不占字段）
       content: typeof d.content === "string" ? d.content : "",
       contentType: d.content_type || "text",
+      fileName: d.file_name || undefined,
       convSeq: d.conv_seq || 0,
       timestamp: d.timestamp || 0,
       status: "received",

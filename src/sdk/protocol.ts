@@ -39,6 +39,7 @@ export interface ChatMessage {
   fromNickname?: string;
   content: string;
   contentType: string;
+  fileName?: string;
   convSeq: number;
   timestamp: number;
   status: MessageStatus;

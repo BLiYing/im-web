@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { loadConversation, clearMessages } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
+import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
@@ -177,7 +178,7 @@ function QuoteThumb({ m }: { m?: ChatMessage }) {
   if (!m || m.recalledAt) return null;
   if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
   if (m.contentType === "video") return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
-  if (m.contentType === "file") return <FileTypeIcon name={m.content} size={32} className="quote-thumb" />;
+  if (m.contentType === "file") return <FileTypeIcon name={m.fileName || m.content} size={32} className="quote-thumb" />;
   return null;
 }
 
@@ -962,6 +963,7 @@ export default function App() {
 
   // 上传并发送图片/文件（M4-6）：上传 → 发 content_type=image|video|file 消息（content=URL）+ 乐观上屏。
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentPickModeRef = useRef<AttachmentPickMode>("media");
   const attachAnchorRef = useRef<HTMLDivElement>(null);
   const attachCloseTimerRef = useRef<number | null>(null);
   const cancelAttachClose = useCallback(() => {
@@ -988,19 +990,21 @@ export default function App() {
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [attachPanel, cancelAttachClose]);
-  const uploadAndSend = useCallback(async (file: File) => {
+  const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media") => {
     const client = clientRef.current;
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!client || !cid) return;
     try {
-      const { url, contentType } = await client.uploadFile(file);
+      const { url, contentType: uploadedContentType } = await client.uploadFile(file);
+      const contentType = attachmentContentType(pickMode, uploadedContentType);
       let poster: string | undefined;
-      if (contentType === "video") {
+      if (pickMode === "media" && contentType === "video") {
         const pf = await captureVideoPoster(file);
         if (pf) { try { poster = (await client.uploadFile(pf)).url; } catch { /* 封面上传失败：不阻塞 */ } }
       }
-      const clientMsgId = client.sendMedia(url, contentType, peer, cid, poster ? { poster } : undefined);
-      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, convSeq: 0, timestamp: Date.now(), status: "sending", posterUrl: poster });
+      const options = contentType === "file" ? { fileName: file.name } : (poster ? { poster } : undefined);
+      const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
+      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, fileName: contentType === "file" ? file.name : undefined, convSeq: 0, timestamp: Date.now(), status: "sending", posterUrl: poster });
     } catch (e) { setToast(`发送失败：${(e as Error).message}`); }
   }, [peer, groupConvId, uid, appendMsg]);
 
@@ -1009,18 +1013,19 @@ export default function App() {
     { id: "media", label: "图片或视频", accept: "image/*,video/*", icon: ImageIcon },
     { id: "file", label: "文件", accept: "*/*", icon: FileText },
   ], []);
-  const pickFile = useCallback((accept: string) => {
+  const pickFile = useCallback((mode: AttachmentPickMode, accept: string) => {
     cancelAttachClose();
     setAttachPanel(false);
+    attachmentPickModeRef.current = mode;
     const inp = fileInputRef.current;
     if (inp) { inp.accept = accept; inp.multiple = accept !== "*/*"; inp.value = ""; inp.click(); } // 图片/视频可多选（相册）
   }, [cancelAttachClose]);
   const onFilePicked = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
-    const allMedia = files.every((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
-    if (allMedia) { void sendMediaBatch(files); } // 多张媒体 → 相册宫格（M4+）
-    else { for (const f of files) void uploadAndSend(f); }
+    const mode = attachmentPickModeRef.current;
+    if (shouldSendAsMediaBatch(mode)) { void sendMediaBatch(files); }
+    else { for (const f of files) void uploadAndSend(f, "file"); }
   }, [uploadAndSend, sendMediaBatch]);
 
   // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
@@ -1077,8 +1082,8 @@ export default function App() {
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => (m.from === uid ? uid : (m.fromNickname || groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.nickname || m.from));
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
     if (forwardMode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
@@ -1097,8 +1102,8 @@ export default function App() {
         // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
         const clientMsgId = ct === "text"
           ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
-          : client.sendMedia(m.content, ct, to, target.conv_id, { forwardFrom: origin });
-        pushOptimistic(clientMsgId, m.content, ct, origin);
+          : client.sendMedia(m.content, ct, to, target.conv_id, { forwardFrom: origin, fileName: m.fileName });
+        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName);
       }
     }
     setForwarding(null);
@@ -2512,9 +2517,9 @@ export default function App() {
                           </div>
                         ); })()
                       ) : m.contentType === "file" ? (
-                        <a className="msg-file" href={m.content} download={fileNameFromContent(m.content)} target="_blank" rel="noreferrer">
-                          <FileTypeIcon name={m.content} size={30} />
-                          <span>{fileNameFromContent(m.content)}</span>
+                        <a className="msg-file" href={m.content} download={m.fileName} target="_blank" rel="noreferrer">
+                          <FileTypeIcon name={m.fileName} size={30} />
+                          <span>{m.fileName}</span>
                         </a>
                       ) : isUrlText(m.content) ? (
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
@@ -2638,7 +2643,7 @@ export default function App() {
                     <div className="attach-popover" role="menu"
                       onMouseEnter={cancelAttachClose} onMouseLeave={scheduleAttachClose}>
                       {attachItems.map((it) => (
-                        <button key={it.id} className="attach-item" role="menuitem" onClick={() => pickFile(it.accept)}>
+                        <button key={it.id} className="attach-item" role="menuitem" onClick={() => pickFile(it.id as AttachmentPickMode, it.accept)}>
                           <it.icon size={24} aria-hidden="true" />
                           <span>{it.label}</span>
                         </button>
@@ -3128,8 +3133,8 @@ export default function App() {
                         <div className="detail-filelist">
                           {files.map((m) => (
                             <a key={m.serverMsgId || m.convSeq} className="detail-fileitem" href={m.content} target="_blank" rel="noreferrer">
-                              <FileTypeIcon name={m.content} size={34} />
-                              <span className="detail-file-name">{fileNameFromContent(m.content)}</span>
+                              <FileTypeIcon name={m.fileName} size={34} />
+                              <span className="detail-file-name">{m.fileName}</span>
                             </a>
                           ))}
                         </div>
