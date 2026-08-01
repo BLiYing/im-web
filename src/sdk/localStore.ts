@@ -1,13 +1,14 @@
 // 本地消息持久化（IndexedDB）。对齐 iOS 的 IMDatabase：消息按会话落库，刷新/重连后从本地秒载，
-// 不必每次从服务端重拉全部历史。按 owner（本人 uid）隔离，避免同一浏览器多账号串库。
+// 后台仅从独立连续游标增量追平。按 owner（本人 uid）隔离，避免同一浏览器多账号串库。
 // 失败记录 IM.STORE warn，但持久化是增强，绝不阻断收发主流程。
 
 import type { ChatMessage, Conversation } from "./protocol";
 import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "messages";
+const CURSOR_STORE = "sync_cursors";
 
 interface MsgRecord {
   id: string;        // 已确认：owner|convId|convSeq；被拒(convSeq=0)：owner|convId|c:clientMsgId —— 唯一键，幂等覆盖
@@ -38,6 +39,13 @@ interface MsgRecord {
   posterUrl?: string; // 视频封面首帧 URL（M4+）
 }
 
+interface SyncCursorRecord {
+  id: string;       // owner|convId
+  owner: string;
+  convId: string;
+  convSeq: number;  // 已经连续持久化完成的最大 conv_seq；不是本地消息最大值
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDB(): Promise<IDBDatabase> {
@@ -50,6 +58,9 @@ function openDB(): Promise<IDBDatabase> {
         const os = db.createObjectStore(STORE, { keyPath: "id" });
         os.createIndex("ownerConv", "ownerConv", { unique: false });
       }
+      if (!db.objectStoreNames.contains(CURSOR_STORE)) {
+        db.createObjectStore(CURSOR_STORE, { keyPath: "id" });
+      }
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -58,11 +69,16 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
+const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId}`;
 
 /** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。 */
 export async function saveMessage(owner: string, m: ChatMessage): Promise<void> {
   if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
-  await put(owner, {
+  await put(owner, messageRecord(owner, m));
+}
+
+function messageRecord(owner: string, m: ChatMessage): MsgRecord {
+  return {
     id: keyOf(owner, m.convId, m.convSeq),
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
@@ -71,19 +87,66 @@ export async function saveMessage(owner: string, m: ChatMessage): Promise<void> 
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
-  });
+  };
+}
+
+function mergedRecord(existing: MsgRecord | undefined, rec: MsgRecord): MsgRecord {
+  return {
+    ...existing,
+    ...rec,
+    fileName: rec.fileName || existing?.fileName,
+    fileSize: rec.fileSize !== undefined && rec.fileSize > 0 ? rec.fileSize : existing?.fileSize ?? rec.fileSize,
+    serverMsgId: rec.serverMsgId || existing?.serverMsgId,
+  };
+}
+
+function advanceCursorInStore(store: IDBObjectStore, owner: string, convId: string, convSeq: number): void {
+  if (convSeq <= 0) return;
+  const id = cursorKeyOf(owner, convId);
+  const req = store.get(id);
+  req.onsuccess = () => {
+    const previous = Number((req.result as SyncCursorRecord | undefined)?.convSeq) || 0;
+    if (convSeq > previous) store.put({ id, owner, convId, convSeq } satisfies SyncCursorRecord);
+  };
+}
+
+/**
+ * 接收/补拉消息的原子落库：消息与连续游标在同一个 IndexedDB 事务提交。
+ * 崩溃时要么两者都成功，要么游标仍停在旧位置并在下次幂等重拉，不会出现“游标已过、消息没落库”。
+ */
+export async function saveIncomingMessage(owner: string, m: ChatMessage, advanceCursor: boolean): Promise<void> {
+  if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
+  const rec = messageRecord(owner, m);
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE, CURSOR_STORE], "readwrite");
+      const messageStore = tx.objectStore(STORE);
+      const getReq = messageStore.get(rec.id);
+      getReq.onsuccess = () => messageStore.put(mergedRecord(getReq.result as MsgRecord | undefined, rec));
+      if (advanceCursor) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, m.convId, m.convSeq);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "incoming_message_write_failed", {
+      conv_id: m.convId, conv_seq: m.convSeq, content_type: m.contentType, error,
+    });
+  }
 }
 
 /** 把一次消息操作（撤回/编辑/置顶）就地应用到已落库消息（按 conv_seq 定位）。记录不存在则忽略。 */
 export async function applyMsgOpLocal(
   owner: string, convId: string, convSeq: number,
   patch: { recalledAt?: number; recalledBy?: string; editedAt?: number; pinnedAt?: number; content?: string },
+  advanceCursorTo = 0,
 ): Promise<void> {
   if (!owner || !convId || !convSeq) return;
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
+      const stores = advanceCursorTo > 0 ? [STORE, CURSOR_STORE] : [STORE];
+      const tx = db.transaction(stores, "readwrite");
       const os = tx.objectStore(STORE);
       const getReq = os.get(keyOf(owner, convId, convSeq));
       getReq.onsuccess = () => {
@@ -97,6 +160,9 @@ export async function applyMsgOpLocal(
           os.put(rec);
         }
       };
+      if (advanceCursorTo > 0) {
+        advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, convId, advanceCursorTo);
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -124,7 +190,14 @@ async function put(owner: string, rec: MsgRecord): Promise<void> {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(rec);
+      const store = tx.objectStore(STORE);
+      const getReq = store.get(rec.id);
+      getReq.onsuccess = () => {
+        const existing = getReq.result as MsgRecord | undefined;
+        // 同一服务端消息可能先由 ACK/实时帧落库、后由 sync_resp 再次到达。
+        // 后到的稀疏负载不能把已经确认的文件名/字节数覆盖为空或 0。
+        store.put(mergedRecord(existing, rec));
+      };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -135,6 +208,43 @@ async function put(owner: string, rec: MsgRecord): Promise<void> {
       content_type: rec.contentType,
       error,
     });
+  }
+}
+
+/** 读取按账号+会话隔离的连续同步游标。无记录表示从 0 开始，不从消息最大值推断。 */
+export async function loadSyncCursor(owner: string, convId: string): Promise<number> {
+  if (!owner || !convId) return 0;
+  try {
+    const db = await openDB();
+    return await new Promise<number>((resolve, reject) => {
+      const tx = db.transaction(CURSOR_STORE, "readonly");
+      const req = tx.objectStore(CURSOR_STORE).get(cursorKeyOf(owner, convId));
+      req.onsuccess = () => resolve(Math.max(0, Number((req.result as SyncCursorRecord | undefined)?.convSeq) || 0));
+      req.onerror = () => reject(req.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "sync_cursor_read_failed", { conv_id: convId, error });
+    return 0;
+  }
+}
+
+/**
+ * 单调推进连续同步游标。调用方只可在对应消息/操作已处理后调用；游标本身按 owner 隔离持久化。
+ * 写失败时下次从较低位置重拉，最多产生幂等重复，不会漏消息。
+ */
+export async function advanceSyncCursor(owner: string, convId: string, convSeq: number): Promise<void> {
+  if (!owner || !convId || convSeq <= 0) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(CURSOR_STORE, "readwrite");
+      const store = tx.objectStore(CURSOR_STORE);
+      advanceCursorInStore(store, owner, convId, convSeq);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "sync_cursor_write_failed", { conv_id: convId, conv_seq: convSeq, error });
   }
 }
 

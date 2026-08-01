@@ -54,11 +54,15 @@ export class IMClient {
   private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
   private state: ConnState = "disconnected";
   private pingTimer: number | null = null;
+  private reconnectTimer: number | null = null;
   private reconnectAttempts = 0;
+  private connectionGeneration = 0; // 使切账号/新重连之前仍在途的登录与 socket 回调失效
   private manualClose = false;
-  private syncedSeq = new Map<string, number>(); // convId -> 已同步到的最大 conv_seq
+  private syncedSeq = new Map<string, number>(); // convId -> 已连续接上的 conv_seq（不能用“见过的最大值”越过空洞）
   private tracked = new Set<string>(); // 重连后需增量同步的会话
-  private pagedPending = new Set<string>(); // 正在分页加载的会话（抑制 has_more 自动向前翻页）
+  private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
+  private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
+  private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
   private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string; groupId?: string; poster?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
@@ -80,9 +84,23 @@ export class IMClient {
   /** 连接：先登录换 token，再用 ?token= 连 ws。password 为空走开发期免密直签。
    *  首次登录失败（如密码错误）会抛错给调用方显示；之后的断线重连仍静默重试。 */
   async connect(uid: string, password = ""): Promise<void> {
+    if (this.uid && this.uid !== uid) {
+      // IMClient 是可复用 SDK；切换账号时绝不能沿用上个 uid 的会话游标。
+      this.syncedSeq.clear();
+      this.tracked.clear();
+      this.syncingConvs.clear();
+      this.syncPending.clear();
+      this.pagedPending.clear();
+      this.pendingOps.clear();
+      this.sendTimers.forEach((timer) => clearTimeout(timer));
+      this.sendTimers.clear();
+      this.pendingSends.clear();
+      this.token = "";
+    }
     this.uid = uid;
     this.password = password;
     this.manualClose = false;
+    this.clearReconnectTimer();
     logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid });
     await this.openSocket(true);
   }
@@ -90,10 +108,18 @@ export class IMClient {
   disconnect(): void {
     logger.info(LOG_TAG.ws, "disconnect_requested", { user_id: this.uid });
     this.manualClose = true;
+    this.connectionGeneration++;
     this.stopPing();
+    this.clearReconnectTimer();
     this.sendTimers.forEach((t) => clearTimeout(t)); // 退出后别再触发"发送失败"回调
     this.sendTimers.clear();
     this.pendingSends.clear();
+    this.syncedSeq.clear();
+    this.tracked.clear();
+    this.syncingConvs.clear();
+    this.syncPending.clear();
+    this.pagedPending.clear();
+    this.pendingOps.clear();
     this.ws?.close(1000);
     this.ws = null;
     this.setState("disconnected");
@@ -272,11 +298,13 @@ export class IMClient {
   /** 进会话：建立重连基线 + 加载初始可视窗口（见 CHAT_UX §3）。
    *  - 有未读（latestSeq>readSeq）：从 readSeq-上下文 起一页，锚定到首条未读；
    *  - 无未读：加载最近一页，贴底。
-   *  reconnect 基线设为 latestSeq（增量补偿只取更新的消息；中间历史靠分页加载）。 */
+   *  latestSeq 仅用于选择 UI 首屏窗口，不代表此前消息已经连续持久化。 */
   openConversation(convId: string, readSeq: number, latestSeq: number): void {
     if (!convId) return;
+    const newlyTracked = !this.tracked.has(convId);
     this.tracked.add(convId);
-    this.syncedSeq.set(convId, latestSeq);
+    if (!this.syncedSeq.has(convId)) this.syncedSeq.set(convId, 0);
+    if (newlyTracked) this.sendSyncReq([convId]);
     const since =
       latestSeq > readSeq
         ? Math.max(0, readSeq - this.contextBefore) // 有未读 → 锚到首条未读附近
@@ -298,8 +326,10 @@ export class IMClient {
 
   /** 发一页分页请求：指定游标、单页、不自动向前翻页（由 SYNC_RESP 的 pagedPending 抑制）。 */
   private requestPage(convId: string, since: number): void {
-    this.pagedPending.add(convId);
-    this.send({ type: T.SYNC_REQ, seq: ++this.seq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
+    if (!this.isSocketOpen()) return;
+    const requestSeq = ++this.seq;
+    this.pagedPending.add(requestSeq);
+    this.send({ type: T.SYNC_REQ, seq: requestSeq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
   }
 
   /** 发送文本，返回 client_msg_id。opts.replyTo=引用回复（M4-2）；opts.forwardFrom=转发溯源（M4-3）。 */
@@ -378,7 +408,10 @@ export class IMClient {
   }
 
   /** 应用一条消息操作到本地（落库 + 通知 UI）。data 来自实时 msg_op 帧或 sync 的 msg_op 事件行负载。 */
-  private applyMsgOp(data: { op?: string; conv_id?: string; target_conv_seq?: number; content?: string; client_msg_id?: string }): void {
+  private applyMsgOp(
+    data: { op?: string; conv_id?: string; target_conv_seq?: number; content?: string; client_msg_id?: string },
+    advanceCursorTo = 0,
+  ): void {
     const convId = data.conv_id || "";
     const target = data.target_conv_seq || 0;
     if (!convId || !target) return;
@@ -387,7 +420,7 @@ export class IMClient {
     else if (data.op === OP.EDIT) patch = { editedAt: Date.now(), content: data.content ?? "" };
     else if (data.op === OP.PIN) patch = { pinnedAt: Date.now() };
     else return; // 未知 op：忽略不崩
-    void localStore.applyMsgOpLocal(this.uid, convId, target, patch);
+    void localStore.applyMsgOpLocal(this.uid, convId, target, patch, advanceCursorTo);
     if (data.client_msg_id) this.pendingOps.delete(data.client_msg_id); // 我方操作成功回执
     this.handlers.onMsgOp?.(convId, target, patch);
   }
@@ -395,23 +428,36 @@ export class IMClient {
   // ---- 内部 ----
 
   private async openSocket(throwOnLoginError = false): Promise<void> {
+    const generation = ++this.connectionGeneration;
+    const uid = this.uid;
+    const password = this.password;
+    const previousSocket = this.ws;
+    this.ws = null;
+    previousSocket?.close(1000);
+    this.stopPing();
     this.setState("connecting");
     logger.info(LOG_TAG.ws, "connecting", {
-      user_id: this.uid,
+      user_id: uid,
       attempt: this.reconnectAttempts + 1,
     });
     let token: string;
     try {
-      token = await this.fetchToken();
+      token = await this.fetchToken(uid, password);
+      if (generation !== this.connectionGeneration || this.manualClose || uid !== this.uid) return;
       this.token = token;
     } catch (e) {
+      if (generation !== this.connectionGeneration || this.manualClose || uid !== this.uid) return;
       this.setState("disconnected");
       logger.warn(LOG_TAG.ws, "login_failed", {
-        user_id: this.uid,
+        user_id: uid,
         code: (e as { code?: number }).code,
         message: (e as Error).message,
       });
-      if (throwOnLoginError) throw e; // 首次登录失败 → 交 UI 显示（密码错误等）
+      if (throwOnLoginError) {
+        // 首次进入若只是网络不可达，UI 可先展示按 uid 隔离的本地缓存，同时 SDK 在后台继续重连。
+        if (!isAuthCode((e as { code?: number }).code) && !this.manualClose) this.scheduleReconnect();
+        throw e;
+      }
       // 重连：鉴权失效（账号没了/密码错/token 失效）→ 退回登录，不无限重试；网络失败 → 继续重试。
       const code = (e as { code?: number }).code;
       if (isAuthCode(code)) {
@@ -427,8 +473,9 @@ export class IMClient {
     const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
     this.ws = ws;
     ws.onopen = () => {
+      if (ws !== this.ws || generation !== this.connectionGeneration) return;
       logger.info(LOG_TAG.ws, "connected", {
-        user_id: this.uid,
+        user_id: uid,
         tracked_conversations: this.tracked.size,
       });
       this.reconnectAttempts = 0;
@@ -436,31 +483,39 @@ export class IMClient {
       this.startPing();
       this.sendSyncReq([...this.tracked]); // 重连补偿
     };
-    ws.onmessage = (ev) => this.onFrame(ev.data);
+    ws.onmessage = (ev) => {
+      if (ws === this.ws && generation === this.connectionGeneration) this.onFrame(ev.data);
+    };
     ws.onclose = (event) => {
+      if (ws !== this.ws || generation !== this.connectionGeneration) return;
+      this.ws = null;
       logger.warn(LOG_TAG.ws, "disconnected", {
-        user_id: this.uid,
+        user_id: uid,
         code: event.code,
         reason: event.reason || "-",
         clean: event.wasClean,
         manual: this.manualClose,
       });
       this.stopPing();
+      this.syncingConvs.clear(); // 此连接上未返回的 sync_resp 已失效，重连后重新补偿
+      this.syncPending.clear();
+      this.pagedPending.clear();
       this.setState("disconnected");
       if (!this.manualClose) this.scheduleReconnect();
     };
     ws.onerror = () => {
-      logger.warn(LOG_TAG.ws, "socket_error", { user_id: this.uid });
+      if (ws !== this.ws || generation !== this.connectionGeneration) return;
+      logger.warn(LOG_TAG.ws, "socket_error", { user_id: uid });
       ws.close();
     };
   }
 
   /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。 */
-  private async fetchToken(): Promise<string> {
+  private async fetchToken(uid: string, password: string): Promise<string> {
     const body = await fetchJSON("/api/v1/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: this.uid, password: this.password }),
+      body: JSON.stringify({ username: uid, password }),
     });
     if (body.code !== 0 || !body.data?.token) {
       const e = new Error(friendlyMessage(body.code, body.message || "登录失败")) as Error & { code?: number };
@@ -483,7 +538,7 @@ export class IMClient {
       case T.ACK: {
         const timer = this.sendTimers.get(d.client_msg_id); // ack 到了 → 取消超时判失败
         if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(d.client_msg_id); }
-        this.updateSynced(d.conv_id, d.conv_seq);
+        // ACK 只确认当前消息，不证明此前所有序号都已连续同步，不能越级推进历史游标。
         // 自己发的消息（本端不会再经 new_msg 回显）→ ack 拿到 conv_seq 后落库，刷新后仍在。
         const pend = this.pendingSends.get(d.client_msg_id);
         if (pend && d.conv_seq > 0) {
@@ -508,17 +563,33 @@ export class IMClient {
       case T.NEW_MSG:
         this.processIncoming(d);
         break;
-      case T.SYNC_RESP:
+      case T.SYNC_RESP: {
+        const responseSeq = typeof env.seq === "number" ? env.seq : 0;
+        const isPaged = this.pagedPending.has(responseSeq);
+        if (isPaged) this.pagedPending.delete(responseSeq);
+        const requestedConvs = this.syncPending.get(responseSeq) ?? [];
+        this.syncPending.delete(responseSeq);
+        requestedConvs.forEach((convId) => this.syncingConvs.delete(convId));
         for (const conv of d.conversations || []) {
-          const isPaged = conv.conv_id && this.pagedPending.has(conv.conv_id);
-          for (const m of conv.messages || []) this.processIncoming(m);
+          for (const m of conv.messages || []) this.processIncoming(m, false);
           if (isPaged) {
-            this.pagedPending.delete(conv.conv_id); // 分页：单页，不自动向前翻页
+            // 聊天历史分页只返回一页，不参与自动追平。
           } else if (conv.has_more && conv.conv_id) {
-            this.sendSyncReq([conv.conv_id]); // 重连增量：继续翻到最新
+            const responseLatest = Number(conv.latest_conv_seq) || 0;
+            const continuous = this.syncedSeq.get(conv.conv_id) ?? 0;
+            if (continuous === responseLatest) {
+              this.sendSyncReq([conv.conv_id]); // 只从本页实际连续处理完成的位置继续翻页
+            } else {
+              logger.warn(LOG_TAG.ws, "sync_page_not_contiguous", {
+                conv_id: conv.conv_id,
+                response_latest_seq: responseLatest,
+                continuous_seq: continuous,
+              });
+            }
           }
         }
         break;
+      }
       case T.RECEIPT:
         this.handlers.onReceipt?.(d.conv_id, d.from, d.status, d.up_to_conv_seq);
         break;
@@ -547,6 +618,11 @@ export class IMClient {
       case T.PONG:
         break;
       case T.ERROR: {
+        const responseSeq = typeof env.seq === "number" ? env.seq : 0;
+        const syncConvs = this.syncPending.get(responseSeq) ?? [];
+        this.syncPending.delete(responseSeq);
+        syncConvs.forEach((convId) => this.syncingConvs.delete(convId));
+        this.pagedPending.delete(responseSeq);
         const cmid = d.client_msg_id;
         // 消息操作被拒（如撤回超时 300008）：回滚提示，不动消息本身。
         const op = cmid ? this.pendingOps.get(cmid) : undefined;
@@ -591,15 +667,22 @@ export class IMClient {
     }
   }
 
-  private processIncoming(d: any): void {
+  private processIncoming(d: any, healRealtimeGap = true): void {
+    const convId = typeof d.conv_id === "string" ? d.conv_id : "";
+    const convSeq = Number(d.conv_seq) || 0;
+    const prevSynced = this.syncedSeq.get(convId) ?? 0;
+    const isNextContiguous = convSeq > 0 && convSeq === prevSynced + 1;
     // msg_op 事件行（撤回/编辑/置顶，来自 sync 补拉）：应用其效果、不作气泡渲染、不入库为消息。
     if (d.content_type === "msg_op") {
-      this.updateSynced(d.conv_id, d.conv_seq);
       try {
-        this.applyMsgOp(JSON.parse(typeof d.content === "string" ? d.content : "{}"));
+        this.applyMsgOp(
+          JSON.parse(typeof d.content === "string" ? d.content : "{}"),
+          isNextContiguous ? convSeq : 0,
+        );
       } catch {
         /* 非法负载：忽略不崩 */
       }
+      if (isNextContiguous) this.updateSynced(convId, convSeq);
       return;
     }
     const msg: ChatMessage = {
@@ -628,8 +711,7 @@ export class IMClient {
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，
     // 避免这条实时消息把 synced 推过空洞、造成中间几条被永久漏掉。
-    const prevSynced = this.syncedSeq.get(msg.convId) ?? 0;
-    if (shouldHealGap(prevSynced, msg.convSeq, this.tracked.has(msg.convId))) {
+    if (healRealtimeGap && shouldHealGap(prevSynced, msg.convSeq, this.tracked.has(msg.convId))) {
       logger.warn(LOG_TAG.ws, "sequence_gap_detected", {
         conv_id: msg.convId,
         previous_seq: prevSynced,
@@ -637,9 +719,10 @@ export class IMClient {
       });
       this.sendSyncReq([msg.convId]); // since=prevSynced（此刻尚未 update）→ 拉回 [prevSynced+1 .. ]
     }
-    this.updateSynced(msg.convId, msg.convSeq);
+    if (isNextContiguous) this.updateSynced(msg.convId, msg.convSeq);
     this.sendReceipt(msg.convId, msg.convSeq);
-    void localStore.saveMessage(this.uid, msg); // 收到/同步到的消息落本地库
+    // 连续消息与游标同事务提交；非连续消息只落消息，游标仍停在空洞前。
+    void localStore.saveIncomingMessage(this.uid, msg, isNextContiguous);
     this.handlers.onMessage?.(msg);
   }
 
@@ -648,12 +731,16 @@ export class IMClient {
     return localStore.loadConversation(this.uid, convId);
   }
 
-  /** 登记会话用于（重）连后增量同步，并把同步基线设为 max(现有, syncedSeq)。
-   *  syncedSeq 传本地已落库的最大 conv_seq → 重连/刷新只补更新的消息，不重拉历史。 */
+  /** 读取当前 uid 命名空间内独立持久化的连续同步游标。 */
+  loadSyncCursor(convId: string): Promise<number> {
+    return localStore.loadSyncCursor(this.uid, convId);
+  }
+
+  /** 登记会话用于（重）连后增量同步。基线只在首次登记时设置，不能用稍后见到的较大值越过空洞。 */
   trackConversation(convId: string, syncedSeq: number): void {
     if (!convId) return;
     this.tracked.add(convId);
-    if (syncedSeq > (this.syncedSeq.get(convId) ?? 0)) this.syncedSeq.set(convId, syncedSeq);
+    if (!this.syncedSeq.has(convId)) this.syncedSeq.set(convId, Math.max(0, syncedSeq));
   }
 
   /** 对所有已登记会话发一次增量同步（从各自基线补新消息）。 */
@@ -687,9 +774,15 @@ export class IMClient {
   }
 
   private sendSyncReq(convIds: string[]): void {
-    const cursors = convIds.map((c) => ({ conv_id: c, since_conv_seq: this.syncedSeq.get(c) ?? 0 }));
+    // connect() 在 WebSocket OPEN 之前即可返回；此时不能先占用 in-flight，onopen 会统一补发。
+    if (!this.isSocketOpen()) return;
+    const pending = convIds.filter((c) => c && !this.syncingConvs.has(c));
+    const cursors = pending.map((c) => ({ conv_id: c, since_conv_seq: this.syncedSeq.get(c) ?? 0 }));
     if (cursors.length === 0) return;
-    this.send({ type: T.SYNC_REQ, seq: ++this.seq, data: { cursors } });
+    pending.forEach((c) => this.syncingConvs.add(c));
+    const requestSeq = ++this.seq;
+    this.syncPending.set(requestSeq, pending);
+    this.send({ type: T.SYNC_REQ, seq: requestSeq, data: { cursors } });
   }
 
   private updateSynced(convId: string, seq: number): void {
@@ -710,6 +803,10 @@ export class IMClient {
     }
   }
 
+  private isSocketOpen(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN;
+  }
+
   private startPing(): void {
     this.stopPing();
     this.pingTimer = window.setInterval(() => this.send({ type: T.PING, seq: ++this.seq }), PING_INTERVAL_MS);
@@ -722,15 +819,24 @@ export class IMClient {
   }
 
   private scheduleReconnect(): void {
+    if (this.reconnectTimer !== null || this.manualClose) return;
     const delay = Math.min(RECONNECT_BASE_MS * 2 ** this.reconnectAttempts, RECONNECT_MAX_MS);
     this.reconnectAttempts++;
     logger.info(LOG_TAG.ws, "reconnect_scheduled", {
       attempt: this.reconnectAttempts,
       delay_ms: delay,
     });
-    window.setTimeout(() => {
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
       if (!this.manualClose) void this.openSocket();
     }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
   }
 
   private setState(s: ConnState): void {
@@ -741,10 +847,10 @@ export class IMClient {
   }
 }
 
-/** 离线空洞自愈判定（纯函数，导出供单测）：实时/同步消息的 conv_seq 跳过了"已同步位点+1"，
- *  且该会话在跟踪中、且非初始(prevSynced>0) → 需补拉缺口。 */
+/** 离线空洞自愈判定（纯函数，导出供单测）：实时消息跳过“已连续位置+1”即补拉。
+ *  初始位置为 0 但首条直接是较大序号同样是空洞，不能当作已同步。 */
 export function shouldHealGap(prevSynced: number, incomingConvSeq: number, tracked: boolean): boolean {
-  return tracked && prevSynced > 0 && incomingConvSeq > prevSynced + 1;
+  return tracked && prevSynced >= 0 && incomingConvSeq > prevSynced + 1;
 }
 
 /** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。

@@ -32,8 +32,11 @@ describe("shouldHealGap 离线空洞自愈判定", () => {
   it("连续(已同步+1) → 不自愈", () => {
     expect(shouldHealGap(2, 3, true)).toBe(false);
   });
-  it("初始位点 0 → 不自愈（避免开会话首屏误触发）", () => {
-    expect(shouldHealGap(0, 5, true)).toBe(false);
+  it("初始位点 0 却先收到较大序号 → 从 0 自愈", () => {
+    expect(shouldHealGap(0, 5, true)).toBe(true);
+  });
+  it("初始位点 0 收到第 1 条是连续消息", () => {
+    expect(shouldHealGap(0, 1, true)).toBe(false);
   });
   it("会话未跟踪 → 不自愈", () => {
     expect(shouldHealGap(2, 5, false)).toBe(false);

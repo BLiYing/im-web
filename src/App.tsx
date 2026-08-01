@@ -417,6 +417,7 @@ export default function App() {
   const maxReadReportedRef = useRef(0); // 已上报的最大已读 conv_seq（可见即读，单调不回退）
   const pendingReadRef = useRef(0); // 已滚入视口的最大 conv_seq（节流后上报）
   const readTimerRef = useRef<number | null>(null); // 可见即读上报的节流定时器
+  const conversationRefreshTimerRef = useRef<number | null>(null); // sync 批量消息只触发一次会话列表刷新
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -437,16 +438,15 @@ export default function App() {
   }, []);
 
   // 登录后从本地库（IndexedDB）预载各会话历史 → 打开会话即秒显，刷新不丢已下载的历史；
-  // 同时把增量同步基线设为本地最大 conv_seq（无本地则用服务端 latest），实现"同步位点持久化"。
+  // 同时读取独立的连续同步游标；本地消息最大值与服务端 latest 都不能证明中间没有空洞。
   const preloadLocal = useCallback(async (convs: Conversation[]) => {
     const client = clientRef.current;
     if (!client) return;
     const loaded: Record<string, ChatMessage[]> = {};
     for (const c of convs) {
       const local = await client.loadLocal(c.conv_id);
-      const localMax = local.length ? local[local.length - 1].convSeq : 0;
-      // 同步位点：有本地消息→从本地最大续传（重连不重拉历史）；无本地→从 latest（旧历史按需 openChat 再拉）。
-      client.trackConversation(c.conv_id, localMax > 0 ? localMax : (c.latest_conv_seq ?? 0));
+      const continuousCursor = await client.loadSyncCursor(c.conv_id);
+      client.trackConversation(c.conv_id, continuousCursor);
       if (local.length === 0) continue;
       loaded[c.conv_id] = local;
       const seen = (seenByConv.current[c.conv_id] ??= new Set());
@@ -454,6 +454,20 @@ export default function App() {
     }
     if (Object.keys(loaded).length) setMsgsByConv((prev) => ({ ...loaded, ...prev }));
   }, []);
+
+  const scheduleConversationRefresh = useCallback(() => {
+    if (conversationRefreshTimerRef.current !== null) {
+      clearTimeout(conversationRefreshTimerRef.current);
+    }
+    conversationRefreshTimerRef.current = window.setTimeout(() => {
+      conversationRefreshTimerRef.current = null;
+      void refreshConversations().then(async (latest) => {
+        if (latest.length === 0) return;
+        await preloadLocal(latest); // 新会话也立即登记，避免等刷新页面后才补洞
+        clientRef.current?.syncTracked();
+      });
+    }, 150);
+  }, [refreshConversations, preloadLocal]);
 
   const refreshFriends = useCallback(async () => {
     try {
@@ -634,18 +648,49 @@ export default function App() {
     setAuthBusy(true);
     setAuthErr("");
     const client = new IMClient({
-      onState: setState,
+      onState: (nextState) => {
+        setState(nextState);
+        // 离线冷启动后重连成功：补取权威会话列表、登记新会话并从各自连续游标同步。
+        if (nextState === "connected" && clientRef.current) {
+          void refreshConversations().then(async (latest) => {
+            if (latest.length === 0) return;
+            await preloadLocal(latest);
+            clientRef.current?.syncTracked();
+          });
+        }
+      },
       onMessage: (m) => {
         const seen = (seenByConv.current[m.convId] ??= new Set());
         if (m.convSeq > 0) {
-          if (seen.has(m.convSeq)) return;
+          if (seen.has(m.convSeq)) {
+            // ACK/另一条同步路径可能先创建了同序号消息；权威重拉仍需把文件元数据补到当前屏幕。
+            setMsgsByConv((prev) => {
+              const list = prev[m.convId] ?? [];
+              return {
+                ...prev,
+                [m.convId]: list.map((existing) => existing.convSeq === m.convSeq
+                  ? {
+                      ...existing,
+                      serverMsgId: m.serverMsgId || existing.serverMsgId,
+                      fileName: m.fileName || existing.fileName,
+                      fileSize: m.fileSize !== undefined && m.fileSize > 0 ? m.fileSize : existing.fileSize,
+                      recalledAt: m.recalledAt || existing.recalledAt,
+                      recalledBy: m.recalledBy || existing.recalledBy,
+                      editedAt: m.editedAt || existing.editedAt,
+                      pinnedAt: m.pinnedAt || existing.pinnedAt,
+                    }
+                  : existing),
+              };
+            });
+            return;
+          }
           seen.add(m.convSeq);
         }
         appendMsg(m.convId, m);
         // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由滚动/布局后的 markVisibleRead 读到，
         // 在上方看历史时则不读，留到滚下去再读。
-        // 任何对端来信都刷新会话列表（双栏下列表常驻：更新最后一条/排序/红点）。
-        if (m.from !== uid) void refreshConversations();
+        // 全量/多页同步会连续投递很多消息，只批量刷新一次；同账号另一端新建的会话也必须覆盖。
+        scheduleConversationRefresh();
       },
       onAck: (clientMsgId, ok, convSeq, serverTs) => {
         setMsgsByConv((prev) => {
@@ -736,6 +781,19 @@ export default function App() {
     try {
       await client.connect(uid, pwd); // 首次登录失败（密码错误等）会抛错
     } catch (e) {
+      const code = (e as { code?: number }).code;
+      const cached = client.cachedConversations();
+      if (code === undefined && cached.length > 0) {
+        // 服务器不可达不是登录态失效：保留 client 的后台重连，直接进入本地会话页显示“未连接”。
+        clientRef.current = client;
+        setConversations(cached);
+        await preloadLocal(cached);
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd }));
+        setAuthBusy(false);
+        setPhase("app");
+        return;
+      }
+      client.disconnect();
       clientRef.current = null;
       setAuthBusy(false);
       setAuthErr((e as Error).message || "登录失败");
@@ -750,16 +808,16 @@ export default function App() {
     // 再拉服务端最新会话列表，预载本地消息并按本地位点增量同步补新消息。
     const convs = await refreshConversations();
     if (convs.length) await preloadLocal(convs);
-    client.syncTracked(); // 从各会话本地/latest 基线补离线期间的新消息（持久化位点续传）
+    client.syncTracked(); // OPEN 前调用安全无副作用；onopen 会从各会话连续持久化位点补拉到最新
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations, preloadLocal, refreshFriends, loadMyInfo, refreshGroupInfo]);
+  }, [uid, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
 
   // 静默恢复登录（Web #4）：挂载后若有已存会话 → 直接用存储凭据重登（成功直达主界面；
-  // 失败回登录页但不清凭据——网络临时不通时下次刷新仍能自动重登，对齐 iOS）。
+  // 网络失败且有本地会话缓存时直接进入会话页显示“未连接”；鉴权失败或无缓存才回登录页。
   useEffect(() => {
     const r = restoreRef.current;
     if (!r || phase !== "login") return;
@@ -825,6 +883,10 @@ export default function App() {
     localStorage.removeItem(SESSION_KEY); // 显式退出/鉴权失效才清会话；网络失败不清（下次刷新仍自动重登）
     clientRef.current?.disconnect();
     clientRef.current = null;
+    if (conversationRefreshTimerRef.current !== null) {
+      clearTimeout(conversationRefreshTimerRef.current);
+      conversationRefreshTimerRef.current = null;
+    }
     seenByConv.current = {};
     currentConvRef.current = "";
     setConversations([]);

@@ -4,6 +4,16 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+- **多端历史连续同步与账号隔离（2026-08-02，自动化/构建通过；待跨端实测）**：新增 IndexedDB
+  `sync_cursors`，按 `(owner,conv_id)` 保存独立连续游标，不再从本地最大消息或会话 latest 推断；
+  收到消息时消息+游标同事务落库，ACK 不推进，多页响应只从实际连续页尾继续，实时跳号从空洞前
+  自愈。修复 `connect()` 返回但 Socket 尚未 OPEN 时过早占用 in-flight 导致 onopen 永不补拉；分页与
+  自动同步改按请求 seq 区分。切账号/新重连用连接代次屏蔽旧登录和旧 Socket 回调，并清空旧账号
+  游标、in-flight、重连计时与未决发送。重复文件消息会合并权威文件名/大小到 IndexedDB 和当前 UI。
+  同时补齐 Web 离线冷启动：有该 uid 会话缓存时，登录接口不可达不会退回登录页，而是进入会话页显示
+  “未连接”并后台重连；恢复后自动刷新权威列表并续传。根因与自动化测试分层方案见
+  `../IMServer/docs/CONTINUOUS_SYNC_AND_MULTI_CLIENT_TESTING.md`；待用户清库后做跨端、断线、多页和
+  切账号实测。Vitest 12 个文件、68/68 用例及生产构建均通过。
 - **✅ 文件入口与大小端到端展示（2026-08-01，自动化及用户测试通过）**：“图片或视频”
   入口继续发送媒体；“文件”入口保留浏览器原始 `File` 字节/名称并强制 `content_type=file`。
   `file_name/file_size` 随发送、转发、实时/离线消息进入 IndexedDB；上传以服务端实际字节数为准，
@@ -61,8 +71,8 @@
 - **消息排序（2026-06-17）**：改按 `timestamp` 排序（conv_seq 同毫秒次级）——修"失败消息被新消息挤到后面"。乐观发送 ack 后把时间戳换成服务器 `ack.timestamp`，消除客户端时钟偏差影响。规则见 `../IMServer/docs/CHAT_UX.md §1`。
 - **虚拟化暂回退**：virtua 在双栏「条件挂载 + 嵌套 flex」下视口测 0、渲染空且不自愈 → 现为普通滚动列表（配反向分页常规不卡，狂滚历史时 DOM 累积）。
 - **发送态补"失败"✅（2026-06-17）**：sendText 起 10s 超时计时器，无 ack（断网/发不出去）→ `onAck(false)` 标"发送失败 ✗"且不落库；ack 到则清计时器；disconnect 清所有计时器。浏览器实测：断后端发→10s 后失败；后端恢复发→✓ 不误翻失败。CLIENT_PARITY M0 发送态 Web 🚧→✅。
-- **本地落库 ✅（2026-06-17）**：`src/sdk/localStore.ts`（按 owner 隔离）——①消息落 IndexedDB（收到/同步 + 自己 ack 后）；②会话列表缓存 localStorage（刷新/弱网先秒显）；③**同步位点持久化**：登录/重连从本地最大 conv_seq 续传（`trackConversation`+`syncTracked`），离线期间的新消息登录即增量补回并落库、不重拉历史。`preloadLocal` 预载 + 按 conv_seq 去重。浏览器实测：离线收 2 条 → 重登 → 自动补回、IndexedDB 共 4 条、无重复。
-- **离线空洞自愈 ✅（2026-06-17）**：`processIncoming` 检测 conv_seq 跳号（> 已同步位点+1 且会话在 tracked）→ 用旧位点 `sendSyncReq` 补拉缺口，与 iOS 同逻辑。无回归（顺序消息不误触发）。**注**：该可靠性边界靠断连竞态触发、难手动复现，目前为"对齐 iOS 已验证逻辑 + 无回归"，待 Web 测试基建(Playwright/vitest)后补可重跑用例。
+- **本地落库 ✅（机制于 2026-08-01 加固，待本轮实测）**：`src/sdk/localStore.ts` 按 owner 隔离消息与会话；同步位置现为独立 IndexedDB 游标，不再从本地最大消息推断。消息与连续游标原子提交，失败时游标不会先于消息落盘；刷新/重连从持久化连续位置分页追平全部历史，重复消息按 owner+conv_seq 幂等覆盖。
+- **离线空洞自愈 ✅（机制于 2026-08-01 加固，待本轮实测）**：实时跳号（包括初始游标 0 却先见到较大序号）从空洞前补拉；自动 sync 有 request-seq in-flight，逐页连续校验，ACK/历史窗口/会话 latest 均不能跨洞推进。仍缺 Playwright 端到端断连竞态用例。
 - **Web 已追平 iOS 本地侧债务**（落库/位点续传/空洞自愈）。
 - **测试基建 ① vitest ✅（2026-06-17）**：`npm test`（vitest + fake-indexeddb，node 环境 + `src/test-setup.ts` 注入 indexedDB/localStorage）。16 用例：localStore（消息落库/会话缓存）、friendlyMessage、shouldHealGap（空洞自愈判定，已抽为纯函数可测）。**仍缺 ②Playwright E2E（UI/多端流程仍靠手测）、③CLIENT_PARITY 覆盖列**——这是后续最大测试债。
 - 登录已支持真账号密码；「免密登录」按钮仅在后端开 `-dev-login` 时生效（默认关）。dev 免密建的号空密码哈希、无法再密码登录——测密码登录用「注册并登录」建新号。

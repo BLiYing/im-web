@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { saveMessage, saveRejected, applyMsgOpLocal, loadConversation, saveConversations, loadConversations } from "./localStore";
+import {
+  saveMessage, saveRejected, applyMsgOpLocal, loadConversation,
+  saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage,
+} from "./localStore";
 import type { ChatMessage, Conversation } from "./protocol";
 
 const msg = (convId: string, seq: number, from: string, content = "x"): ChatMessage => ({
@@ -31,6 +34,22 @@ describe("localStore 消息（IndexedDB）", () => {
     const got = await loadConversation("oFile", "c1");
     expect(got[0].fileName).toBe("photo.png");
     expect(got[0].fileSize).toBe(7340032);
+  });
+
+  it("重复同步的稀疏文件元数据不会覆盖已确认的文件名和大小", async () => {
+    await saveMessage("oFileMerge", {
+      serverMsgId: "file-2", convId: "c1", from: "a", content: "/uploads/photo-uuid",
+      contentType: "file", fileName: "photo.png", fileSize: 7340032, convSeq: 1, timestamp: 1001, status: "received",
+    });
+    await saveMessage("oFileMerge", {
+      convId: "c1", from: "a", content: "/uploads/photo-uuid",
+      contentType: "file", fileSize: 0, convSeq: 1, timestamp: 1001, status: "received",
+    });
+    const got = await loadConversation("oFileMerge", "c1");
+    expect(got).toHaveLength(1);
+    expect(got[0].fileName).toBe("photo.png");
+    expect(got[0].fileSize).toBe(7340032);
+    expect(got[0].serverMsgId).toBe("file-2");
   });
 
   it("旧记录无 server_msg_id 时回退复合键（兼容）", async () => {
@@ -115,6 +134,27 @@ describe("localStore 消息（IndexedDB）", () => {
     await saveMessage("", msg("c1", 1, "a"));
     expect(await loadConversation("", "c1")).toEqual([]);
     expect(await loadConversation("ox", "")).toEqual([]);
+  });
+});
+
+describe("localStore 连续同步游标（IndexedDB）", () => {
+  it("无游标从 0 开始，不使用本地最大消息序号推断", async () => {
+    await saveMessage("cursorA", msg("c1", 9, "peer"));
+    expect(await loadSyncCursor("cursorA", "c1")).toBe(0);
+  });
+
+  it("按 owner 隔离且只能单调推进", async () => {
+    await advanceSyncCursor("cursorA2", "c1", 5);
+    await advanceSyncCursor("cursorA2", "c1", 3);
+    expect(await loadSyncCursor("cursorA2", "c1")).toBe(5);
+    expect(await loadSyncCursor("cursorB2", "c1")).toBe(0);
+  });
+
+  it("消息与连续游标同事务写入，非连续消息只落消息不越级", async () => {
+    await saveIncomingMessage("cursorAtomic", msg("c1", 1, "peer"), true);
+    await saveIncomingMessage("cursorAtomic", msg("c1", 3, "peer"), false);
+    expect((await loadConversation("cursorAtomic", "c1")).map((m) => m.convSeq)).toEqual([1, 3]);
+    expect(await loadSyncCursor("cursorAtomic", "c1")).toBe(1);
   });
 });
 
