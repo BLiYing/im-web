@@ -5,6 +5,7 @@ import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type 
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
+import { FileTypeIcon } from "./FileTypeIcon";
 import type { LucideIcon } from "lucide-react";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -176,6 +177,7 @@ function QuoteThumb({ m }: { m?: ChatMessage }) {
   if (!m || m.recalledAt) return null;
   if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
   if (m.contentType === "video") return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
+  if (m.contentType === "file") return <FileTypeIcon name={m.content} size={32} className="quote-thumb" />;
   return null;
 }
 
@@ -194,7 +196,7 @@ const recordItemPreview = (it: RecordItem): string =>
 
 /** 从文件消息 URL 取原始显示名：存储名 <随机>__<原名>.<ext> → 取 "__" 之后并解码（与后端/iOS 对齐）。 */
 function fileNameFromContent(content: string): string {
-  const last = content.split("/").pop() || content;
+  const last = (content.split("/").pop() || content).split(/[?#]/, 1)[0];
   let decoded = last;
   try { decoded = decodeURIComponent(last); } catch { /* 保留原串 */ }
   const i = decoded.indexOf("__");
@@ -960,6 +962,32 @@ export default function App() {
 
   // 上传并发送图片/文件（M4-6）：上传 → 发 content_type=image|video|file 消息（content=URL）+ 乐观上屏。
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachAnchorRef = useRef<HTMLDivElement>(null);
+  const attachCloseTimerRef = useRef<number | null>(null);
+  const cancelAttachClose = useCallback(() => {
+    if (attachCloseTimerRef.current === null) return;
+    window.clearTimeout(attachCloseTimerRef.current);
+    attachCloseTimerRef.current = null;
+  }, []);
+  const scheduleAttachClose = useCallback(() => {
+    cancelAttachClose();
+    attachCloseTimerRef.current = window.setTimeout(() => {
+      setAttachPanel(false);
+      attachCloseTimerRef.current = null;
+    }, 1000);
+  }, [cancelAttachClose]);
+  useEffect(() => cancelAttachClose, [cancelAttachClose]);
+  useEffect(() => {
+    if (!attachPanel) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!attachAnchorRef.current?.contains(event.target as Node)) {
+        cancelAttachClose();
+        setAttachPanel(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [attachPanel, cancelAttachClose]);
   const uploadAndSend = useCallback(async (file: File) => {
     const client = clientRef.current;
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
@@ -978,14 +1006,15 @@ export default function App() {
 
   // 附件面板项（数据驱动，M4-6）：加入口 = 数组加一行。Web 只图片或视频 / 文件。
   const attachItems = useMemo(() => [
-    { id: "media", label: "图片或视频", accept: "image/*,video/*" },
-    { id: "file", label: "文件", accept: "*/*" },
+    { id: "media", label: "图片或视频", accept: "image/*,video/*", icon: ImageIcon },
+    { id: "file", label: "文件", accept: "*/*", icon: FileText },
   ], []);
   const pickFile = useCallback((accept: string) => {
+    cancelAttachClose();
     setAttachPanel(false);
     const inp = fileInputRef.current;
     if (inp) { inp.accept = accept; inp.multiple = accept !== "*/*"; inp.value = ""; inp.click(); } // 图片/视频可多选（相册）
-  }, []);
+  }, [cancelAttachClose]);
   const onFilePicked = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
@@ -2483,7 +2512,10 @@ export default function App() {
                           </div>
                         ); })()
                       ) : m.contentType === "file" ? (
-                        <a className="msg-file" href={m.content} download={fileNameFromContent(m.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(m.content)}</a>
+                        <a className="msg-file" href={m.content} download={fileNameFromContent(m.content)} target="_blank" rel="noreferrer">
+                          <FileTypeIcon name={m.content} size={30} />
+                          <span>{fileNameFromContent(m.content)}</span>
+                        </a>
                       ) : isUrlText(m.content) ? (
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
                         <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
@@ -2583,14 +2615,6 @@ export default function App() {
             </footer>
           ) : (
             <>
-              {attachPanel && convId && (
-                // 附件面板（M4-6，数据驱动）：图片或视频 / 文件。
-                <div className="attach-panel">
-                  {attachItems.map((it) => (
-                    <button key={it.id} className="attach-item" onClick={() => pickFile(it.accept)}>{it.label}</button>
-                  ))}
-                </div>
-              )}
               {pastedImages.length > 0 && (
                 // 粘贴图片预览条（Web #2）：缩略图 + 移除，点发送即作为图片消息上传。
                 <div className="paste-preview">
@@ -2603,7 +2627,25 @@ export default function App() {
                 </div>
               )}
               <footer>
-                <button className="attach-btn" disabled={!convId} title="附件" onClick={() => setAttachPanel((v) => !v)}>＋</button>
+                <div className="attach-anchor" ref={attachAnchorRef}
+                  onMouseEnter={() => { cancelAttachClose(); if (convId) setAttachPanel(true); }}
+                  onMouseLeave={scheduleAttachClose}>
+                  <button className="attach-btn" disabled={!convId} title="附件"
+                    aria-expanded={attachPanel && !!convId}
+                    onClick={() => setAttachPanel(true)}>＋</button>
+                  {attachPanel && convId && (
+                    // 毛玻璃气泡菜单：悬停或点击加号均打开，功能仍由数据数组驱动。
+                    <div className="attach-popover" role="menu"
+                      onMouseEnter={cancelAttachClose} onMouseLeave={scheduleAttachClose}>
+                      {attachItems.map((it) => (
+                        <button key={it.id} className="attach-item" role="menuitem" onClick={() => pickFile(it.accept)}>
+                          <it.icon size={24} aria-hidden="true" />
+                          <span>{it.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={onFilePicked} />
                 <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
                   placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
@@ -2701,7 +2743,10 @@ export default function App() {
                         <video className="fav-thumb" src={videoFrameSrc(f.content)} preload="metadata" muted /><span className="play-badge">▶</span>
                       </span>
                     ) : f.content_type === "file" ? (
-                      <a className="msg-file" href={f.content} download={fileNameFromContent(f.content)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(f.content)}</a>
+                      <a className="msg-file" href={f.content} download={fileNameFromContent(f.content)} target="_blank" rel="noreferrer">
+                        <FileTypeIcon name={f.content} size={30} />
+                        <span>{fileNameFromContent(f.content)}</span>
+                      </a>
                     ) : isUrlText(f.content) ? (
                       <a className="msg-link" href={f.content} target="_blank" rel="noreferrer">{f.content}</a>
                     ) : (
@@ -2757,7 +2802,10 @@ export default function App() {
                       <video className="record-item-media" src={videoFrameSrc(it.c)} preload="metadata" muted /><span className="play-badge">▶</span>
                     </span>
                   ) : it.ct === "file" ? (
-                    <a className="msg-file" href={it.c} download={fileNameFromContent(it.c)} target="_blank" rel="noreferrer">📎 {fileNameFromContent(it.c)}</a>
+                    <a className="msg-file" href={it.c} download={fileNameFromContent(it.c)} target="_blank" rel="noreferrer">
+                      <FileTypeIcon name={it.c} size={30} />
+                      <span>{fileNameFromContent(it.c)}</span>
+                    </a>
                   ) : (
                     <div className="record-item-text">{it.c}</div>
                   )}
@@ -3080,7 +3128,8 @@ export default function App() {
                         <div className="detail-filelist">
                           {files.map((m) => (
                             <a key={m.serverMsgId || m.convSeq} className="detail-fileitem" href={m.content} target="_blank" rel="noreferrer">
-                              <FileText size={18} /><span className="detail-file-name">{decodeURIComponent((m.content.split("/").pop() || "文件").split("?")[0])}</span>
+                              <FileTypeIcon name={m.content} size={34} />
+                              <span className="detail-file-name">{fileNameFromContent(m.content)}</span>
                             </a>
                           ))}
                         </div>
