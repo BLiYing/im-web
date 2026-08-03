@@ -8,6 +8,8 @@ import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./a
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { formatFileSize } from "./fileMetadata";
+import { formatMediaDuration, formatUploadProgress, mediaDisplaySize, probeMediaMetadata } from "./media";
+import { LOG_TAG, logger } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -220,6 +222,17 @@ async function copyImageToClipboard(url: string): Promise<void> {
 
 type LinkPreview = { url: string; title?: string; description?: string; image?: string; site_name?: string };
 const linkPreviewCache = new Map<string, LinkPreview | null>(); // 进程内缓存（含负缓存 null=抓取失败）
+
+/**
+ * 媒体气泡定框：拿到协议下发的原始像素时按比例算出 CSS 尺寸（与 iOS 同算法）；
+ * **尺寸未知**（老消息 / 老客户端 / 转发件）则不锁死方框，交给 `.auto` 让图片按自身比例显示，
+ * 否则 object-fit:cover 会把老图永久裁成正方形（Web 没有 iOS 那样的加载后重排）。
+ */
+function mediaBoxProps(m: ChatMessage): { className: string; style?: CSSProperties } {
+  if (!m.mediaW || !m.mediaH) return { className: "msg-media auto" };
+  const box = mediaDisplaySize(m.mediaW, m.mediaH);
+  return { className: "msg-media", style: { width: `${box.width}px`, height: `${box.height}px` } };
+}
 
 /** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。 */
 function LinkCard({ url, fetchPreview, onMediaLoad }: { url: string; fetchPreview: (u: string) => Promise<LinkPreview>; onMediaLoad?: () => void }) {
@@ -921,6 +934,13 @@ export default function App() {
     void refreshConversations();
   }, [refreshConversations]);
 
+  // 媒体上传进度（M4+）：key=本地占位 clientMsgId，值为**媒体本体**已传/总字节数，
+  // 在气泡左上角显“3.9 MB / 7.9 MB”（镜像 iOS）。传完/失败即删键，角标切回视频时长。
+  const [uploadProgress, setUploadProgress] = useState<Record<string, { sent: number; total: number }>>({});
+  const clearUploadProgress = useCallback((key: string) => {
+    setUploadProgress((prev) => { if (!(key in prev)) return prev; const nx = { ...prev }; delete nx[key]; return nx; });
+  }, []);
+
   // 粘贴图片（Web #2）：Ctrl/Cmd+V 粘贴剪贴板中的图片 → 输入区上方预览 → 发送时作为图片上传。
   const [pastedImages, setPastedImages] = useState<{ file: File; url: string }[]>([]);
   const addPastedImages = useCallback((files: File[]) => {
@@ -953,16 +973,20 @@ export default function App() {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!client || !cid || files.length === 0) return;
     const groupId = files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined;
-    const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined }));
+    const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined, meta: { width: 0, height: 0, durationMs: 0 } }));
     for (const l of locals) {
       appendMsg(cid, {
         clientMsgId: l.localId, convId: cid, from: uid, content: l.blobUrl,
         contentType: l.f.type.startsWith("video/") ? "video" : "image",
         convSeq: 0, timestamp: Date.now(), status: "sending", groupId,
       });
+      setUploadProgress((prev) => ({ ...prev, [l.localId]: { sent: 0, total: l.f.size } })); // 排队中：先显“等待中”
     }
     // 视频：先在本地抓首帧 → 立刻用 blob 封面显示（发送端不必等上传就见封面）；抓到的 File 复用做上传。
+    // 同时量出像素尺寸与时长 → 本地气泡立刻按原比例排版，并随消息上行给收端。
     await Promise.all(locals.map(async (l) => {
+      l.meta = await probeMediaMetadata(l.f);
+      if (l.meta.width > 0) { patchMsg(cid, l.localId, { mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size }); }
       if (!l.f.type.startsWith("video/")) return;
       const pf = await captureVideoPoster(l.f);
       if (pf) { l.posterFile = pf; l.posterBlobUrl = URL.createObjectURL(pf); patchMsg(cid, l.localId, { posterUrl: l.posterBlobUrl }); }
@@ -970,20 +994,33 @@ export default function App() {
     for (let i = 0; i < locals.length; i++) {
       const l = locals[i];
       try {
-        const { url, contentType } = await client.uploadFile(l.f);
+        // 分母用**媒体本体字节数**：XHR 报的 total 是 multipart 整包（含 boundary/头），会比文件属性大一截。
+        const { url, contentType } = await client.uploadFile(l.f, (sent, total) => {
+          const ratio = total > 0 ? Math.min(sent / total, 1) : 0;
+          setUploadProgress((prev) => ({ ...prev, [l.localId]: { sent: Math.round(ratio * l.f.size), total: l.f.size } }));
+        });
         // 视频封面：上传本地已抓的首帧图，随消息带 poster URL（收端直显免解码）；上传失败则保留本地 blob 封面不阻塞。
         let poster: string | undefined;
         if (l.posterFile) { try { poster = (await client.uploadFile(l.posterFile)).url; } catch { /* 封面上传失败：保留本地 blob 封面 */ } }
-        const clientMsgId = client.sendMedia(url, contentType, peer, cid, { groupId, poster });
+        const clientMsgId = client.sendMedia(url, contentType, peer, cid, {
+          groupId, poster, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size,
+        });
         patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl });
+        clearUploadProgress(l.localId); // 传完：左上角进度胶囊消失，切回时长角标
       } catch (e) {
         patchMsg(cid, l.localId, { status: "failed" });
+        clearUploadProgress(l.localId);
+        // 用户只看到一句 toast；失败的会话/消息定位靠这条（可与 HTTP 层同 request_id 的上传日志对账）。
+        logger.warn(LOG_TAG.ui, "media_send_failed", {
+          conv_id: cid, client_msg_id: l.localId, mime: l.f.type, bytes: l.f.size,
+          media_w: l.meta.width, media_h: l.meta.height, error: (e as Error).message,
+        });
         setToast(`第 ${i + 1} 项发送失败：${(e as Error).message}`);
       }
       // 延迟释放 blob：等重渲染切到服务器 URL 后再回收，避免闪图（失败格保留本地图直至刷新）。
       window.setTimeout(() => { URL.revokeObjectURL(l.blobUrl); if (l.posterBlobUrl) URL.revokeObjectURL(l.posterBlobUrl); }, 60_000);
     }
-  }, [peer, groupConvId, uid, appendMsg, patchMsg]);
+  }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
 
   const send = useCallback(() => {
     const text = input.trim();
@@ -1165,7 +1202,11 @@ export default function App() {
         // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
         const clientMsgId = ct === "text"
           ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
-          : client.sendMedia(m.content, ct, to, target.conv_id, { forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize });
+          // 转发也要带上媒体尺寸/时长：源消息手上就有，丢了收端就只能按未知渲染（且事后补不回来）。
+          : client.sendMedia(m.content, ct, to, target.conv_id, {
+              forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize,
+              mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
+            });
         pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize);
       }
     }
@@ -2542,13 +2583,17 @@ export default function App() {
                   </div>
                 );
               }
+              // 媒体气泡：时间/已读压在图上（右下角），故不再渲染气泡下方的 .bmeta 行。
+              const isMediaBubble = m.contentType === "image" || m.contentType === "video";
+              const uploading = uploadProgress[m.clientMsgId ?? ""];
+              const durationText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
               const bubbleBlock = (
                 <>
                   <div className="bubble-line">
                     {mine && m.status === "failed" && (
                       <span className="fail-badge" title={m.note || "发送失败"}>!</span>
                     )}
-                    <div className="bubble"
+                    <div className={`bubble${isMediaBubble ? " media" : ""}`}
                       onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                       {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                       {m.replyToConvSeq ? (
@@ -2558,15 +2603,27 @@ export default function App() {
                           <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
                         </div>
                       ) : null}
-                      {m.contentType === "image" ? (
-                        <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} onClick={() => setViewer({ m })} />
-                      ) : m.contentType === "video" ? (
-                        // 不自动播放：气泡内显首帧 + 播放角标，点击进全屏查看器（镜像 iOS）。
-                        <span className="msg-video-wrap" onClick={() => setViewer({ m })}>
-                          {m.posterUrl
-                            ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
-                            : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />}
-                          <span className="play-badge">▶</span>
+                      {isMediaBubble ? (
+                        // 图片/视频：按 media_w/media_h 的原始比例定框（未知回退方块），
+                        // 左上角时长或上传进度、右下角时间+已读态、视频居中播放角标——与 iOS 同版式。
+                        <span {...mediaBoxProps(m)} onClick={() => setViewer({ m })}>
+                          {m.contentType === "video"
+                            ? (m.posterUrl
+                                ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
+                                : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />)
+                            : <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} />}
+                          {m.contentType === "video" && <span className="play-badge">▶</span>}
+                          {uploading
+                            ? <span className="media-badge media-badge-tl">{formatUploadProgress(uploading.sent, uploading.total)}</span>
+                            : (durationText && <span className="media-badge media-badge-tl">{durationText}</span>)}
+                          <span className="media-badge media-badge-br">
+                            {mine
+                              ? (m.status === "sending" ? "发送中…"
+                                // 被拒收（有 note）时失败已由红❗+下方系统行表达，角标只显时间，不重复报错（与 iOS 一致）。
+                                : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : "未发送 ✗")
+                                : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>)
+                              : formatTime(m.timestamp, timeFormat)}
+                          </span>
                         </span>
                       ) : m.contentType === "chat_record" ? (
                         // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
@@ -2593,16 +2650,18 @@ export default function App() {
                       ) : (
                         <span className="btext">{m.content}</span>
                       )}
-                      <span className="bmeta">
-                        {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
-                        {mine ? (
-                          m.status === "sending" ? "发送中…"
-                            : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
-                              : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
-                        ) : (
-                          formatTime(m.timestamp, timeFormat)
-                        )}
-                      </span>
+                      {!isMediaBubble && (
+                        <span className="bmeta">
+                          {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
+                          {mine ? (
+                            m.status === "sending" ? "发送中…"
+                              : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
+                                : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+                          ) : (
+                            formatTime(m.timestamp, timeFormat)
+                          )}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {m.convSeq > 0 && translations[m.convSeq] && (

@@ -27,6 +27,8 @@
   --on-accent: #ffffff;
   --on-media: #ffffff;
   --on-media-muted: rgba(255, 255, 255, 0.35);
+  /* 压在媒体上的已读双勾：底恒为暗色遮罩，故用亮绿（不随明暗主题变化，与 iOS mediaBadgeCheckRead 同值）。 */
+  --check-read-on-media: #7ddc7d;
   --subtle-fill: rgba(29, 33, 41, 0.05);
   --accent-flash: rgba(76, 166, 76, 0.35);
   --overlay: rgba(0, 0, 0, 0.4);
@@ -328,6 +330,24 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .viewer-more-pop .danger { color: var(--danger); }
 
 /* 气泡内视频：首帧 + 居中播放角标（不自动播放，点击进查看器） */
+/* 媒体气泡（M4+）：外框按协议 media_w/media_h 的原始比例由 JS 定尺（与 iOS 同算法），
+   图片/首帧 cover 填满；时长/进度压左上、时间+已读压右下，故气泡自身去内边距。 */
+.bubble.media { padding: 0; overflow: hidden; }
+/* 媒体气泡里仍可能有「转发自 X」/引用条：气泡整体去了内边距，这两行要自己补回来，否则贴着边框。 */
+.bubble.media > .forward-from, .bubble.media > .quote-bar { margin: 6px 10px 2px; }
+.msg-media { position: relative; display: inline-flex; cursor: pointer; border-radius: var(--radius-bubble); overflow: hidden; }
+.msg-media .msg-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; border-radius: 0; }
+/* 尺寸未知（老消息/老端/转发件）：按图片自身比例显示并夹进同一个盒子，绝不裁切。 */
+.msg-media.auto .msg-image { width: auto; height: auto; max-width: 240px; max-height: 320px; object-fit: contain; }
+/* 悬浮角标：底恒为半透明黑，浅色图上也读得清（不靠文字阴影）。 */
+.media-badge { position: absolute; padding: 1px 6px; border-radius: 9px; background: var(--overlay);
+  color: var(--on-media); font-size: 11px; line-height: 16px; white-space: nowrap; pointer-events: none;
+  font-variant-numeric: tabular-nums; }
+.media-badge-tl { left: 6px; top: 6px; }
+.media-badge-br { right: 6px; bottom: 6px; }
+.media-badge .ck { color: var(--on-media); }
+.media-badge .ck.read { color: var(--check-read-on-media); }
+
 .msg-video-wrap { position: relative; display: inline-block; cursor: pointer; }
 .play-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--on-media); font-size: 26px; text-shadow: 0 1px 6px var(--overlay-strong); pointer-events: none; }
 

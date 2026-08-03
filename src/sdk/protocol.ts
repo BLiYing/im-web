@@ -57,6 +57,11 @@ export interface ChatMessage {
   forwardFrom?: string;    // 转发溯源"转发自 X"（M4-3）
   groupId?: string;        // 相册分组 ID（M4+）：同批多图/视频聚簇渲染宫格；空=普通消息
   posterUrl?: string;      // 视频封面首帧图 URL（M4+）：发送时生成上传，收端直显封面（免解码原视频）；空=非视频/无封面
+  /** M4+ 媒体像素宽高（image/video，发送端量出）：据此按原比例预留气泡尺寸，免加载完跳版；0/缺省=未知。 */
+  mediaW?: number;
+  mediaH?: number;
+  /** M4+ 视频时长（**毫秒**）：封面左上角显 mm:ss；0/缺省=未知或非视频。 */
+  duration?: number;
 }
 
 /** 引用回复定位（发送时上行只带 convSeq，preview 为本端即时预览；服务端会冻结权威快照）。 */

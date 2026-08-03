@@ -37,6 +37,9 @@ interface MsgRecord {
   forwardFrom?: string;
   groupId?: string; // 相册分组（M4+）
   posterUrl?: string; // 视频封面首帧 URL（M4+）
+  mediaW?: number;    // 媒体像素宽（M4+）：按原比例渲染气泡，免加载完跳版
+  mediaH?: number;    // 媒体像素高（M4+）
+  duration?: number;  // 视频时长毫秒（M4+）：封面左上角角标
 }
 
 interface SyncCursorRecord {
@@ -87,6 +90,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
+    mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
   };
 }
 
@@ -275,6 +279,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
+            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration,
           },
     );
   } catch (error) {

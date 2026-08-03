@@ -5,7 +5,7 @@
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
-import { tracedFetch } from "./http";
+import { tracedFetch, tracedUpload, type UploadProgressHandler } from "./http";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -13,6 +13,20 @@ const RECONNECT_MAX_MS = 30_000;
 const SEND_TIMEOUT_MS = 10_000; // 发出后多久没收到 ack 即判定"发送失败"（断网/发不出去）
 
 export type ConnState = "disconnected" | "connecting" | "connected";
+
+/** 富媒体发送选项。mediaW/mediaH/duration/fileSize 为 M4+ 媒体元数据（PROTOCOL §4.1），
+ *  由**发送端量出**：收端据此按原比例预留气泡、显视频时长角标、算上传进度分母。 */
+export interface MediaSendOptions {
+  forwardFrom?: string;
+  groupId?: string;
+  poster?: string;
+  fileName?: string;
+  fileSize?: number;
+  mediaW?: number;
+  mediaH?: number;
+  /** 视频时长（毫秒）。 */
+  duration?: number;
+}
 
 export interface IMClientHandlers {
   onState?: (state: ConnState) => void;
@@ -63,7 +77,7 @@ export class IMClient {
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string; groupId?: string; poster?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; replyToConvSeq?: number; replySnapshot?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -339,17 +353,26 @@ export class IMClient {
 
   /** 发送富媒体（图片/文件，M4-6）：content=已上传的 URL，contentType=image|video|file。
    *  opts.forwardFrom=转发溯源；opts.groupId=相册分组；opts.poster=视频封面首帧 URL（M4+，收端直显免解码）。 */
-  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: { forwardFrom?: string; groupId?: string; poster?: string; fileName?: string; fileSize?: number }): string {
+  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions): string {
     return this.sendContent(url, contentType, to, convId, opts);
   }
 
-  /** 上传图片/文件（M4-6）：multipart → {url, contentType, size}。 */
-  async uploadFile(file: File): Promise<{ url: string; contentType: string; size: number }> {
+  /** 上传图片/文件（M4-6）：multipart → {url, contentType, size}。
+   *  onProgress 非空时走 XHR（fetch 拿不到上行进度），回调的 sent/total 是**请求体**字节数。 */
+  async uploadFile(file: File, onProgress?: UploadProgressHandler): Promise<{ url: string; contentType: string; size: number }> {
     const fd = new FormData();
     fd.append("file", file);
-    const resp = await tracedFetch("/api/v1/upload", { method: "POST", headers: { Authorization: `Bearer ${this.token}` }, body: fd });
-    const body = await resp.json().catch(() => ({ code: -1 }));
-    if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message || "上传失败"));
+    const auth = { Authorization: `Bearer ${this.token}` };
+    let body: { code: number; message?: string; data: Record<string, unknown> };
+    if (onProgress) {
+      const { text } = await tracedUpload("/api/v1/upload", fd, { headers: auth, onProgress });
+      // 代理/网关可能回非 JSON（502 的 HTML 等）：与 fetch 分支一样降级成统一错误，别把解析异常抛给用户。
+      try { body = JSON.parse(text || "{}"); } catch { body = { code: -1, data: {} }; }
+    } else {
+      const resp = await tracedFetch("/api/v1/upload", { method: "POST", headers: auth, body: fd });
+      body = await resp.json().catch(() => ({ code: -1, data: {} }));
+    }
+    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "上传失败"));
     const serverSize = Number(body.data.size);
     return {
       url: body.data.url as string,
@@ -359,11 +382,12 @@ export class IMClient {
   }
 
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
-  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string }; forwardFrom?: string; groupId?: string; poster?: string; fileName?: string; fileSize?: number }): string {
+  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string } }): string {
     const clientMsgId = crypto.randomUUID();
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
-      fileName: opts?.fileName, fileSize: opts?.fileSize, replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster });
+      fileName: opts?.fileName, fileSize: opts?.fileSize, replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster,
+      mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
@@ -381,7 +405,21 @@ export class IMClient {
     if (opts?.groupId) { data.group_id = opts.groupId; }
     if (opts?.poster) { data.poster = opts.poster; }
     if (contentType === "file" && opts?.fileName) { data.file_name = opts.fileName; }
-    if (contentType === "file" && opts?.fileSize !== undefined && opts.fileSize >= 0) { data.file_size = opts.fileSize; }
+    // 媒体元数据（M4+，PROTOCOL §4.1）：尺寸/时长/字节数由发送端量出，收端据此按原比例排版 + 显时长角标。
+    if (opts?.mediaW && opts.mediaW > 0) { data.media_w = opts.mediaW; }
+    if (opts?.mediaH && opts.mediaH > 0) { data.media_h = opts.mediaH; }
+    if (opts?.duration && opts.duration > 0) { data.duration = opts.duration; }
+    if (opts?.fileSize !== undefined && opts.fileSize > 0) { data.file_size = opts.fileSize; }
+    if (contentType === "image" || contentType === "video") {
+      // 媒体上行的唯一收口 → "到底带没带尺寸/时长"以此为准（含转发路径）。不记 content/正文。
+      const fields = {
+        client_msg_id: clientMsgId, conv_id: convId, content_type: contentType,
+        media_w: data.media_w ?? 0, media_h: data.media_h ?? 0, duration_ms: data.duration ?? 0,
+        bytes: data.file_size ?? 0, has_poster: Boolean(opts?.poster), forwarded: Boolean(opts?.forwardFrom),
+      };
+      if (data.media_w && data.media_h) logger.info(LOG_TAG.ws, "media_meta_attached", fields);
+      else logger.warn(LOG_TAG.ws, "media_meta_missing", fields); // 收端只能回退，排版异常的头号根因
+    }
     this.send({ type: T.SEND_MSG, seq: ++this.seq, data });
     return clientMsgId;
   }
@@ -554,6 +592,7 @@ export class IMClient {
             fileName: pend.fileName, fileSize: pend.fileSize,
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, forwardFrom: pend.forwardFrom,
             groupId: pend.groupId, posterUrl: pend.poster,
+            mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration,
           });
           this.pendingSends.delete(d.client_msg_id);
         }
@@ -707,6 +746,9 @@ export class IMClient {
       forwardFrom: d.forward_from || undefined,
       groupId: d.group_id || undefined,
       posterUrl: d.poster || undefined,
+      mediaW: Number(d.media_w) > 0 ? Number(d.media_w) : undefined,
+      mediaH: Number(d.media_h) > 0 ? Number(d.media_h) : undefined,
+      duration: Number(d.duration) > 0 ? Number(d.duration) : undefined,
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

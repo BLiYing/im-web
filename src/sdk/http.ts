@@ -29,6 +29,53 @@ function bodyBytes(body: BodyInit | null | undefined): number | undefined {
   return undefined;
 }
 
+/** 上传进度回调：sent/total 均为**请求体**字节数（含 multipart 头，略大于文件本身）。 */
+export type UploadProgressHandler = (sent: number, total: number) => void;
+
+/**
+ * 上传专用的 XHR 版 tracedFetch。fetch 不提供上行进度事件，媒体上传要显示「已传 / 总大小」
+ * 只能走 XMLHttpRequest.upload.onprogress。日志字段与 tracedFetch 保持一致（req/method/path/
+ * status/duration_ms/bytes），跨端 Request ID 契约不变（见 docs/LOGGING.md）。
+ */
+export function tracedUpload(
+  path: string,
+  body: FormData,
+  opts: { headers?: Record<string, string>; onProgress?: UploadProgressHandler } = {},
+): Promise<{ status: number; text: string }> {
+  const requestID = crypto.randomUUID();
+  const started = performance.now();
+  logger.info(LOG_TAG.http, "request", { req: requestID, method: "POST", path, body: "[multipart]" });
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path, true);
+    xhr.setRequestHeader("X-Request-ID", requestID);
+    Object.entries(opts.headers ?? {}).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    if (opts.onProgress) {
+      xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress!(e.loaded, e.total); };
+    }
+    xhr.onload = () => {
+      const fields = {
+        req: xhr.getResponseHeader("X-Request-ID") || requestID,
+        method: "POST", path, status: xhr.status,
+        duration_ms: Math.round((performance.now() - started) * 10) / 10,
+        bytes: new TextEncoder().encode(xhr.responseText || "").byteLength,
+      };
+      if (xhr.status >= 200 && xhr.status < 300) logger.info(LOG_TAG.http, "response", fields);
+      else logger.warn(LOG_TAG.http, "response", fields);
+      resolve({ status: xhr.status, text: xhr.responseText || "" });
+    };
+    xhr.onerror = () => {
+      logger.error(LOG_TAG.http, "transport_error", {
+        req: requestID, method: "POST", path,
+        duration_ms: Math.round((performance.now() - started) * 10) / 10,
+      });
+      reject(new Error("网络错误，上传失败"));
+    };
+    xhr.send(body);
+  });
+}
+
 export async function tracedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(input instanceof Request ? input.headers : undefined);
   new Headers(init.headers).forEach((value, key) => headers.set(key, value));
