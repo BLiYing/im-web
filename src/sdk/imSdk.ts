@@ -417,8 +417,8 @@ export class IMClient {
         media_w: data.media_w ?? 0, media_h: data.media_h ?? 0, duration_ms: data.duration ?? 0,
         bytes: data.file_size ?? 0, has_poster: Boolean(opts?.poster), forwarded: Boolean(opts?.forwardFrom),
       };
-      if (data.media_w && data.media_h) logger.info(LOG_TAG.ws, "media_meta_attached", fields);
-      else logger.warn(LOG_TAG.ws, "media_meta_missing", fields); // 收端只能回退，排版异常的头号根因
+      if (data.media_w && data.media_h) logger.info(LOG_TAG.media, "media_meta_attached", fields);
+      else logger.warn(LOG_TAG.media, "media_meta_missing", fields); // 收端只能回退，排版异常的头号根因
     }
     this.send({ type: T.SEND_MSG, seq: ++this.seq, data });
     return clientMsgId;

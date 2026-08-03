@@ -78,8 +78,8 @@ export async function probeMediaMetadata(file: File): Promise<MediaMetadata> {
   const meta = await (isVideo ? probeVideo(file) : probeImage(file));
   // 量不到=收端排版回退（无角标、比例未知）的源头，必须留痕；量到了只在 debug 记一笔便于对账。
   const fields = mediaProbeLogFields(file, meta);
-  if (isMediaMetadataComplete(isVideo, meta)) logger.debug(LOG_TAG.ui, "media_probe_ok", fields);
-  else logger.warn(LOG_TAG.ui, "media_probe_incomplete", fields);
+  if (isMediaMetadataComplete(isVideo, meta)) logger.debug(LOG_TAG.media, "media_probe_ok", fields);
+  else logger.warn(LOG_TAG.media, "media_probe_incomplete", fields);
   return meta;
 }
 

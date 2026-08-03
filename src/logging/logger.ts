@@ -4,6 +4,8 @@ export const LOG_TAG = {
   ws: "IM.WS",
   store: "IM.STORE",
   ui: "IM.UI",
+  // 媒体全链路（探测 → 上传 → 渲染 → 播放）单独成桶，便于一条过滤捞出整条链路；与 iOS IM.MEDIA 对齐。
+  media: "IM.MEDIA",
 } as const;
 
 export type LogTag = (typeof LOG_TAG)[keyof typeof LOG_TAG];

@@ -5,6 +5,8 @@
 ## 统一入口
 
 - 业务日志使用 `src/logging/logger.ts` 的 `logger` 和 `LOG_TAG`。
+- 媒体（图片/视频）的探测/上传/渲染/播放统一用 `LOG_TAG.media`（`IM.MEDIA`，与 iOS 同名），
+  便于一条过滤捞出整条链路；不要再塞进 `LOG_TAG.ui` / `LOG_TAG.ws`。
 - 禁止在业务代码直接调用 `console.log/info/warn/error/debug`。
 - `main.tsx` 调用 `installGlobalLogging()`，注册诊断导出及全局 `error` /
   `unhandledrejection` 捕获。

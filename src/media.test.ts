@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { diagnosticEntries } from "./logging/logger";
+import { LOG_TAG, diagnosticEntries } from "./logging/logger";
 import {
   MEDIA_FALLBACK_SIDE,
   formatMediaDuration,
@@ -83,5 +83,9 @@ describe("媒体探测日志", () => {
     const meta = await probeMediaMetadata(new File(["x"], "a.pdf", { type: "application/pdf" }));
     expect(meta).toEqual({ width: 0, height: 0, durationMs: 0 });
     expect(diagnosticEntries().slice(before).filter((e) => e.event.startsWith("media_probe"))).toHaveLength(0);
+  });
+
+  it("媒体链路统一落 IM.MEDIA（与 iOS 同名），才能一条过滤捞全", () => {
+    expect(LOG_TAG.media).toBe("IM.MEDIA");
   });
 });

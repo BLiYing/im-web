@@ -293,6 +293,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .msg-file-body { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .msg-file-name { min-width: 0; overflow-wrap: anywhere; }
 .msg-file-size { color: var(--text-secondary); font-size: 12px; line-height: 1.2; }
+/* 文件上传进度条：气泡立刻上屏，传输期间给出可见反馈（原先几十秒毫无动静）。 */
+.file-progress { display: block; height: 3px; margin-top: 4px; border-radius: 2px; background: var(--neutral-control); overflow: hidden; }
+.file-progress-bar { display: block; height: 100%; background: var(--accent); transition: width 0.2s linear; }
 .attach-anchor { position: relative; flex: 0 0 auto; align-self: flex-end; }
 .chat footer .attach-btn { width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); font-size: 28px; font-weight: 300; line-height: 1; cursor: pointer; }
 .chat footer .attach-btn:hover, .chat footer .attach-btn[aria-expanded="true"] { background: var(--surface-hover); color: var(--accent); }
@@ -350,6 +353,16 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 .msg-video-wrap { position: relative; display: inline-block; cursor: pointer; }
 .play-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--on-media); font-size: 26px; text-shadow: 0 1px 6px var(--overlay-strong); pointer-events: none; }
+
+/* 视频解不了码时的降级卡片（HEVC 等）：给出原因 + 下载入口，不留一个黑框让人猜。 */
+/* 用定宽而非 max-width：作为 .modal-mask 的 flex item，内部 img 的 max-width:100% 会与
+   shrink-to-fit 形成循环约束，卡片会被压成一条竖线。 */
+.viewer-unplayable { width: min(560px, 86vw); padding: 24px; border-radius: 12px; background: var(--surface-elevated);
+  color: var(--text); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.viewer-unplayable img { max-width: 100%; max-height: 40vh; border-radius: 8px; }
+.viewer-unplayable p { color: var(--text-secondary); font-size: 14px; margin: 0; }
+.viewer-unplayable-btn { padding: 8px 18px; border-radius: 8px; background: var(--accent); color: var(--on-accent);
+  text-decoration: none; font-size: 14px; }
 
 /* 会话媒体库（蒙层网格） */
 .gallery-panel { width: min(640px, 92vw); max-height: 80vh; overflow-y: auto; background: var(--surface-elevated); border-radius: 12px; padding: 16px; }
@@ -852,3 +865,7 @@ button.detail-row:hover { background: var(--surface-hover); }
     width: auto;
   }
 }
+
+/* 上传失败的文件气泡：整块可点重试，给出明确的可操作反馈（不是一条 0% 的空进度条）。 */
+.msg-file.failed { cursor: pointer; }
+.msg-file.failed .msg-file-size { color: var(--danger); }

@@ -361,6 +361,11 @@ export default function App() {
   const [viewer, setViewer] = useState<{ m: ChatMessage; fromGallery?: boolean } | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false); // 会话媒体库（蒙层网格）
   const [viewerMore, setViewerMore] = useState(false);   // 查看器「更多」浮层（hover 显示）
+  // 本浏览器解不了该视频的编码（HEVC 等）→ 换成"下载后本地播放"的降级卡片，避免黑屏。
+  // 按被查看的 URL 复位：换一条视频要重新给它一次播放机会，否则一次失败会连累后面每条。
+  const [videoUnplayable, setVideoUnplayable] = useState(false);
+  const viewedContent = viewer?.m.content;
+  useEffect(() => { setVideoUnplayable(false); }, [viewedContent]);
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
@@ -1011,7 +1016,7 @@ export default function App() {
         patchMsg(cid, l.localId, { status: "failed" });
         clearUploadProgress(l.localId);
         // 用户只看到一句 toast；失败的会话/消息定位靠这条（可与 HTTP 层同 request_id 的上传日志对账）。
-        logger.warn(LOG_TAG.ui, "media_send_failed", {
+        logger.warn(LOG_TAG.media, "media_send_failed", {
           conv_id: cid, client_msg_id: l.localId, mime: l.f.type, bytes: l.f.size,
           media_w: l.meta.width, media_h: l.meta.height, error: (e as Error).message,
         });
@@ -1090,12 +1095,26 @@ export default function App() {
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [attachPanel, cancelAttachClose]);
+  // 失败的文件消息要能重试，就必须留住原始 File（浏览器无法从消息里还原它）。仅内存，刷新即失效。
+  const pendingFilesRef = useRef<Map<string, { file: File; mode: AttachmentPickMode }>>(new Map());
+
   const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media") => {
     const client = clientRef.current;
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (!client || !cid) return;
+    // 先上屏一条占位消息再上传：大文件传几十秒，原先"传完才出现"期间界面毫无反馈，用户以为卡死。
+    const localId = `outbox-${crypto.randomUUID()}`;
+    appendMsg(cid, {
+      clientMsgId: localId, convId: cid, from: uid, content: "", contentType: attachmentContentType(pickMode, "file"),
+      fileName: file.name, fileSize: file.size, convSeq: 0, timestamp: Date.now(), status: "sending",
+    });
+    setUploadProgress((prev) => ({ ...prev, [localId]: { sent: 0, total: file.size } }));
+    pendingFilesRef.current.set(localId, { file, mode: pickMode }); // 失败时据此重试
     try {
-      const { url, contentType: uploadedContentType, size } = await client.uploadFile(file);
+      const { url, contentType: uploadedContentType, size } = await client.uploadFile(file, (sent, total) => {
+        const ratio = total > 0 ? Math.min(sent / total, 1) : 0;
+        setUploadProgress((prev) => ({ ...prev, [localId]: { sent: Math.round(ratio * file.size), total: file.size } }));
+      });
       const contentType = attachmentContentType(pickMode, uploadedContentType);
       let poster: string | undefined;
       if (pickMode === "media" && contentType === "video") {
@@ -1104,9 +1123,33 @@ export default function App() {
       }
       const options = contentType === "file" ? { fileName: file.name, fileSize: size } : (poster ? { poster } : undefined);
       const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
-      appendMsg(cid, { clientMsgId, convId: cid, from: uid, content: url, contentType, fileName: contentType === "file" ? file.name : undefined, fileSize: contentType === "file" ? size : undefined, convSeq: 0, timestamp: Date.now(), status: "sending", posterUrl: poster });
-    } catch (e) { setToast(`发送失败：${(e as Error).message}`); }
-  }, [peer, groupConvId, uid, appendMsg]);
+      patchMsg(cid, localId, { clientMsgId, content: url, contentType, posterUrl: poster });
+      clearUploadProgress(localId);
+      pendingFilesRef.current.delete(localId);
+    } catch (e) {
+      patchMsg(cid, localId, { status: "failed" });
+      clearUploadProgress(localId);
+      logger.warn(LOG_TAG.media, "file_send_failed", {
+        conv_id: cid, client_msg_id: localId, mime: file.type, bytes: file.size, error: (e as Error).message,
+      });
+      setToast(`发送失败：${(e as Error).message}`);
+    }
+  }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
+
+  /// 点击失败的文件气泡重试：移除旧占位，用留存的 File 重新走一遍上传（新的 localId）。
+  const retryFileUpload = useCallback((m: ChatMessage) => {
+    const key = m.clientMsgId ?? "";
+    const kept = pendingFilesRef.current.get(key);
+    if (!kept) { setToast("原文件已失效，请重新选择"); return; }
+    pendingFilesRef.current.delete(key);
+    const cid = m.convId;
+    setMsgsByConv((prev) => {
+      const list = prev[cid];
+      if (!list) return prev;
+      return { ...prev, [cid]: list.filter((x) => x.clientMsgId !== key) };
+    });
+    void uploadAndSend(kept.file, kept.mode);
+  }, [uploadAndSend]);
 
   // 附件面板项（数据驱动，M4-6）：加入口 = 数组加一行。Web 只图片或视频 / 文件。
   const attachItems = useMemo(() => [
@@ -2637,13 +2680,36 @@ export default function App() {
                           </div>
                         ); })()
                       ) : m.contentType === "file" ? (
-                        <a className="msg-file" href={m.content} download={m.fileName} target="_blank" rel="noreferrer">
-                          <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
-                          <span className="msg-file-body">
-                            <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
-                            {formatFileSize(m.fileSize) && <span className="msg-file-size">{formatFileSize(m.fileSize)}</span>}
+                        // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。
+                        uploading || !m.content ? (
+                          <span className={`msg-file${m.status === "failed" ? " failed" : ""}`}
+                                onClick={m.status === "failed" ? () => retryFileUpload(m) : undefined}>
+                            <FileTypeIcon name={m.fileName || ""} size={30} />
+                            <span className="msg-file-body">
+                              <span className="msg-file-name">{m.fileName || "文件"}</span>
+                              <span className="msg-file-size">
+                                {m.status === "failed"
+                                  ? `${formatFileSize(m.fileSize)} · 上传失败，点击重试`
+                                  : uploading ? formatUploadProgress(uploading.sent, uploading.total) : formatFileSize(m.fileSize)}
+                              </span>
+                              {/* 失败态不显进度条：0% 的空条会让人以为"还没开始传"。 */}
+                              {m.status !== "failed" && (
+                                <span className="file-progress">
+                                  <span className="file-progress-bar"
+                                        style={{ width: `${uploading && uploading.total > 0 ? Math.round((uploading.sent / uploading.total) * 100) : 0}%` }} />
+                                </span>
+                              )}
+                            </span>
                           </span>
-                        </a>
+                        ) : (
+                          <a className="msg-file" href={m.content} download={m.fileName} target="_blank" rel="noreferrer">
+                            <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
+                            <span className="msg-file-body">
+                              <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
+                              {formatFileSize(m.fileSize) && <span className="msg-file-size">{formatFileSize(m.fileSize)}</span>}
+                            </span>
+                          </a>
+                        )
                       ) : isUrlText(m.content) ? (
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
                         <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
@@ -2799,7 +2865,24 @@ export default function App() {
         // 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（hover 浮层 6 功能）。点击遮罩关闭。
         <div className="modal-mask" onClick={() => { setViewer(null); setViewerMore(false); }}>
           {viewer.m.contentType === "video" ? (
-            <video className="image-viewer" src={viewer.m.content} controls onClick={(e) => e.stopPropagation()} />
+            // 浏览器解不了码（对端发来的 HEVC 等）时 <video> 只会黑屏 → 降级成明确提示 + 下载入口，
+            // 而不是让用户对着黑框以为坏了。封面仍能显示（poster 是 JPEG，与视频编码无关）。
+            videoUnplayable ? (
+              <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>
+                {viewer.m.posterUrl && <img src={viewer.m.posterUrl} alt="" />}
+                <p>当前浏览器不支持该视频的编码格式（如 HEVC）。</p>
+                <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地播放器打开</a>
+              </div>
+            ) : (
+              <video className="image-viewer" src={viewer.m.content} controls
+                     onClick={(e) => e.stopPropagation()}
+                     onError={() => {
+                       logger.warn(LOG_TAG.media, "video_playback_unsupported", {
+                         conv_id: viewer.m.convId, conv_seq: viewer.m.convSeq, has_poster: Boolean(viewer.m.posterUrl),
+                       });
+                       setVideoUnplayable(true);
+                     }} />
+            )
           ) : (
             <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => e.stopPropagation()} />
           )}
