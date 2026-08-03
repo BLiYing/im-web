@@ -68,6 +68,11 @@
 3. 重新引入消息列表虚拟化（react-window / @tanstack/react-virtual，或定位 virtua 双栏挂载问题）。
 
 ## 已知坑 / 限制
+- **未读语义澄清（2026-08-03，非 bug）**：自己发送的消息（含从另一端/设备发的）在自己的其它端
+  **永远不计未读**——服务端 `conversation.unreadCount` 排除 `sender==本人`，与微信/Telegram 一致。
+  实例：web 登录 1001，看 1001 自己从 iOS 发到群里的图/视频，未读=0 是正确行为，既非 bug 也非
+  IndexedDB 缓存问题（`/conversations` 直接返回 `unread:0`，Web 如实渲染）。要测未读须由**他人**
+  （如 1002/1003）发送且本端未读该会话。
 - **消息排序（2026-06-17）**：改按 `timestamp` 排序（conv_seq 同毫秒次级）——修"失败消息被新消息挤到后面"。乐观发送 ack 后把时间戳换成服务器 `ack.timestamp`，消除客户端时钟偏差影响。规则见 `../IMServer/docs/CHAT_UX.md §1`。
 - **虚拟化暂回退**：virtua 在双栏「条件挂载 + 嵌套 flex」下视口测 0、渲染空且不自愈 → 现为普通滚动列表（配反向分页常规不卡，狂滚历史时 DOM 累积）。
 - **发送态补"失败"✅（2026-06-17）**：sendText 起 10s 超时计时器，无 ack（断网/发不出去）→ `onAck(false)` 标"发送失败 ✗"且不落库；ack 到则清计时器；disconnect 清所有计时器。浏览器实测：断后端发→10s 后失败；后端恢复发→✓ 不误翻失败。CLIENT_PARITY M0 发送态 Web 🚧→✅。
