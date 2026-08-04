@@ -129,13 +129,35 @@ function Avatar({ url, label, cls = "avatar", children }: {
 const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
 
 /** 服务端冻结的英文媒体快照（[image]/[video]/[file]）本地化为中文（与 iOS IMLocalizeSnippet 对齐）。 */
+/** 合并转发卡片的引用快照：`[聊天记录] 标题`。兼容存量截断快照（旧引用把 JSON 截 60 字入库，
+ *  解析不出时正则抠 "t":"…" 标题）；全失败回落 `[聊天记录]`。与 iOS IMChatRecordSnippet 同语义。 */
+function chatRecordSnippet(json: string): string {
+  let title = "";
+  try {
+    const o = JSON.parse(json);
+    if (o && typeof o.t === "string") title = o.t;
+  } catch {
+    title = /"t":"([^"]*)"/.exec(json)?.[1] ?? "";
+  }
+  return title ? `[聊天记录] ${title}` : "[聊天记录]";
+}
+const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.includes('"items"') || s.includes('"t":'));
+
 const localizeSnippet = (s: string) =>
-  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]" : s === "[file]" ? "[文件]" : s;
+  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]" : s === "[file]" ? "[文件]"
+  // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
+  : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
 
 /** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。 */
 const replyPreviewOf = (m: ChatMessage): string =>
   m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
-  : m.contentType === "file" ? "[文件]" : (m.content || "").slice(0, 60);
+  : m.contentType === "file" ? "[文件]"
+  : m.contentType === "chat_record" ? chatRecordSnippet(m.content) : (m.content || "").slice(0, 60);
+
+/** 多选态该消息是否可勾选：系统提示/撤回墓碑/发送中·失败的本地件（无服务端内容，转出去是空的）不可选。
+ *  与 iOS isSelectableMessage: 同语义。 */
+const selectableInMultiSelect = (m: ChatMessage): boolean =>
+  m.convSeq > 0 && !m.recalledAt && m.contentType !== "system";
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
@@ -199,8 +221,9 @@ function QuoteThumb({ m }: { m?: ChatMessage }) {
   return null;
 }
 
-/** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题, items=[{n发送者, ct类型, c内容/URL}]。 */
-type RecordItem = { n: string; ct: string; c: string };
+/** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
+ *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
+type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number };
 type ChatRecord = { t: string; items: RecordItem[] };
 function parseChatRecord(content: string): ChatRecord {
   try {
@@ -210,7 +233,8 @@ function parseChatRecord(content: string): ChatRecord {
   return { t: "聊天记录", items: [] };
 }
 const recordItemPreview = (it: RecordItem): string =>
-  it.ct === "image" ? "[图片]" : it.ct === "video" ? "[视频]" : it.ct === "file" ? "[文件]" : it.c;
+  it.ct === "image" ? "[图片]" : it.ct === "video" ? "[视频]"
+  : it.ct === "file" ? `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd() : it.c;
 
 /** 从文件消息 URL 取原始显示名：存储名 <随机>__<原名>.<ext> → 取 "__" 之后并解码（与后端/iOS 对齐）。 */
 function fileNameFromContent(content: string): string {
@@ -1361,8 +1385,14 @@ export default function App() {
 
     if (forwardMode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
-        .filter((m) => m.content && !m.recalledAt && m.contentType !== "system")
-        .map((m) => ({ n: nameOf(m), ct: m.contentType || "text", c: m.content }));
+        .filter((m) => m.content && !m.recalledAt && m.contentType !== "system" && m.convSeq > 0)
+        .map((m) => ({
+          n: nameOf(m), ct: m.contentType || "text", c: m.content,
+          // 文件行随包携带原名与大小（fn/fs，与 iOS 同约定）——收端不再只显「[文件]」。
+          ...(m.contentType === "file"
+            ? { fn: m.fileName || fileNameFromContent(m.content), ...(m.fileSize ? { fs: m.fileSize } : {}) }
+            : {}),
+        }));
       const names = new Set(items.map((i) => i.n));
       const title = names.size <= 1 ? `${[...names][0] || "聊天"} 的聊天记录` : "群聊的聊天记录";
       const json = JSON.stringify({ t: title, items });
@@ -2890,8 +2920,12 @@ export default function App() {
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
                   )}
                   <div className={`row ${mine ? "me" : "them"}${selectMode ? " selecting" : ""}`}
-                    onClick={selectMode && m.convSeq > 0 ? () => toggleSelected(m.convSeq) : undefined}>
-                    {selectMode && (
+                    onClick={!selectMode ? undefined
+                      : selectableInMultiSelect(m) ? () => toggleSelected(m.convSeq)
+                      // 发送中/失败的本地件：无勾选圈，点按直接提示原因（系统行/撤回墓碑静默）。
+                      : m.convSeq <= 0 && m.contentType !== "system" ? () => setToast("发送中/失败的消息不可选择")
+                      : undefined}>
+                    {selectMode && selectableInMultiSelect(m) && (
                       <span className={`sel-check${selected.has(m.convSeq) ? " on" : ""}`}>{selected.has(m.convSeq) ? "✓" : ""}</span>
                     )}
                     {grpThem ? (
@@ -3163,9 +3197,10 @@ export default function App() {
                       <video className="record-item-media" src={videoFrameSrc(it.c)} preload="metadata" muted /><span className="play-badge">▶</span>
                     </span>
                   ) : it.ct === "file" ? (
-                    <a className="msg-file" href={it.c} download={fileNameFromContent(it.c)} target="_blank" rel="noreferrer">
-                      <FileTypeIcon name={it.c} size={30} />
-                      <span>{fileNameFromContent(it.c)}</span>
+                    <a className="msg-file" href={it.c} download={it.fn || fileNameFromContent(it.c)} target="_blank" rel="noreferrer">
+                      <FileTypeIcon name={it.fn || it.c} size={30} />
+                      <span>{it.fn || fileNameFromContent(it.c)}</span>
+                      {it.fs ? <span className="msg-file-size">{formatFileSize(it.fs)}</span> : null}
                     </a>
                   ) : (
                     <div className="record-item-text">{it.c}</div>

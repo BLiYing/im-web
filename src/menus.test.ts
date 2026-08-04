@@ -75,6 +75,22 @@ describe("buildMessageActions", () => {
     expect(find({ m: msg({ from: "2002", convSeq: 0, status: "sending", contentType: "image" }), uid: "1001" })).toBe(false); // 非本人
   });
 
+  it("删除对 发送中且未落库(convSeq=0) 的本地件隐藏（要撤走用取消发送，防僵尸上传）", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "delete")!.visible(ctx);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "file" }), uid: "1001" })).toBe(false);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "failed", contentType: "file" }), uid: "1001" })).toBe(true); // 失败行可删
+    expect(find({ m: msg({ convSeq: 5, status: "received" }), uid: "1001" })).toBe(true);
+  });
+
+  it("多选对 撤回墓碑/未落库(convSeq=0) 隐藏", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "multiSelect")!.visible(ctx);
+    expect(find({ m: msg({ convSeq: 5, recalledAt: 1 }), uid: "1001" })).toBe(false);
+    expect(find({ m: msg({ convSeq: 0, status: "sending" }), uid: "1001" })).toBe(false);
+    expect(find({ m: msg({ convSeq: 5 }), uid: "1001" })).toBe(true);
+  });
+
   it("run 路由到真实处理器 / comingSoon", () => {
     const actions = buildMessageActions(msgHandlers);
     const ctx: MessageCtx = { m: msg({}), uid: "1001" };

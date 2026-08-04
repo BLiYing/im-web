@@ -79,7 +79,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
-    { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0, run: (c) => h.multiSelect(c.m) },
+    { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
     { id: "reportMsg", label: "举报消息", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
     { id: "reportUser", label: "举报发送者", icon: Flag, visible: (c) => c.m.from !== c.uid, run: (c) => h.reportUser(c.m) },
@@ -90,7 +90,9 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
         && (c.m.status === "sending" || c.m.status === "failed")
         && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
       run: (c) => h.cancelSend(c.m) },
-    { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.m) },
+    // 删除对发送中的本地件隐藏：删除只删行不停上传，传完仍会发出去（僵尸任务）；要撤走用「取消发送」。
+    { id: "delete", label: "删除", icon: Trash2, danger: true,
+      visible: (c) => !(c.m.status === "sending" && c.m.convSeq === 0), run: (c) => h.delete(c.m) },
   ];
 }
 
