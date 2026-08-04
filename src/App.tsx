@@ -1450,13 +1450,27 @@ export default function App() {
 
   // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
   const jumpToSeq = useCallback((seq: number) => {
-    const el = msgsRef.current?.querySelector(`[data-seq="${seq}"]`);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    const box = msgsRef.current;
+    const el = box?.querySelector(`[data-seq="${seq}"]`);
+    if (!box || !el) { setToast("原消息不在当前视图"); return; }
+    const flash = () => {
       el.classList.add("flash");
       window.setTimeout(() => el.classList.remove("flash"), 1200);
+    };
+    // 目标已在视口内 → 立即闪；否则先平滑滚动，**到位后**再闪（原先边滚边闪，目标离得远时
+    // 1.2s 动画在滚动途中就放完了，人到了什么都看不见）。scrollend 一次性监听，老浏览器降级定时。
+    const r = el.getBoundingClientRect();
+    const br = box.getBoundingClientRect();
+    const visible = r.top >= br.top && r.bottom <= br.bottom;
+    if (visible) { flash(); return; }
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    if ("onscrollend" in box) {
+      let done = false;
+      const once = () => { if (!done) { done = true; flash(); } };
+      box.addEventListener("scrollend", once, { once: true });
+      window.setTimeout(once, 1500); // 防御：极端情况 scrollend 不触发（如无需滚动）
     } else {
-      setToast("原消息不在当前视图");
+      window.setTimeout(flash, 700); // 无 scrollend 的老浏览器：按平滑滚动典型时长延迟
     }
   }, []);
 
