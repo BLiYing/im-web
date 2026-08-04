@@ -44,6 +44,7 @@
   --wallpaper-scale: 1;
   --avatar-ring: rgba(29, 33, 41, 0.22);
   --msg-font: 15px;
+  --sys-font: calc(var(--msg-font) * 0.8); /* 系统提示/居中时间标签随消息字号等比缩放（×0.8） */
   --radius-bubble: 18px;
   --radius-card: 14px;
   --app-card-radius: 24px;
@@ -237,10 +238,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: default; }
 /* 被拒收等系统提示：该条下方居中灰字（类似"未读消息"分割提示，但无横线）。 */
 .sys-note { display: flex; justify-content: center; margin: 4px 0 8px; }
-.sys-note span { color: var(--text-secondary); font-size: 12px; text-align: center; max-width: 80%; }
+.sys-note span { color: var(--text-secondary); font-size: var(--sys-font); text-align: center; max-width: 80%; }
 /* 群系统消息（邀请/移除/转让/禁言等留痕）：居中灰字胶囊，独立一行。 */
 .sys-line { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
-.sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: 12px; text-align: center; max-width: 80%; padding: 3px 12px; border-radius: 11px; }
+.sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); text-align: center; max-width: 80%; padding: 3px 12px; border-radius: 11px; }
 /* 撤回消息的"重新编辑"链接按钮（微信式，紧随撤回系统行）。 */
 .reedit-btn { background: none; border: none; color: var(--accent); font-size: 12px; cursor: pointer; padding: 0; }
 .reedit-btn:hover { text-decoration: underline; }
@@ -256,6 +257,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 跳转到被引用原消息时的高亮闪烁。 */
 .msg-item.flash > .row > .bubble-line > .bubble, .flash .bubble { animation: quoteflash 1.2s ease; }
 @keyframes quoteflash { 0%,100% { background-color: inherit; } 30% { background-color: var(--accent-flash); } }
+/* 媒体气泡（图片/视频）背景被 <img> 铺满盖住，quoteflash 动 background 看不见——改用描边脉冲（box-shadow
+   不受 .bubble.media 的 overflow:hidden 裁剪），更具体的选择器覆盖上面的 background 动画。 */
+.flash .bubble.media { animation: quoteflashmedia 1.2s ease; }
+@keyframes quoteflashmedia { 0%,100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 3px var(--accent); } }
 /* 转发溯源（M4-3）："转发自 X"小字，气泡顶部。 */
 .forward-from { flex-basis: 100%; font-size: 12px; color: var(--text-secondary); margin-bottom: 2px; }
 /* 多选（M4-3）：行内勾选圈 + 底部批量工具栏。 */
@@ -426,7 +431,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   font-size: 12px; color: var(--text-secondary); background: var(--surface); border-top: 1px solid var(--separator); }
 /* 日期分隔胶囊（居中浮于壁纸上）。 */
 .date-pill { display: flex; justify-content: center; margin: 10px 0 6px; }
-.date-pill span { background: var(--date-pill-bg); color: var(--on-media); font-size: 12px; font-weight: 600; padding: 3px 12px; border-radius: 12px; }
+.date-pill span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); font-weight: 600; padding: 3px 12px; border-radius: 12px; }
 .chat footer { display: flex; align-items: flex-end; gap: var(--space-2); padding: 10px var(--space-4); margin-top: var(--app-gap); border: 1px solid var(--separator); border-radius: var(--app-card-radius); background: var(--card-bg); box-shadow: 0 6px 22px var(--shadow-soft); }
 .chat footer textarea { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--surface); color: var(--text); font: inherit; line-height: 1.4; resize: none; overflow-y: auto; max-height: 120px; }
 .chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); cursor: pointer; flex-shrink: 0; }
