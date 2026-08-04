@@ -40,6 +40,38 @@ function normalizeValue(value: unknown, seen = new WeakSet<object>()): unknown {
   return value;
 }
 
+// ── 开发期日志落盘（dev-only sink）──────────────────────────────────────────
+// 浏览器进程读不到本地磁盘，也无法让人「翻日志文件」。开发期把每条结构化日志批量 POST 到
+// Vite 中间件（见 vite.config.ts 的 im-dev-log-sink）落到 im-web/dev-logs/im-web.log，
+// 排查时直接读该文件即可，无需手动复制控制台。
+//   · 只在 DEV + 浏览器环境启用；vitest 用 node 环境（无 window）天然不触发，另加 MODE 守卫双保险。
+//   · 用原生 fetch/sendBeacon（不经 tracedFetch），否则「上报日志的请求」又被记进日志 → 死循环。
+//   · 批量 + 500ms 去抖，页面隐藏/卸载时用 sendBeacon 兜底冲刷；全程失败静默（落盘只是辅助）。
+const SINK_URL = "/__devlog";
+const sinkEnabled =
+  import.meta.env.DEV && import.meta.env.MODE !== "test" && typeof window !== "undefined";
+let sinkBuffer: string[] = [];
+let sinkTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushSink(useBeacon = false): void {
+  if (sinkTimer !== null) { clearTimeout(sinkTimer); sinkTimer = null; }
+  if (sinkBuffer.length === 0) return;
+  const payload = sinkBuffer.join("\n") + "\n";
+  sinkBuffer = [];
+  if (useBeacon && typeof navigator !== "undefined" && navigator.sendBeacon) {
+    navigator.sendBeacon(SINK_URL, new Blob([payload], { type: "text/plain" }));
+    return;
+  }
+  void fetch(SINK_URL, { method: "POST", body: payload, keepalive: true }).catch(() => { /* 落盘失败不影响主流程 */ });
+}
+
+function shipToSink(entry: LogEntry): void {
+  if (!sinkEnabled) return;
+  sinkBuffer.push(JSON.stringify(entry));
+  if (sinkBuffer.length >= 50) { flushSink(); return; } // 攒够一批立刻送，避免缓冲无界
+  if (sinkTimer === null) sinkTimer = setTimeout(() => { sinkTimer = null; flushSink(); }, 500);
+}
+
 function write(level: LogLevel, tag: LogTag, event: string, fields?: Record<string, unknown>): void {
   if (levelWeight[level] < levelWeight[minimumLevel]) return;
   const entry: LogEntry = {
@@ -55,6 +87,7 @@ function write(level: LogLevel, tag: LogTag, event: string, fields?: Record<stri
   const method = level === "debug" ? "debug" : level === "info" ? "info" : level === "warn" ? "warn" : "error";
   const suffix = entry.fields ? ` ${JSON.stringify(entry.fields)}` : "";
   console[method](`[${tag}] ${event}${suffix}`);
+  shipToSink(entry);
 }
 
 export const logger = {
@@ -118,11 +151,18 @@ export function installGlobalLogging(): void {
   const handleRejection = (event: PromiseRejectionEvent) => {
     logger.error(LOG_TAG.app, "unhandled_rejection", { reason: event.reason });
   };
+  // 页面隐藏/卸载时把攒着的日志用 sendBeacon 冲刷落盘（keepalive fetch 在卸载时不保证送达）。
+  const handleHidden = () => { if (document.visibilityState === "hidden") flushSink(true); };
+  const handlePageHide = () => flushSink(true);
   window.addEventListener("error", handleError);
   window.addEventListener("unhandledrejection", handleRejection);
+  document.addEventListener("visibilitychange", handleHidden);
+  window.addEventListener("pagehide", handlePageHide);
   window.__IMLoggingCleanup = () => {
     window.removeEventListener("error", handleError);
     window.removeEventListener("unhandledrejection", handleRejection);
+    document.removeEventListener("visibilitychange", handleHidden);
+    window.removeEventListener("pagehide", handlePageHide);
   };
   logger.info(LOG_TAG.app, "logger_ready", {
     level: minimumLevel,
