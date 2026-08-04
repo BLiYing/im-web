@@ -4,11 +4,13 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
-- **引用体验增强·A 堆 web 两项（2026-08-04，已改·待用户视觉复核）**：`styles.css`——① 媒体气泡跳转
+- **引用体验增强·A 堆 web 三项（2026-08-05，已改·待用户视觉复核）**：`styles.css`——① 媒体气泡跳转
   不闪修复（`quoteflash` 动 background 被 `<img>` 盖住，新增 `.flash .bubble.media` 用 `box-shadow` 描边
   脉冲 `quoteflashmedia`）；② 系统通知/居中时间标签随字号**等比 ×0.8**（新增 `--sys-font: calc(--msg-font*0.8)`，
   `.sys-note/.sys-line/.date-pill` 由写死 12px 改用它，默认态仍 12px 零变化）。`npm run build` 绿；脚本已验
-  变量计算(15→12/24→19.2)与 keyframes 就位。**完整视觉链路需登录自测**（拖字号滑块、点引用媒体跳转看描边）。
+  变量计算(15→12/24→19.2)与 keyframes 就位。③ `App.tsx jumpToSeq`：引用跳不到分两句 toast——目标 < 已加载
+  最早 conv_seq → 「原消息较早，请上拉加载后重试」，否则（窗口内缺失）→ 「原消息已被删除」，build 绿。
+  **完整视觉链路需登录自测**（拖字号滑块、点引用媒体跳转看描边、点已删/更早的引用看 toast）。
   协议侧引用增强（文件名/发送者）在 `../IMServer` B 堆，未动 web 消费。
 - 更早批次——分片上传对齐 iOS、多选/合并转发/引用卡片、粘贴条攒批、引用跳转到位后再闪等——
   **全部已实测通过并提交**（详见归档 2026-08-04 节 + git log）。tsc + 91 vitest 为当前绿基线。

@@ -1451,8 +1451,19 @@ export default function App() {
   // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
   const jumpToSeq = useCallback((seq: number) => {
     const box = msgsRef.current;
-    const el = box?.querySelector(`[data-seq="${seq}"]`);
-    if (!box || !el) { setToast("原消息不在当前视图"); return; }
+    if (!box) return;
+    const el = box.querySelector(`[data-seq="${seq}"]`);
+    if (!el) {
+      // 跳不到分两种：目标比"已加载窗口最早一条"还早 → 还没上拉加载到（可加载后重试）；
+      // 否则落在窗口内却缺失 → 已被本地删除（回捞成本高，仅提示）。
+      let earliest = Infinity;
+      box.querySelectorAll("[data-seq]").forEach((n) => {
+        const s = Number((n as HTMLElement).dataset.seq);
+        if (s > 0 && s < earliest) earliest = s;
+      });
+      setToast(seq < earliest ? "原消息较早，请上拉加载后重试" : "原消息已被删除");
+      return;
+    }
     const flash = () => {
       el.classList.add("flash");
       window.setTimeout(() => el.classList.remove("flash"), 1200);
