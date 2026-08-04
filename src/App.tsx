@@ -145,6 +145,7 @@ const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.includes(
 
 const localizeSnippet = (s: string) =>
   s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]" : s === "[file]" ? "[文件]"
+  : s === "[chat_record]" ? "[聊天记录]" // 旧服务端 token（无标题）兜底
   // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
   : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
 
@@ -1065,20 +1066,24 @@ export default function App() {
   }, [teardownOutboxUpload, removeMsgRow]);
 
   // 粘贴图片（Web #2）：Ctrl/Cmd+V 粘贴剪贴板中的图片 → 输入区上方预览 → 发送时作为图片上传。
-  const [pastedImages, setPastedImages] = useState<{ file: File; url: string }[]>([]);
-  const addPastedImages = useCallback((files: File[]) => {
-    if (files.length) setPastedImages((prev) => [...prev, ...files.map((f) => ({ file: f, url: URL.createObjectURL(f) }))]);
+  // 粘贴攒批（对齐 iOS 预览条）：图片与**任意文件**都先进预览条，发送键统一发出。
+  const [pastedImages, setPastedImages] = useState<{ file: File; url: string; kind: "image" | "file" }[]>([]);
+  const addPastedFiles = useCallback((files: File[]) => {
+    if (files.length) setPastedImages((prev) => [...prev, ...files.map((f) => ({
+      file: f, url: URL.createObjectURL(f),
+      kind: (f.type.startsWith("image/") ? "image" : "file") as "image" | "file",
+    }))]);
   }, []);
   const removePastedImage = useCallback((idx: number) => {
     setPastedImages((prev) => { const nx = prev.slice(); const [rm] = nx.splice(idx, 1); if (rm) URL.revokeObjectURL(rm.url); return nx; });
   }, []);
   const onComposerPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const imgs = Array.from(e.clipboardData?.items ?? [])
-      .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+    const files = Array.from(e.clipboardData?.items ?? [])
+      .filter((it) => it.kind === "file")
       .map((it) => it.getAsFile())
       .filter((f): f is File => !!f);
-    if (imgs.length) { e.preventDefault(); addPastedImages(imgs); }
-  }, [addPastedImages]);
+    if (files.length) { e.preventDefault(); addPastedFiles(files); }
+  }, [addPastedFiles]);
 
   // 按 clientMsgId 就地打补丁（相册批量发送：本地占位 → 上传完成换服务器 URL/真 ID）。
   const patchMsg = useCallback((cid: string, clientMsgId: string, patch: Partial<ChatMessage>) => {
@@ -1166,76 +1171,8 @@ export default function App() {
     }
   }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
 
-  const send = useCallback(() => {
-    const text = input.trim();
-    const client = clientRef.current;
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
-    if (!client || !cid) return;
-    // 先发已粘贴的图片（Web #2）：走相册批量通道（≥2 张聚簇成宫格，秒上屏 + 逐张上传）。
-    if (pastedImages.length) {
-      const imgs = pastedImages;
-      setPastedImages([]);
-      void sendMediaBatch(imgs.map((pi) => pi.file));
-      for (const pi of imgs) { window.setTimeout(() => URL.revokeObjectURL(pi.url), 60_000); }
-    }
-    if (!text) return;
-    // 编辑态（M4-5）：发 msg_op edit 而非新消息；内容由服务端广播回 onMsgOp 更新。
-    if (editingMsg && editingMsg.convSeq > 0) {
-      client.editMessage(cid, editingMsg.convSeq, text);
-      setEditingMsg(null); setInput("");
-      return;
-    }
-    // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（媒体→[图片]等；服务端会冻结权威快照给收件方）。
-    const rt = replyTo && replyTo.convSeq > 0
-      ? { convSeq: replyTo.convSeq, preview: replyPreviewOf(replyTo) }
-      : undefined;
-    const clientMsgId = client.sendText(text, peer, cid, rt ? { replyTo: rt } : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
-    appendMsg(cid, {
-      clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
-      convSeq: 0, timestamp: Date.now(), status: "sending",
-      replyToConvSeq: rt?.convSeq, replySnapshot: rt?.preview,
-    });
-    setInput("");
-    setReplyTo(null);
-  }, [input, peer, groupConvId, uid, appendMsg, replyTo, editingMsg, pastedImages, sendMediaBatch]);
-
-  // 引用某条消息（M4-2）：进入引用态（输入框上方显示引用条，发送时带上）。
-  const replyMessage = useCallback((m: ChatMessage) => {
-    setMenu(null);
-    setReplyTo(m);
-  }, []);
-
-  // 上传并发送图片/文件（M4-6）：上传 → 发 content_type=image|video|file 消息（content=URL）+ 乐观上屏。
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const attachmentPickModeRef = useRef<AttachmentPickMode>("media");
-  const attachAnchorRef = useRef<HTMLDivElement>(null);
-  const attachCloseTimerRef = useRef<number | null>(null);
-  const cancelAttachClose = useCallback(() => {
-    if (attachCloseTimerRef.current === null) return;
-    window.clearTimeout(attachCloseTimerRef.current);
-    attachCloseTimerRef.current = null;
-  }, []);
-  const scheduleAttachClose = useCallback(() => {
-    cancelAttachClose();
-    attachCloseTimerRef.current = window.setTimeout(() => {
-      setAttachPanel(false);
-      attachCloseTimerRef.current = null;
-    }, 1000);
-  }, [cancelAttachClose]);
-  useEffect(() => cancelAttachClose, [cancelAttachClose]);
-  useEffect(() => {
-    if (!attachPanel) return;
-    const closeOutside = (event: PointerEvent) => {
-      if (!attachAnchorRef.current?.contains(event.target as Node)) {
-        cancelAttachClose();
-        setAttachPanel(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeOutside);
-    return () => document.removeEventListener("pointerdown", closeOutside);
-  }, [attachPanel, cancelAttachClose]);
-  // （声明已前移到 uploadProgress 附近：cancelSendMessage 也要用它。）
-
+  // 注意：uploadAndSend 必须声明在 send 之前——send 的 useCallback deps 数组在组件体内即时求值，
+  // 后置声明会踩 const TDZ（ReferenceError）。
   const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media", convIdOverride?: string) => {
     const client = clientRef.current;
     // convIdOverride 用于重试：按原会话重发（不耦合当前打开的会话）。
@@ -1278,6 +1215,82 @@ export default function App() {
       setToast(`发送失败：${(e as Error).message}`);
     }
   }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
+
+  const send = useCallback(() => {
+    const text = input.trim();
+    const client = clientRef.current;
+    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    if (!client || !cid) return;
+    // 先发预览条攒的粘贴件（Web #2）：图片走相册批量通道（≥2 张聚簇成宫格），
+    // 文件走既有文件通道（≥8MB 自动分片可暂停续传）；文字随后补发一条文本。
+    if (pastedImages.length) {
+      const items = pastedImages;
+      setPastedImages([]);
+      const imgs = items.filter((pi) => pi.kind === "image");
+      if (imgs.length) void sendMediaBatch(imgs.map((pi) => pi.file));
+      for (const pi of items) {
+        if (pi.kind === "file") void uploadAndSend(pi.file, "file");
+        window.setTimeout(() => URL.revokeObjectURL(pi.url), 60_000);
+      }
+    }
+    if (!text) return;
+    // 编辑态（M4-5）：发 msg_op edit 而非新消息；内容由服务端广播回 onMsgOp 更新。
+    if (editingMsg && editingMsg.convSeq > 0) {
+      client.editMessage(cid, editingMsg.convSeq, text);
+      setEditingMsg(null); setInput("");
+      return;
+    }
+    // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（媒体→[图片]等；服务端会冻结权威快照给收件方）。
+    const rt = replyTo && replyTo.convSeq > 0
+      ? { convSeq: replyTo.convSeq, preview: replyPreviewOf(replyTo) }
+      : undefined;
+    const clientMsgId = client.sendText(text, peer, cid, rt ? { replyTo: rt } : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
+    appendMsg(cid, {
+      clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
+      convSeq: 0, timestamp: Date.now(), status: "sending",
+      replyToConvSeq: rt?.convSeq, replySnapshot: rt?.preview,
+    });
+    setInput("");
+    setReplyTo(null);
+  }, [input, peer, groupConvId, uid, appendMsg, replyTo, editingMsg, pastedImages, sendMediaBatch, uploadAndSend]);
+
+  // 引用某条消息（M4-2）：进入引用态（输入框上方显示引用条，发送时带上）。
+  const replyMessage = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    setReplyTo(m);
+  }, []);
+
+  // 上传并发送图片/文件（M4-6）：上传 → 发 content_type=image|video|file 消息（content=URL）+ 乐观上屏。
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentPickModeRef = useRef<AttachmentPickMode>("media");
+  const attachAnchorRef = useRef<HTMLDivElement>(null);
+  const attachCloseTimerRef = useRef<number | null>(null);
+  const cancelAttachClose = useCallback(() => {
+    if (attachCloseTimerRef.current === null) return;
+    window.clearTimeout(attachCloseTimerRef.current);
+    attachCloseTimerRef.current = null;
+  }, []);
+  const scheduleAttachClose = useCallback(() => {
+    cancelAttachClose();
+    attachCloseTimerRef.current = window.setTimeout(() => {
+      setAttachPanel(false);
+      attachCloseTimerRef.current = null;
+    }, 1000);
+  }, [cancelAttachClose]);
+  useEffect(() => cancelAttachClose, [cancelAttachClose]);
+  useEffect(() => {
+    if (!attachPanel) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!attachAnchorRef.current?.contains(event.target as Node)) {
+        cancelAttachClose();
+        setAttachPanel(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [attachPanel, cancelAttachClose]);
+  // （声明已前移到 uploadProgress 附近：cancelSendMessage 也要用它。）
+
 
   /// 重试失败的媒体/文件消息（图片/视频/文件通吃）：移除旧占位，用留存的 File 按**原会话/原相册**
   /// 重发（新的 localId）。媒体走批量通道（保留 groupId → 宫格成员回原格）；文件走单发通道。
@@ -2994,13 +3007,21 @@ export default function App() {
           ) : (
             <>
               {pastedImages.length > 0 && (
-                // 粘贴图片预览条（Web #2）：缩略图 + 移除，点发送即作为图片消息上传。
+                // 粘贴预览条（Web #2）：图片显缩略图、文件显类型图标+文件名；逐个 ✕ 移除，点发送统一发出。
                 <div className="paste-preview">
                   {pastedImages.map((pi, i) => (
-                    <div key={pi.url} className="paste-thumb">
-                      <img src={pi.url} alt="待发送图片" />
-                      <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
-                    </div>
+                    pi.kind === "image" ? (
+                      <div key={pi.url} className="paste-thumb">
+                        <img src={pi.url} alt="待发送图片" />
+                        <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                      </div>
+                    ) : (
+                      <div key={pi.url} className="paste-thumb paste-file">
+                        <FileTypeIcon name={pi.file.name} size={26} />
+                        <span className="paste-file-name" title={pi.file.name}>{pi.file.name}</span>
+                        <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                      </div>
+                    )
                   ))}
                 </div>
               )}
