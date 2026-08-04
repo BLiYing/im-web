@@ -1463,7 +1463,12 @@ export default function App() {
     const br = box.getBoundingClientRect();
     const visible = r.top >= br.top && r.bottom <= br.bottom;
     if (visible) { flash(); return; }
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    // 同「进未读会话定位」：不用 scrollIntoView（会连带滚动 html/#root 把 .app 顶出视口、间距塌陷），
+    // 只动 .msgs 自身 scrollTop，把目标行滚到容器纵向居中。
+    box.scrollTo({
+      top: box.scrollTop + (r.top - br.top) - (box.clientHeight - r.height) / 2,
+      behavior: "smooth",
+    });
     if ("onscrollend" in box) {
       let done = false;
       const once = () => { if (!done) { done = true; flash(); } };
@@ -1848,7 +1853,10 @@ export default function App() {
     if (pendingScrollRef.current) {
       if (messages.length === 0) return; // 等锚点窗口到达再定位
       if (firstUnreadIdx >= 0 && !forceBottomRef.current && dividerRef.current) {
-        dividerRef.current.scrollIntoView({ block: "start" }); // 停在首条未读（分割线在其上方）
+        // 停在首条未读（分割线滚到容器顶）。不用 Element.scrollIntoView——它会沿祖先链一路把
+        // 能滚的都滚，含 html/#root，导致整个 .app 被顶出视口、顶部与卡片间距"塌陷"（刷新才复位）；
+        // 改为只动 .msgs 自身的 scrollTop，把分割线顶对齐到容器顶，滚动严格限定在消息容器内。
+        box.scrollTop += dividerRef.current.getBoundingClientRect().top - box.getBoundingClientRect().top;
         // 定位后实测是否已贴底：未读不多、整屏放得下时分割线滚到顶仍贴底 → 不显示 ↓N（CHAT_UX §7）。
         const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
         wasNearBottomRef.current = nearBottom;
@@ -3080,7 +3088,7 @@ export default function App() {
 
       {viewer && (
         // 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（hover 浮层 6 功能）。点击遮罩关闭。
-        <div className="modal-mask" onClick={() => { setViewer(null); setViewerMore(false); }}>
+        <div className="modal-mask viewer-mask" onClick={() => { setViewer(null); setViewerMore(false); }}>
           {viewer.m.contentType === "video" ? (
             // 浏览器解不了码（对端发来的 HEVC 等）时 <video> 只会黑屏 → 降级成明确提示 + 下载入口，
             // 而不是让用户对着黑框以为坏了。封面仍能显示（poster 是 JPEG，与视频编码无关）。

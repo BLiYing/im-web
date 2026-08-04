@@ -320,6 +320,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .chat footer .attach-item svg { flex: 0 0 auto; color: var(--text-secondary); }
 .chat footer .attach-item:hover { background: var(--surface-hover); }
 @keyframes attachPopoverIn { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+/* 媒体查看器（图/视频灯箱）：区别于对话框蒙层，需要深色沉浸背景，避免播放时画面被身后聊天透出干扰 */
+.viewer-mask { background: rgba(0, 0, 0, 0.9); }
 .image-viewer { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
 
 /* 媒体查看器工具条（右下：下载/媒体库/更多，镜像 iOS） */
