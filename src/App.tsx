@@ -114,11 +114,12 @@ function hexToRGB(value: string): string {
 
 // 可复用头像：有 avatar_url（http 或 data: 内联图）→ 渲染 <img>；否则回退首字母圈（现 Web 用统一主色底）。
 // cls 决定尺寸（avatar / settings-avatar / edit-avatar）；children 作为叠加层（如在线点、相机角标）。
-function Avatar({ url, label, cls = "avatar", children }: {
-  url?: string; label: string; cls?: string; children?: React.ReactNode;
+function Avatar({ url, label, cls = "avatar", children, onClick }: {
+  url?: string; label: string; cls?: string; children?: React.ReactNode; onClick?: () => void;
 }) {
   return (
-    <div className={cls}>
+    <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
+         style={onClick ? { cursor: "pointer" } : undefined}>
       {url ? <img className="avatar-img" src={url} alt="" /> : (label || "").slice(-2)}
       {children}
     </div>
@@ -2837,7 +2838,7 @@ export default function App() {
                       {grpThem ? (
                         <div className="them-wrap">
                           <div className="avatar-col">
-                            {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} />}
+                            {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} onClick={() => openPeerDetail(m.from)} />}
                           </div>
                           <div className="them-stack">
                             {showSender && <span className="sender-name">{senderLabel(m)}</span>}
@@ -2994,7 +2995,7 @@ export default function App() {
                       // 群聊对方：左侧头像列（连续段末条显头像）+ 昵称（连续段首条）在气泡上方。
                       <div className="them-wrap">
                         <div className="avatar-col">
-                          {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} />}
+                          {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} onClick={() => openPeerDetail(m.from)} />}
                         </div>
                         <div className="them-stack">
                           {showSender && <span className="sender-name">{senderLabel(m)}</span>}
