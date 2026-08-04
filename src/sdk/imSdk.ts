@@ -6,6 +6,7 @@ import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpd
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, type UploadProgressHandler } from "./http";
+import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -359,7 +360,16 @@ export class IMClient {
 
   /** 上传图片/文件（M4-6）：multipart → {url, contentType, size}。
    *  onProgress 非空时走 XHR（fetch 拿不到上行进度），回调的 sent/total 是**请求体**字节数。 */
-  async uploadFile(file: File, onProgress?: UploadProgressHandler): Promise<{ url: string; contentType: string; size: number }> {
+  /**
+   * 上传文件：≥8MB 走分片（init/chunk/status/complete，可经 chunkedTaskFor(key) 暂停/继续/取消，
+   * 断网自动退避续传、上传会话过期自动换会话重传——与 iOS 同一套语义）；小文件一次性 multipart。
+   * key 建议传消息的 localId，气泡的 ⏸/↑/✕ 才能定位到任务；不传则不可暂停。
+   */
+  async uploadFile(file: File, onProgress?: UploadProgressHandler, key?: string): Promise<{ url: string; contentType: string; size: number }> {
+    if (file.size >= CHUNKED_THRESHOLD) {
+      // onProgress 与 startChunkedUpload 的进度回调签名一致，直接透传（无需包一层 identity lambda）。
+      return startChunkedUpload(file, this.token, key ?? crypto.randomUUID(), onProgress);
+    }
     const fd = new FormData();
     fd.append("file", file);
     const auth = { Authorization: `Bearer ${this.token}` };

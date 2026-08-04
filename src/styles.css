@@ -869,3 +869,7 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* 上传失败的文件气泡：整块可点重试，给出明确的可操作反馈（不是一条 0% 的空进度条）。 */
 .msg-file.failed { cursor: pointer; }
 .msg-file.failed .msg-file-size { color: var(--danger); }
+
+/* 宫格格子：分片上传的中心 ⏸/↑（点格子暂停/继续，与 iOS 中心按钮同语义）与左上角时长角标 */
+.album-pause { color: var(--on-media); font-size: 22px; font-weight: 700; text-shadow: 0 1px 6px var(--overlay-strong); }
+.album-duration { position: absolute; left: 4px; top: 4px; padding: 0 6px; border-radius: 8px; background: var(--overlay); color: var(--on-media); font-size: 10px; line-height: 16px; pointer-events: none; z-index: 1; }

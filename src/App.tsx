@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
+import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
@@ -138,9 +139,10 @@ const replyPreviewOf = (m: ChatMessage): string =>
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
-function AlbumGrid({ members, timeLabel, onOpen, onMenu }: {
+function AlbumGrid({ members, timeLabel, progress, onOpen, onMenu }: {
   members: ChatMessage[];
   timeLabel: string;
+  progress: Record<string, { sent: number; total: number }>;
   onOpen: (m: ChatMessage) => void;
   onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
 }) {
@@ -155,7 +157,11 @@ function AlbumGrid({ members, timeLabel, onOpen, onMenu }: {
         const tileH = row.length === 1 ? 150 : tileW;
         return (
           <div className="album-row" key={ri} style={{ gap: GAP, marginTop: ri === 0 ? 0 : GAP }}>
-            {row.map((m) => (
+            {row.map((m) => {
+              const up = progress[m.clientMsgId ?? ""];
+              const task = chunkedTaskFor(m.clientMsgId ?? "");
+              const durText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
+              return (
               <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className="album-tile"
                 style={{ width: row.length === 1 ? W : tileW, height: tileH }}
                 onClick={() => onOpen(m)}
@@ -163,11 +169,19 @@ function AlbumGrid({ members, timeLabel, onOpen, onMenu }: {
                 {m.contentType === "video"
                   ? (m.posterUrl ? <img src={m.posterUrl} alt="" /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" />)
                   : <img src={m.content} alt="" />}
-                {m.contentType === "video" && <span className="play-badge">▶</span>}
-                {m.status === "sending" && m.convSeq === 0 && <span className="album-tile-dim"><span className="album-spinner" /></span>}
+                {m.contentType === "video" && !(m.status === "sending" && m.convSeq === 0) && <span className="play-badge">▶</span>}
+                {/* 时长角标：探测出即显示（上传中也显示——宫格进度在中心，左上角是空的，与 iOS 一致）。 */}
+                {durText && <span className="album-duration">{durText}</span>}
+                {m.status === "sending" && m.convSeq === 0 && (
+                  <span className="album-tile-dim">
+                    {/* 分片任务：中心 ⏸/↑（点格子暂停/继续）；小文件（不可暂停）保留转圈。 */}
+                    {up && task ? <span className="album-pause">{task.paused ? "↑" : "⏸"}</span> : <span className="album-spinner" />}
+                  </span>
+                )}
                 {m.status === "failed" && <span className="album-tile-dim"><span className="album-fail">!</span></span>}
               </div>
-            ))}
+              );
+            })}
           </div>
         );
       })}
@@ -941,10 +955,61 @@ export default function App() {
 
   // 媒体上传进度（M4+）：key=本地占位 clientMsgId，值为**媒体本体**已传/总字节数，
   // 在气泡左上角显“3.9 MB / 7.9 MB”（镜像 iOS）。传完/失败即删键，角标切回视频时长。
+  // 失败的媒体/文件消息要能重试，就必须留住原始 File（浏览器无法从消息里还原它）。仅内存，刷新即失效。
+  // 记 convId/groupId：重试时按**原会话/原相册**重发（不耦合当前打开的会话，宫格成员回原格）。
+  const pendingFilesRef = useRef<Map<string, { file: File; mode: AttachmentPickMode; convId: string; groupId?: string }>>(new Map());
+  // 已被用户取消的出箱件：发送流水线（sendMediaBatch/uploadAndSend）在每个边界检查它，
+  // 跳过后续上传与 sendMedia——因为 cancel() 只能中断在飞的**分片**任务，小文件 XHR、排队中的
+  // 相册成员、以及"上传完成→poster→sendMedia"窗口都没有可 abort 的任务，必须靠这个集合拦住。
+  const cancelledSendsRef = useRef<Set<string>>(new Set());
   const [uploadProgress, setUploadProgress] = useState<Record<string, { sent: number; total: number }>>({});
   const clearUploadProgress = useCallback((key: string) => {
     setUploadProgress((prev) => { if (!(key in prev)) return prev; const nx = { ...prev }; delete nx[key]; return nx; });
   }, []);
+
+  // 从会话列表移除一条本地行（取消/重试/删除共用）。
+  const removeMsgRow = useCallback((cid: string, key: string) => {
+    setMsgsByConv((prev) => {
+      const list = prev[cid];
+      if (!list) return prev;
+      return { ...prev, [cid]: list.filter((x) => x.clientMsgId !== key) };
+    });
+  }, []);
+
+  // 停掉一条出箱件的上传并清理其副作用（取消发送 / 删除发送中消息共用）：abort 分片任务、清进度、
+  // 丢留存 File。**不**移除气泡（调用方按需移除），也不 revoke blobURL（由发送循环在边界统一 revoke）。
+  // active=该件是否有正在跑的发送循环（媒体/文件且 sending）——只有它才需要标进取消集合让循环在边界跳过；
+  // 文本行、已 failed 行没有循环消费该键，加了就成永不回收的孤儿（键是唯一 uuid，不会误伤后续上传，但会泄漏）。
+  const teardownOutboxUpload = useCallback((key: string, active: boolean) => {
+    if (!key) return;
+    if (active) cancelledSendsRef.current.add(key);
+    chunkedTaskFor(key)?.cancel();
+    pendingFilesRef.current.delete(key);
+    clearUploadProgress(key);
+  }, [clearUploadProgress]);
+
+  // 该消息是否有正在跑的发送流水线（据此决定是否需要取消集合拦截）。
+  const hasActiveSend = (m: ChatMessage) =>
+    m.status === "sending" && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file");
+
+  // 暂停 ↔ 继续（仅 ≥8MB 的分片任务可暂停；恢复以服务端 offset 为准续传）。返回是否有任务被切换。
+  // 暂停态的唯一真相是 task.paused（渲染直接读 chunkedTaskFor(key)?.paused）；这里仅 bump 进度对象触发重渲染。
+  const toggleUploadPause = useCallback((m: ChatMessage): boolean => {
+    const key = m.clientMsgId ?? "";
+    const task = chunkedTaskFor(key);
+    if (!task) return false;
+    if (task.paused) task.resume(); else task.pause();
+    setUploadProgress((prev) => (prev[key] ? { ...prev, [key]: { ...prev[key] } } : prev));
+    return true;
+  }, []);
+
+  // 取消发送（右键菜单）：停上传 + 移除气泡。与 iOS 长按「取消发送」同语义。
+  const cancelSendMessage = useCallback((m: ChatMessage) => {
+    const key = m.clientMsgId ?? "";
+    teardownOutboxUpload(key, hasActiveSend(m));
+    removeMsgRow(m.convId, key);
+    logger.info(LOG_TAG.media, "media_send_cancelled", { conv_id: m.convId, client_msg_id: key, content_type: m.contentType });
+  }, [teardownOutboxUpload, removeMsgRow]);
 
   // 粘贴图片（Web #2）：Ctrl/Cmd+V 粘贴剪贴板中的图片 → 输入区上方预览 → 发送时作为图片上传。
   const [pastedImages, setPastedImages] = useState<{ file: File; url: string }[]>([]);
@@ -973,11 +1038,12 @@ export default function App() {
 
   // 相册批量发送（M4+）：**选完秒上屏**——每张先用本地 blob URL 占位（≥2 张共享 group_id → 宫格聚簇），
   // 逐张上传后原地替换为服务器 URL 并走 socket 发送（带 group_id）；单张失败标该格不阻塞后续。
-  const sendMediaBatch = useCallback(async (files: File[]) => {
+  const sendMediaBatch = useCallback(async (files: File[], opts?: { convId?: string; groupId?: string }) => {
     const client = clientRef.current;
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    // opts 用于重试：按原会话/原相册重发（不耦合当前打开的会话）。
+    const cid = opts?.convId ?? (peer ? convIdFor(uid, peer) : groupConvId);
     if (!client || !cid || files.length === 0) return;
-    const groupId = files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined;
+    const groupId = opts?.groupId ?? (files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined);
     const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined, meta: { width: 0, height: 0, durationMs: 0 } }));
     for (const l of locals) {
       appendMsg(cid, {
@@ -998,23 +1064,32 @@ export default function App() {
     }));
     for (let i = 0; i < locals.length; i++) {
       const l = locals[i];
+      // 取消：立即回收 blob（气泡已被移除，无需等 60s 换 URL），并从集合摘除。
+      const revokeNow = () => { URL.revokeObjectURL(l.blobUrl); if (l.posterBlobUrl) URL.revokeObjectURL(l.posterBlobUrl); };
+      const takeCancelled = () => { if (cancelledSendsRef.current.delete(l.localId)) { revokeNow(); return true; } return false; };
+      if (takeCancelled()) continue; // 排队中就被取消：这一项根本不发起上传
       try {
         // 分母用**媒体本体字节数**：XHR 报的 total 是 multipart 整包（含 boundary/头），会比文件属性大一截。
+        // key=localId：≥8MB 走分片，气泡的 ⏸/↑/右键取消经 chunkedTaskFor(localId) 定位任务。
         const { url, contentType } = await client.uploadFile(l.f, (sent, total) => {
           const ratio = total > 0 ? Math.min(sent / total, 1) : 0;
           setUploadProgress((prev) => ({ ...prev, [l.localId]: { sent: Math.round(ratio * l.f.size), total: l.f.size } }));
-        });
+        }, l.localId);
+        if (takeCancelled()) continue; // 小文件 XHR 无法 abort：传完了但用户已取消 → 不发消息
         // 视频封面：上传本地已抓的首帧图，随消息带 poster URL（收端直显免解码）；上传失败则保留本地 blob 封面不阻塞。
         let poster: string | undefined;
         if (l.posterFile) { try { poster = (await client.uploadFile(l.posterFile)).url; } catch { /* 封面上传失败：保留本地 blob 封面 */ } }
+        if (takeCancelled()) continue; // poster 上传窗口（大视频可达数秒）内被取消 → 不发消息
         const clientMsgId = client.sendMedia(url, contentType, peer, cid, {
           groupId, poster, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size,
         });
         patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl });
         clearUploadProgress(l.localId); // 传完：左上角进度胶囊消失，切回时长角标
       } catch (e) {
-        patchMsg(cid, l.localId, { status: "failed" });
         clearUploadProgress(l.localId);
+        if ((e as Error).name === "UploadCancelledError") { takeCancelled(); revokeNow(); continue; } // 分片任务被 cancel()
+        patchMsg(cid, l.localId, { status: "failed" });
+        pendingFilesRef.current.set(l.localId, { file: l.f, mode: "media", convId: cid, groupId }); // 留住 File+分组：点失败气泡按原相册重试
         // 用户只看到一句 toast；失败的会话/消息定位靠这条（可与 HTTP 层同 request_id 的上传日志对账）。
         logger.warn(LOG_TAG.media, "media_send_failed", {
           conv_id: cid, client_msg_id: l.localId, mime: l.f.type, bytes: l.f.size,
@@ -1095,12 +1170,12 @@ export default function App() {
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [attachPanel, cancelAttachClose]);
-  // 失败的文件消息要能重试，就必须留住原始 File（浏览器无法从消息里还原它）。仅内存，刷新即失效。
-  const pendingFilesRef = useRef<Map<string, { file: File; mode: AttachmentPickMode }>>(new Map());
+  // （声明已前移到 uploadProgress 附近：cancelSendMessage 也要用它。）
 
-  const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media") => {
+  const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media", convIdOverride?: string) => {
     const client = clientRef.current;
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    // convIdOverride 用于重试：按原会话重发（不耦合当前打开的会话）。
+    const cid = convIdOverride ?? (peer ? convIdFor(uid, peer) : groupConvId);
     if (!client || !cid) return;
     // 先上屏一条占位消息再上传：大文件传几十秒，原先"传完才出现"期间界面毫无反馈，用户以为卡死。
     const localId = `outbox-${crypto.randomUUID()}`;
@@ -1109,26 +1184,30 @@ export default function App() {
       fileName: file.name, fileSize: file.size, convSeq: 0, timestamp: Date.now(), status: "sending",
     });
     setUploadProgress((prev) => ({ ...prev, [localId]: { sent: 0, total: file.size } }));
-    pendingFilesRef.current.set(localId, { file, mode: pickMode }); // 失败时据此重试
+    pendingFilesRef.current.set(localId, { file, mode: pickMode, convId: cid }); // 失败时据此重试
+    const takeCancelled = () => cancelledSendsRef.current.delete(localId); // 取消：文件无 blobURL，无需 revoke
     try {
       const { url, contentType: uploadedContentType, size } = await client.uploadFile(file, (sent, total) => {
         const ratio = total > 0 ? Math.min(sent / total, 1) : 0;
         setUploadProgress((prev) => ({ ...prev, [localId]: { sent: Math.round(ratio * file.size), total: file.size } }));
-      });
+      }, localId);
+      if (takeCancelled()) return; // 小文件 XHR 无法 abort：传完了但用户已取消 → 不发消息
       const contentType = attachmentContentType(pickMode, uploadedContentType);
       let poster: string | undefined;
       if (pickMode === "media" && contentType === "video") {
         const pf = await captureVideoPoster(file);
         if (pf) { try { poster = (await client.uploadFile(pf)).url; } catch { /* 封面上传失败：不阻塞 */ } }
       }
+      if (takeCancelled()) return; // poster 窗口内被取消 → 不发消息
       const options = contentType === "file" ? { fileName: file.name, fileSize: size } : (poster ? { poster } : undefined);
       const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
       patchMsg(cid, localId, { clientMsgId, content: url, contentType, posterUrl: poster });
       clearUploadProgress(localId);
       pendingFilesRef.current.delete(localId);
     } catch (e) {
-      patchMsg(cid, localId, { status: "failed" });
       clearUploadProgress(localId);
+      if ((e as Error).name === "UploadCancelledError") { takeCancelled(); return; } // 分片任务被 cancel()
+      patchMsg(cid, localId, { status: "failed" });
       logger.warn(LOG_TAG.media, "file_send_failed", {
         conv_id: cid, client_msg_id: localId, mime: file.type, bytes: file.size, error: (e as Error).message,
       });
@@ -1136,20 +1215,32 @@ export default function App() {
     }
   }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
 
-  /// 点击失败的文件气泡重试：移除旧占位，用留存的 File 重新走一遍上传（新的 localId）。
-  const retryFileUpload = useCallback((m: ChatMessage) => {
+  /// 重试失败的媒体/文件消息（图片/视频/文件通吃）：移除旧占位，用留存的 File 按**原会话/原相册**
+  /// 重发（新的 localId）。媒体走批量通道（保留 groupId → 宫格成员回原格）；文件走单发通道。
+  const retryUpload = useCallback((m: ChatMessage) => {
     const key = m.clientMsgId ?? "";
     const kept = pendingFilesRef.current.get(key);
     if (!kept) { setToast("原文件已失效，请重新选择"); return; }
     pendingFilesRef.current.delete(key);
-    const cid = m.convId;
-    setMsgsByConv((prev) => {
-      const list = prev[cid];
-      if (!list) return prev;
-      return { ...prev, [cid]: list.filter((x) => x.clientMsgId !== key) };
-    });
-    void uploadAndSend(kept.file, kept.mode);
-  }, [uploadAndSend]);
+    removeMsgRow(m.convId, key);
+    if (kept.mode === "media") void sendMediaBatch([kept.file], { convId: kept.convId, groupId: kept.groupId });
+    else void uploadAndSend(kept.file, kept.mode, kept.convId);
+  }, [removeMsgRow, sendMediaBatch, uploadAndSend]);
+
+  /// 媒体气泡点按路由（与 iOS 中心按钮状态机一致）：失败 ↻ 重试；上传中 ⏸↔↑ 暂停恢复
+  /// （仅 ≥8MB 分片任务；小文件几秒传完不可暂停，点击忽略）；已发出 → 打开查看器。
+  const onMediaBubbleTap = useCallback((m: ChatMessage, openViewer: () => void) => {
+    const mine = m.from === uid;
+    if (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? "")) {
+      retryUpload(m);
+      return;
+    }
+    if (mine && m.status === "sending" && m.convSeq === 0 && uploadProgress[m.clientMsgId ?? ""]) {
+      toggleUploadPause(m); // 无任务（小文件）时返回 false，无副作用——上传中本就不可查看
+      return;
+    }
+    openViewer();
+  }, [uid, uploadProgress, retryUpload, toggleUploadPause]);
 
   // 附件面板项（数据驱动，M4-6）：加入口 = 数组加一行。Web 只图片或视频 / 文件。
   const attachItems = useMemo(() => [
@@ -1288,6 +1379,9 @@ export default function App() {
 
   // 本地删除一条消息（仅本端：从内存列表 + 去重集移除，不影响对端）。
   const deleteMessage = useCallback((m: ChatMessage) => {
+    // 删除一条仍在发送的本地出箱件：必须同时停掉上传（abort 分片 + 取消集合拦住小文件/poster/sendMedia），
+    // 否则"删除"只抹掉气泡而上传照跑、消息照发（幽灵送达）。已发出的消息（convSeq>0）走纯本地删除。
+    if (m.from === uid && m.convSeq === 0 && m.clientMsgId) teardownOutboxUpload(m.clientMsgId, hasActiveSend(m));
     setMsgsByConv((prev) => {
       const list = (prev[m.convId] ?? []).filter((x) =>
         m.clientMsgId ? x.clientMsgId !== m.clientMsgId : x.convSeq !== m.convSeq
@@ -1296,7 +1390,7 @@ export default function App() {
     });
     if (m.convSeq > 0) seenByConv.current[m.convId]?.delete(m.convSeq);
     setMenu(null);
-  }, []);
+  }, [uid, teardownOutboxUpload]);
 
   const copyMessage = useCallback((m: ChatMessage) => {
     setMenu(null);
@@ -1433,9 +1527,10 @@ export default function App() {
       delete: deleteMessage,
       reportMsg: (m) => void reportMessage(m, "message"),
       reportUser: (m) => void reportMessage(m, "user"),
+      cancelSend: cancelSendMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动，M4.5 全接后端）：置顶/免打扰切换、标已读/未读、删除会话。
@@ -2601,8 +2696,9 @@ export default function App() {
                 const grid = (
                   <AlbumGrid members={members}
                     timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
-                    onOpen={(mm) => { if (mm.convSeq > 0 || mm.status !== "sending") setViewer({ m: mm }); }}
-                    onMenu={(e, mm) => { e.preventDefault(); if (mm.convSeq > 0) setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                    progress={uploadProgress}
+                    onOpen={(mm) => onMediaBubbleTap(mm, () => setViewer({ m: mm }))}
+                    onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
                 );
                 return (
                   <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
@@ -2629,6 +2725,8 @@ export default function App() {
               // 媒体气泡：时间/已读压在图上（右下角），故不再渲染气泡下方的 .bmeta 行。
               const isMediaBubble = m.contentType === "image" || m.contentType === "video";
               const uploading = uploadProgress[m.clientMsgId ?? ""];
+              // 暂停态唯一真相=分片任务（toggleUploadPause bump 进度对象触发重渲染）；小文件无任务恒 false。
+              const uploadPaused = !!chunkedTaskFor(m.clientMsgId ?? "")?.paused;
               const durationText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
               const bubbleBlock = (
                 <>
@@ -2649,19 +2747,25 @@ export default function App() {
                       {isMediaBubble ? (
                         // 图片/视频：按 media_w/media_h 的原始比例定框（未知回退方块），
                         // 左上角时长或上传进度、右下角时间+已读态、视频居中播放角标——与 iOS 同版式。
-                        <span {...mediaBoxProps(m)} onClick={() => setViewer({ m })}>
+                        // 点按走状态机（与 iOS 中心按钮一致）：失败 ↻ 重试 / 上传中 ⏸↔↑ / 其余打开查看器。
+                        <span {...mediaBoxProps(m)} onClick={() => onMediaBubbleTap(m, () => setViewer({ m }))}>
                           {m.contentType === "video"
                             ? (m.posterUrl
                                 ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
                                 : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />)
                             : <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} />}
-                          {m.contentType === "video" && <span className="play-badge">▶</span>}
                           {uploading
-                            ? <span className="media-badge media-badge-tl">{formatUploadProgress(uploading.sent, uploading.total)}</span>
+                            ? (chunkedTaskFor(m.clientMsgId ?? "") && <span className="play-badge">{uploadPaused ? "↑" : "⏸"}</span>)
+                            : (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? ""))
+                              ? <span className="play-badge">↻</span>
+                              : m.contentType === "video" && <span className="play-badge">▶</span>}
+                          {uploading
+                            ? <span className="media-badge media-badge-tl">{uploadPaused ? "⏸ " : ""}{formatUploadProgress(uploading.sent, uploading.total)}</span>
                             : (durationText && <span className="media-badge media-badge-tl">{durationText}</span>)}
                           <span className="media-badge media-badge-br">
                             {mine
-                              ? (m.status === "sending" ? "发送中…"
+                              // 只有真正在传输才显「发送中…」；暂停时回落显示时间（与 iOS 一致）。
+                              ? (m.status === "sending" ? (uploadPaused ? formatTime(m.timestamp, timeFormat) : "发送中…")
                                 // 被拒收（有 note）时失败已由红❗+下方系统行表达，角标只显时间，不重复报错（与 iOS 一致）。
                                 : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : "未发送 ✗")
                                 : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>)
@@ -2683,14 +2787,18 @@ export default function App() {
                         // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。
                         uploading || !m.content ? (
                           <span className={`msg-file${m.status === "failed" ? " failed" : ""}`}
-                                onClick={m.status === "failed" ? () => retryFileUpload(m) : undefined}>
+                                onClick={m.status === "failed" ? () => retryUpload(m)
+                                       : uploading ? () => toggleUploadPause(m) : undefined}>
                             <FileTypeIcon name={m.fileName || ""} size={30} />
                             <span className="msg-file-body">
                               <span className="msg-file-name">{m.fileName || "文件"}</span>
                               <span className="msg-file-size">
                                 {m.status === "failed"
                                   ? `${formatFileSize(m.fileSize)} · 上传失败，点击重试`
-                                  : uploading ? formatUploadProgress(uploading.sent, uploading.total) : formatFileSize(m.fileSize)}
+                                  : uploading
+                                    ? `${formatUploadProgress(uploading.sent, uploading.total)}${
+                                        chunkedTaskFor(m.clientMsgId ?? "") ? (uploadPaused ? " · 已暂停，点击继续" : " · 点击暂停") : ""}`
+                                    : formatFileSize(m.fileSize)}
                               </span>
                               {/* 失败态不显进度条：0% 的空条会让人以为"还没开始传"。 */}
                               {m.status !== "failed" && (

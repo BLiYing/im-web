@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), comingSoon: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), comingSoon: vi.fn(),
 };
 const convHandlers = { setPinned: vi.fn(), setMuted: vi.fn(), markRead: vi.fn(), markUnread: vi.fn(), delete: vi.fn() };
 
@@ -30,7 +30,7 @@ describe("buildMessageActions", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
       "copy", "reply", "forward", "favorite", "recall", "edit",
-      "multiSelect", "translate", "reportMsg", "reportUser", "delete",
+      "multiSelect", "translate", "reportMsg", "reportUser", "cancelSend", "delete",
     ]);
   });
 
@@ -54,6 +54,25 @@ describe("buildMessageActions", () => {
     expect(visibleIds(buildMessageActions(msgHandlers), theirs)).toContain("reportUser");
     expect(visibleIds(buildMessageActions(msgHandlers), mine)).toContain("delete");
     expect(visibleIds(buildMessageActions(msgHandlers), mine)).toContain("copy");
+  });
+
+  it("收藏仅在已落库(convSeq>0)时可见：未发出的乐观行 content 是本地 blob:，收藏会存成死链", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "favorite")!.visible(ctx);
+    expect(find({ m: msg({ convSeq: 5, content: "/uploads/x.jpg", contentType: "image" }), uid: "1001" })).toBe(true);
+    expect(find({ m: msg({ convSeq: 0, content: "blob:http://x", contentType: "image" }), uid: "1001" })).toBe(false); // 上传中乐观行
+    expect(find({ m: msg({ convSeq: 5, content: "", contentType: "text" }), uid: "1001" })).toBe(false);              // 空内容
+    expect(find({ m: msg({ convSeq: 5, content: "hi", contentType: "system" }), uid: "1001" })).toBe(false);          // 系统消息
+  });
+
+  it("取消发送仅在 本人 && 未发出(convSeq=0) && sending|failed && 媒体/文件 时可见", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "cancelSend")!.visible(ctx);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "video" }), uid: "1001" })).toBe(true);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "failed", contentType: "file" }), uid: "1001" })).toBe(true);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "text" }), uid: "1001" })).toBe(false);  // 文本无上传可取消
+    expect(find({ m: msg({ from: "1001", convSeq: 5, status: "sending", contentType: "image" }), uid: "1001" })).toBe(false); // 已发出→走撤回
+    expect(find({ m: msg({ from: "2002", convSeq: 0, status: "sending", contentType: "image" }), uid: "1001" })).toBe(false); // 非本人
   });
 
   it("run 路由到真实处理器 / comingSoon", () => {

@@ -5,7 +5,7 @@ import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
-  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil,
+  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle,
 } from "lucide-react";
 
 /** 一个菜单项：id 稳定标识、label 文案、icon 图标、danger 红色危险样式、visible 按上下文决定是否显示、run 执行。 */
@@ -50,6 +50,7 @@ export interface MessageHandlers {
   delete: (m: ChatMessage) => void;
   reportMsg: (m: ChatMessage) => void;
   reportUser: (m: ChatMessage) => void;
+  cancelSend: (m: ChatMessage) => void;
   comingSoon: (label: string) => void;
 }
 
@@ -74,13 +75,21 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
     { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
     // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
-    { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
+    // 必须 convSeq>0：未发出的乐观行 content 是本地 blob: URL，收藏它会存成一条永久失效的死链。
+    { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
     { id: "reportMsg", label: "举报消息", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
     { id: "reportUser", label: "举报发送者", icon: Flag, visible: (c) => c.m.from !== c.uid, run: (c) => h.reportUser(c.m) },
+    // 取消发送：仅本人、仍在发送/失败的媒体/文件出箱行（convSeq=0，尚未发出去；发出去后走撤回）。
+    // 限 image/video/file——文本 sending 是 WS 帧已发出等 ack，无上传可取消，列出来会误导。与 iOS 同语义。
+    { id: "cancelSend", label: "取消发送", icon: XCircle,
+      visible: (c) => c.m.from === c.uid && c.m.convSeq === 0
+        && (c.m.status === "sending" || c.m.status === "failed")
+        && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
+      run: (c) => h.cancelSend(c.m) },
     { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.m) },
   ];
 }
