@@ -34,6 +34,7 @@ interface MsgRecord {
   pinnedAt?: number;
   replyToConvSeq?: number;
   replySnapshot?: string;
+  replyToFrom?: string;
   forwardFrom?: string;
   groupId?: string; // 相册分组（M4+）
   posterUrl?: string; // 视频封面首帧 URL（M4+）
@@ -88,7 +89,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
-    replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, forwardFrom: m.forwardFrom,
+    replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
     mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
   };
@@ -277,7 +278,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
-            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, forwardFrom: r.forwardFrom,
+            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
             mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration,
           },

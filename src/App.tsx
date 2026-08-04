@@ -144,7 +144,8 @@ function chatRecordSnippet(json: string): string {
 const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.includes('"items"') || s.includes('"t":'));
 
 const localizeSnippet = (s: string) =>
-  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]" : s === "[file]" ? "[文件]"
+  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]"
+  : s === "[file]" ? "[文件]" : s.startsWith("[file] ") ? "[文件] " + s.slice(7) // 文件带原名（M4-x）
   : s === "[chat_record]" ? "[聊天记录]" // 旧服务端 token（无标题）兜底
   // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
   : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
@@ -152,7 +153,7 @@ const localizeSnippet = (s: string) =>
 /** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。 */
 const replyPreviewOf = (m: ChatMessage): string =>
   m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
-  : m.contentType === "file" ? "[文件]"
+  : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
   : m.contentType === "chat_record" ? chatRecordSnippet(m.content) : (m.content || "").slice(0, 60);
 
 /** 多选态该消息是否可勾选：系统提示/撤回墓碑/发送中·失败的本地件（无服务端内容，转出去是空的）不可选。
@@ -459,6 +460,7 @@ export default function App() {
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
   const msgsRef = useRef<HTMLDivElement>(null); // 消息滚动容器
+  const messagesRef = useRef<ChatMessage[]>([]); // 当前会话已加载消息镜像（供定义在派生之前的回调读取，如 jumpToSeq）
   const dividerRef = useRef<HTMLDivElement>(null); // 未读分割线（进会话定位用）
   const histAnchorRef = useRef<{ h: number; t: number } | null>(null); // 上滚加载历史前的滚动锚点（保位）
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
@@ -1242,13 +1244,13 @@ export default function App() {
     }
     // 引用回复（M4-2）：带上目标 conv_seq + 本端即时快照（媒体→[图片]等；服务端会冻结权威快照给收件方）。
     const rt = replyTo && replyTo.convSeq > 0
-      ? { convSeq: replyTo.convSeq, preview: replyPreviewOf(replyTo) }
+      ? { convSeq: replyTo.convSeq, preview: replyPreviewOf(replyTo), from: replyTo.from }
       : undefined;
     const clientMsgId = client.sendText(text, peer, cid, rt ? { replyTo: rt } : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
     appendMsg(cid, {
       clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
       convSeq: 0, timestamp: Date.now(), status: "sending",
-      replyToConvSeq: rt?.convSeq, replySnapshot: rt?.preview,
+      replyToConvSeq: rt?.convSeq, replySnapshot: rt?.preview, replyToFrom: rt?.from,
     });
     setInput("");
     setReplyTo(null);
@@ -1451,26 +1453,34 @@ export default function App() {
   // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
   const jumpToSeq = useCallback((seq: number) => {
     const box = msgsRef.current;
-    if (!box) return;
-    const el = box.querySelector(`[data-seq="${seq}"]`);
+    if (!box) { setToast("原消息不在当前视图"); return; }
+    let el = box.querySelector(`[data-seq="${seq}"]`);
+    const list = messagesRef.current;
     if (!el) {
-      // 跳不到分两种：目标比"已加载窗口最早一条"还早 → 还没上拉加载到（可加载后重试）；
-      // 否则落在窗口内却缺失 → 已被本地删除（回捞成本高，仅提示）。
-      let earliest = Infinity;
-      box.querySelectorAll("[data-seq]").forEach((n) => {
-        const s = Number((n as HTMLElement).dataset.seq);
-        if (s > 0 && s < earliest) earliest = s;
-      });
-      setToast(seq < earliest ? "原消息较早，请上拉加载后重试" : "原消息已被删除");
+      // 相册宫格从行不渲染自己的 data-seq（只有主行有）：目标在模型里且属于宫格 → 定位到宫格主行。
+      const target = list.find((x) => x.convSeq === seq);
+      if (target?.groupId) {
+        const leader = list.find((x) => x.groupId === target.groupId && isAlbumMember(x));
+        if (leader) el = box.querySelector(`[data-seq="${leader.convSeq}"]`);
+      }
+    }
+    if (!el) {
+      // 跳不到分两种，**按模型判定而非 DOM**（宫格从行/未来虚拟化都可能不渲染节点）：
+      // 目标比已加载最早一条还早 → 还没上拉加载到；落在已加载窗口内却缺失 → 已被本地删除。
+      // 窗口内无任何已确认消息（minSeq=0）判不出方向 → 回退通用提示。
+      const earliest = minSeqOf(list);
+      setToast(earliest === 0 ? "原消息不在当前视图"
+        : seq < earliest ? "原消息较早，请上拉加载后重试" : "原消息已被删除");
       return;
     }
+    const node = el;
     const flash = () => {
-      el.classList.add("flash");
-      window.setTimeout(() => el.classList.remove("flash"), 1200);
+      node.classList.add("flash");
+      window.setTimeout(() => node.classList.remove("flash"), 1200);
     };
     // 目标已在视口内 → 立即闪；否则先平滑滚动，**到位后**再闪（原先边滚边闪，目标离得远时
     // 1.2s 动画在滚动途中就放完了，人到了什么都看不见）。scrollend 一次性监听，老浏览器降级定时。
-    const r = el.getBoundingClientRect();
+    const r = node.getBoundingClientRect();
     const br = box.getBoundingClientRect();
     const visible = r.top >= br.top && r.bottom <= br.bottom;
     if (visible) { flash(); return; }
@@ -1842,6 +1852,7 @@ export default function App() {
   const messages = (msgsByConv[convId] ?? [])
     .slice()
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
+  messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
   const firstUnreadIdx =
     entryUnread > 0 ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq) : -1;
@@ -2854,10 +2865,15 @@ export default function App() {
                       onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                       {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                       {m.replyToConvSeq ? (
-                        // 引用条：被引用的是图片/视频时内嵌小缩略图（与输入区引用预览一致，用户反馈 #1）。
+                        // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
                         <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
                           <QuoteThumb m={messages.find((x) => x.convSeq === m.replyToConvSeq)} />
-                          <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
+                          <span className="quote-lines">
+                            {isGroupChat && m.replyToFrom && (
+                              <span className="quote-who">{m.replyToFrom === uid ? "你" : (memberNick(m.convId, m.replyToFrom) || m.replyToFrom)}</span>
+                            )}
+                            <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
+                          </span>
                         </div>
                       ) : null}
                       {isMediaBubble ? (

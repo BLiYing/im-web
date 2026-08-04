@@ -54,6 +54,7 @@ export interface ChatMessage {
   pinnedAt?: number;    // >0=聊天内置顶（M4）
   replyToConvSeq?: number; // 引用回复的目标 conv_seq（点击跳转，M4-2）
   replySnapshot?: string;  // 引用目标的降级快照（气泡顶部引用条）
+  replyToFrom?: string;    // 被引用消息发送者 uid（M4-x）：群聊引用条显示发送者，本地解析显示名；单聊不显示
   forwardFrom?: string;    // 转发溯源"转发自 X"（M4-3）
   groupId?: string;        // 相册分组 ID（M4+）：同批多图/视频聚簇渲染宫格；空=普通消息
   posterUrl?: string;      // 视频封面首帧图 URL（M4+）：发送时生成上传，收端直显封面（免解码原视频）；空=非视频/无封面
