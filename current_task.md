@@ -4,34 +4,29 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
-- **群聊气泡头像进资料面板（2026-08-05，改完·未编译·待实测·未提交）**：`Avatar` 加可选 `onClick`，群聊对方
-  气泡头像点击 → `openPeerDetail(m.from)`（与 iOS 语义统一：**先进资料、不学 telegram 直跳聊天**——单聊依赖好友
-  关系，非好友直跳会开出发不了消息的死会话；资料页内再决定发消息/加好友）。
-- **引用增强（M4-2 扩展）web 侧已实测收口（2026-08-05）**：SDK 贯通 `replyToFrom`、引用条两行式
-  （群聊显被引用者、单聊不显）、`[file] 名` 前缀本地化、媒体跳转描边闪烁、系统小字/时间标签等比 ×0.8
-  （`--sys-font`）、跳转失败两句提示（**模型判定** + 宫格成员定位主行）。/code-review 修复已并入：
-  乐观回显带 `replyToFrom`、闪烁选择器特异性（直链 (0,6,0) 压过旧规则）、胶囊圆角 999px、`.reedit-btn`
-  联动字号。**逐功能×端状态见 `../IMServer/docs/CLIENT_PARITY.md` M4-2 三行（唯一来源）**；交互语义
-  CHAT_UX §3.1。build 绿，**2026-08-05 已实测通过并提交**。
-- 更早批次——分片上传对齐 iOS、多选/合并转发/引用卡片、粘贴条攒批、引用跳转到位后再闪等——
-  **全部已实测通过并提交**（详见归档 2026-08-04 节 + git log）。tsc + 91 vitest 为当前绿基线。
+**参与四大任务（2026-08-05）**——协作 IMServer/iOS 讨论方案后实施代码：
+1. **任务一**：非好友聊天权限分析 + 群成员资料页交互设计
+2. **任务二**：多选消息支持合并转发的聊天记录设计
+3. **任务三**：媒体与文件下载设置设计（自动下载、按网络分阈值）
+4. **任务四**：文件与媒体消息下载 UI/UX（下载状态、进度、暂停）
+
+详见 `../IMServer/current_task.md` 完整需求。
 
 ## 下一步
-1. **caption（图+文一条消息，随三端下一轮）**：方案见 `../IMServer/docs/ROADMAP.md`「M4-6 caption 追加」；
+1. **接 IMServer 四大任务方案确认**（等 Telegram 截图）→ 实施代码
+2. **caption（图+文一条消息）**：方案见 `../IMServer/docs/ROADMAP.md`「M4-6 caption 追加」；
    Web 侧=媒体气泡图下文字区 + 粘贴条「图+配文」合成一条。
-2. 网络恢复秒连：听 `online` 事件跳过退避立即重连（与 iOS NWPathMonitor 同轮）。
-3. 群内已读细化（现自己消息恒单 ✓）、@提醒（随主线 M5-6）。
-4. 重新引入消息列表虚拟化（react-window / @tanstack/react-virtual，或定位 virtua 双栏挂载问题）。
-5. 测试债：Playwright E2E（断连竞态/多端流程仍靠手测）、CLIENT_PARITY 覆盖列。
+3. 网络恢复秒连：听 `online` 事件跳过退避立即重连。
+4. 群内已读细化、@提醒（随主线 M5-6）。
+5. 消息列表虚拟化；测试债：Playwright E2E。
 
 ## 已知坑 / 限制
 - **File 句柄不能跨刷新持久化**：刷新后进行中的上传作废，无 iOS 式杀进程自动续传（Web 平台限制）。
-- **未读语义（非 bug）**：自己发送的消息（含其它端发的）在自己任何端永不计未读（服务端排除 sender==本人）。
-- 消息排序按 `timestamp`（conv_seq 同毫秒次级）；ack 后换服务器时间戳，见 CHAT_UX §1。
-- 虚拟化暂回退为普通滚动列表（virtua 双栏条件挂载视口测 0）。
-- 本地落库/空洞自愈/连续游标：IndexedDB 按 owner 隔离、消息+游标同事务、ACK 不越级推进（已实测）。
+- **未读语义（非 bug）**：自己发送的消息在自己任何端永不计未读（服务端排除 sender==本人）。
+- 消息排序按 `timestamp`；ack 后换服务器时间戳。
+- 虚拟化暂回退为普通滚动列表。
+- 本地落库/空洞自愈/连续游标：IndexedDB 按 owner 隔离、同事务。
 - 免密登录需后端 `-dev-login`；dev 建的号无法再走密码登录。
-- 已读=可见即读；壁纸为内联 SVG 近似。
 
 ## 关联工程 / 常用命令
 - 后端 `/Users/liying/IOSProject/IMServer`；iOS `/Users/liying/IOSProject/IMProgram`。
