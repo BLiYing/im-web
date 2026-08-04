@@ -115,6 +115,31 @@ describe("chunkedUpload", () => {
     }
   });
 
+  it("空闲超时：分片长时间零进展（如 iCloud 未下完）→ 续一次仍超时则以明确文案失败", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = { offset: 0, inits: 0 };
+      const base = standardHandler(state);
+      const calls = mockFetch(async (url, init) => {
+        // 分片永远挂起（模拟 file.slice() 卡在等 iCloud 下载真实字节），只能靠空闲超时掐断。
+        if (url.includes("/chunk")) { await new Promise(() => { /* 永不 resolve */ }); }
+        return base(url, init);
+      });
+      const p = startChunkedUpload(makeFile(), "tok", "kidle");
+      const expectation = expect(p).rejects.toThrow(/iCloud|超时/);
+      await vi.advanceTimersByTimeAsync(60_000); // 第一次空闲超时 → 触发续传
+      await vi.advanceTimersByTimeAsync(2_000);  // 续传退避
+      await vi.advanceTimersByTimeAsync(60_000); // 第二次空闲超时 → 明确失败
+      await expectation;
+      expect(chunkedTaskFor("kidle")).toBeUndefined(); // 终态注销
+      expect(calls.filter((c) => c.includes("/upload/init")).length).toBe(1); // 网络类路径：不清 upload_id 从 0 重传
+      expect(calls.some((c) => c.includes("/status"))).toBe(true); // 续传经 status 拿权威 offset
+      expect(calls.filter((c) => c.includes("/chunk")).length).toBeGreaterThanOrEqual(2); // 首传 + 续传各发起一次
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("取消：promise 以 UploadCancelledError 拒绝并注销任务", async () => {
     const state = { offset: 0, inits: 0 };
     mockFetch(standardHandler(state));

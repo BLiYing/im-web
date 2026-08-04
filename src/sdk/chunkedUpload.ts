@@ -20,6 +20,14 @@ import { logger, LOG_TAG } from "../logging/logger";
 
 /** 单片大小 = 服务端 init 响应建议值与其单片上限（8MB）。 */
 export const CHUNK_SIZE = 8 * 1024 * 1024;
+/**
+ * 单个请求空闲超时（ms）。真机踩坑：从 iCloud 未下载完的 .mov 发起分片时，`file.slice()` 读真实字节会
+ * 卡在等 iCloud 下载——首片 PUT 曾静默飞 95s 零进展，界面只显"等待中"没有任何反馈。fetch 无法拿到
+ * 上传子进度，只能对整个请求设硬超时：8MB 分片即便 ~0.13MB/s 也能在此窗口内传完，超时基本只会命中
+ * "字节源卡死"（iCloud 没下完 / 磁盘不可读）。超时按网络失败处理：先从服务端 offset 续一次，仍超时则
+ * 以明确文案失败，不再让用户干等。
+ */
+export const CHUNK_IDLE_TIMEOUT_MS = 60_000;
 /** ≥ 该大小才走分片（小文件多 3 次往返反而更慢），与 iOS chunkedThresholdBytes 一致。 */
 export const CHUNKED_THRESHOLD = 8 * 1024 * 1024;
 
@@ -64,6 +72,8 @@ export class ChunkedUploadTask {
   private netRetryCount = 0;
   private uploadId: string | undefined;
   private inFlight: AbortController | null = null;
+  private idleTimedOut = false; // 本次 abort 是空闲超时触发（区别于用户暂停/取消的 abort）
+  private idleTimeoutCount = 0; // 连续空闲超时次数：续一次仍超时即失败
   private resolveFn!: (r: ChunkedResult) => void;
   private rejectFn!: (e: Error) => void;
 
@@ -111,11 +121,19 @@ export class ChunkedUploadTask {
   private async api(path: string, init: RequestInit): Promise<Record<string, unknown>> {
     const ac = new AbortController();
     this.inFlight = ac;
-    const resp = await tracedFetch(path, {
-      ...init,
-      headers: { Authorization: `Bearer ${this.token}`, ...(init.headers as Record<string, string> | undefined) },
-      signal: ac.signal,
-    });
+    // 空闲超时：请求整体超过窗口未完成即掐断（典型是 file.slice() 卡在等 iCloud 下载字节）。
+    // 打标 idleTimedOut 以便在 catch 里与"用户暂停/取消的 abort"区分。
+    const idleTimer = setTimeout(() => { this.idleTimedOut = true; ac.abort(); }, CHUNK_IDLE_TIMEOUT_MS);
+    let resp: Response;
+    try {
+      resp = await tracedFetch(path, {
+        ...init,
+        headers: { Authorization: `Bearer ${this.token}`, ...(init.headers as Record<string, string> | undefined) },
+        signal: ac.signal,
+      });
+    } finally {
+      clearTimeout(idleTimer); // 请求settled（成功/失败/被abort）即撤销定时器，避免误置 idleTimedOut
+    }
     const text = await resp.text().catch(() => "");
     let body: { code?: number; message?: string; data?: Record<string, unknown> } | null = null;
     try { body = text ? JSON.parse(text) : null; } catch { body = null; }
@@ -157,6 +175,7 @@ export class ChunkedUploadTask {
         if (!this.alive(gen)) return;
         offset = Number(d.offset ?? 0); // 服务端返回的 offset 是权威值：乱序/重复自动对齐
         this.netRetryCount = 0;         // 有分片落地即清零：只有**连续**网络失败才升级为整体失败
+        this.idleTimeoutCount = 0;      // 有进展即清零：只有连续零进展才判定字节源卡死
       }
       this.onProgress?.(this.file.size, this.file.size);
       const d = await this.api(`/api/v1/upload/${this.uploadId}/complete`, { method: "POST" });
@@ -170,7 +189,25 @@ export class ChunkedUploadTask {
         size: Number.isFinite(size) && size > 0 ? size : this.file.size,
       });
     } catch (e) {
-      if ((e as Error)?.name === "AbortError") return; // 暂停/取消主动中断：新链或终态已接管
+      if ((e as Error)?.name === "AbortError") {
+        if (!this.idleTimedOut) return; // 用户暂停/取消的主动中断：新链或终态已接管
+        // 空闲超时触发的 abort：视为网络类失败，但给出面向用户的明确文案（不再干等）。
+        this.idleTimedOut = false;
+        if (this.cancelled || this.finished || gen !== this.generation || this.paused) return;
+        const msg = "读取文件超时——文件可能尚未从 iCloud 下载到本地，请确认已下载后重试";
+        if (this.idleTimeoutCount >= 1) { // 已续过一次仍超时：字节源确实卡死，明确失败
+          logger.warn(LOG_TAG.media, "upload_idle_timeout_failed", { client_msg_id: this.key, upload_id: this.uploadId ?? "-" });
+          this.fail(new Error(msg));
+          return;
+        }
+        this.idleTimeoutCount += 1;
+        logger.warn(LOG_TAG.media, "upload_idle_timeout_retry", { client_msg_id: this.key, upload_id: this.uploadId ?? "-", attempt: this.idleTimeoutCount });
+        const genIdle = ++this.generation; // 立即从服务端 offset 续一次（可能是瞬时卡顿）
+        setTimeout(() => {
+          if (!this.cancelled && !this.finished && !this.paused && genIdle === this.generation) void this.runChain(genIdle);
+        }, 2000);
+        return;
+      }
       if (this.cancelled || this.finished || gen !== this.generation) return;
       // 暂停期间到达的迟到错误（响应体已被 tracedFetch 缓冲、abort 慢一步）一律不推进——
       // 否则业务错误会在暂停期偷偷 init 新会话（违反"暂停期间零新请求"，恢复后从 0 重传）。恢复时会重跑链。

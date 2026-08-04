@@ -450,6 +450,12 @@ export default function App() {
   const pendingReadRef = useRef(0); // 已滚入视口的最大 conv_seq（节流后上报）
   const readTimerRef = useRef<number | null>(null); // 可见即读上报的节流定时器
   const conversationRefreshTimerRef = useRef<number | null>(null); // sync 批量消息只触发一次会话列表刷新
+  // 会话列表刷新节流：ack/receipt/conv_update/group/msg_op 都会触发一次 fetchConversations，
+  // 高频收发时叠成请求风暴（日志见同时 3-4 个 GET 在飞、300-400ms）。合并进 400ms 窗口只发一次，
+  // 且串行化（在飞时置脏，回来后再补一次），避免并发拉取。
+  const listRefreshTimerRef = useRef<number | null>(null);
+  const listRefreshInFlightRef = useRef(false);
+  const listRefreshDirtyRef = useRef(false);
 
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
@@ -500,6 +506,28 @@ export default function App() {
       });
     }, 150);
   }, [refreshConversations, preloadLocal]);
+
+  // 会话列表节流刷新：把一阵 ack/receipt/conv_update 风暴合并成 400ms 一发，并串行化拉取。
+  // 与 scheduleConversationRefresh 的区别：那条负责 sync 批量新消息（还要 preloadLocal + syncTracked），
+  // 这条只重拉列表，供纯"列表要变"的实时事件用，最省资源。
+  const scheduleListRefresh = useCallback(() => {
+    if (listRefreshTimerRef.current !== null) return; // 窗口内已排队，本次并入
+    listRefreshTimerRef.current = window.setTimeout(() => {
+      listRefreshTimerRef.current = null;
+      if (listRefreshInFlightRef.current) { listRefreshDirtyRef.current = true; return; } // 有在飞的：置脏待补
+      void (async () => {
+        listRefreshInFlightRef.current = true;
+        try {
+          do {
+            listRefreshDirtyRef.current = false;
+            await refreshConversations();
+          } while (listRefreshDirtyRef.current); // 拉取期间又来了事件 → 再补一次，收敛到最新
+        } finally {
+          listRefreshInFlightRef.current = false;
+        }
+      })();
+    }, 400);
+  }, [refreshConversations]);
 
   const refreshFriends = useCallback(async () => {
     try {
@@ -740,17 +768,18 @@ export default function App() {
           return out;
         });
         // 自己发送成功 → 刷新列表：新发起的会话首条消息后即出现在左侧、更新最后一条。
-        if (ok) void refreshConversations();
+        // 走节流：连发/群发时每条 ack 不再各拉一次列表（否则叠成 GET 风暴）。
+        if (ok) scheduleListRefresh();
       },
       onReceipt: (convId, from, status, upToSeq) => {
         if (status !== "read") return;
         if (from === uid) {
           // 多端已读同步（M1）：我在另一端已读 → 本端列表未读清零（服务端已记位点，刷新即得）。
-          void refreshConversations();
+          scheduleListRefresh();
         } else {
           setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
           // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变绿✓✓（否则要切会话才更新）。
-          void refreshConversations();
+          scheduleListRefresh();
         }
       },
       onPresence: (user, status) => setPresence((prev) => ({ ...prev, [user]: status })),
@@ -765,7 +794,7 @@ export default function App() {
       onFriend: () => { void refreshFriends(); },
       // 群成员/资料实时变更：刷新会话列表 + 该群资料缓存；自己被移出 → 提示并退出该会话。
       onGroup: (event, cid, _from, target) => {
-        void refreshConversations();
+        scheduleListRefresh();
         if (event !== "dissolve") void refreshGroupInfo(cid); // 被移出时 fetch 报 300203 → 自动清缓存；解散后群已不存在，无需再拉
         // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
         if ((event === "remove" && target === uid) || event === "dissolve") {
@@ -794,12 +823,12 @@ export default function App() {
           if (!list) return prev;
           return { ...prev, [cid]: list.map((m) => (m.convSeq === targetSeq ? { ...m, ...patch } : m)) };
         });
-        void refreshConversations(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
+        scheduleListRefresh(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
       },
       // 我发起的操作被拒（如撤回超时 300008）→ toast 提示（不改消息本身）。
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
-      onConvUpdate: () => { void refreshConversations(); },
+      onConvUpdate: () => { scheduleListRefresh(); },
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
       onAuthError: (msg) => {
@@ -846,7 +875,7 @@ export default function App() {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
+  }, [uid, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
 
   // 静默恢复登录（Web #4）：挂载后若有已存会话 → 直接用存储凭据重登（成功直达主界面；
   // 网络失败且有本地会话缓存时直接进入会话页显示“未连接”；鉴权失败或无缓存才回登录页。
@@ -1064,6 +1093,9 @@ export default function App() {
     }));
     for (let i = 0; i < locals.length; i++) {
       const l = locals[i];
+      // 成功后哪些本地 blob 被服务器 URL 取代、成了可安全回收的孤儿（失败/回退仍在用的不能碰）。
+      let mainOrphaned = false;   // 主体内容已切服务器 URL
+      let posterOrphaned = false; // 封面已切服务器 URL（封面上传失败回退本地 blob 时为 false）
       // 取消：立即回收 blob（气泡已被移除，无需等 60s 换 URL），并从集合摘除。
       const revokeNow = () => { URL.revokeObjectURL(l.blobUrl); if (l.posterBlobUrl) URL.revokeObjectURL(l.posterBlobUrl); };
       const takeCancelled = () => { if (cancelledSendsRef.current.delete(l.localId)) { revokeNow(); return true; } return false; };
@@ -1085,6 +1117,8 @@ export default function App() {
         });
         patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl });
         clearUploadProgress(l.localId); // 传完：左上角进度胶囊消失，切回时长角标
+        mainOrphaned = true;      // 主体已切服务器 URL → 本地 blob 可回收
+        posterOrphaned = !!poster; // 仅当封面也上到服务器才回收本地封面 blob（回退时还在显）
       } catch (e) {
         clearUploadProgress(l.localId);
         if ((e as Error).name === "UploadCancelledError") { takeCancelled(); revokeNow(); continue; } // 分片任务被 cancel()
@@ -1097,8 +1131,14 @@ export default function App() {
         });
         setToast(`第 ${i + 1} 项发送失败：${(e as Error).message}`);
       }
-      // 延迟释放 blob：等重渲染切到服务器 URL 后再回收，避免闪图（失败格保留本地图直至刷新）。
-      window.setTimeout(() => { URL.revokeObjectURL(l.blobUrl); if (l.posterBlobUrl) URL.revokeObjectURL(l.posterBlobUrl); }, 60_000);
+      // 延迟释放**已被服务器 URL 取代**的本地 blob（等重渲染切换后再回收，避免闪图）。
+      // 关键：失败气泡仍用本地 blob 当内容、封面上传失败回退本地 blob 时也仍在显——这些绝不能 revoke，
+      // 否则 <img>/<video> 引用已释放的 blob → ERR_FILE_NOT_FOUND 反复重试刷屏（纯噪音但很吵）。
+      // 未回收的 blob 会在页面刷新时随文档一起释放。
+      window.setTimeout(() => {
+        if (mainOrphaned) URL.revokeObjectURL(l.blobUrl);
+        if (posterOrphaned && l.posterBlobUrl) URL.revokeObjectURL(l.posterBlobUrl);
+      }, 60_000);
     }
   }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
 
