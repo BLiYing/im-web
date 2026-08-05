@@ -28,6 +28,10 @@ src/
 - **聊天消息列表的交互行为**（进会话定位/分页/未读分割线/红点/已读/跳转按钮/自动滚动）**以 `../IMServer/docs/CHAT_UX.md` 为单一事实来源**，照它实现，别另起一套。
 - 协议字段以 `../IMServer/docs/PROTOCOL.md` 为准；端能力矩阵 `../IMServer/docs/CLIENT_PARITY.md`；阶段划分 `../IMServer/docs/ROADMAP.md`。
 - 日志实现见 `docs/LOGGING.md`，跨端共同契约见 `../IMServer/docs/LOGGING.md`；新增日志/API 必须走统一 logger/tracedFetch。
+  **禁止业务代码直接 `console.*`**（`logging/logger.ts` 自身除外）。自查：
+  `grep -rn "console\." src --include="*.ts" --include="*.tsx" | grep -v logger.ts` 应为 0 条。
+  （2026-08-05 全量复查：本端 0 处违规；后端 Go 曾因有兼容桥接兜底而累计 54 处未被发现，
+  详见 `../IMServer/docs/LOGGING.md` §7.1。）
 - UI 配色与外观规范见 `docs/UI_COLOR.md`；新增或修改 UI 前必须读取，CSS 只使用已声明的
   语义令牌，审计记录见 `docs/UI_COLOR_AUDIT.md`。
 - **今后新增的业务/技术 Markdown 文档一律放入 `docs/`**。根目录仅保留 README、CLAUDE、`current_task.md` 及既有工程入口文件；不为整理目录而移动这些入口文件。
