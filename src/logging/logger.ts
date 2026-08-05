@@ -53,6 +53,21 @@ const sinkEnabled =
 let sinkBuffer: string[] = [];
 let sinkTimer: ReturnType<typeof setTimeout> | null = null;
 
+// 来源标签（与 iOS IMRemoteLogSink 对齐）：多标签页/多账号汇聚到同一 im-web.log 时用于 grep 分离。
+//   · dev = 每标签页一个短 id（页面加载时生成一次；每个浏览器标签是独立 page load，故可区分标签）。
+//   · uid = 当前登录账号，由 App 经 setLogContext 注入（登录/切号时更新）；未登录为 "-"。
+// 这是 grep 过滤标签，不是安全边界（/__devlog 本就 dev-only 无鉴权）。
+const logDev =
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+let logUid = "-";
+
+/** 由 App 在 uid 确定/变更时调用，使后续每条上报都带上账号标签。 */
+export function setLogContext(uid: string | null | undefined): void {
+  logUid = uid && uid.length > 0 ? uid : "-";
+}
+
 function flushSink(useBeacon = false): void {
   if (sinkTimer !== null) { clearTimeout(sinkTimer); sinkTimer = null; }
   if (sinkBuffer.length === 0) return;
@@ -67,7 +82,8 @@ function flushSink(useBeacon = false): void {
 
 function shipToSink(entry: LogEntry): void {
   if (!sinkEnabled) return;
-  sinkBuffer.push(JSON.stringify(entry));
+  // dev/uid 置于顶层（与 iOS 一致），便于 `grep '"uid":"1006"'` / `grep '"dev":"…"'` 分离来源。
+  sinkBuffer.push(JSON.stringify({ dev: logDev, uid: logUid, ...entry }));
   if (sinkBuffer.length >= 50) { flushSink(); return; } // 攒够一批立刻送，避免缓冲无界
   if (sinkTimer === null) sinkTimer = setTimeout(() => { sinkTimer = null; flushSink(); }, 500);
 }

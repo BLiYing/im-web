@@ -11,7 +11,7 @@ import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, mediaDisplaySize, probeMediaMetadata } from "./media";
-import { LOG_TAG, logger } from "./logging/logger";
+import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -926,6 +926,7 @@ export default function App() {
       },
     });
     clientRef.current = client;
+    setLogContext(uid); // 让后续每条 dev 日志带上当前账号标签，便于多标签页/多账号汇聚时 grep 分离
     try {
       await client.connect(uid, pwd); // 首次登录失败（密码错误等）会抛错
     } catch (e) {
