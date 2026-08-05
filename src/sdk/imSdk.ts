@@ -78,6 +78,7 @@ export class IMClient {
   private manualClose = false;
   private syncedSeq = new Map<string, number>(); // convId -> 已连续接上的 conv_seq（不能用“见过的最大值”越过空洞）
   private tracked = new Set<string>(); // 重连后需增量同步的会话
+  private watched: string[] = []; // 当前在线态关注全集（watch），onopen/重连后自动重发
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
@@ -552,6 +553,7 @@ export class IMClient {
       this.setState("connected");
       this.startPing();
       this.sendSyncReq([...this.tracked]); // 重连补偿
+      if (this.watched.length) this.send({ type: T.WATCH, data: { set: this.watched } }); // watch 连接级易失，重连重发
     };
     ws.onmessage = (ev) => {
       if (ws === this.ws && generation === this.connectionGeneration) this.onFrame(ev.data);
@@ -842,6 +844,14 @@ export class IMClient {
   /** 发送"正在输入"给会话对端（临时态）。 */
   sendTyping(convId: string): void {
     if (convId) this.send({ type: T.TYPING, data: { conv_id: convId } });
+  }
+
+  /** 上报「当前要显示在线态的用户全集」（全量替换语义，见 PROTOCOL §5.5）：服务端只把这些人的
+   *  presence 变化推给本连接，并对新增者回一帧 presence 快照。空数组=取消全部关注（如退出聊天页）。
+   *  订阅是连接级易失态——SDK 记住当前集合，onopen（含重连）自动重发，调用方无需管重连。 */
+  watchUsers(userIDs: string[]): void {
+    this.watched = Array.isArray(userIDs) ? userIDs.filter(Boolean) : [];
+    this.send({ type: T.WATCH, data: { set: this.watched } });
   }
 
   /** 上报已读到 upToSeq（对端据此显示已读双勾）。 */

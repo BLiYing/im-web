@@ -645,6 +645,7 @@ export default function App() {
     setPeer("");
     setGroupConvId(cid);
     currentConvRef.current = cid;
+    clientRef.current?.watchUsers([]); // 切到群聊：清空单聊在线态关注（群成员在线不走 watch）
     const conv = conversations.find((c) => c.conv_id === cid);
     const readSeq = conv?.read_seq ?? 0;
     const latestSeq = conv?.latest_conv_seq ?? 0;
@@ -1000,6 +1001,7 @@ export default function App() {
     setPeer(p);
     setGroupConvId(""); // 切回单聊模式
     currentConvRef.current = cid;
+    clientRef.current?.watchUsers([p]); // 订阅对端在线态：首聊尚无会话也能即时收到上线（服务端 watch，PROTOCOL §5.5）
     // 进会话定位（CHAT_UX §3）：以 read_seq 为锚点——有未读则停在首条未读，否则到最新。
     const conv = conversations.find((c) => c.conv_id === cid);
     const readSeq = conv?.read_seq ?? 0;
@@ -1065,6 +1067,7 @@ export default function App() {
     setPeer("");
     setGroupConvId("");
     setTypingConv(null);
+    clientRef.current?.watchUsers([]); // 退出会话：取消在线态关注
     void refreshConversations();
   }, [refreshConversations]);
 

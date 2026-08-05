@@ -12,6 +12,7 @@ export const T = {
   RECEIPT: "receipt",
   TYPING: "typing",
   PRESENCE: "presence",
+  WATCH: "watch",
   SYNC_REQ: "sync_req",
   SYNC_RESP: "sync_resp",
   FRIEND: "friend",
