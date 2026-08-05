@@ -2032,7 +2032,8 @@ export default function App() {
     const items = box.querySelectorAll<HTMLElement>(".msg-item[data-seq]");
     let maxSeq = 0;
     items.forEach((el) => {
-      const seq = Number(el.dataset.seq);
+      // 相册主行带 data-seq-end=宫格末条 seq：看到宫格即视为读到整组，否则以相册结尾的会话已读卡在首条、未读清不掉。
+      const seq = Number(el.dataset.seqEnd || el.dataset.seq);
       // 元素顶部已进入容器可见底边 → 视为已滚入（被看到过）；其中最大 seq = 当前看到的最深位置。
       if (seq > 0 && el.getBoundingClientRect().top < boxBottom) maxSeq = Math.max(maxSeq, seq);
     });
@@ -2905,6 +2906,9 @@ export default function App() {
                 if (!isAlbumLeader(messages, i)) return null;
                 const members = albumMembers(messages, m.groupId!);
                 const last = members[members.length - 1];
+                // 相册尾条的 conv_seq（供「可见即读」：主行虽只带 data-seq=主行 seq，但看到宫格=看到整组，
+                // 已读须能推进到末条，否则以相册结尾的会话未读永远卡在相册首条、清不掉。乐观态 seq=0 取到者忽略）。
+                const albumEndSeq = members.reduce((mx, mm) => Math.max(mx, mm.convSeq || 0), 0);
                 // 整组共用一条失败/拒收表达（同批发送、同一原因被拒）：取首个带 note 的成员。
                 const notedMember = members.find((mm) => mm.note);
                 const albumFailed = mine && members.some((mm) => mm.status === "failed");
@@ -2919,7 +2923,7 @@ export default function App() {
                   </div>
                 );
                 return (
-                  <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} data-seq-end={albumEndSeq || undefined} key={m.clientMsgId ?? m.serverMsgId ?? i}>
                     {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                     {i === firstUnreadIdx && (
                       <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
