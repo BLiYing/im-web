@@ -3,6 +3,7 @@
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
+import { presenceFromFrame, type Presence } from "./presence";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, type UploadProgressHandler } from "./http";
@@ -36,8 +37,9 @@ export interface IMClientHandlers {
   onAck?: (clientMsgId: string, ok: boolean, convSeq: number, serverTs?: number) => void;
   /** 对端回执：from 已读/送达到 upToSeq（用于已读双勾）。 */
   onReceipt?: (convId: string, from: string, status: string, upToSeq: number) => void;
-  /** 在线状态变化：某用户上线/离线。 */
-  onPresence?: (user: string, status: string) => void;
+  /** 某用户上线。presence 只报**变化**，初始值须由 HTTP 快照提供（会话列表 peer_presence）；
+   *  服务端不推下线，靠 presence.onlineUntil 到期本地降级（见 sdk/presence.ts）。 */
+  onPresence?: (user: string, presence: Presence) => void;
   /** 对端正在输入。 */
   onTyping?: (convId: string, from: string) => void;
   /** 好友关系变更（申请/同意/拒绝/拉黑/删除）：提示刷新通讯录。 */
@@ -654,7 +656,7 @@ export class IMClient {
         this.handlers.onReceipt?.(d.conv_id, d.from, d.status, d.up_to_conv_seq);
         break;
       case T.PRESENCE:
-        this.handlers.onPresence?.(d.user, d.status);
+        this.handlers.onPresence?.(d.user, presenceFromFrame(d));
         break;
       case T.TYPING:
         this.handlers.onTyping?.(d.conv_id, d.from);

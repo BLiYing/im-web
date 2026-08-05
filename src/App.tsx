@@ -3,6 +3,7 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
+import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
@@ -385,7 +386,7 @@ export default function App() {
   const [msgsByConv, setMsgsByConv] = useState<Record<string, ChatMessage[]>>({});
   const [peer, setPeer] = useState("");
   const [input, setInput] = useState("");
-  const [presence, setPresence] = useState<Record<string, string>>({}); // user -> online/offline
+  const [presence, setPresence] = useState<Record<string, Presence>>({}); // user -> 在线态（租约模型，见 sdk/presence.ts）
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
   const [typingConv, setTypingConv] = useState<string | null>(null);
   const [entryUnread, setEntryUnread] = useState(0); // 进会话时的未读数（红点/↓N 计数，服务端 cap 999）
@@ -495,11 +496,25 @@ export default function App() {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
   }, []);
 
+  // 用会话列表里的在线态快照播种 presence 表。仅覆盖单聊且带快照的项——
+  // 群聊无对端、老响应无这些字段，此时保留既有值（多半来自 presence 帧，比空值新）。
+  const seedPresenceFromConversations = useCallback((convs: Conversation[]) => {
+    setPresence((prev) => {
+      const next = { ...prev };
+      for (const c of convs) {
+        if (c.is_group || !c.peer || c.peer_presence === undefined) continue;
+        next[c.peer] = presenceFromConversation(c);
+      }
+      return next;
+    });
+  }, []);
+
   const refreshConversations = useCallback(async (): Promise<Conversation[]> => {
     try {
       const convs = await clientRef.current?.fetchConversations();
       if (convs) {
         setConversations(convs);
+        seedPresenceFromConversations(convs); // 在线态**初始值**：presence 帧只报变化，不播种就只能靠碰巧撞上对方上线
         clientRef.current?.cacheConversations(convs); // 缓存：刷新/离线先秒显
         return convs;
       }
@@ -816,7 +831,7 @@ export default function App() {
           scheduleListRefresh();
         }
       },
-      onPresence: (user, status) => setPresence((prev) => ({ ...prev, [user]: status })),
+      onPresence: (user, p) => setPresence((prev) => ({ ...prev, [user]: p })),
       onTyping: (convId, from) => {
         if (from === uid) return;
         setTypingConv(convId);
@@ -2083,7 +2098,6 @@ export default function App() {
 
   // ---- 双栏主界面（左会话列表常驻 + 右聊天详情） ----
   const readSeq = peerReadSeq[convId] ?? 0;
-  const peerOnline = presence[peer] === "online";
   const peerBlocked = !!peer && friends.some((f) => f.user_id === peer && f.blocked); // 我拉黑了对方（blocked 标记，与 status 正交）
 
   // 通讯录派生：我对每个对端的关系状态、收到的申请、已是好友、新申请红点数。
@@ -2114,7 +2128,8 @@ export default function App() {
     : peerConv?.peer_avatar_url;
   const chatSubtitle = isGroupChat
     ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员` : "群聊")
-    : (peerOnline ? "在线" : "最近上线");
+    // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
+    : presenceText(presence[peer]);
   // 群成员昵称（气泡/正在输入回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
   const memberNick = (cid: string, id: string): string => {
     const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
@@ -2435,7 +2450,7 @@ export default function App() {
               onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
               onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
               <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)}>
-                {!c.is_group && presence[c.peer] === "online" && <span className="presence-dot" />}
+                {!c.is_group && isOnline(presence[c.peer]) && <span className="presence-dot" />}
               </Avatar>
               <div className="convbody">
                 <div className="convtop">
@@ -2533,7 +2548,7 @@ export default function App() {
             {accepted.map((f) => (
               <div key={`f-${f.user_id}`} className="convitem" onClick={() => openFriendChat(f.user_id)}>
                 <Avatar url={f.avatar_url} label={friendLabel(f)}>
-                  {presence[f.user_id] === "online" && <span className="presence-dot" />}
+                  {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
                 </Avatar>
                 <div className="convbody">
                   <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>

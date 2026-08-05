@@ -1,6 +1,8 @@
 // 协议常量与类型，对齐 IMServer/docs/PROTOCOL.md。
 // 这是 Web 端"协议 SDK"的一部分，与 iOS 的 IMProtocol/IMMessageModel 对应。
 
+import type { PresenceLevel } from "./presence";
+
 export const T = {
   PING: "ping",
   PONG: "pong",
@@ -125,6 +127,10 @@ export interface Conversation {
   unread: number;
   read_seq: number; // 本人已读位点（首条未读 = convSeq > read_seq 的第一条）
   peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表绿✓✓/灰✓）
+  // 在线态快照（仅单聊）：presence 帧只报"变化"，进页面时的初始值取自这里。语义见 presence.ts。
+  peer_presence?: PresenceLevel;
+  peer_online_until?: number;
+  peer_last_seen?: number;
   // M4.5 会话级设置（每用户私有；conv_update 帧多端同步）：
   pinned_at?: number;      // 置顶时间（0/缺省=未置顶；已置顶排在列表顶，越大越靠上）
   muted?: boolean;         // 免打扰（弱提示不响铃）
