@@ -203,7 +203,10 @@ function AlbumGrid({ members, timeLabel, progress, onOpen, onMenu }: {
                     {up && task ? <span className="album-pause">{task.paused ? "↑" : "⏸"}</span> : <span className="album-spinner" />}
                   </span>
                 )}
-                {m.status === "failed" && <span className="album-tile-dim"><span className="album-fail">!</span></span>}
+                {/* 格内 ❗ 只表达「这一格上传/发送失败」。**被服务端拒收（有 note）时不显示**——
+                    那是整条消息的事，已由宫格左侧红❗+下方系统行表达，逐格再标一遍是噪声。
+                    与 iOS 同语义：iOS 格内 ❗ 由 IMUploadProgress.failed 驱动，拒收时上传早已成功故不显示。 */}
+                {m.status === "failed" && !m.note && <span className="album-tile-dim"><span className="album-fail">!</span></span>}
               </div>
               );
             })}
