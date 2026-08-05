@@ -46,8 +46,9 @@ export interface IMClientHandlers {
   onGroup?: (event: string, convId: string, from: string, target: string) => void;
   /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。 */
   onAuthError?: (msg: string) => void;
-  /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。 */
-  onMsgRejected?: (clientMsgId: string, msg: string) => void;
+  /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。
+   *  code 为服务端业务码（200102 被拉黑 / 200103 非好友 …），UI 据此决定是否给恢复入口。 */
+  onMsgRejected?: (clientMsgId: string, msg: string, code: number) => void;
   /** 消息操作（撤回/编辑/置顶）应用到某条消息：UI 据 patch 更新该条（convSeq 定位）。 */
   onMsgOp?: (convId: string, targetConvSeq: number, patch: MsgOpPatch) => void;
   /** 我发起的消息操作被拒（如撤回超时 300008）：回滚提示。 */
@@ -709,7 +710,7 @@ export class IMClient {
             });
           }
           this.pendingSends.delete(cmid);
-          this.handlers.onMsgRejected?.(cmid, note);
+          this.handlers.onMsgRejected?.(cmid, note, Number(d.code) || 0);
         }
         break;
       }

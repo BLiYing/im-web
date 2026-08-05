@@ -237,8 +237,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fail-badge { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--danger); color: var(--on-accent);
   font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: default; }
 /* 被拒收等系统提示：该条下方居中灰字（类似"未读消息"分割提示，但无横线）。 */
-.sys-note { display: flex; justify-content: center; margin: 4px 0 8px; }
+.sys-note { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 4px 0 8px; }
 .sys-note span { color: var(--text-secondary); font-size: var(--sys-font); text-align: center; max-width: 80%; }
+/* 拒收系统行的恢复入口（非好友 → 发好友申请）：强调色，独立一行（与 iOS 版式一致）。 */
+.sys-note-action { background: none; border: 0; padding: 0; color: var(--accent); font-size: var(--sys-font); font-weight: 500; cursor: pointer; }
+.sys-note-action:hover { text-decoration: underline; }
 /* 群系统消息（邀请/移除/转让/禁言等留痕）：居中灰字胶囊，独立一行。 */
 .sys-line { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
 .sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); text-align: center; max-width: 80%; padding: 3px 12px; border-radius: 999px; } /* 999px：字号放大后仍保持胶囊形（写死 11px 会退化成方角） */

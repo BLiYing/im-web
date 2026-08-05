@@ -47,6 +47,12 @@ export interface ChatMessage {
   status: MessageStatus;
   /** 发送失败时的系统提示（如被拉黑拒收），在该条下方居中显示；微信式，不弹窗。 */
   note?: string;
+  /**
+   * note 对应的服务端错误码（如 200103 非好友），决定系统行是否附带可点击的恢复入口。
+   * ⚠️ **瞬态、不落 IndexedDB**：仅本次会话有效，刷新后 note 文案仍在但链接消失；
+   * 点该条重试会立即重新拿到拒收码并再次显示链接，故恢复路径不会永久丢失（与 iOS 同取舍）。
+   */
+  noteCode?: number;
   /** M4 消息操作派生状态（只在被操作过的消息上出现）。 */
   recalledAt?: number;  // >0=已撤回（渲染居中系统行"撤回了一条消息"，隐藏原气泡）
   recalledBy?: string;  // 撤回操作者 uid

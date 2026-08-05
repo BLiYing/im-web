@@ -836,11 +836,11 @@ export default function App() {
         }
       },
       // 某条消息被拒收（被拉黑）→ 标记该条发送失败 + 把原因挂到该条 note（微信式：红❗+下方居中系统行，不弹窗）。
-      onMsgRejected: (clientMsgId, msg) => {
+      onMsgRejected: (clientMsgId, msg, code) => {
         setMsgsByConv((prev) => {
           const out: Record<string, ChatMessage[]> = {};
           for (const [cid, list] of Object.entries(prev)) {
-            out[cid] = list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, status: "failed", note: msg } : m));
+            out[cid] = list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, status: "failed", note: msg, noteCode: code } : m));
           }
           return out;
         });
@@ -2227,6 +2227,18 @@ export default function App() {
     })();
   };
 
+  // 点拒收系统行的「发送好友申请」（非好友 200103 的恢复入口，微信式）。
+  // 服务端 Request 对「我侧陈旧 accepted」已放行——单向删除后被删方的唯一恢复路径。
+  const requestFriendFromNote = async (target: string) => {
+    try {
+      await clientRef.current!.friendAction("request", target);
+      await refreshFriends();
+      setToast("已发送好友申请");
+    } catch (e) {
+      setToast((e as Error).message || "好友申请发送失败");
+    }
+  };
+
   // 单聊拉黑/取消拉黑（拉黑二次确认）。
   const doToggleBlock = (peer: string, block: boolean) => {
     if (block && !window.confirm("拉黑该联系人？拉黑后将不再收到对方消息。")) return;
@@ -3013,7 +3025,14 @@ export default function App() {
                     ) : bubbleBlock}
                   </div>
                   {mine && m.status === "failed" && m.note && (
-                    <div className="sys-note"><span>{m.note}</span></div>
+                    <div className="sys-note">
+                      <span>{m.note}</span>
+                      {/* 恢复入口：仅非好友(200103) 给——被拉黑(200102) 刻意不给，服务端对两者回同样的
+                          模糊文案以不泄露拉黑，给了入口反而会因申请被 200102 拒而暴露。 */}
+                      {m.noteCode === 200103 && peer && (
+                        <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>发送好友申请</button>
+                      )}
+                    </div>
                   )}
                 </div>
               );
