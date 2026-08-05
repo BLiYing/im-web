@@ -553,7 +553,11 @@ export class IMClient {
       this.setState("connected");
       this.startPing();
       this.sendSyncReq([...this.tracked]); // 重连补偿
-      if (this.watched.length) this.send({ type: T.WATCH, data: { set: this.watched } }); // watch 连接级易失，重连重发
+      if (this.watched.length) {
+        // watch 连接级易失，重连重发；诊断记一条与首次 watch_sent 区分（看重连是否补上）。
+        logger.info(LOG_TAG.ws, "watch_resent", { count: this.watched.length, targets: this.watched });
+        this.send({ type: T.WATCH, data: { set: this.watched } });
+      }
     };
     ws.onmessage = (ev) => {
       if (ws === this.ws && generation === this.connectionGeneration) this.onFrame(ev.data);
@@ -667,6 +671,8 @@ export class IMClient {
         this.handlers.onReceipt?.(d.conv_id, d.from, d.status, d.up_to_conv_seq);
         break;
       case T.PRESENCE:
+        // 诊断：在线态链路的「收到」书挡，与本端 watch_sent、服务端 presence_online_broadcast 对账。
+        logger.info(LOG_TAG.ws, "presence_applied", { user: d.user, status: d.status });
         this.handlers.onPresence?.(d.user, presenceFromFrame(d));
         break;
       case T.TYPING:
@@ -851,6 +857,8 @@ export class IMClient {
    *  订阅是连接级易失态——SDK 记住当前集合，onopen（含重连）自动重发，调用方无需管重连。 */
   watchUsers(userIDs: string[]): void {
     this.watched = Array.isArray(userIDs) ? userIDs.filter(Boolean) : [];
+    // 诊断：在线态订阅链路的「发出」书挡，与服务端 watch_registered、onPresence 收到对账。
+    logger.info(LOG_TAG.ws, "watch_sent", { count: this.watched.length, targets: this.watched });
     this.send({ type: T.WATCH, data: { set: this.watched } });
   }
 
