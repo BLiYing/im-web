@@ -3433,6 +3433,9 @@ export default function App() {
         const pinned = (conv?.pinned_at ?? 0) > 0;
         const muted = !!conv?.muted;
         const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
+        // 好友准入（微信式，任务一 P0）：非好友不显示「消息/呼叫/视频」，改显「加好友」。
+        // 拉黑的好友 status 仍 accepted（仍算好友，可发消息），故只看 status 不看 blocked。
+        const detailPeerIsFriend = !d.isGroup && !!d.peer && friends.some((f) => f.user_id === d.peer && f.status === "accepted");
         // 页签数据（本地历史）
         const media = detailMsgs.filter((m) => m.contentType === "image" || m.contentType === "video")
           .sort((a, b) => b.convSeq - a.convSeq);
@@ -3498,11 +3501,14 @@ export default function App() {
 
                   {/* ---- 操作排 pills ---- */}
                   <div className="detail-pills">
-                    {!d.isGroup && (
+                    {!d.isGroup && !detailPeerIsFriend && (
+                      <button className="detail-pill" onClick={() => void doFriendAction(d.peer!, async () => { await clientRef.current!.friendAction("request", d.peer!); setToast("已发送好友申请"); })}><UserPlus size={20} /><span>加好友</span></button>
+                    )}
+                    {!d.isGroup && detailPeerIsFriend && (
                       <button className="detail-pill" onClick={() => { close(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
                     )}
-                    {!d.isGroup && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
-                    {!d.isGroup && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
+                    {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
+                    {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
                     <button className="detail-pill" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /><span>搜索</span></button>
                     <div className="detail-pill-anchor">
                       <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
@@ -3667,8 +3673,17 @@ export default function App() {
         const cid = memberMenu.convId;
         if (!gp) return null;
         const run = (fn: () => Promise<void>) => { setMemberMenu(null); void doGroupAction(cid, fn); };
+        // 好友准入（微信式，任务一 P0）：好友 → 「发送消息」；非好友 → 「添加好友」（非好友发消息会被 200103 拒收）。
+        const isSelf = m.user_id === uid;
+        const isMemberFriend = friends.some((f) => f.user_id === m.user_id && f.status === "accepted");
         return (
           <div className="ctx-menu" style={{ left: memberMenu.x, top: memberMenu.y }} onClick={(e) => e.stopPropagation()}>
+            {!isSelf && isMemberFriend && (
+              <button onClick={() => { setMemberMenu(null); openChat(m.user_id); }}>发送消息</button>
+            )}
+            {!isSelf && !isMemberFriend && (
+              <button onClick={() => { setMemberMenu(null); void doFriendAction(m.user_id, async () => { await clientRef.current!.friendAction("request", m.user_id); setToast("已发送好友申请"); }); }}>添加好友</button>
+            )}
             {gp.my_role === "owner" && m.role === "member" && (
               <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "admin"))}>设为管理员</button>
             )}
