@@ -317,6 +317,15 @@ export class IMClient {
     return data as MyProfile;
   }
 
+  /** 读取他人在线态快照：GET /api/v1/users/{id}。
+   *  会话列表只覆盖「已有会话」的对端；从通讯录打开一个从没聊过的好友时没有任何快照来源，
+   *  presence 帧又只在对方**恰好此刻上线**时才到，故需要这条兜底（对齐 iOS 的同名调用）。
+   *  服务端仅对好友下发在线态，非好友返回空态。 */
+  async fetchUserPresence(userId: string): Promise<Presence> {
+    const data = await this.api(`/api/v1/users/${encodeURIComponent(userId)}`);
+    return presenceFromFrame(data);
+  }
+
   /** 整体更新本人资料（PUT 语义）：PUT /api/v1/users/me。 */
   async updateMyProfile(p: { nickname: string; avatar_url: string; phone: string; tags: string[] }): Promise<MyProfile> {
     const data = await this.api("/api/v1/users/me", { method: "PUT", body: JSON.stringify(p) });

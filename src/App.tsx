@@ -387,6 +387,7 @@ export default function App() {
   const [peer, setPeer] = useState("");
   const [input, setInput] = useState("");
   const [presence, setPresence] = useState<Record<string, Presence>>({}); // user -> 在线态（租约模型，见 sdk/presence.ts）
+  const [, setPresenceTick] = useState(0); // 仅用于驱动在线态重算的心跳，见下方 useEffect
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
   const [typingConv, setTypingConv] = useState<string | null>(null);
   const [entryUnread, setEntryUnread] = useState(0); // 进会话时的未读数（红点/↓N 计数，服务端 cap 999）
@@ -495,6 +496,43 @@ export default function App() {
   const appendMsg = useCallback((convId: string, m: ChatMessage) => {
     setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
   }, []);
+
+  // 在线态定时重算：服务端**不推下线帧**，对端离线是靠本地租约到期体现的——而"租约到期"是
+  // 纯粹的时间流逝，不改变任何 state，React 不会因此重渲染。不自己敲这个心跳的话，用户静止不动时
+  // 副标题与列表绿点会永远停在「在线」。30s 周期同时让降档后的「N 分钟前在线」随时间推进。
+  useEffect(() => {
+    const id = setInterval(() => setPresenceTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 打开单聊时若还没有该对端的在线态，补拉一次快照。
+  // 会话列表只覆盖「已有会话」的对端；从通讯录点进一个从没聊过的好友，列表里根本没有这一项，
+  // 而 broadcastOnline 的收件人也取自会话成员（此时同样不含我），故不补这一下就永远是空白。
+  useEffect(() => {
+    if (!peer || groupConvId || presence[peer]) return;
+    let cancelled = false;
+    void clientRef.current?.fetchUserPresence(peer)
+      .then((p) => { if (!cancelled) setPresence((prev) => (prev[peer] ? prev : { ...prev, [peer]: p })); })
+      .catch(() => { /* 在线态是锦上添花，失败静默 */ });
+    return () => { cancelled = true; };
+    // presence 故意不进依赖：只在「首次没有」时拉一次，避免拿到空态后反复重拉。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peer, groupConvId]);
+
+  // 对端不在线时低频重拉快照（每 2 分钟）。
+  // 单聊 topic 随首条消息才建立，故「好友但从没聊过」的对端不在 broadcastOnline 的收件人集合里——
+  // 他上线时我收不到 presence 帧。租约模型只会让状态降级，没有任何东西能把它升回「在线」，
+  // 不轮询的话这类会话里对方永远显示为离线。已在线时不轮询（有租约 + 有帧，够用了）。
+  useEffect(() => {
+    if (!peer || groupConvId) return;
+    const id = setInterval(() => {
+      if (isOnline(presence[peer])) return;
+      void clientRef.current?.fetchUserPresence(peer)
+        .then((p) => setPresence((prev) => ({ ...prev, [peer]: p })))
+        .catch(() => { /* 失败静默 */ });
+    }, 120_000);
+    return () => clearInterval(id);
+  }, [peer, groupConvId, presence]);
 
   // 用会话列表里的在线态快照播种 presence 表。仅覆盖单聊且带快照的项——
   // 群聊无对端、老响应无这些字段，此时保留既有值（多半来自 presence 帧，比空值新）。

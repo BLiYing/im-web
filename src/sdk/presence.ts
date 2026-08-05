@@ -62,8 +62,10 @@ export function presenceText(p: Presence | undefined, now = Date.now()): string 
   if (p.lastSeen > 0) return relativeLastSeen(p.lastSeen, now);
   // 无精确时间（未知或将来被隐私设置抹掉）时回退到粗档文案。
   switch (p.level) {
+    // 档位说 online 但租约已过期/缺失：**不能**显示「在线」——没有租约就没有到期时刻，
+    // 这个「在线」再也不会被时间推翻，会永久停在错误状态。从宽也只到「最近在线」。
     case "online":
-      return "在线"; // 租约已过期但档位仍为 online：快照偏旧，从宽显示
+      return "最近在线";
     case "recently":
       return "最近在线";
     case "last_week":

@@ -67,6 +67,14 @@ describe("租约（服务端不推下线，靠到期本地降级）", () => {
     expect(isOnline(undefined, NOW)).toBe(false);
     expect(presenceText(undefined, NOW)).toBe("");
   });
+
+  it("档位 online 但无租约时，不能显示「在线」——那是永不过期的错误状态", () => {
+    // 可由服务端竞态产出（status=online 但 online_until=0）。若显示「在线」，
+    // 因为没有租约可到期，这个状态再也不会被时间推翻。
+    const p: Presence = { level: "online", onlineUntil: 0, lastSeen: 0 };
+    expect(presenceText(p, NOW)).toBe("最近在线");
+    expect(presenceText(p, NOW + 86_400_000)).toBe("最近在线"); // 一天后仍不会变成「在线」
+  });
 });
 
 describe("副标题文案分级", () => {
