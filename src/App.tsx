@@ -445,6 +445,7 @@ export default function App() {
   const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
   const [createBusy, setCreateBusy] = useState(false);
   const [memberMenu, setMemberMenu] = useState<{ x: number; y: number; convId: string; m: GroupMember } | null>(null); // 成员行 ⋯ 菜单
+  const memberMenuRef = useRef<HTMLDivElement | null>(null); // 菜单本体：捕获阶段关闭时用来排除菜单内点击
   const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
   const [typingFrom, setTypingFrom] = useState(""); // 正在输入的对端 uid（群聊显示"谁"在输入）
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
@@ -1713,15 +1714,22 @@ export default function App() {
   }, [convMenu]);
 
   // 群成员 ⋯ 菜单：点空白/滚动/Esc 关闭。
+  // ⚠️ 必须用**捕获阶段**监听 click：该菜单由详情面板内的 ⋯ 触发，而 `.detail-panel` 自身挂了
+  // `onClick={e => e.stopPropagation()}`（防误关面板），冒泡阶段的 window 监听收不到面板内的点击，
+  // 导致点面板任意处菜单都不消失。捕获阶段在 stopPropagation 生效前就能拿到事件。
+  // 菜单自身的点击由 ref 排除（菜单项各自负责关闭），否则会在按钮 handler 前先卸载菜单。
   useEffect(() => {
     if (!memberMenu) return;
-    const close = () => setMemberMenu(null);
+    const close = (e: Event) => {
+      if (memberMenuRef.current?.contains(e.target as Node)) return;
+      setMemberMenu(null);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMemberMenu(null); };
-    window.addEventListener("click", close);
+    window.addEventListener("click", close, true);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("click", close);
+      window.removeEventListener("click", close, true);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
     };
@@ -3436,6 +3444,9 @@ export default function App() {
         // 好友准入（微信式，任务一 P0）：非好友不显示「消息/呼叫/视频」，改显「加好友」。
         // 拉黑的好友 status 仍 accepted（仍算好友，可发消息），故只看 status 不看 blocked。
         const detailPeerIsFriend = !d.isGroup && !!d.peer && friends.some((f) => f.user_id === d.peer && f.status === "accepted");
+        // 非好友（单聊）只保留头像 + 操作排（加好友/更多），隐藏设置·备注名·页签——尚未建立关系时这些设置无意义。
+        // 仅隐藏，数据加载逻辑不动（加为好友后重新渲染即恢复）。与 iOS sectionLayout 同语义。
+        const showDetailBody = d.isGroup || detailPeerIsFriend;
         // 页签数据（本地历史）
         const media = detailMsgs.filter((m) => m.contentType === "image" || m.contentType === "video")
           .sort((a, b) => b.convSeq - a.convSeq);
@@ -3509,7 +3520,7 @@ export default function App() {
                     )}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                    <button className="detail-pill" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /><span>搜索</span></button>
+                    {showDetailBody && <button className="detail-pill" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /><span>搜索</span></button>}
                     <div className="detail-pill-anchor">
                       <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                       {detailMore && (
@@ -3529,6 +3540,7 @@ export default function App() {
                     </div>
                   </div>
 
+                  {showDetailBody && (<>
                   {/* ---- 设置：置顶 / 免打扰 (+群管理) ---- */}
                   <div className="detail-card">
                     <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>置顶聊天</span>
@@ -3623,6 +3635,7 @@ export default function App() {
                       )
                     )}
                   </div>
+                  </>)}
                 </>
               )}
             </aside>
@@ -3679,7 +3692,7 @@ export default function App() {
         return (
           // 锚定在点击点的左上方（right/bottom 定位，菜单向左上展开）：⋯ 按钮贴屏幕右缘、成员行偏下，
           // 原 left/top 向右下展开会把菜单推出视口（选项被截断看不到）。
-          <div className="ctx-menu" style={{ right: window.innerWidth - memberMenu.x, bottom: window.innerHeight - memberMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <div ref={memberMenuRef} className="ctx-menu" style={{ right: window.innerWidth - memberMenu.x, bottom: window.innerHeight - memberMenu.y }} onClick={(e) => e.stopPropagation()}>
             {!isSelf && isMemberFriend && (
               <button onClick={() => { setMemberMenu(null); openChat(m.user_id); }}>发送消息</button>
             )}
