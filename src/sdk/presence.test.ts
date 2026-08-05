@@ -86,6 +86,22 @@ describe("副标题文案分级", () => {
     expect(presenceText(at(NOW - 59 * 60_000), NOW)).toBe("59 分钟前在线");
   });
 
+  it("今天/昨天按本地日历日（DST 安全，不减固定 24h）", () => {
+    // 以本地当天正午为 now，避开午夜边界的抖动；时刻均按运行环境本地时区构造，故与 tz 无关。
+    const localNoon = new Date(NOW);
+    localNoon.setHours(12, 0, 0, 0);
+    const now = localNoon.getTime();
+
+    const morning = new Date(localNoon);
+    morning.setHours(8, 30, 0, 0);
+    expect(presenceText(at(morning.getTime()), now)).toBe("今天 08:30 在线");
+
+    const yEvening = new Date(localNoon);
+    yEvening.setDate(yEvening.getDate() - 1);
+    yEvening.setHours(22, 15, 0, 0);
+    expect(presenceText(at(yEvening.getTime()), now)).toBe("昨天 22:15 在线");
+  });
+
   it("无精确时间时回退到粗档文案（为将来的隐私开关留位）", () => {
     expect(presenceText({ level: "recently", onlineUntil: 0, lastSeen: 0 }, NOW)).toBe("最近在线");
     expect(presenceText({ level: "last_week", onlineUntil: 0, lastSeen: 0 }, NOW)).toBe("一周内在线");

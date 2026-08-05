@@ -91,10 +91,14 @@ function relativeLastSeen(lastSeen: number, now: number): string {
 
   const seen = new Date(lastSeen);
   const hhmm = `${pad2(seen.getHours())}:${pad2(seen.getMinutes())}`;
-  const dayStart = new Date(now);
-  dayStart.setHours(0, 0, 0, 0);
-  if (lastSeen >= dayStart.getTime()) return `今天 ${hhmm} 在线`;
-  if (lastSeen >= dayStart.getTime() - 86_400_000) return `昨天 ${hhmm} 在线`;
+  // 今天/昨天按**本地日历日**判定（与 iOS isDateInToday/isDateInYesterday 对齐）：昨天用 setDate(-1)
+  // 退一个日历日，而非减固定 86_400_000ms——后者在有夏令时的地区，切换日前后会差一小时（CST 无 DST 无影响）。
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(todayStart.getDate() - 1);
+  if (lastSeen >= todayStart.getTime()) return `今天 ${hhmm} 在线`;
+  if (lastSeen >= yesterdayStart.getTime()) return `昨天 ${hhmm} 在线`;
 
   // 跨年时带上年份，避免「1月2日」指向去年却看不出来。
   const sameYear = seen.getFullYear() === new Date(now).getFullYear();
