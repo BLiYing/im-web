@@ -468,7 +468,6 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .chat header .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); margin-right: 4px; }
 .chat header .dot.on { background: var(--online); }
 .chat header .muted { color: var(--text-secondary); font-size: 12px; font-weight: 400; }
-.typing { padding: 4px var(--space-4); color: var(--text-secondary); font-size: 12px; }
 
 /* 右下角"跳到底部"悬浮按钮（Telegram 风格，带未读计数）。 */
 .jump-btn { position: absolute; right: var(--space-4); bottom: 72px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--separator); background: var(--card-bg); color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px var(--shadow-soft); display: flex; align-items: center; justify-content: center; }

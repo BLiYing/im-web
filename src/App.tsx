@@ -454,7 +454,6 @@ export default function App() {
   const [memberMenu, setMemberMenu] = useState<{ x: number; y: number; convId: string; m: GroupMember } | null>(null); // 成员行 ⋯ 菜单
   const memberMenuRef = useRef<HTMLDivElement | null>(null); // 菜单本体：捕获阶段关闭时用来排除菜单内点击
   const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
-  const [typingFrom, setTypingFrom] = useState(""); // 正在输入的对端 uid（群聊显示"谁"在输入）
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
   const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
   const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
@@ -873,7 +872,6 @@ export default function App() {
       onTyping: (convId, from) => {
         if (from === uid) return;
         setTypingConv(convId);
-        setTypingFrom(from); // 群聊显示"谁"在输入
         if (typingTimer.current) clearTimeout(typingTimer.current);
         typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
       },
@@ -2169,7 +2167,8 @@ export default function App() {
     ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员` : "群聊")
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
     : presenceText(presence[peer]);
-  // 群成员昵称（气泡/正在输入回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
+  const visibleChatSubtitle = convId && typingConv === convId ? "正在输入" : chatSubtitle;
+  // 群成员昵称（气泡回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
   const memberNick = (cid: string, id: string): string => {
     const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
     return (m?.nickname && m.nickname.trim()) || "";
@@ -2818,7 +2817,7 @@ export default function App() {
                 <Avatar url={chatAvatarURL} label={chatTitle} cls="chat-avatar" />
                 <span className="chat-identity-copy">
                   <span className="chat-title">{chatTitle}</span>
-                  <span className="chat-subtitle">{chatSubtitle}</span>
+                  <span className="chat-subtitle">{visibleChatSubtitle}</span>
                 </span>
               </button>
             ) : (
@@ -3119,11 +3118,6 @@ export default function App() {
             <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
               ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
             </button>
-          )}
-          {convId && typingConv === convId && (
-            <div className="typing">
-              {isGroupChat ? `${memberNick(convId, typingFrom) || typingFrom} 正在输入…` : "对方正在输入…"}
-            </div>
           )}
           {peerBlocked && peer && (
             // 微信式单向：拉黑者仍可发、对方能收到；这里只给一条非阻断提示 + 解除入口，不禁用输入。
