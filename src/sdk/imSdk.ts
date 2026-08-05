@@ -183,6 +183,16 @@ export class IMClient {
     await this.api(`/api/v1/friends/${action}`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
   }
 
+  /**
+   * 发好友申请：POST /api/v1/friends/request。
+   * 返回 true 表示**已直接成为好友、无需对方确认**（对方先申请过我；或我曾单向删除对方而对方仍视我为好友）。
+   * 调用方据此**不要提示「已发送好友申请」**——那会让用户误以为还要等对方通过；刷新界面即可。
+   */
+  async requestFriend(userId: string): Promise<boolean> {
+    const r = await this.api(`/api/v1/friends/request`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
+    return (r as { outcome?: string } | undefined)?.outcome === "accepted";
+  }
+
   /** 删除好友：DELETE /api/v1/friends/{id}。 */
   async removeFriend(userId: string): Promise<void> {
     await this.api(`/api/v1/friends/${encodeURIComponent(userId)}`, { method: "DELETE" });
@@ -703,10 +713,18 @@ export class IMClient {
               code: d.code,
               message: note,
             });
+            // 字段集必须与 ACK 落库一致（见上面 handleAck）：此前这里把 contentType 写死 "text"
+            // 且丢掉 groupId/poster/尺寸等，导致被拒的图片/视频刷新后退化成一条显示 URL 的文本气泡，
+            // 且相册因 groupId 丢失而散成一条条独立消息（各带一个红❗）。
             void localStore.saveRejected(this.uid, {
               clientMsgId: cmid, convId: pend.convId, from: this.uid,
-              content: pend.content, contentType: "text",
+              content: pend.content, contentType: pend.contentType,
               convSeq: 0, timestamp: pend.timestamp, status: "failed", note,
+              fileName: pend.fileName, fileSize: pend.fileSize,
+              replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot,
+              replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
+              groupId: pend.groupId, posterUrl: pend.poster,
+              mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration,
             });
           }
           this.pendingSends.delete(cmid);

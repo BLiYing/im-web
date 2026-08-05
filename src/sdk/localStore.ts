@@ -179,11 +179,12 @@ export async function applyMsgOpLocal(
 /** 保存一条被拒收的失败消息（被拉黑：服务端永不接受、无 conv_seq）。按 clientMsgId 落库，重进/刷新仍在。 */
 export async function saveRejected(owner: string, m: ChatMessage): Promise<void> {
   if (!owner || !m.convId || !m.clientMsgId) return;
+  // 复用 messageRecord 的**完整**字段集：被拒的媒体消息也要留住 groupId/poster/尺寸/文件名，
+  // 否则刷新后图片/视频退化成显示 URL 的文本气泡，相册也会因 groupId 丢失而散成独立消息。
   await put(owner, {
+    ...messageRecord(owner, m),
     id: `${owner}|${m.convId}|c:${m.clientMsgId}`, // 与已确认消息的 conv_seq 键不冲突；同 clientMsgId 幂等覆盖
-    ownerConv: `${owner}|${m.convId}`,
-    owner, convId: m.convId, convSeq: 0,
-    from: m.from, content: m.content, contentType: m.contentType, timestamp: m.timestamp,
+    convSeq: 0, // 被拒收永远拿不到 conv_seq，渲染按 timestamp 落位
     clientMsgId: m.clientMsgId, status: "failed", note: m.note,
   });
 }
@@ -269,9 +270,14 @@ export async function loadConversation(owner: string, convId: string): Promise<C
       r.status === "failed"
         ? {
             // 被拒收的失败消息：还原失败态 + 系统提示（红❗+下方系统行）。convSeq=0，渲染按 timestamp 落位。
+            // 媒体字段一并还原（与下面已确认分支同一套）——少还原 groupId 会让相册散架、
+            // 少还原 posterUrl/尺寸会让视频封面与比例丢失。
             clientMsgId: r.clientMsgId,
             convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize,
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
+            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
+            groupId: r.groupId, posterUrl: r.posterUrl,
+            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration,
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）

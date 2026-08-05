@@ -436,7 +436,9 @@ export default function App() {
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
   // 会话详情面板（右侧抽屉，对齐 iOS IMChatDetailViewController；单聊/群聊共用）。null=关闭。
-  const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string } | null>(null);
+  // fromOwnChat：从「当前正在聊的这个人」的聊天页顶栏头像进来的——此时不显示「消息」入口
+  // （你已经在这个会话里了，点它等于原地不动）。与 iOS 的 showsMessagePill 取反同义。
+  const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean } | null>(null);
   const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "links">("media");
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
   const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/占位项）
@@ -2194,11 +2196,13 @@ export default function App() {
   };
 
   // 打开单聊详情面板（对方资料）。默认页签=媒体。
-  const openPeerDetail = (peer: string) => {
+  // fromOwnChat=true 表示从该会话自己的聊天页顶栏进来 → 不显示「消息」入口（已经在这个会话里了）。
+  // 群成员列表 / 群聊气泡头像等外部入口保持 false，仍给「消息」发起单聊（与 iOS showsMessagePill 一致）。
+  const openPeerDetail = (peer: string, fromOwnChat = false) => {
     if (!peer || peer === uid) return;
     const cid = convIdFor(uid, peer);
     setManageOpen(false); setDetailMore(false); setDetailTab("media");
-    setDetail({ convId: cid, isGroup: false, peer });
+    setDetail({ convId: cid, isGroup: false, peer, fromOwnChat });
     setDetailMsgs([]); loadDetailMsgs(cid);
   };
 
@@ -2229,11 +2233,12 @@ export default function App() {
 
   // 点拒收系统行的「发送好友申请」（非好友 200103 的恢复入口，微信式）。
   // 服务端 Request 对「我侧陈旧 accepted」已放行——单向删除后被删方的唯一恢复路径。
+  // 已直接成为好友时**不吐司**「已发送好友申请」——那会误导用户以为还要等对方通过。
   const requestFriendFromNote = async (target: string) => {
     try {
-      await clientRef.current!.friendAction("request", target);
+      const becameFriend = await clientRef.current!.requestFriend(target);
       await refreshFriends();
-      setToast("已发送好友申请");
+      setToast(becameFriend ? "已重新成为好友" : "已发送好友申请");
     } catch (e) {
       setToast((e as Error).message || "好友申请发送失败");
     }
@@ -2752,7 +2757,7 @@ export default function App() {
             {(isGroupChat || peer) ? (
               <button className="chat-identity"
                 title={isGroupChat ? "查看群资料" : "查看资料"}
-                onClick={() => isGroupChat ? openGroupPanel(groupConvId) : openPeerDetail(peer)}>
+                onClick={() => isGroupChat ? openGroupPanel(groupConvId) : openPeerDetail(peer, true)}>
                 <Avatar url={chatAvatarURL} label={chatTitle} cls="chat-avatar" />
                 <span className="chat-identity-copy">
                   <span className="chat-title">{chatTitle}</span>
@@ -2841,12 +2846,18 @@ export default function App() {
                 if (!isAlbumLeader(messages, i)) return null;
                 const members = albumMembers(messages, m.groupId!);
                 const last = members[members.length - 1];
+                // 整组共用一条失败/拒收表达（同批发送、同一原因被拒）：取首个带 note 的成员。
+                const notedMember = members.find((mm) => mm.note);
+                const albumFailed = mine && members.some((mm) => mm.status === "failed");
                 const grid = (
-                  <AlbumGrid members={members}
-                    timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
-                    progress={uploadProgress}
-                    onOpen={(mm) => onMediaBubbleTap(mm, () => setViewer({ m: mm }))}
-                    onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                  <div className="bubble-line">
+                    {albumFailed && <span className="fail-badge" title={notedMember?.note || "发送失败"}>!</span>}
+                    <AlbumGrid members={members}
+                      timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
+                      progress={uploadProgress}
+                      onOpen={(mm) => onMediaBubbleTap(mm, () => setViewer({ m: mm }))}
+                      onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                  </div>
                 );
                 return (
                   <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
@@ -2867,6 +2878,15 @@ export default function App() {
                         </div>
                       ) : grid}
                     </div>
+                    {/* 被拒收系统行（整组一条）：此前相册分支完全没有，图片被拒时既无文案也无恢复入口。 */}
+                    {albumFailed && notedMember?.note && (
+                      <div className="sys-note">
+                        <span>{notedMember.note}</span>
+                        {notedMember.noteCode === 200103 && peer && (
+                          <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>发送好友申请</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               }
@@ -3532,9 +3552,14 @@ export default function App() {
                   {/* ---- 操作排 pills ---- */}
                   <div className="detail-pills">
                     {!d.isGroup && !detailPeerIsFriend && (
-                      <button className="detail-pill" onClick={() => void doFriendAction(d.peer!, async () => { await clientRef.current!.friendAction("request", d.peer!); setToast("已发送好友申请"); })}><UserPlus size={20} /><span>加好友</span></button>
+                      <button className="detail-pill" onClick={() => void doFriendAction(d.peer!, async () => {
+                        // 已直接成为好友（我曾单向删除对方而对方仍视我为好友）→ 不吐司，doFriendAction 的
+                        // refreshFriends 会让操作排/卡片立即恢复；说「已发送申请」反而误导要等对方通过。
+                        const becameFriend = await clientRef.current!.requestFriend(d.peer!);
+                        if (!becameFriend) { setToast("已发送好友申请"); }
+                      })}><UserPlus size={20} /><span>加好友</span></button>
                     )}
-                    {!d.isGroup && detailPeerIsFriend && (
+                    {!d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
                       <button className="detail-pill" onClick={() => { close(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
                     )}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
@@ -3716,7 +3741,10 @@ export default function App() {
               <button onClick={() => { setMemberMenu(null); openChat(m.user_id); }}>发送消息</button>
             )}
             {!isSelf && !isMemberFriend && (
-              <button onClick={() => { setMemberMenu(null); void doFriendAction(m.user_id, async () => { await clientRef.current!.friendAction("request", m.user_id); setToast("已发送好友申请"); }); }}>添加好友</button>
+              <button onClick={() => { setMemberMenu(null); void doFriendAction(m.user_id, async () => {
+                const becameFriend = await clientRef.current!.requestFriend(m.user_id);
+                if (!becameFriend) { setToast("已发送好友申请"); } // 直接成为好友时不吐司（见 requestFriend 注释）
+              }); }}>添加好友</button>
             )}
             {gp.my_role === "owner" && m.role === "member" && (
               <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "admin"))}>设为管理员</button>

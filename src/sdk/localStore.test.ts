@@ -106,6 +106,27 @@ describe("localStore 消息（IndexedDB）", () => {
     expect(got[0].clientMsgId).toBe("cm-1");
   });
 
+  // 回归：被拒的媒体消息必须留住媒体字段。此前 saveRejected 只存 6 个字段、且 SDK 把 contentType
+  // 写死 "text"，导致刷新后图片/视频退化成显示 URL 的文本气泡，相册还会因 groupId 丢失而散架。
+  it("被拒收的媒体消息保留 contentType/groupId/poster/尺寸/文件名", async () => {
+    await saveRejected("oRM", {
+      clientMsgId: "cm-img", convId: "c1", from: "oRM",
+      content: "/uploads/a.jpg", contentType: "image",
+      convSeq: 0, timestamp: 7000, status: "failed", note: "被拒收",
+      fileName: "a.jpg", fileSize: 1234, groupId: "g-1",
+      posterUrl: "/uploads/p.jpg", mediaW: 800, mediaH: 600, duration: 3000,
+    });
+    const got = (await loadConversation("oRM", "c1"))[0];
+    expect(got.contentType).toBe("image"); // 不再被写死成 text
+    expect(got.groupId).toBe("g-1");       // 相册聚簇的依据
+    expect(got.posterUrl).toBe("/uploads/p.jpg");
+    expect(got.mediaW).toBe(800);
+    expect(got.mediaH).toBe(600);
+    expect(got.duration).toBe(3000);
+    expect(got.fileName).toBe("a.jpg");
+    expect(got.fileSize).toBe(1234);
+  });
+
   it("多条被拒收消息按各自 clientMsgId 共存，不互相覆盖", async () => {
     const base = { convId: "c1", from: "oR2", content: "x", contentType: "text", convSeq: 0, timestamp: 1, status: "failed" as const, note: "n" };
     await saveRejected("oR2", { ...base, clientMsgId: "a" });
