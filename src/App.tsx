@@ -3677,7 +3677,9 @@ export default function App() {
         const isSelf = m.user_id === uid;
         const isMemberFriend = friends.some((f) => f.user_id === m.user_id && f.status === "accepted");
         return (
-          <div className="ctx-menu" style={{ left: memberMenu.x, top: memberMenu.y }} onClick={(e) => e.stopPropagation()}>
+          // 锚定在点击点的左上方（right/bottom 定位，菜单向左上展开）：⋯ 按钮贴屏幕右缘、成员行偏下，
+          // 原 left/top 向右下展开会把菜单推出视口（选项被截断看不到）。
+          <div className="ctx-menu" style={{ right: window.innerWidth - memberMenu.x, bottom: window.innerHeight - memberMenu.y }} onClick={(e) => e.stopPropagation()}>
             {!isSelf && isMemberFriend && (
               <button onClick={() => { setMemberMenu(null); openChat(m.user_id); }}>发送消息</button>
             )}
