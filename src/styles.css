@@ -180,7 +180,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convitem { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--separator); cursor: pointer; }
 .convitem:hover { background: var(--surface-hover); }
 .convitem.active { background: var(--selection-bg); }
-.avatar { width: 44px; height: 44px; border: 2px solid var(--avatar-ring); border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 600; flex-shrink: 0; overflow: hidden; }
+/* 不加 overflow:hidden——头像图 .avatar-img 自带 border-radius:50% 已自裁成圆，而 overflow:hidden + 圆角会把
+   挂在右下角（圆外）的在线绿点裁成月牙。图片裁剪交给 .avatar-img 自己，容器只负责给绿点留出溢出空间。 */
+/* 无边框（对齐 iOS）：首字母底色改按 uid 播种（6 色饱和色板），本身即与页面拉开对比，不再需要描边兜底。
+   52px 对齐 iOS 列表头像尺寸。底色 var(--accent) 只是兜底，实际由组件按 seed 内联覆盖。 */
+.avatar { width: 52px; height: 52px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 18px; flex-shrink: 0; }
 .convbody { flex: 1; min-width: 0; }
 .convtop { display: flex; justify-content: space-between; }
 .convpeer { font-weight: 600; }
@@ -464,7 +468,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .unread-divider::before, .unread-divider::after { content: ""; flex: 1; height: 1px; background: var(--separator); }
 .unread-divider span { white-space: nowrap; }
 .avatar { position: relative; }
-.presence-dot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; background: var(--online); border: 2px solid var(--surface); }
+.presence-dot { position: absolute; right: 1px; bottom: 1px; width: 13px; height: 13px; border-radius: 50%; background: var(--online); border: 2px solid var(--surface); }
 .chat header .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); margin-right: 4px; }
 .chat header .dot.on { background: var(--online); }
 .chat header .muted { color: var(--text-secondary); font-size: 12px; font-weight: 400; }
@@ -483,8 +487,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 侧栏头部：左上角圆头像 + 账号信息（覆盖默认 space-between 布局）。 */
 .sidebar header { justify-content: flex-start; }
 .account-anchor { position: relative; flex-shrink: 0; }
-.account-avatar { width: 32px; height: 32px; padding: 0; border: 0; background: none; cursor: pointer; flex-shrink: 0; }
-.account-avatar-inner { width: 32px; height: 32px; border: 2px solid var(--avatar-ring); border-radius: 50%; overflow: hidden; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+/* 左上角菜单入口（Telegram 式）：汉堡图标，非本人头像；悬停浮现圆形底色。 */
+.account-menu-btn { width: 40px; height: 40px; padding: 0; border: 0; background: none; border-radius: 50%; color: var(--text-secondary); cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: background 0.15s ease; }
+.account-menu-btn:hover { background: var(--surface-hover); }
+.account-menu-btn:active { background: var(--selection-bg); }
 .account-meta { font-size: 13px; color: var(--text-secondary); font-weight: 400; }
 
 /* 账号气泡卡片 / 通用卡片菜单（比 ctx-menu 宽）。 */
@@ -494,7 +500,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .chat-menu { left: auto; right: 0; }
 .chat-identity { min-width: 0; display: flex; align-items: center; gap: 10px; padding: 0; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
 .chat-identity:hover .chat-title { color: var(--accent); }
-.chat-avatar { width: 40px; height: 40px; flex: 0 0 40px; border: 2px solid var(--avatar-ring); border-radius: 50%; overflow: hidden; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
+.chat-avatar { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; overflow: hidden; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; }
 .chat-identity-copy { min-width: 0; display: flex; flex-direction: column; }
 .chat-title { max-width: min(42vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 650; }
 .chat-subtitle { color: var(--text-secondary); font-size: 12px; font-weight: 400; }
@@ -544,14 +550,14 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .settings-row.info .row-value { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
 /* 顶部名片 */
 .settings-profile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-4) 0 var(--space-3); }
-.settings-avatar { width: 84px; height: 84px; border: 2px solid var(--avatar-ring); border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 30px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.settings-avatar { width: 84px; height: 84px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 30px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .settings-name { font-size: 18px; font-weight: 600; color: var(--text); }
 .settings-status { font-size: 13px; color: var(--accent); }
 .settings-logout { display: block; width: 100%; margin-top: var(--space-2); padding: 12px; border: 0; background: var(--card-bg); border-radius: var(--radius-card); color: var(--danger); font-size: 15px; cursor: pointer; }
 .settings-logout:hover { background: var(--surface-hover); }
 /* 编辑资料 */
 .edit-avatar { position: relative; display: block; width: 96px; height: 96px; margin: var(--space-3) auto var(--space-4); padding: 0; border: 0; background: none; cursor: pointer; }
-.edit-avatar-inner { width: 96px; height: 96px; border: 2px solid var(--avatar-ring); border-radius: 50%; overflow: hidden; background: var(--accent); color: var(--on-accent); font-size: 32px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.edit-avatar-inner { width: 96px; height: 96px; border-radius: 50%; overflow: hidden; background: var(--accent); color: var(--on-accent); font-size: 32px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .edit-cam { position: absolute; right: -2px; bottom: -2px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); border: 3px solid var(--grouped-bg); color: var(--on-accent); display: flex; align-items: center; justify-content: center; }
 .settings-avatar { overflow: hidden; }
 .edit-fields { padding: 0; }
@@ -785,7 +791,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 头部 */
 .detail-header { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 26px 16px 18px; background: var(--page-bg); }
 .detail-avatar-wrap { position: relative; }
-.detail-avatar { width: 88px; height: 88px; border: 2px solid var(--avatar-ring); border-radius: 50%; background: var(--accent); color: var(--on-accent);
+.detail-avatar { width: 88px; height: 88px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
   display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 30px; overflow: hidden; }
 .detail-cam { position: absolute; right: -2px; bottom: -2px; width: 30px; height: 30px; border: 2px solid var(--page-bg);
   border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; }

@@ -17,7 +17,7 @@ import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
-  MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff,
+  MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
   Download, LayoutGrid, MoreHorizontal,
   Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star,
@@ -113,14 +113,28 @@ function hexToRGB(value: string): string {
   return [0, 2, 4].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16)).join(", ");
 }
 
-// 可复用头像：有 avatar_url（http 或 data: 内联图）→ 渲染 <img>；否则回退首字母圈（现 Web 用统一主色底）。
 // cls 决定尺寸（avatar / settings-avatar / edit-avatar）；children 作为叠加层（如在线点、相机角标）。
-function Avatar({ url, label, cls = "avatar", children, onClick }: {
-  url?: string; label: string; cls?: string; children?: React.ReactNode; onClick?: () => void;
+/** 首字母头像的底色板（与 iOS IMTheme avatarColorForSeed 同一组 6 色：蓝/绿/橙/红/紫/青）。 */
+const AVATAR_COLORS = ["#3399F5", "#4FC778", "#F59E33", "#E65C6B", "#9473E6", "#2EB8BD"];
+/** 按种子（uid / 群 conv_id）稳定取底色，与 iOS 同算法：h = h*31 + UTF-16 码元、64 位无符号回绕、% 6。
+ *  同一 uid 两端同色。用 BigInt 精确复刻 NSUInteger 的 2^64 回绕（短 uid 无溢出，长种子也不偏差）。 */
+function avatarColor(seed: string): string {
+  if (!seed) return AVATAR_COLORS[0];
+  const MASK = (1n << 64n) - 1n;
+  let h = 0n;
+  for (let i = 0; i < seed.length; i++) h = (h * 31n + BigInt(seed.charCodeAt(i))) & MASK;
+  return AVATAR_COLORS[Number(h % 6n)];
+}
+
+// 可复用头像：有 avatar_url → 渲染 <img>；否则回退首字母圈，底色按 seed（uid/群 conv_id）播种（与 iOS 同色）。
+// seed 缺省回落 label——但 label 是昵称、会变且与 iOS 的 uid 种子不一致，故用户头像务必显式传 uid。
+function Avatar({ url, label, seed, cls = "avatar", children, onClick }: {
+  url?: string; label: string; seed?: string; cls?: string; children?: React.ReactNode; onClick?: () => void;
 }) {
+  const bg = url ? undefined : avatarColor(seed ?? label);
   return (
     <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
-         style={onClick ? { cursor: "pointer" } : undefined}>
+         style={{ ...(onClick ? { cursor: "pointer" } : null), ...(bg ? { background: bg } : null) }}>
       {url ? <img className="avatar-img" src={url} alt="" /> : (label || "").slice(-2)}
       {children}
     </div>
@@ -2465,9 +2479,9 @@ export default function App() {
       <aside className="sidebar">
         <header>
           <div className="account-anchor">
-            <button className="account-avatar" title="账号"
+            <button className="account-menu-btn" title="菜单" aria-label="菜单"
               onClick={(e) => { e.stopPropagation(); setAccountCard((v) => !v); }}>
-              <Avatar url={myInfo?.avatar_url} label={myInfo?.nickname || uid} cls="account-avatar-inner" />
+              <Menu size={22} />
             </button>
             {accountCard && (
               <div className="menu-card" onClick={(e) => e.stopPropagation()}>
@@ -2491,7 +2505,7 @@ export default function App() {
             <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""}`}
               onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
               onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
-              <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)}>
+              <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer}>
                 {!c.is_group && isOnline(presence[c.peer]) && <span className="presence-dot" />}
               </Avatar>
               <div className="convbody">
@@ -2538,7 +2552,7 @@ export default function App() {
                   const st = friendStatus.get(u.user_id);
                   return (
                     <div key={`s-${u.user_id}`} className="convitem static">
-                      <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname)} />
+                      <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname)} seed={u.user_id} />
                       <div className="convbody">
                         <div className="convpeer">{labelOf(u.user_id, u.nickname)}</div>
                         <div className="convlast">{u.user_id}{u.tags.length > 0 ? ` · ${u.tags.join(" ")}` : ""}</div>
@@ -2569,7 +2583,7 @@ export default function App() {
                 <div className="section-label">新的朋友（{incoming.length}）</div>
                 {incoming.map((f) => (
                   <div key={`p-${f.user_id}`} className="convitem static">
-                    <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname)} />
+                    <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname)} seed={f.user_id} />
                     <div className="convbody">
                       <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
                       <div className="convlast">请求加你为好友</div>
@@ -2589,7 +2603,7 @@ export default function App() {
             {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
             {accepted.map((f) => (
               <div key={`f-${f.user_id}`} className="convitem" onClick={() => openFriendChat(f.user_id)}>
-                <Avatar url={f.avatar_url} label={friendLabel(f)}>
+                <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}>
                   {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
                 </Avatar>
                 <div className="convbody">
@@ -2616,7 +2630,7 @@ export default function App() {
             </header>
             <div className="settings-body">
               <div className="settings-profile">
-                <Avatar url={myInfo?.avatar_url} label={myInfo?.nickname || uid} cls="settings-avatar" />
+                <Avatar url={myInfo?.avatar_url} label={myInfo?.nickname || uid} seed={uid} cls="settings-avatar" />
                 <div className="settings-name">{myInfo?.nickname || uid}</div>
                 <div className="settings-status">{stateText}</div>
               </div>
@@ -2644,7 +2658,7 @@ export default function App() {
             <div className="settings-body">
               {/* 点头像 → 选本机图片（隐藏的 file input，浏览器自动用系统原生文件框，跨平台无需检测系统）。 */}
               <button className="edit-avatar" title="更换头像" onClick={() => avatarFileRef.current?.click()}>
-                <Avatar url={profileDraft.avatar_url} label={profileDraft.nickname || uid} cls="edit-avatar-inner" />
+                <Avatar url={profileDraft.avatar_url} label={profileDraft.nickname || uid} seed={uid} cls="edit-avatar-inner" />
                 <span className="edit-cam"><SquarePen size={15} /></span>
               </button>
               <input ref={avatarFileRef} type="file" accept="image/*" hidden
@@ -2818,7 +2832,7 @@ export default function App() {
               <button className="chat-identity"
                 title={isGroupChat ? "查看群资料" : "查看资料"}
                 onClick={() => isGroupChat ? openGroupPanel(groupConvId) : openPeerDetail(peer, true)}>
-                <Avatar url={chatAvatarURL} label={chatTitle} cls="chat-avatar" />
+                <Avatar url={chatAvatarURL} label={chatTitle} seed={groupConvId || peer} cls="chat-avatar" />
                 <span className="chat-identity-copy">
                   <span className="chat-title">{chatTitle}</span>
                   <span className="chat-subtitle">{visibleChatSubtitle}</span>
@@ -2932,7 +2946,7 @@ export default function App() {
                       {grpThem ? (
                         <div className="them-wrap">
                           <div className="avatar-col">
-                            {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} onClick={() => openPeerDetail(m.from)} />}
+                            {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} seed={m.from} onClick={() => openPeerDetail(m.from)} />}
                           </div>
                           <div className="them-stack">
                             {showSender && <span className="sender-name">{senderLabel(m)}</span>}
@@ -3098,7 +3112,7 @@ export default function App() {
                       // 群聊对方：左侧头像列（连续段末条显头像）+ 昵称（连续段首条）在气泡上方。
                       <div className="them-wrap">
                         <div className="avatar-col">
-                          {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} onClick={() => openPeerDetail(m.from)} />}
+                          {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} seed={m.from} onClick={() => openPeerDetail(m.from)} />}
                         </div>
                         <div className="them-stack">
                           {showSender && <span className="sender-name">{senderLabel(m)}</span>}
@@ -3446,7 +3460,7 @@ export default function App() {
             {blockedList.length === 0 && <div className="empty">没有拉黑的用户</div>}
             {blockedList.map((f) => (
               <div key={f.user_id} className="convitem static">
-                <Avatar url={f.avatar_url} label={friendLabel(f)} />
+                <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
                 <div className="convbody">
                   <div className="convpeer">{friendLabel(f)}</div>
                   <div className="convlast">{f.user_id}</div>
@@ -3476,7 +3490,7 @@ export default function App() {
               {groupsModal.map((g) => (
                 <div key={g.conv_id} className="convitem"
                   onClick={() => { setGroupsModal(null); setTab("chats"); openGroupChat(g.conv_id); }}>
-                  <Avatar url={g.avatar_url} label={g.name} />
+                  <Avatar url={g.avatar_url} label={g.name} seed={g.conv_id} />
                   <div className="convbody">
                     <div className="convpeer">{g.name}</div>
                     <div className="convlast">{g.owner === uid ? "我是群主" : `群主 ${g.owner}`}</div>
@@ -3510,7 +3524,7 @@ export default function App() {
                       selected: on ? createDraft.selected.filter((x) => x !== f.user_id) : [...createDraft.selected, f.user_id],
                     })}>
                     <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
-                    <Avatar url={f.avatar_url} label={friendLabel(f)} />
+                    <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
                     <span className="row-label">{friendLabel(f)}</span>
                   </button>
                 );
@@ -3574,7 +3588,7 @@ export default function App() {
                   </div>
                   <div className="detail-manage-avatar">
                     <button className="detail-manage-avatar-btn" onClick={() => pickGroupAvatar(gp)}>
-                      <Avatar url={gp.avatar_url} label={gp.name} cls="detail-avatar" />
+                      <Avatar url={gp.avatar_url} label={gp.name} seed={gp.conv_id} cls="detail-avatar" />
                       <span className="detail-manage-cam"><Camera size={18} /></span>
                     </button>
                     <div className="detail-manage-caption">设置新头像</div>
@@ -3598,7 +3612,7 @@ export default function App() {
                   {/* ---- 头部：头像 + 名 + 副标题 ---- */}
                   <div className="detail-header">
                     <div className="detail-avatar-wrap">
-                      <Avatar url={avatarUrl} label={title} cls="detail-avatar" />
+                      <Avatar url={avatarUrl} label={title} seed={d.isGroup ? d.convId : (d.peer ?? "")} cls="detail-avatar" />
                       {canManage && (
                         <button className="detail-cam" title="设置群头像" onClick={() => pickGroupAvatar(gp!)}><Camera size={15} /></button>
                       )}
@@ -3683,7 +3697,7 @@ export default function App() {
                         {gp.members.map((m) => (
                           <div key={m.user_id} className="detail-member"
                             onClick={() => m.user_id !== uid && openPeerDetail(m.user_id)} role="button">
-                            <Avatar url={m.avatar_url} label={m.nickname || m.user_id} />
+                            <Avatar url={m.avatar_url} label={m.nickname || m.user_id} seed={m.user_id} />
                             <div className="detail-member-body">
                               <div className="detail-member-name">{m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
                               <div className="detail-member-sub">{m.user_id}</div>
@@ -3764,7 +3778,7 @@ export default function App() {
                         selected: on ? inviteDraft.selected.filter((x) => x !== f.user_id) : [...inviteDraft.selected, f.user_id],
                       })}>
                       <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
-                      <Avatar url={f.avatar_url} label={friendLabel(f)} />
+                      <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
                       <span className="row-label">{friendLabel(f)}</span>
                     </button>
                   );
