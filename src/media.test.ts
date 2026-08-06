@@ -9,6 +9,7 @@ import {
   mediaDisplaySize,
   mediaProbeLogFields,
   probeMediaMetadata,
+  tinyThumbTargetSize,
 } from "./media";
 
 // 与 iOS IMMediaFormatTests 同口径：两端媒体气泡的排版/文案必须一致。
@@ -87,5 +88,24 @@ describe("媒体探测日志", () => {
 
   it("媒体链路统一落 IM.MEDIA（与 iOS 同名），才能一条过滤捞全", () => {
     expect(LOG_TAG.media).toBe("IM.MEDIA");
+  });
+});
+
+describe("tinyThumbTargetSize（M4-7 极小缩略目标尺寸）", () => {
+  it("等比缩进 20px 见方：横图按宽收", () => {
+    expect(tinyThumbTargetSize(800, 600)).toEqual({ width: 20, height: 15 });
+  });
+  it("竖图按高收", () => {
+    expect(tinyThumbTargetSize(600, 800)).toEqual({ width: 15, height: 20 });
+  });
+  it("不放大小图（本就 <=20px 时原样返回）", () => {
+    expect(tinyThumbTargetSize(12, 8)).toEqual({ width: 12, height: 8 });
+  });
+  it("极端长条短边至少 1px，不塌成 0", () => {
+    expect(tinyThumbTargetSize(1000, 10)).toEqual({ width: 20, height: 1 });
+  });
+  it("尺寸未知（<=0）返回 0×0，调用方据此不生成 thumb", () => {
+    expect(tinyThumbTargetSize(0, 0)).toEqual({ width: 0, height: 0 });
+    expect(tinyThumbTargetSize(-5, 10)).toEqual({ width: 0, height: 0 });
   });
 });

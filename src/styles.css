@@ -899,3 +899,31 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* 宫格格子：分片上传的中心 ⏸/↑（点格子暂停/继续，与 iOS 中心按钮同语义）与左上角时长角标 */
 .album-pause { color: var(--on-media); font-size: 22px; font-weight: 700; text-shadow: 0 1px 6px var(--overlay-strong); }
 .album-duration { position: absolute; left: 4px; top: 4px; padding: 0 6px; border-radius: 8px; background: var(--overlay); color: var(--on-media); font-size: 10px; line-height: 16px; pointer-events: none; z-index: 1; }
+
+/* ===== 下载门控（M4-7，草图 §02/§03/§09）=====
+   未下载的媒体不拉原件：显 thumb 模糊占位（~200B data URI）或中性灰底，配中心 ↓ + 尺寸角标。 */
+.msg-image-blur { filter: blur(9px) saturate(0.9); transform: scale(1.15); }
+.msg-media .msg-image-empty { width: 100%; height: 100%; display: block;
+  background: repeating-linear-gradient(45deg, var(--surface-hover), var(--surface-hover) 10px, var(--surface) 10px, var(--surface) 20px); }
+.msg-media.auto .msg-image-empty { width: 180px; height: 180px; }
+/* 文件条的图标位即状态位：↓ 未下载 / ✕ 下载中 / ↻ 重试（与 iOS 左图标位同语义） */
+.msg-file-dl { width: 30px; height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: var(--accent); color: var(--on-media, #fff); font-size: 16px; font-weight: 700; }
+.msg-file.failed .msg-file-dl { background: var(--danger); }
+
+/* ===== 数据与存储面板（M4-7）===== */
+.data-panel { z-index: 40; }
+.settings-row.static { cursor: default; }
+.settings-foot { padding: 6px 14px 2px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.switch-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: 10px 14px; font-size: 14px; cursor: pointer; }
+.switch-row:hover { background: var(--surface-hover); }
+.switch-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.settings-subrows { display: flex; flex-direction: column; }
+.range-scale { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+.tier-row { display: flex; align-items: center; gap: 8px; padding: 12px 14px; }
+.tier-btn { flex: 1; padding: 7px 0; border: 1px solid var(--separator); border-radius: 8px; background: none;
+  color: var(--text); font-size: 14px; cursor: pointer; }
+.tier-btn:hover { background: var(--surface-hover); }
+.tier-btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-media, #fff); }
+.tier-custom { color: var(--text-secondary); font-size: 12px; }

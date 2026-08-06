@@ -19,6 +19,8 @@ export const T = {
   GROUP: "group",
   MSG_OP: "msg_op",
   CONV_UPDATE: "conv_update",
+  /** 账号级客户端配置版本变更（M4-7 自动下载策略）：收到即重拉 GET /download-settings。 */
+  CAPS_UPDATE: "capabilities_update",
   ERROR: "error",
 } as const;
 
@@ -72,6 +74,8 @@ export interface ChatMessage {
   mediaH?: number;
   /** M4+ 视频时长（**毫秒**）：封面左上角显 mm:ss；0/缺省=未知或非视频。 */
   duration?: number;
+  /** M4-7 极小模糊预览（~20px JPEG 的 data URI，image/video 带）：**未下载**卡片的模糊占位。空=回退中性占位。 */
+  thumb?: string;
 }
 
 /** 引用回复定位（发送时上行只带 convSeq，preview 为本端即时预览；服务端会冻结权威快照）。 */

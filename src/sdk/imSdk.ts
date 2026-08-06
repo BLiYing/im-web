@@ -28,6 +28,8 @@ export interface MediaSendOptions {
   mediaH?: number;
   /** 视频时长（毫秒）。 */
   duration?: number;
+  /** 极小模糊预览（~20px 缩略 JPEG 的 data URL，M4-7）：收端未下载时放大+模糊显占位。 */
+  thumb?: string;
 }
 
 export interface IMClientHandlers {
@@ -57,6 +59,8 @@ export interface IMClientHandlers {
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
   /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
   onConvUpdate?: (u: ConvUpdate) => void;
+  /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
+  onCapabilitiesUpdate?: (version: number) => void;
 }
 
 /** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
@@ -162,6 +166,24 @@ export class IMClient {
     });
     if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message));
     return body.data;
+  }
+
+  /** 拉账号级自动下载策略（M4-7）。返回 `{version, settings}`；未设置过时后端回出厂默认。 */
+  async downloadSettings(): Promise<{ version: number; settings: unknown }> {
+    return (await this.api("/api/v1/download-settings")) as { version: number; settings: unknown };
+  }
+
+  /** 保存自动下载策略（整体替换）：后端规整 + bump 版本 + 推 capabilities_update 给本账号其它端。
+   *  请求体**就是 settings 本身**（后端直接 Decode 进 downloadsettings.Settings），不要再包一层。 */
+  async saveDownloadSettings(settings: unknown): Promise<{ version: number; settings: unknown }> {
+    return (await this.api("/api/v1/download-settings", {
+      method: "PUT", body: JSON.stringify(settings),
+    })) as { version: number; settings: unknown };
+  }
+
+  /** 恢复出厂默认（草图 §05-3「重置自动下载设置」）。 */
+  async resetDownloadSettings(): Promise<{ version: number; settings: unknown }> {
+    return (await this.api("/api/v1/download-settings/reset", { method: "POST" })) as { version: number; settings: unknown };
   }
 
   /** 链接富预览：抓取 URL 的 OG 元信息（后端带 SSRF 防护 + 缓存）。失败抛错，调用方回退纯链接。 */
@@ -437,6 +459,7 @@ export class IMClient {
     if (opts?.forwardFrom) { data.forward_from = opts.forwardFrom; }
     if (opts?.groupId) { data.group_id = opts.groupId; }
     if (opts?.poster) { data.poster = opts.poster; }
+    if (opts?.thumb) { data.thumb = opts.thumb; } // 极小模糊预览（M4-7），收端未下载时显模糊占位
     if (contentType === "file" && opts?.fileName) { data.file_name = opts.fileName; }
     // 媒体元数据（M4+，PROTOCOL §4.1）：尺寸/时长/字节数由发送端量出，收端据此按原比例排版 + 显时长角标。
     if (opts?.mediaW && opts.mediaW > 0) { data.media_w = opts.mediaW; }
@@ -684,6 +707,9 @@ export class IMClient {
       case T.GROUP:
         this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "");
         break;
+      case T.CAPS_UPDATE: // 账号级配置版本变更（M4-7）：另一端改了自动下载策略 → 本端重拉
+        this.handlers.onCapabilitiesUpdate?.(Number(d.version) || 0);
+        break;
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶）：应用到本地
         this.applyMsgOp(d);
         break;
@@ -798,6 +824,7 @@ export class IMClient {
       mediaW: Number(d.media_w) > 0 ? Number(d.media_w) : undefined,
       mediaH: Number(d.media_h) > 0 ? Number(d.media_h) : undefined,
       duration: Number(d.duration) > 0 ? Number(d.duration) : undefined,
+      thumb: typeof d.thumb === "string" && d.thumb ? d.thumb : undefined, // 未下载卡片的模糊占位（M4-7）
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

@@ -64,6 +64,50 @@ export function mediaDisplaySize(
   return out;
 }
 
+/**
+ * 极小缩略的目标像素尺寸（M4-7）：等比缩进 maxSide 见方，**不放大小图**。纯函数，便于单测。
+ * 尺寸未知（<=0）返回 0×0（调用方据此不生成 thumb）。
+ */
+export function tinyThumbTargetSize(w: number, h: number, maxSide = 20): MediaBox {
+  if (!(w > 0) || !(h > 0)) return { width: 0, height: 0 };
+  const k = Math.min(maxSide / w, maxSide / h, 1);
+  return { width: Math.max(1, Math.round(w * k)), height: Math.max(1, Math.round(h * k)) };
+}
+
+/**
+ * 由已加载的图源画一张极小模糊缩略（~20px JPEG 的 data URL，M4-7）：收端**未下载**时放大 + 模糊显占位，
+ * 免先下原图（对齐 iOS IMTinyThumbDataURI / Telegram stripped thumbnail）。刻意极小（<1KB，随每条媒体消息常驻下发）。
+ * canvas 不可用 / 异常偏大 → undefined（收端回退中性占位）。
+ */
+export function tinyThumbDataURL(source: CanvasImageSource, w: number, h: number, maxSide = 20): string | undefined {
+  const t = tinyThumbTargetSize(w, h, maxSide);
+  if (t.width <= 0 || t.height <= 0) return undefined;
+  const canvas = document.createElement("canvas");
+  canvas.width = t.width;
+  canvas.height = t.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return undefined;
+  ctx.drawImage(source, 0, 0, t.width, t.height);
+  let url: string;
+  try { url = canvas.toDataURL("image/jpeg", 0.4); } catch { return undefined; }
+  // 服务端 thumb 上限 4096 字符；异常偏大就不带，保持"极小"契约。
+  return url.startsWith("data:image/jpeg") && url.length <= 3800 ? url : undefined;
+}
+
+/** 从图片文件生成极小模糊缩略（data URL，M4-7）。解不了码 / 超时 / 失败 → undefined，不阻塞发送。 */
+export function makeTinyThumbFromImage(file: File): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    let done = false;
+    const finish = (v?: string) => { if (done) return; done = true; URL.revokeObjectURL(url); resolve(v); };
+    img.onload = () => finish(tinyThumbDataURL(img, img.naturalWidth || 0, img.naturalHeight || 0));
+    img.onerror = () => finish(undefined);
+    window.setTimeout(() => finish(undefined), 8000);
+    img.src = url;
+  });
+}
+
 export interface MediaMetadata { width: number; height: number; durationMs: number }
 
 const UNKNOWN_METADATA: MediaMetadata = { width: 0, height: 0, durationMs: 0 };

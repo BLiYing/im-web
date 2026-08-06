@@ -10,7 +10,12 @@ import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./a
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { formatFileSize } from "./fileMetadata";
-import { formatMediaDuration, formatUploadProgress, mediaDisplaySize, probeMediaMetadata } from "./media";
+import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
+import {
+  applyTier, defaultDownloadSettings, downloadGlyph, downloadText, parseDownloadSettings,
+  shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
+  type DownloadSettings, type DownloadState, type SpeedTier,
+} from "./download";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -462,6 +467,15 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
+  // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
+  // Web 只吃 Wi-Fi 档（浏览器分不清移动/Wi-Fi），且**始终提供手动下载**；策略本身仍随账号多端同步。
+  const [dataStorageOpen, setDataStorageOpen] = useState(false);        // 设置 ▸ 数据与存储 子面板
+  const [dlSettings, setDlSettings] = useState<DownloadSettings | null>(null);
+  const [dlStates, setDlStates] = useState<Record<string, DownloadState>>({}); // content → 下载态
+  const [dlBlobs, setDlBlobs] = useState<Record<string, string>>({});          // content → objectURL（应用内缓存）
+  const dlBlobsRef = useRef<Record<string, string>>({});
+  dlBlobsRef.current = dlBlobs;
+  const dlAbortRef = useRef<Record<string, AbortController>>({}); // content → 在飞请求的中止句柄（✕ 取消要真中止）
   const [wallpaperOpen, setWallpaperOpen] = useState(false); // 通用设置 ▸ 聊天壁纸
   const [wallpaper, setWallpaper] = useState<WallpaperChoice>(loadWallpaper);
   const [wallpaperBlur, setWallpaperBlur] = useState(() => localStorage.getItem("im.wallpaperBlur") === "1");
@@ -946,6 +960,11 @@ export default function App() {
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
       onConvUpdate: () => { scheduleListRefresh(); },
+      // 账号级配置变更（M4-7）：另一端改了自动下载策略 → 重拉（零新链路的多端同步）。
+      onCapabilitiesUpdate: (version) => {
+        logger.info(LOG_TAG.media, "capabilities_update_received", { version });
+        void refreshDownloadSettings();
+      },
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
       onAuthError: (msg) => {
@@ -990,6 +1009,7 @@ export default function App() {
     client.syncTracked(); // OPEN 前调用安全无副作用；onopen 会从各会话连续持久化位点补拉到最新
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
+    void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
     localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
     setAuthBusy(false);
     setPhase("app");
@@ -1236,8 +1256,13 @@ export default function App() {
         let poster: string | undefined;
         if (l.posterFile) { try { poster = (await client.uploadFile(l.posterFile)).url; } catch { /* 封面上传失败：保留本地 blob 封面 */ } }
         if (takeCancelled()) continue; // poster 上传窗口（大视频可达数秒）内被取消 → 不发消息
+        // 极小模糊预览（M4-7）：图片本体 / 视频封面首帧的缩略，随消息带 thumb；收端未下载时显模糊占位。失败不阻塞。
+        let thumb: string | undefined;
+        if (contentType === "image") thumb = await makeTinyThumbFromImage(l.f);
+        else if (contentType === "video" && l.posterFile) thumb = await makeTinyThumbFromImage(l.posterFile);
+        if (takeCancelled()) continue;
         const clientMsgId = client.sendMedia(url, contentType, peer, cid, {
-          groupId, poster, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size,
+          groupId, poster, thumb, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size,
         });
         patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl });
         clearUploadProgress(l.localId); // 传完：左上角进度胶囊消失，切回时长角标
@@ -1290,12 +1315,18 @@ export default function App() {
       if (takeCancelled()) return; // 小文件 XHR 无法 abort：传完了但用户已取消 → 不发消息
       const contentType = attachmentContentType(pickMode, uploadedContentType);
       let poster: string | undefined;
+      let thumb: string | undefined; // 极小模糊预览（M4-7）：收端未下载时显模糊占位
       if (pickMode === "media" && contentType === "video") {
         const pf = await captureVideoPoster(file);
-        if (pf) { try { poster = (await client.uploadFile(pf)).url; } catch { /* 封面上传失败：不阻塞 */ } }
+        if (pf) {
+          thumb = await makeTinyThumbFromImage(pf); // 视频封面首帧的缩略
+          try { poster = (await client.uploadFile(pf)).url; } catch { /* 封面上传失败：不阻塞 */ }
+        }
+      } else if (pickMode === "media" && contentType === "image") {
+        thumb = await makeTinyThumbFromImage(file);
       }
       if (takeCancelled()) return; // poster 窗口内被取消 → 不发消息
-      const options = contentType === "file" ? { fileName: file.name, fileSize: size } : (poster ? { poster } : undefined);
+      const options = contentType === "file" ? { fileName: file.name, fileSize: size } : ((poster || thumb) ? { poster, thumb } : undefined);
       const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
       patchMsg(cid, localId, { clientMsgId, content: url, contentType, posterUrl: poster });
       clearUploadProgress(localId);
@@ -1401,6 +1432,150 @@ export default function App() {
 
   /// 媒体气泡点按路由（与 iOS 中心按钮状态机一致）：失败 ↻ 重试；上传中 ⏸↔↑ 暂停恢复
   /// （仅 ≥8MB 分片任务；小文件几秒传完不可暂停，点击忽略）；已发出 → 打开查看器。
+  // ================= 自动下载策略 + 下载门控（M4-7，草图 §02/§03/§09）=================
+  // 三条铁律：① 全程不跳页（状态就地变化）；② **完成即止，绝不自动打开/播放**；③ 手动点击永远优先。
+
+  /** 拉账号级策略（登录后 + 收到 capabilities_update 时）。失败静默沿用默认，不打断聊天。 */
+  const refreshDownloadSettings = useCallback(async () => {
+    const c = clientRef.current;
+    if (!c) return;
+    try {
+      const res = await c.downloadSettings();
+      const next = parseDownloadSettings(res?.settings);
+      setDlSettings(next);
+      // 策略是所有门控判定的输入；version 与服务端 download_settings_saved 对账即可确认多端同步到没到本端。
+      logger.info(LOG_TAG.media, "download_settings_applied", {
+        version: Number(res?.version) || 0,
+        wifi_enabled: next.wifi.enabled,
+        wifi_video_max_bytes: next.wifi.video.max_bytes,
+        wifi_file_max_bytes: next.wifi.file.max_bytes,
+      });
+    } catch (e) {
+      // 拉不到 → 静默沿用默认策略，门控行为会与用户设置不一致，必须留痕。
+      logger.warn(LOG_TAG.media, "download_settings_unavailable", { error: (e as Error).message, fallback: "defaults" });
+    }
+  }, []);
+
+  /** 保存策略（乐观应用 + PUT；失败回滚重拉，与 iOS 同口径）。 */
+  const saveDownloadSettings = useCallback(async (next: DownloadSettings) => {
+    const c = clientRef.current;
+    setDlSettings(next);
+    if (!c) return;
+    try {
+      const res = await c.saveDownloadSettings(next);
+      setDlSettings(parseDownloadSettings(res?.settings)); // 以服务端规整后的为准
+    } catch (e) {
+      logger.warn(LOG_TAG.media, "download_settings_save_failed", { error: (e as Error).message, rollback: true });
+      setToast(`保存失败：${(e as Error).message}`);
+      void refreshDownloadSettings();
+    }
+  }, [refreshDownloadSettings]);
+
+  /**
+   * 这条收到的媒体/文件当前的门控态：**undefined = 就绪**（可直接显图/播放/打开）。
+   * 非 undefined 时卡片显 ↓ / 进度 / ↻，点击走 `startDownload`。
+   * 自己发的、上传中的、撤回的一律不门控（本地就有原件或还没有远端地址）。
+   */
+  const mediaGate = useCallback((m: ChatMessage): DownloadState | undefined => {
+    if (!m.content || m.from === uid || m.recalledAt) return undefined;
+    const kind = m.contentType;
+    if (kind !== "image" && kind !== "video" && kind !== "file") return undefined;
+    if (dlBlobs[m.content]) return undefined;                       // 已下到应用内缓存
+    const st = dlStates[m.content];
+    if (st) return st.phase === "done" ? undefined : st;            // 进行中 / 失败 / 已失效
+    // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
+    if (shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId)) return undefined; // 策略放行=浏览器直取
+    return { phase: "notStarted", received: 0, total: m.fileSize ?? 0 };
+  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId]);
+
+  /** 该消息应当渲染的地址：已手动下载过用应用内 blob，否则用远端 URL。 */
+  const mediaSrc = useCallback((m: ChatMessage) => dlBlobs[m.content] || m.content, [dlBlobs]);
+
+  /**
+   * 手动下载到应用内缓存（带真进度）。失败分因：404/410=服务端已清理 → "文件已失效"、不给重试。
+   * 刷新会丢（blob URL 活在本页生命周期内），与上传的同类限制一致。
+   */
+  const startDownload = useCallback(async (m: ChatMessage) => {
+    const key = m.content;
+    if (!key || dlBlobsRef.current[key]) return;
+    // 只在真正发起时记（mediaGate 每次 render 都会走，绝不能在那里打日志）。
+    const startedAt = Date.now();
+    logger.info(LOG_TAG.media, "download_start", {
+      conv_id: m.convId, conv_seq: m.convSeq, kind: m.contentType, size_bytes: m.fileSize ?? 0,
+      file_name: m.fileName,
+    });
+    setDlStates((p) => ({ ...p, [key]: { phase: "downloading", received: 0, total: m.fileSize ?? 0 } }));
+    const ac = new AbortController();
+    dlAbortRef.current[key] = ac;
+    try {
+      const resp = await fetch(key, { signal: ac.signal });
+      if (!resp.ok) {
+        const gone = resp.status === 404 || resp.status === 410;
+        // status 是「文件已失效」与「可重试」分因的依据（与 iOS download_http_error 同语义）。
+        logger.warn(LOG_TAG.media, "download_http_error", {
+          conv_id: m.convId, conv_seq: m.convSeq, status: resp.status, expired: gone,
+        });
+        setDlStates((p) => ({ ...p, [key]: { phase: gone ? "expired" : "failed", received: 0, total: m.fileSize ?? 0 } }));
+        return;
+      }
+      const total = Number(resp.headers.get("Content-Length")) || m.fileSize || 0;
+      let blob: Blob;
+      if (resp.body) {
+        const reader = resp.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          setDlStates((p) => ({ ...p, [key]: { phase: "downloading", received, total } }));
+        }
+        blob = new Blob(chunks as BlobPart[], { type: resp.headers.get("Content-Type") || "application/octet-stream" });
+      } else {
+        blob = await resp.blob(); // 老浏览器无流式 body：只能等整段（无中间进度）
+      }
+      const url = URL.createObjectURL(blob);
+      setDlBlobs((p) => ({ ...p, [key]: url }));
+      // 完成即止：只置"就绪"，**不**自动打开/播放（铁律②）。
+      setDlStates((p) => ({ ...p, [key]: { phase: "done", received: total, total } }));
+      logger.info(LOG_TAG.media, "download_completed", {
+        conv_id: m.convId, conv_seq: m.convSeq, bytes: blob.size, duration_ms: Date.now() - startedAt,
+      });
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return; // 用户按 ✕ 取消：状态已回落"未下载"，别覆盖成失败
+      logger.warn(LOG_TAG.media, "download_failed", {
+        conv_id: m.convId, conv_seq: m.convSeq, duration_ms: Date.now() - startedAt, error: (e as Error).message,
+      });
+      setDlStates((p) => ({ ...p, [key]: { phase: "failed", received: 0, total: m.fileSize ?? 0 } }));
+    } finally {
+      if (dlAbortRef.current[key] === ac) delete dlAbortRef.current[key];
+    }
+  }, []);
+
+  /** 门控卡片点击路由：下载中 → 取消（Web 无断点续传，只能重来）；已失效 → 不响应；其余 → 下载/重试。 */
+  const onGateTap = useCallback((m: ChatMessage) => {
+    const st = dlStates[m.content];
+    if (st?.phase === "expired") return;
+    if (st?.phase === "downloading") {
+      logger.warn(LOG_TAG.media, "download_cancelled_by_user", {
+        conv_id: m.convId, conv_seq: m.convSeq, received: st.received, total: st.total,
+      });
+      dlAbortRef.current[m.content]?.abort();                                     // 真中止在飞请求，别让它稍后又"完成"
+      setDlStates((p) => { const n = { ...p }; delete n[m.content]; return n; }); // 回到"未下载"
+      return;
+    }
+    void startDownload(m);
+  }, [dlStates, startDownload]);
+
+  /** 清空应用内媒体缓存（设置 ▸ 数据与存储）：只删本机，云端保留可重下 → 卡片回退"未下载"。 */
+  const clearMediaCache = useCallback(() => {
+    logger.info(LOG_TAG.media, "media_cache_cleared", { count: Object.keys(dlBlobsRef.current).length });
+    Object.values(dlBlobsRef.current).forEach((u) => URL.revokeObjectURL(u));
+    setDlBlobs({});
+    setDlStates({});
+  }, []);
+
   const onMediaBubbleTap = useCallback((m: ChatMessage, openViewer: () => void) => {
     const mine = m.from === uid;
     if (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? "")) {
@@ -2459,7 +2634,7 @@ export default function App() {
       { id: "general", label: "通用设置", icon: Settings2, chevron: true, onClick: () => setGeneralOpen(true) },
       { id: "animations", label: "动画与性能", icon: Gauge, chevron: true, onClick: () => comingSoon("动画与性能") },
       { id: "notifications", label: "通知", icon: Bell, chevron: true, onClick: () => comingSoon("通知") },
-      { id: "data", label: "数据与存储", icon: Database, chevron: true, onClick: () => comingSoon("数据与存储") },
+      { id: "data", label: "数据与存储", icon: Database, chevron: true, onClick: () => setDataStorageOpen(true) },
       { id: "privacy", label: "隐私与安全", icon: Lock, chevron: true, onClick: () => void openBlacklist() },
       { id: "folders", label: "聊天文件夹", icon: Folder, chevron: true, onClick: () => comingSoon("聊天文件夹") },
       { id: "devices", label: "已登录设备", icon: MonitorSmartphone, chevron: true, onClick: () => comingSoon("已登录设备") },
@@ -2663,6 +2838,113 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* 数据与存储（M4-7，草图 §05/§06/§09）：Web 只呈现 **Wi-Fi / 不限流量** 这一档——
+            浏览器无法可靠区分移动/Wi-Fi，桌面也没有流量焦虑；改动仍随账号同步回移动端。
+            存储用量是**本页应用内缓存**（手动下载的 blob），刷新即失效，故不与移动端同步。 */}
+        {dataStorageOpen && (() => {
+          const st = dlSettings ?? defaultDownloadSettings();
+          const wifi = st.wifi;
+          const tier: SpeedTier = tierOfPolicy(wifi);
+          const patchWifi = (next: typeof wifi) => void saveDownloadSettings({ ...st, wifi: next });
+          const cachedCount = Object.keys(dlBlobs).length;
+          const limitRow = (kind: "video" | "file", label: string) => (
+            <div className="range-row" key={kind}>
+              <div className="range-top">
+                <span className="row-label">{label}大小上限</span>
+                <span className="row-value">{wifi[kind].max_bytes > 0 ? formatFileSize(wifi[kind].max_bytes) : "手动"}</span>
+              </div>
+              {/* 0 = 手动（不自动下）；其余按 MB 取整，右端对齐后端 MaxAutoBytes(1.5 GiB)。 */}
+              <input type="range" min={0} max={Math.round(MAX_AUTO_BYTES / (1024 * 1024))} step={1}
+                     value={Math.round(wifi[kind].max_bytes / (1024 * 1024))}
+                     onChange={(e) => patchWifi({ ...wifi, [kind]: { ...wifi[kind], max_bytes: Number(e.target.value) * 1024 * 1024 } })} />
+              <div className="range-scale"><span>手动</span><span>1.5 GB</span></div>
+              <div className="settings-subrows">
+                {(["single", "group"] as const).map((who) => (
+                  <label className="switch-row" key={who}>
+                    <span className="row-label">{who === "single" ? "单聊" : "群聊"}</span>
+                    <input type="checkbox" checked={wifi[kind][who]}
+                           onChange={(e) => patchWifi({ ...wifi, [kind]: { ...wifi[kind], [who]: e.target.checked } })} />
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+          return (
+            <div className="settings-panel data-panel">
+              <header className="settings-head">
+                <button className="icon-btn" title="返回" onClick={() => setDataStorageOpen(false)}><ChevronLeft size={24} /></button>
+                <span className="settings-title">数据与存储</span>
+                <span className="icon-btn-spacer" />
+              </header>
+              <div className="settings-body">
+                <div className="section-label">存储用量</div>
+                <div className="settings-group">
+                  <div className="settings-row static">
+                    <span className="row-label">已缓存媒体</span>
+                    <span className="row-value">{cachedCount} 个</span>
+                  </div>
+                  <button className="settings-row danger" onClick={clearMediaCache}>
+                    <Trash2 size={20} className="row-icon" /><span className="row-label">清除缓存</span>
+                  </button>
+                </div>
+                <div className="settings-foot">只删本机缓存，云端仍保留、需要时可重新下载。刷新页面也会清空（浏览器限制）。</div>
+
+                <div className="section-label">自动下载媒体文件</div>
+                <div className="settings-group">
+                  <label className="switch-row">
+                    <span className="row-label">自动下载</span>
+                    <input type="checkbox" checked={wifi.enabled}
+                           onChange={(e) => patchWifi({ ...wifi, enabled: e.target.checked })} />
+                  </label>
+                </div>
+                <div className="settings-foot">
+                  浏览器分不清移动数据与 Wi-Fi，故 Web 只使用「Wi-Fi / 不限流量」这一档；手动点击永远可下载。
+                </div>
+
+                <div className="section-label">流量档位</div>
+                <div className="settings-group">
+                  <div className="tier-row">
+                    {([["low", "低"], ["medium", "中"], ["high", "高"]] as const).map(([v, t]) => (
+                      <button key={v} className={`tier-btn${tier === v ? " on" : ""}`}
+                              onClick={() => patchWifi(applyTier(wifi, v))}>{t}</button>
+                    ))}
+                    {tier === "custom" && <span className="tier-custom">自定义</span>}
+                  </div>
+                </div>
+                <div className="settings-foot">档位是快捷入口——一键设好下面的大小上限；手改任一上限后回到「自定义」。图片体积小，恒自动下载。</div>
+
+                <div className="section-label">媒体文件类型</div>
+                <div className="settings-group">
+                  <div className="settings-subrows">
+                    {(["single", "group"] as const).map((who) => (
+                      <label className="switch-row" key={who}>
+                        <span className="row-label">图片 · {who === "single" ? "单聊" : "群聊"}</span>
+                        <input type="checkbox" checked={wifi.image[who]}
+                               onChange={(e) => patchWifi({ ...wifi, image: { ...wifi.image, [who]: e.target.checked } })} />
+                      </label>
+                    ))}
+                  </div>
+                  {limitRow("video", "视频")}
+                  {limitRow("file", "文件")}
+                </div>
+
+                <div className="settings-group">
+                  <button className="settings-row danger" onClick={() => {
+                    if (!window.confirm("恢复自动下载的出厂默认设置？")) return;
+                    const c = clientRef.current;
+                    if (!c) return;
+                    void c.resetDownloadSettings()
+                      .then((r) => setDlSettings(parseDownloadSettings(r?.settings)))
+                      .catch((e: Error) => setToast(`重置失败：${e.message}`));
+                  }}>
+                    <span className="row-label">重置自动下载设置</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* 编辑资料面板：经设置页铅笔进入，叠在设置面板之上（对齐 Telegram Web「Edit profile」）。 */}
         {profileDraft && (
@@ -2990,6 +3272,8 @@ export default function App() {
               // 暂停态唯一真相=分片任务（toggleUploadPause bump 进度对象触发重渲染）；小文件无任务恒 false。
               const uploadPaused = !!chunkedTaskFor(m.clientMsgId ?? "")?.paused;
               const durationText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
+              // 下载门控（M4-7）：undefined=就绪；非空=未下载/下载中/失败/已失效 → 卡片显 ↓ 或进度，不加载原件。
+              const gate = mediaGate(m);
               const bubbleBlock = (
                 <>
                   <div className="bubble-line">
@@ -3015,18 +3299,31 @@ export default function App() {
                         // 图片/视频：按 media_w/media_h 的原始比例定框（未知回退方块），
                         // 左上角时长或上传进度、右下角时间+已读态、视频居中播放角标——与 iOS 同版式。
                         // 点按走状态机（与 iOS 中心按钮一致）：失败 ↻ 重试 / 上传中 ⏸↔↑ / 其余打开查看器。
-                        <span {...mediaBoxProps(m)} onClick={() => onMediaBubbleTap(m, () => setViewer({ m }))}>
-                          {m.contentType === "video"
-                            ? (m.posterUrl
-                                ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
-                                : <video className="msg-image" src={videoFrameSrc(m.content)} preload="metadata" muted onLoadedData={onMediaLoad} />)
-                            : <img className="msg-image" src={m.content} alt="图片" onLoad={onMediaLoad} />}
-                          {uploading
+                        <span {...mediaBoxProps(m)}
+                              onClick={() => (gate ? onGateTap(m) : onMediaBubbleTap(m, () => setViewer({ m })))}
+                              title={gate ? downloadText(gate, formatFileSize(m.fileSize)) : undefined}>
+                          {/* 门控（未下载）：不拉原图/原视频，只显 thumb 模糊占位（~200B data URI），没有就留灰底。 */}
+                          {gate
+                            ? (m.thumb
+                                ? <img className="msg-image msg-image-blur" src={m.thumb} alt="未下载" />
+                                : <span className="msg-image msg-image-empty" />)
+                            : m.contentType === "video"
+                              ? (m.posterUrl
+                                  ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
+                                  : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} />)
+                              : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} />}
+                          {gate
+                            ? (downloadGlyph(gate) && <span className="play-badge">{downloadGlyph(gate)}</span>)
+                            : uploading
                             ? (chunkedTaskFor(m.clientMsgId ?? "") && <span className="play-badge">{uploadPaused ? "↑" : "⏸"}</span>)
                             : (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? ""))
                               ? <span className="play-badge">↻</span>
                               : m.contentType === "video" && <span className="play-badge">▶</span>}
-                          {uploading
+                          {gate
+                            ? <span className="media-badge media-badge-tl">
+                                {downloadText(gate, formatFileSize(m.fileSize))}{durationText ? ` · ${durationText}` : ""}
+                              </span>
+                            : uploading
                             ? <span className="media-badge media-badge-tl">{uploadPaused ? "⏸ " : ""}{formatUploadProgress(uploading.sent, uploading.total)}</span>
                             : (durationText && <span className="media-badge media-badge-tl">{durationText}</span>)}
                           <span className="media-badge media-badge-br">
@@ -3076,8 +3373,31 @@ export default function App() {
                               )}
                             </span>
                           </span>
+                        ) : gate ? (
+                          // 门控（M4-7）：未下载/下载中/失败——图标位即状态位（↓ / % / ↻），点击就地下载，不跳页。
+                          <span className={`msg-file${gate.phase === "failed" || gate.phase === "expired" ? " failed" : ""}`}
+                                onClick={() => onGateTap(m)}
+                                title={gate.phase === "expired" ? "文件已失效" : "点击下载"}>
+                            <span className="msg-file-dl">{downloadGlyph(gate) ?? "✕"}</span>
+                            <span className="msg-file-body">
+                              <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
+                              <span className="msg-file-size">
+                                {gate.phase === "notStarted"
+                                  ? `${formatFileSize(m.fileSize)} · 点击下载`
+                                  : downloadText(gate, formatFileSize(m.fileSize))}
+                              </span>
+                              {gate.phase === "downloading" && (
+                                <span className="file-progress">
+                                  <span className="file-progress-bar"
+                                        style={{ width: `${gate.total > 0 ? Math.round((gate.received / gate.total) * 100) : 0}%` }} />
+                                </span>
+                              )}
+                            </span>
+                          </span>
                         ) : (
-                          <a className="msg-file" href={m.content} download={m.fileName} target="_blank" rel="noreferrer">
+                          // 就绪：整条可下载/打开（已手动下过的走应用内 blob，不再走网络）。
+                          <a className="msg-file" href={mediaSrc(m)} download={m.fileName || fileNameFromContent(m.content)}
+                             target="_blank" rel="noreferrer">
                             <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
                             <span className="msg-file-body">
                               <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
