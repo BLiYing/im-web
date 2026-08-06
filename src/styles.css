@@ -429,6 +429,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .record-item-name { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
 .record-item-media { max-width: 200px; max-height: 200px; border-radius: 6px; cursor: pointer; display: block; }
 .record-item-text { white-space: pre-wrap; word-break: break-word; }
+/* 套娃：详情页里的嵌套合并转发条目 = mini 卡片；标题栏用统一 icon-btn 返回，按钮与标题中线对齐 */
+.record-card-nested { margin-top: 2px; }
+.record-head { display: flex; align-items: center; gap: 4px; }
+.record-head-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 600; }
 
 /* 转发模式切换（逐条/合并） */
 .fwd-mode { display: flex; gap: 8px; margin: 8px 0; }

@@ -244,18 +244,27 @@ function QuoteThumb({ m }: { m?: ChatMessage }) {
 
 /** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
  *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
-type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number };
-type ChatRecord = { t: string; items: RecordItem[] };
-function parseChatRecord(content: string): ChatRecord {
+export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number };
+export type ChatRecord = { t: string; items: RecordItem[] };
+export function parseChatRecord(content: string): ChatRecord {
   try {
     const o = JSON.parse(content);
     if (o && typeof o === "object") return { t: typeof o.t === "string" ? o.t : "聊天记录", items: Array.isArray(o.items) ? o.items : [] };
   } catch { /* 非法 JSON */ }
   return { t: "聊天记录", items: [] };
 }
-const recordItemPreview = (it: RecordItem): string =>
-  it.ct === "image" ? "[图片]" : it.ct === "video" ? "[视频]"
-  : it.ct === "file" ? `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd() : it.c;
+export const recordItemPreview = (it: RecordItem): string => {
+  if (it.ct === "image") return "[图片]";
+  if (it.ct === "video") return "[视频]";
+  if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();
+  // 嵌套合并转发：预览显「[聊天记录] 子标题」，不铺子卡片 JSON 原文（套娃卡片）；
+  // 子 JSON 非法时 parseChatRecord 回落标题「聊天记录」，此时不再叠加以免「[聊天记录] 聊天记录」。
+  if (it.ct === "chat_record") {
+    const t = parseChatRecord(it.c).t;
+    return t && t !== "聊天记录" ? `[聊天记录] ${t}` : "[聊天记录]";
+  }
+  return it.c;
+};
 
 /** 从文件消息 URL 取原始显示名：存储名 <随机>__<原名>.<ext> → 取 "__" 之后并解码（与后端/iOS 对齐）。 */
 function fileNameFromContent(content: string): string {
@@ -414,7 +423,15 @@ export default function App() {
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
-  const [recordView, setRecordView] = useState<ChatRecord | null>(null); // 合并转发详情弹窗
+  // 合并转发详情弹窗：栈式，支持嵌套「套娃」下钻/返回（栈顶=当前展示层，空=关闭）。
+  const [recordStack, setRecordStack] = useState<ChatRecord[]>([]);
+  const recordView = recordStack.length > 0 ? recordStack[recordStack.length - 1] : null;
+  // 当前层里嵌套合并转发条目的子记录解析结果（按 item 下标缓存），避免每次 render 重复 JSON.parse。
+  const recordNested = useMemo(() => {
+    const m = new Map<number, ChatRecord>();
+    recordView?.items.forEach((it, i) => { if (it.ct === "chat_record") m.set(i, parseChatRecord(it.c)); });
+    return m;
+  }, [recordView]);
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
   const [attachPanel, setAttachPanel] = useState(false); // 附件面板（图片或视频/文件，M4-6）
   // 媒体查看器（镜像 iOS）：图片/视频全屏 + 下载/媒体库/更多；fromGallery=从媒体库进入（不再显示媒体库按钮）。
@@ -3025,7 +3042,7 @@ export default function App() {
                       ) : m.contentType === "chat_record" ? (
                         // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
                         (() => { const r = parseChatRecord(m.content); return (
-                          <div className="record-card" onClick={() => setRecordView(r)}>
+                          <div className="record-card" onClick={() => setRecordStack([r])}>
                             <div className="record-title">{r.t}</div>
                             <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
                               <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
@@ -3372,18 +3389,26 @@ export default function App() {
       )}
 
       {recordView && (
-        // 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器。
-        <div className="modal-mask" onClick={() => setRecordView(null)}>
+        // 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器；
+        // 嵌套合并转发条目 → 套娃 mini 卡片，点击入栈下钻（栈深 >1 时显返回）。
+        <div className="modal-mask" onClick={() => setRecordStack([])}>
           <div className="modal record-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">{recordView.t}</div>
+            <div className="modal-title record-head">
+              {recordStack.length > 1 && (
+                <button className="icon-btn" title="返回" onClick={() => setRecordStack((s) => s.slice(0, -1))}>
+                  <ChevronLeft size={22} />
+                </button>
+              )}
+              <span className="record-head-title">{recordView.t}</span>
+            </div>
             <div className="record-list">
               {recordView.items.map((it, i) => (
                 <div key={i} className="record-item">
                   <div className="record-item-name">{it.n}</div>
                   {it.ct === "image" ? (
-                    <img className="record-item-media" src={it.c} alt="图片" onClick={() => { setRecordView(null); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
+                    <img className="record-item-media" src={it.c} alt="图片" onClick={() => { setRecordStack([]); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
                   ) : it.ct === "video" ? (
-                    <span className="fav-thumb-wrap" onClick={() => { setRecordView(null); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
+                    <span className="fav-thumb-wrap" onClick={() => { setRecordStack([]); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
                       <video className="record-item-media" src={videoFrameSrc(it.c)} preload="metadata" muted /><span className="play-badge">▶</span>
                     </span>
                   ) : it.ct === "file" ? (
@@ -3392,13 +3417,24 @@ export default function App() {
                       <span>{it.fn || fileNameFromContent(it.c)}</span>
                       {it.fs ? <span className="msg-file-size">{formatFileSize(it.fs)}</span> : null}
                     </a>
+                  ) : it.ct === "chat_record" ? (
+                    // 套娃 mini 卡片：标题 + 前 2 行预览 + 脚注；点击入栈进子记录（任意深度）。sub 走 recordNested 缓存。
+                    (() => { const sub = recordNested.get(i) ?? parseChatRecord(it.c); return (
+                      <div className="record-card record-card-nested" onClick={() => setRecordStack((s) => [...s, sub])}>
+                        <div className="record-title">{sub.t}</div>
+                        <div className="record-preview">{sub.items.slice(0, 2).map((si, k) => (
+                          <div key={k} className="record-line">{si.n}: {recordItemPreview(si)}</div>
+                        ))}</div>
+                        <div className="record-foot">聊天记录 ›</div>
+                      </div>
+                    ); })()
                   ) : (
                     <div className="record-item-text">{it.c}</div>
                   )}
                 </div>
               ))}
             </div>
-            <button className="modal-close" onClick={() => setRecordView(null)}>关闭</button>
+            <button className="modal-close" onClick={() => setRecordStack([])}>关闭</button>
           </div>
         </div>
       )}
