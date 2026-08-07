@@ -174,6 +174,18 @@ export function downloadGlyph(s: DownloadState | undefined): string | null {
   }
 }
 
+/**
+ * 档 B 被动预览的三态取图决策（引用条 / 会话媒体库宫格；对齐 iOS `previewForURL:` 优先级）：
+ * `resolved`（已解门控 / 本机已有原件）→ `"original"`（真帧）；否则有 thumb → `"thumb"`（磨砂缩略）；
+ * 都没有 → `"icon"`（媒体类型图标 / 中性底）。
+ * **契约**：`"thumb"`/`"icon"` 分支**绝不为预览联网**——不得加载原件、poster 或远端抽帧（与 iOS 档 B 一致）。
+ */
+export type PreviewSource = "original" | "thumb" | "icon";
+export function passivePreviewSource(resolved: boolean, hasThumb: boolean): PreviewSource {
+  if (resolved) return "original";
+  return hasThumb ? "thumb" : "icon";
+}
+
 /** 卡片角标 / 文件条第二行文案（与 iOS displayText / fileLineText 对齐）。 */
 export function downloadText(s: DownloadState | undefined, sizeText: string): string {
   if (!s || s.phase === "notStarted") return sizeText;

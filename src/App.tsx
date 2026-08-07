@@ -13,7 +13,7 @@ import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
 import {
   applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, parseDownloadSettings,
-  shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
+  passivePreviewSource, shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
   type DownloadSettings, type DownloadState, type SpeedTier,
 } from "./download";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
@@ -184,10 +184,11 @@ const selectableInMultiSelect = (m: ChatMessage): boolean =>
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
-function AlbumGrid({ members, timeLabel, progress, onOpen, onMenu }: {
+function AlbumGrid({ members, timeLabel, progress, gateFor, onOpen, onMenu }: {
   members: ChatMessage[];
   timeLabel: string;
   progress: Record<string, { sent: number; total: number }>;
+  gateFor: (m: ChatMessage) => boolean; // 该格是否门控（收到的未下载图/视频）：档 A，逐格独立判定
   onOpen: (m: ChatMessage) => void;
   onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
 }) {
@@ -206,17 +207,27 @@ function AlbumGrid({ members, timeLabel, progress, onOpen, onMenu }: {
               const up = progress[m.clientMsgId ?? ""];
               const task = chunkedTaskFor(m.clientMsgId ?? "");
               const durText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
+              // 逐格门控（档 A，对齐 iOS IMAlbumCell）：未下载格**只显内嵌 thumb 磨砂 + 中心 ↓ + 尺寸角标，绝不拉原图/原视频**；
+              // 点门控格=就地下载（解门控），非进查看器（铁律③手动优先）。
+              const gated = gateFor(m);
+              const sizeText = formatFileSize(m.fileSize);
               return (
               <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className="album-tile"
                 style={{ width: row.length === 1 ? W : tileW, height: tileH }}
                 onClick={() => onOpen(m)}
                 onContextMenu={(e) => onMenu(e, m)}>
-                {m.contentType === "video"
-                  ? (m.posterUrl ? <img src={m.posterUrl} alt="" /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" />)
-                  : <img src={m.content} alt="" />}
-                {m.contentType === "video" && !(m.status === "sending" && m.convSeq === 0) && <span className="play-badge">▶</span>}
-                {/* 时长角标：探测出即显示（上传中也显示——宫格进度在中心，左上角是空的，与 iOS 一致）。 */}
-                {durText && <span className="album-duration">{durText}</span>}
+                {gated
+                  ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
+                  : m.contentType === "video"
+                    ? (m.posterUrl ? <img src={m.posterUrl} alt="" /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" />)
+                    : <img src={m.content} alt="" />}
+                {gated
+                  ? <span className="album-dl">↓</span>
+                  : m.contentType === "video" && !(m.status === "sending" && m.convSeq === 0) && <span className="play-badge">▶</span>}
+                {/* 角标：门控显「尺寸(·时长)」；否则仅时长（上传中也显示——宫格进度在中心，左上角是空的，与 iOS 一致）。 */}
+                {gated
+                  ? ((sizeText || durText) && <span className="album-duration">{[sizeText, durText].filter(Boolean).join(" · ")}</span>)
+                  : (durText && <span className="album-duration">{durText}</span>)}
                 {m.status === "sending" && m.convSeq === 0 && (
                   <span className="album-tile-dim">
                     {/* 分片任务：中心 ⏸/↑（点格子暂停/继续）；小文件（不可暂停）保留转圈。 */}
@@ -238,11 +249,21 @@ function AlbumGrid({ members, timeLabel, progress, onOpen, onMenu }: {
   );
 }
 
-/** 引用条内的媒体小缩略图（图片 <img> / 视频首帧 <video>），无媒体返回 null。 */
-function QuoteThumb({ m }: { m?: ChatMessage }) {
+/**
+ * 引用条内的媒体小缩略图（**档 B·被动预览**，对齐 iOS `previewForURL:`）：
+ * `gated=true`（被引用者未解门控/本机无原件）→ **只用内嵌 thumb 磨砂、绝不联网拉原件/远端抽帧**，无 thumb 退图标；
+ * `gated=false`（已解门控/本机已有）→ 真帧（图片原图 / 视频 poster 或首帧）。文件恒图标。无媒体返回 null。
+ */
+function QuoteThumb({ m, gated }: { m?: ChatMessage; gated?: boolean }) {
   if (!m || m.recalledAt) return null;
-  if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
-  if (m.contentType === "video") return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
+  if (m.contentType === "image" || m.contentType === "video") {
+    const src = passivePreviewSource(!gated, !!m.thumb);
+    if (src === "thumb") return <img className="quote-thumb gate-blur" src={m.thumb} alt="" />;
+    if (src === "icon") return <span className="quote-thumb quote-thumb-ph">{m.contentType === "video" ? "▶" : "🖼"}</span>;
+    // original：已解门控才联网取真帧。
+    if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
+    return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
+  }
   if (m.contentType === "file") return <FileTypeIcon name={m.fileName || m.content} size={32} className="quote-thumb" />;
   return null;
 }
@@ -520,6 +541,14 @@ export default function App() {
   // 图片/视频门控（方案 B）：不下到内存 blob，只记「已解门控」的 content——解门控后直接 <img/video src=远端>，
   // 浏览器 HTTP 缓存兜底持久（刷新仍在）。门控判定本身保留：大图/视频先显模糊占位、点了才拉，省流量。
   const [mediaOptedIn, setMediaOptedIn] = useState<Set<string>>(new Set());
+  // 打开查看器 = 用户主动看原图 → 标记「已解门控」（对齐 iOS 档 B「点某格才打开查看器，此时才允许拉原件」）：
+  // 之后该图/视频在气泡/相册/详情宫格/媒体库/引用条都显真帧、刷新仍在（opt-in 落 localStorage）。
+  useEffect(() => {
+    const vm = viewer?.m;
+    if (!vm || !vm.content || vm.from === uid || vm.recalledAt) return;
+    if (vm.contentType !== "image" && vm.contentType !== "video") return;
+    setMediaOptedIn((s) => { if (s.has(vm.content)) return s; const n = new Set(s); n.add(vm.content); saveOptedIn(uid, n); return n; });
+  }, [viewer, uid]);
   const [wallpaperOpen, setWallpaperOpen] = useState(false); // 通用设置 ▸ 聊天壁纸
   const [wallpaper, setWallpaper] = useState<WallpaperChoice>(loadWallpaper);
   const [wallpaperBlur, setWallpaperBlur] = useState(() => localStorage.getItem("im.wallpaperBlur") === "1");
@@ -3372,7 +3401,8 @@ export default function App() {
                     <AlbumGrid members={members}
                       timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
                       progress={uploadProgress}
-                      onOpen={(mm) => onMediaBubbleTap(mm, () => setViewer({ m: mm }))}
+                      gateFor={(mm) => !!mediaGate(mm)}
+                      onOpen={(mm) => (mediaGate(mm) ? onGateTap(mm) : onMediaBubbleTap(mm, () => setViewer({ m: mm })))}
                       onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
                   </div>
                 );
@@ -3427,7 +3457,7 @@ export default function App() {
                       {m.replyToConvSeq ? (
                         // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
                         <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
-                          <QuoteThumb m={messages.find((x) => x.convSeq === m.replyToConvSeq)} />
+                          {(() => { const q = messages.find((x) => x.convSeq === m.replyToConvSeq); return <QuoteThumb m={q} gated={!!(q && mediaGate(q))} />; })()}
                           <span className="quote-lines">
                             {isGroupChat && m.replyToFrom && (
                               <span className="quote-who">{m.replyToFrom === uid ? "你" : (memberNick(m.convId, m.replyToFrom) || m.replyToFrom)}</span>
@@ -3630,7 +3660,7 @@ export default function App() {
           {replyTo && (
             // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消；图片/视频显示小缩略图。
             <div className="reply-compose">
-              <QuoteThumb m={replyTo} />
+              <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />
               <div className="reply-compose-text">
                 <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
                 <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>
@@ -3772,13 +3802,23 @@ export default function App() {
               )}
               {messages
                 .filter((mm) => (mm.contentType === "image" || mm.contentType === "video") && !mm.recalledAt)
-                .map((mm) => (
+                .map((mm) => {
+                  // 会话媒体库 = 档 B·被动预览：未下载**只显 thumb 磨砂、绝不联网拉原图/远端抽帧**（打开这一动作不该拉几十条原件）；
+                  // 点某格才 setViewer→用户主动看原图，此时才联网（对齐 iOS 媒体库宫格）。
+                  const src = passivePreviewSource(!mediaGate(mm), !!mm.thumb);
+                  return (
                   <div key={mm.clientMsgId} className="gallery-item" onClick={() => setViewer({ m: mm, fromGallery: true })}>
-                    {mm.contentType === "video"
-                      ? <>{mm.posterUrl ? <img src={mm.posterUrl} alt="" /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted />}<span className="play-badge">▶</span></>
-                      : <img src={mm.content} alt="" />}
+                    {src === "thumb"
+                      ? <img className="gate-blur" src={mm.thumb} alt="" />
+                      : src === "icon"
+                        ? <span className="gate-empty" />
+                        : mm.contentType === "video"
+                          ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted />)
+                          : <img src={mm.content} alt="" />}
+                    {mm.contentType === "video" && <span className="play-badge">▶</span>}
                   </div>
-                ))}
+                  );
+                })}
             </div>
           </div>
         </div>
@@ -4229,12 +4269,25 @@ export default function App() {
                     {activeTab === "media" && (
                       media.length === 0 ? <div className="detail-empty">暂无媒体</div> : (
                         <div className="detail-media-grid">
-                          {media.map((m) => (
-                            <button key={m.serverMsgId || m.convSeq} className="detail-media-tile" onClick={() => setViewer({ m })}>
-                              <img src={m.contentType === "video" ? (m.posterUrl || m.content) : m.content} alt="" />
-                              {m.contentType === "video" && <span className="detail-media-play">▶</span>}
+                          {media.map((m) => {
+                            // 与聊天气泡共用门控（对齐 iOS 详情宫格 = 档 A，但 autoPrefetch=NO：浏览历史不顺手全拉）：
+                            // 未下载格**只显 thumb 磨砂 + ↓ + 尺寸，不拉原件**；点门控格=就地解门控（不进查看器），就绪格才打开。
+                            const gate = mediaGate(m);
+                            const sizeText = formatFileSize(m.fileSize);
+                            return (
+                            <button key={m.serverMsgId || m.convSeq} className="detail-media-tile"
+                                    onClick={() => (gate ? onGateTap(m) : setViewer({ m }))}
+                                    title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
+                              {gate
+                                ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
+                                : <img src={m.contentType === "video" ? (m.posterUrl || m.content) : m.content} alt="" />}
+                              {gate
+                                ? <span className="detail-media-dl">↓</span>
+                                : m.contentType === "video" && <span className="detail-media-play">▶</span>}
+                              {gate && sizeText && <span className="detail-media-size">{sizeText}</span>}
                             </button>
-                          ))}
+                            );
+                          })}
                         </div>
                       )
                     )}

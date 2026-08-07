@@ -10,6 +10,7 @@ import {
   downloadGlyph,
   downloadText,
   MAX_AUTO_BYTES,
+  passivePreviewSource,
   type DownloadState,
 } from "./download";
 
@@ -161,5 +162,18 @@ describe("下载状态机呈现（与 iOS 镜像）", () => {
     expect(downloadText(st("downloading", 1, 2), "2.4 MB")).toBe("50%");
     expect(downloadText(st("failed"), "2.4 MB")).toBe("下载失败，点击重试");
     expect(downloadText(st("expired"), "2.4 MB")).toBe("文件已失效");
+  });
+});
+
+describe("档 B 被动预览取图（引用条 / 会话媒体库；对齐 iOS previewForURL）", () => {
+  it("已解门控/本地已有 → 真帧，无视有无 thumb", () => {
+    expect(passivePreviewSource(true, true)).toBe("original");
+    expect(passivePreviewSource(true, false)).toBe("original");
+  });
+  it("未解门控但有 thumb → 磨砂缩略（不联网）", () => {
+    expect(passivePreviewSource(false, true)).toBe("thumb");
+  });
+  it("未解门控且无 thumb → 图标兜底（不联网）", () => {
+    expect(passivePreviewSource(false, false)).toBe("icon");
   });
 });
