@@ -305,7 +305,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 富媒体（M4-6）：图片/视频气泡 + 文件链接 + 附件面板 + 大图查看。 */
 .msg-image { max-width: 220px; max-height: 260px; border-radius: 8px; cursor: pointer; display: block; }
 .file-type-icon { display: block; flex: 0 0 auto; overflow: visible; }
-.msg-file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; color: var(--accent); text-decoration: none; }
+/* 固定最小高度（容得下 36px 圆图标 + 两行文字）：门控↔就绪、未下载↔下载中切换时高度恒定，零抖动。 */
+.msg-file { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; color: var(--accent); text-decoration: none; }
+.msg-file.clickable { cursor: pointer; }
 .msg-file-body { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .msg-file-name { min-width: 0; overflow-wrap: anywhere; }
 .msg-file-size { color: var(--text-secondary); font-size: 12px; line-height: 1.2; }
@@ -861,8 +863,9 @@ button.detail-row:hover { background: var(--surface-hover); }
 
 /* 文件 / 链接列表 */
 .detail-filelist { background: var(--card-bg); border-radius: var(--radius-card); overflow: hidden; }
-.detail-fileitem, .detail-linkitem { display: flex; align-items: center; gap: 10px; padding: 12px 14px; color: var(--text); text-decoration: none; }
+.detail-fileitem, .detail-linkitem { display: flex; align-items: center; gap: 10px; padding: 12px 14px; color: var(--text); text-decoration: none; cursor: pointer; }
 .detail-fileitem .file-type-icon { width: 34px; height: 34px; }
+.detail-fileitem.failed .detail-file-size { color: var(--danger); }
 .detail-fileitem + .detail-fileitem, .detail-linkitem + .detail-linkitem { border-top: 1px solid var(--separator); }
 .detail-fileitem:hover, .detail-linkitem:hover { background: var(--surface-hover); }
 .detail-linkitem { color: var(--accent); }
@@ -906,10 +909,17 @@ button.detail-row:hover { background: var(--surface-hover); }
 .msg-media .msg-image-empty { width: 100%; height: 100%; display: block;
   background: repeating-linear-gradient(45deg, var(--surface-hover), var(--surface-hover) 10px, var(--surface) 10px, var(--surface) 20px); }
 .msg-media.auto .msg-image-empty { width: 180px; height: 180px; }
-/* 文件条的图标位即状态位：↓ 未下载 / ✕ 下载中 / ↻ 重试（与 iOS 左图标位同语义） */
-.msg-file-dl { width: 30px; height: 30px; flex: none; display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; background: var(--accent); color: var(--on-media, #fff); font-size: 16px; font-weight: 700; }
-.msg-file.failed .msg-file-dl { background: var(--danger); }
+/* 文件条的图标位即状态位（**圆形**，对齐 iOS _disc/_ring）：↓ 未下载 / 环形进度+✕ 下载中 / ↻ 重试 / ⊘ 已失效。
+   固定 36px 圆槽，下载进度用外围圆环表示（非底部线性条）→ 状态切换不撑高卡片、不下移图标。 */
+.msg-file-dl { position: relative; width: 36px; height: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--accent); color: var(--on-media, #fff); font-size: 16px; font-weight: 700; }
+.msg-file-dl.downloading { background: var(--neutral-control); color: var(--accent); }      /* 中性圆底，让 accent 进度环可见 */
+.msg-file-dl.failed, .msg-file.failed .msg-file-dl, .detail-fileitem.failed .msg-file-dl { background: var(--danger); color: var(--on-media, #fff); }
+.msg-file-dl.expired { background: var(--neutral-control); color: var(--text-secondary); }
+.dl-glyph { position: relative; z-index: 1; line-height: 1; }
+.dl-ring { position: absolute; inset: 0; width: 36px; height: 36px; transform: rotate(-90deg); }   /* 从 12 点方向起画 */
+.dl-ring-track { fill: none; stroke: var(--separator); stroke-width: 3; }
+.dl-ring-bar { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 0.2s linear; }
 
 /* ===== 数据与存储面板（M4-7）===== */
 .data-panel { z-index: 40; }

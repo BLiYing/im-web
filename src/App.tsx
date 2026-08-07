@@ -12,7 +12,7 @@ import { FileTypeIcon } from "./FileTypeIcon";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
 import {
-  applyTier, defaultDownloadSettings, downloadGlyph, downloadText, parseDownloadSettings,
+  applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, parseDownloadSettings,
   shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
   type DownloadSettings, type DownloadState, type SpeedTier,
 } from "./download";
@@ -25,7 +25,7 @@ import {
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
   Download, LayoutGrid, MoreHorizontal,
-  Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star,
+  Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -358,6 +358,36 @@ function AnchoredMenu({ x, y, className, children }: { x: number; y: number; cla
   );
 }
 
+/**
+ * 文件门控圆形图标（对齐 iOS IMChatDetailViewController 的 `_disc`/`_ring`）：固定 36px 圆底 + 白色字形，
+ * 聊天气泡与详情文件列表共用。**下载中叠加环形进度**——去掉了原来的底部线性进度条，图标槽位恒定，
+ * 状态切换（↓→✕）不再撑高卡片 / 下移图标（修下载抖动）。
+ * 未下载=accent 圆底 ↓ / 下载中=中性圆底 + accent 进度环 + ✕ / 失败=danger 圆底 ↻ / 已失效=中性圆底 ⊘。
+ */
+function FileGateIcon({ state }: { state: DownloadState }) {
+  const glyph = downloadGlyph(state) ?? "⊘";
+  const cls = state.phase === "downloading" ? "downloading"
+            : state.phase === "failed" ? "failed"
+            : state.phase === "expired" ? "expired" : "";
+  const R = 16, C = 2 * Math.PI * R; // 半径 16 → 周长，驱动 stroke-dashoffset
+  return (
+    <span className={`msg-file-dl ${cls}`.trim()}>
+      {state.phase === "downloading" && (
+        <svg className="dl-ring" viewBox="0 0 36 36" aria-hidden="true">
+          <circle className="dl-ring-track" cx="18" cy="18" r={R} />
+          <circle className="dl-ring-bar" cx="18" cy="18" r={R}
+                  style={{ strokeDasharray: C, strokeDashoffset: C * (1 - downloadFraction(state)) }} />
+        </svg>
+      )}
+      <span className="dl-glyph">{glyph}</span>
+    </span>
+  );
+}
+
+/** 就绪文件点击时能否在浏览器内直接预览（对齐 iOS QuickLook 的 Web 诚实映射）。其余类型 → 另存。 */
+const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac|txt|md|log|json|csv|xml)$/i;
+function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test(name); }
+
 /** 保持登录（与 iOS IMSessionStore 一致的 dev 骨架）：登录成功落 localStorage，刷新后静默重登。
  *  存凭据而非 token——token 24h 过期且断线重连本就要用密码重新换 token；生产应换更安全的方案。 */
 const SESSION_KEY = "im.session";
@@ -491,6 +521,7 @@ export default function App() {
   const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean } | null>(null);
   const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "links">("media");
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
+  const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
   const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/占位项）
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
@@ -1498,6 +1529,22 @@ export default function App() {
   const mediaSrc = useCallback((m: ChatMessage) => dlBlobs[m.content] || m.content, [dlBlobs]);
 
   /**
+   * 就绪文件点击路由（对齐 iOS QuickLook 的 Web 诚实映射）：可预览类型（pdf/图片/音视频/文本）在**新标签预览**，
+   * 其余（zip/dmg/office…）触发**另存**——绝不静默走浏览器下载。已手动下过的走应用内 blob，否则远端 URL。
+   */
+  const openReadyFile = useCallback((m: ChatMessage) => {
+    const name = m.fileName || fileNameFromContent(m.content);
+    const url = dlBlobsRef.current[m.content] || m.content;
+    if (isPreviewableFile(name)) {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } else {
+      const a = document.createElement("a");
+      a.href = url; a.download = name; a.rel = "noreferrer";
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+  }, []);
+
+  /**
    * 手动下载到应用内缓存（带真进度）。失败分因：404/410=服务端已清理 → "文件已失效"、不给重试。
    * 刷新会丢（blob URL 活在本页生命周期内），与上传的同类限制一致。
    */
@@ -2013,6 +2060,23 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
     };
   }, [memberMenu]);
+
+  // 详情文件行右键菜单：点空白/滚动/Esc 关闭。与成员菜单同理走**捕获阶段**——菜单虽渲染在顶层，但触发点
+  // 在 `.detail-panel`（挂了 stopPropagation）内，冒泡阶段的 window 监听收不到面板内的点击。菜单自身点击由
+  // `.ctx-menu` 排除（菜单项各自负责关闭），避免在按钮 handler 前先卸载菜单。
+  useEffect(() => {
+    if (!fileMenu) return;
+    const close = (e: Event) => { if ((e.target as Element)?.closest?.(".ctx-menu")) return; setFileMenu(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFileMenu(null); };
+    window.addEventListener("click", close, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [fileMenu]);
 
   // 左上角头像卡片：点空白/Esc 关闭。
   useEffect(() => {
@@ -3387,12 +3451,12 @@ export default function App() {
                             </span>
                           </span>
                         ) : gate ? (
-                          // 门控（M4-7）：未下载/下载中/失败——图标位即状态位（↓ / % / ↻），点击就地下载，不跳页。
+                          // 门控（M4-7）：未下载/下载中/失败——圆形图标位即状态位（↓ / 环形进度 / ↻），点击就地下载，不跳页。
+                          // 进度改由 FileGateIcon 的圆环表示（去底部线性条），图标槽位恒定 → 状态切换不撑高卡片。
                           <span className={`msg-file${gate.phase === "failed" || gate.phase === "expired" ? " failed" : ""}`}
                                 onClick={() => onGateTap(m)}
                                 title={gate.phase === "expired" ? "文件已失效" : "点击下载"}>
-                            {/* 已失效无从重试/取消，用中性 ⊘ 而非取消 ✕（避免误导可点取消）。 */}
-                            <span className="msg-file-dl">{downloadGlyph(gate) ?? "⊘"}</span>
+                            <FileGateIcon state={gate} />
                             <span className="msg-file-body">
                               <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
                               <span className="msg-file-size">
@@ -3400,24 +3464,18 @@ export default function App() {
                                   ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 点击下载` : "点击下载")
                                   : downloadText(gate, formatFileSize(m.fileSize))}
                               </span>
-                              {gate.phase === "downloading" && (
-                                <span className="file-progress">
-                                  <span className="file-progress-bar"
-                                        style={{ width: `${gate.total > 0 ? Math.round((gate.received / gate.total) * 100) : 0}%` }} />
-                                </span>
-                              )}
                             </span>
                           </span>
                         ) : (
-                          // 就绪：整条可下载/打开（已手动下过的走应用内 blob，不再走网络）。
-                          <a className="msg-file" href={mediaSrc(m)} download={m.fileName || fileNameFromContent(m.content)}
-                             target="_blank" rel="noreferrer">
+                          // 就绪：点击路由（可预览类型新标签预览 / 其余另存，对齐 iOS QuickLook）。已手动下过走应用内 blob。
+                          <span className="msg-file clickable" onClick={() => openReadyFile(m)}
+                                title={isPreviewableFile(m.fileName || fileNameFromContent(m.content)) ? "点击预览" : "点击下载"}>
                             <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
                             <span className="msg-file-body">
                               <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
                               {formatFileSize(m.fileSize) && <span className="msg-file-size">{formatFileSize(m.fileSize)}</span>}
                             </span>
-                          </a>
+                          </span>
                         )
                       ) : isUrlText(m.content) ? (
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
@@ -3797,6 +3855,27 @@ export default function App() {
         </AnchoredMenu>
       )}
 
+      {fileMenu && (() => {
+        // 详情文件行右键菜单（对齐 iOS 长按 §04）：转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（占位，后端接口待建）。
+        const m = fileMenu.m;
+        const downloading = dlStates[m.content]?.phase === "downloading";
+        return (
+          <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
+            <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
+              <Forward size={16} className="menu-icon" />转发</button>
+            <button onClick={() => { setFileMenu(null); setDetail(null); if (m.convSeq > 0) jumpToSeq(m.convSeq); else setToast("该消息无法定位"); }}>
+              <MessageCircle size={16} className="menu-icon" />定位到聊天</button>
+            {downloading && (
+              <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
+                <X size={16} className="menu-icon" />取消下载</button>
+            )}
+            {/* 删除文件消息：服务端接口尚缺（同 iOS deleteFileMessage 占位），先 toast 不误导已删。 */}
+            <button className="danger" onClick={() => { setFileMenu(null); comingSoon("删除文件"); }}>
+              <Trash2 size={16} className="menu-icon" />删除</button>
+          </AnchoredMenu>
+        );
+      })()}
+
       {friendMenu && (
         <div className="ctx-menu" style={{ left: friendMenu.x, top: friendMenu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.removeFriend(id)); }}>删除好友</button>
@@ -4097,15 +4176,32 @@ export default function App() {
                     {activeTab === "files" && (
                       files.length === 0 ? <div className="detail-empty">暂无文件</div> : (
                         <div className="detail-filelist">
-                          {files.map((m) => (
-                            <a key={m.serverMsgId || m.convSeq} className="detail-fileitem" href={m.content} target="_blank" rel="noreferrer">
-                              <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={34} />
-                              <span className="detail-file-body">
-                                <span className="detail-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
-                                {formatFileSize(m.fileSize) && <span className="detail-file-size">{formatFileSize(m.fileSize)}</span>}
-                              </span>
-                            </a>
-                          ))}
+                          {files.map((m) => {
+                            // 与聊天气泡共用门控/下载缓存（对齐 iOS 详情与聊天共享 IMMediaDownloadCoordinator）：
+                            // 未下载→点击就地下载（圆形图标+环形进度）；就绪→预览/另存。右键=转发/定位/取消下载/删除。
+                            const gate = mediaGate(m);
+                            const name = m.fileName || fileNameFromContent(m.content);
+                            return (
+                              <div key={m.serverMsgId || m.convSeq}
+                                   className={`detail-fileitem${gate && (gate.phase === "failed" || gate.phase === "expired") ? " failed" : ""}`}
+                                   onClick={() => (gate ? onGateTap(m) : openReadyFile(m))}
+                                   onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}
+                                   title={gate ? (gate.phase === "expired" ? "文件已失效" : "点击下载")
+                                              : (isPreviewableFile(name) ? "点击预览" : "点击下载")}>
+                                {gate ? <FileGateIcon state={gate} /> : <FileTypeIcon name={name} size={34} />}
+                                <span className="detail-file-body">
+                                  <span className="detail-file-name">{name}</span>
+                                  <span className="detail-file-size">
+                                    {gate
+                                      ? (gate.phase === "notStarted"
+                                          ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 未下载` : "未下载")
+                                          : downloadText(gate, formatFileSize(m.fileSize)))
+                                      : (formatFileSize(m.fileSize) || "")}
+                                  </span>
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       )
                     )}
