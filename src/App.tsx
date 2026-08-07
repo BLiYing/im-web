@@ -14,8 +14,9 @@ import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, medi
 import {
   applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, parseDownloadSettings,
   passivePreviewSource, shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
-  type DownloadSettings, type DownloadState, type SpeedTier,
+  type DownloadSettings, type DownloadState, type SpeedTier, type MediaKind,
 } from "./download";
+import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -259,7 +260,9 @@ function QuoteThumb({ m, gated }: { m?: ChatMessage; gated?: boolean }) {
   if (m.contentType === "image" || m.contentType === "video") {
     const src = passivePreviewSource(!gated, !!m.thumb);
     if (src === "thumb") return <img className="quote-thumb gate-blur" src={m.thumb} alt="" />;
-    if (src === "icon") return <span className="quote-thumb quote-thumb-ph">{m.contentType === "video" ? "▶" : "🖼"}</span>;
+    // 占位图标：用 lucide 矢量（跟随文字色、跨系统一致），与 iOS 引用占位 video.fill/photo.fill 观感对齐——
+    // 取代旧 emoji ▶/🖼（依赖各平台 emoji 字体、彩色样式不可控）。
+    if (src === "icon") return <span className="quote-thumb quote-thumb-ph">{m.contentType === "video" ? <Video size={18} aria-label="视频" /> : <ImageIcon size={18} aria-label="图片" />}</span>;
     // original：已解门控才联网取真帧。
     if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
     return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
@@ -541,6 +544,19 @@ export default function App() {
   // 图片/视频门控（方案 B）：不下到内存 blob，只记「已解门控」的 content——解门控后直接 <img/video src=远端>，
   // 浏览器 HTTP 缓存兜底持久（刷新仍在）。门控判定本身保留：大图/视频先显模糊占位、点了才拉，省流量。
   const [mediaOptedIn, setMediaOptedIn] = useState<Set<string>>(new Set());
+  // 持久失效标记（草图 §06 404 止损）：命中 404/410 的 content 落 localStorage（按 uid）。mediaGate 据此直接
+  // 画失效占位、不再回源 → 掐 404 风暴、刷新仍显失效。ref 供 render 中的 onError 回调同步去重、避免重复复验。
+  const [expiredSet, setExpiredSet] = useState<Set<string>>(new Set());
+  const expiredRef = useRef<Set<string>>(expiredSet);
+  expiredRef.current = expiredSet;
+  /** 把某 content 标记为永久失效（幂等）：更新内存态 + 持久化。 */
+  const markExpired = useCallback((content: string) => {
+    if (!content) return;
+    setExpiredSet((s) => {
+      if (s.has(content)) return s;
+      const n = new Set(s); n.add(content); saveStrSet(expiredKey(uid), n); return n;
+    });
+  }, [uid]);
   // 打开查看器 = 用户主动看原图 → 标记「已解门控」（对齐 iOS 档 B「点某格才打开查看器，此时才允许拉原件」）：
   // 之后该图/视频在气泡/相册/详情宫格/媒体库/引用条都显真帧、刷新仍在（opt-in 落 localStorage）。
   useEffect(() => {
@@ -1092,6 +1108,20 @@ export default function App() {
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
     setMediaOptedIn(loadOptedIn(uid)); // 恢复图片/视频「已解门控」记录（方案 B）：刷新后已看过的媒体仍直显，不回退门控
+    setExpiredSet(loadStrSet(expiredKey(uid))); // 恢复失效标记：已知 404 的媒体刷新后仍显失效、不再回源
+    // rehydrate 已下载文件（C1）：从 Cache Storage 取回持久字节 → 重建 objectURL → dlBlobs，对齐 iOS 读盘即"就绪"。
+    void (async () => {
+      const keys = [...loadStrSet(downloadedFilesKey(uid))];
+      const restored: Record<string, string> = {};
+      for (const k of keys) {
+        const blob = await cacheMatchBlob(uid, k);
+        if (blob) restored[k] = URL.createObjectURL(blob);
+      }
+      if (Object.keys(restored).length) {
+        setDlBlobs((p) => ({ ...restored, ...p })); // 已在飞/新下的优先，不覆盖
+        logger.info(LOG_TAG.media, "media_cache_rehydrated", { count: Object.keys(restored).length });
+      }
+    })();
     localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
     setAuthBusy(false);
     setPhase("app");
@@ -1199,6 +1229,7 @@ export default function App() {
     setDlBlobs({});
     setDlStates({});
     setMediaOptedIn(new Set()); // 图片/视频解门控记录：换账号重新门控
+    setExpiredSet(new Set());   // 失效标记内存态清空（每 uid 各自持久化，登录时按账号重载）
     setDataStorageOpen(false);
     setPhase("login");
   }, []);
@@ -1570,6 +1601,8 @@ export default function App() {
     if (!m.content || m.from === uid || m.recalledAt) return undefined;
     const kind = m.contentType;
     if (kind !== "image" && kind !== "video" && kind !== "file") return undefined;
+    // 持久失效标记优先（草图 §06）：已知服务端已清理 → 直接失效态、不回源（掐 404 风暴）。三类消息统一。
+    if (expiredSet.has(m.content)) return { phase: "expired", received: 0, total: m.fileSize ?? 0 };
     // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
     const passesPolicy = shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId);
     if (kind === "image" || kind === "video") {
@@ -1583,7 +1616,7 @@ export default function App() {
     if (st) return st.phase === "done" ? undefined : st;            // 进行中 / 失败 / 已失效
     if (passesPolicy) return undefined;                             // 策略放行=浏览器直取
     return { phase: "notStarted", received: 0, total: m.fileSize ?? 0 };
-  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn]);
+  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn, expiredSet]);
 
   /** 该消息应当渲染的地址：已手动下载过用应用内 blob，否则用远端 URL。 */
   const mediaSrc = useCallback((m: ChatMessage) => dlBlobs[m.content] || m.content, [dlBlobs]);
@@ -1642,6 +1675,7 @@ export default function App() {
           conv_id: m.convId, conv_seq: m.convSeq, status: resp.status, expired: gone,
         });
         setDlStates((p) => ({ ...p, [key]: { phase: gone ? "expired" : "failed", received: 0, total: m.fileSize ?? 0 } }));
+        if (gone) markExpired(key); // 持久失效：刷新后仍显失效、不再回源
         return;
       }
       const total = Number(resp.headers.get("Content-Length")) || m.fileSize || 0;
@@ -1670,6 +1704,9 @@ export default function App() {
       }
       const url = URL.createObjectURL(blob);
       setDlBlobs((p) => ({ ...p, [key]: url }));
+      // C1：字节写入 Cache Storage + 记入"已下载文件"键集合 → 刷新/离线仍在、秒开（对齐 iOS 落盘）。
+      void cachePutBlob(uid, key, blob);
+      const dlf = loadStrSet(downloadedFilesKey(uid)); dlf.add(key); saveStrSet(downloadedFilesKey(uid), dlf);
       // 完成即止：只置"就绪"，**不**自动打开/播放（铁律②）。
       setDlStates((p) => ({ ...p, [key]: { phase: "done", received: total, total } }));
       logger.info(LOG_TAG.media, "download_completed", {
@@ -1684,7 +1721,29 @@ export default function App() {
     } finally {
       if (dlAbortRef.current[key] === ac) delete dlAbortRef.current[key];
     }
-  }, []);
+  }, [uid, markExpired]);
+
+  /**
+   * 被动展示路径（气泡/查看器的原件 <img>/<video>）加载失败时的失效复验：
+   * <img onError> 分不清「404 已清理」与「解码失败/瞬时抖动」——只对前者才标失效。用一次轻量 ranged GET
+   * （服务端 /uploads 支持 Range）读状态码：404/410 → 落持久失效标记（掐 404 风暴）；其余（网络错/解码）不标，
+   * 保留可重试/可重载。已知失效则直接跳过，避免 onError 反复触发复验。
+   */
+  const markExpiredIfGone = useCallback(async (m: ChatMessage) => {
+    const key = m.content;
+    if (!key || expiredRef.current.has(key)) return;
+    try {
+      const resp = await fetch(key, { headers: { Range: "bytes=0-0" } });
+      if (resp.status === 404 || resp.status === 410) {
+        logger.warn(LOG_TAG.media, "media_verified_expired", {
+          conv_id: m.convId, conv_seq: m.convSeq, kind: m.contentType, status: resp.status,
+        });
+        markExpired(key);
+      }
+    } catch {
+      /* 网络错/断网：不标失效（可能只是暂时坏了），保留下次重载 */
+    }
+  }, [markExpired]);
 
   /** 门控卡片点击路由：下载中 → 取消（Web 无断点续传，只能重来）；已失效 → 不响应；其余 → 下载/重试。 */
   const onGateTap = useCallback((m: ChatMessage) => {
@@ -1714,7 +1773,12 @@ export default function App() {
     setDlBlobs({});
     setDlStates({});
     setMediaOptedIn(new Set()); // 图片/视频回退模糊占位（浏览器 HTTP 缓存里的字节由浏览器自管，无法在此清除）
-    try { localStorage.removeItem(optedInKey(uid)); } catch { /* ignore */ } // 持久 opt-in 一并清，刷新后也真回退
+    void cacheClear(uid);       // C1：清空该账号 Cache Storage 里的持久文件字节
+    try {
+      localStorage.removeItem(optedInKey(uid));      // 持久 opt-in 一并清，刷新后也真回退
+      localStorage.removeItem(downloadedFilesKey(uid)); // 已下载文件键集合
+      // 失效标记**不清**：那是"服务端已删"的客观事实，清了只会刷新后再撞一次 404。
+    } catch { /* ignore */ }
   }, [uid]);
 
   const onMediaBubbleTap = useCallback((m: ChatMessage, openViewer: () => void) => {
@@ -3528,11 +3592,13 @@ export default function App() {
                                 : <span className="msg-image msg-image-empty" />)
                             : m.contentType === "video"
                               ? (m.posterUrl
-                                  ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} />
-                                  : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} />)
-                              : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} />}
+                                  ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} onError={() => markExpiredIfGone(m)} />
+                                  : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} onError={() => markExpiredIfGone(m)} />)
+                              : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} onError={() => markExpiredIfGone(m)} />}
                           {gate
-                            ? (downloadGlyph(gate) && <span className="play-badge">{downloadGlyph(gate)}</span>)
+                            ? (gate.phase === "expired"
+                                ? <span className="play-badge expired" title="已失效">⊘</span>
+                                : downloadGlyph(gate) && <span className="play-badge">{downloadGlyph(gate)}</span>)
                             : uploading
                             ? (chunkedTaskFor(m.clientMsgId ?? "") && <span className="play-badge">{uploadPaused ? "↑" : "⏸"}</span>)
                             : (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? ""))
@@ -3540,7 +3606,7 @@ export default function App() {
                               : m.contentType === "video" && <span className="play-badge">▶</span>}
                           {gate
                             ? <span className="media-badge media-badge-tl">
-                                {downloadText(gate, formatFileSize(m.fileSize))}{durationText ? ` · ${durationText}` : ""}
+                                {downloadText(gate, formatFileSize(m.fileSize), m.contentType as MediaKind)}{durationText && gate.phase !== "expired" ? ` · ${durationText}` : ""}
                               </span>
                             : uploading
                             ? <span className="media-badge media-badge-tl">{uploadPaused ? "⏸ " : ""}{formatUploadProgress(uploading.sent, uploading.total)}</span>
@@ -3804,10 +3870,12 @@ export default function App() {
                          conv_id: viewer.m.convId, conv_seq: viewer.m.convSeq, has_poster: Boolean(viewer.m.posterUrl),
                        });
                        setVideoUnplayable(true);
+                       void markExpiredIfGone(viewer.m); // 404=源已清理（非编码问题）→ 落持久失效标记
                      }} />
             )
           ) : (
-            <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }} />
+            <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
+                 onError={() => markExpiredIfGone(viewer.m)} />
           )}
           <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
             <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>

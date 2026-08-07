@@ -186,13 +186,14 @@ export function passivePreviewSource(resolved: boolean, hasThumb: boolean): Prev
   return hasThumb ? "thumb" : "icon";
 }
 
-/** 卡片角标 / 文件条第二行文案（与 iOS displayText / fileLineText 对齐）。 */
-export function downloadText(s: DownloadState | undefined, sizeText: string): string {
+/** 卡片角标 / 文件条第二行文案（与 iOS displayText / fileLineText 对齐）。
+ *  `kind` 仅用于「已失效」的类型化文案（图片/视频/文件），缺省 → "文件已失效"（兼容既有调用与测试）。 */
+export function downloadText(s: DownloadState | undefined, sizeText: string, kind?: MediaKind): string {
   if (!s || s.phase === "notStarted") return sizeText;
   switch (s.phase) {
     case "downloading": return `${Math.round(downloadFraction(s) * 100)}%`;
     case "failed": return "下载失败，点击重试";
-    case "expired": return "文件已失效";
+    case "expired": return kind === "image" ? "图片已失效" : kind === "video" ? "视频已失效" : "文件已失效";
     case "done": return sizeText;
   }
 }

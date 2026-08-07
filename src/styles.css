@@ -373,6 +373,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 .msg-video-wrap { position: relative; display: inline-block; cursor: pointer; }
 .play-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--on-media); font-size: 26px; text-shadow: 0 1px 6px var(--overlay-strong); pointer-events: none; }
+/* 已失效（服务端已清理）：中心 ⊘ 灰白、略降透明 —— 与"加载中/可重试"区分（草图 §02/§03 终态）。 */
+.play-badge.expired { color: var(--on-media); opacity: .82; font-size: 30px; }
 
 /* 视频解不了码时的降级卡片（HEVC 等）：给出原因 + 下载入口，不留一个黑框让人猜。 */
 /* 用定宽而非 max-width：作为 .modal-mask 的 flex item，内部 img 的 max-width:100% 会与
@@ -924,7 +926,7 @@ button.detail-row:hover { background: var(--surface-hover); }
   background: var(--overlay); color: var(--on-media); font-size: 10px; line-height: 16px; pointer-events: none; z-index: 1; }
 /* 引用条缩略的门控态（档 B）：磨砂缩略（32px 用较小模糊，避免溢出邻块）/ 无 thumb 的类型图标兜底。 */
 .quote-thumb.gate-blur { filter: blur(4px) saturate(0.9); transform: none; }
-.quote-thumb-ph { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-hover); font-size: 15px; }
+.quote-thumb-ph { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-hover); color: var(--text-secondary); }
 /* 文件条的图标位即状态位（**圆形**，对齐 iOS _disc/_ring）：↓ 未下载 / 环形进度+✕ 下载中 / ↻ 重试 / ⊘ 已失效。
    固定 36px 圆槽，下载进度用外围圆环表示（非底部线性条）→ 状态切换不撑高卡片、不下移图标。 */
 .msg-file-dl { position: relative; width: 36px; height: 36px; flex: none; display: inline-flex; align-items: center; justify-content: center;

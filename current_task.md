@@ -4,6 +4,17 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+**媒体持久化 C1 + 持久失效标记（2026-08-07，tsc + 144 vitest 绿 + vite build 绿；待浏览器手测）**
+> 对齐 iOS「原件落 sandbox 磁盘、`fileExistsAtPath` 命中即就绪」。解决两个刷新丢失：**已下载文件刷新又要下载**（含资料卡文件列表）＋ **expired 刷新变透明/条纹坏占位、重刷 404 风暴**。
+- **`src/mediaCache.ts`（新）+ 6 单测**：Cache Storage 薄封装（按 uid 命名空间 `im-media-<uid>`，跨账号隔离）
+  `cachePutBlob/cacheMatchBlob/cacheClear` + 持久字符串集合 `loadStrSet/saveStrSet`（末 500 封顶）+ 键 `expiredKey/downloadedFilesKey`。
+  **无 `caches` 全局（Node/隐私模式）静默降级为易失内存 blob，绝不抛**。
+- **C1 已下载文件持久化**：`startDownload` 成功 → `cachePutBlob` + 记 `im.dlfiles.<uid>` 键集合；登录 rehydrate（cacheMatchBlob→objectURL→dlBlobs）→ 刷新/离线仍在、秒开。图片/视频不走此路（沿用 `mediaOptedIn` + 远端 URL + 浏览器 HTTP 缓存）。
+- **持久失效标记**（草图 §06 404 止损）：`expiredSet`（`im.expired.<uid>`）。命中来源两条——`startDownload` 拿 404/410；被动 `<img>/<video>` `onError` → **ranged GET 复验**（`Range: bytes=0-0`，区分「404 已清理」与「解码/瞬时」，只前者标失效）。`mediaGate` 命中即返回 `expired`、**不回源**（掐 404 风暴），三类消息统一。
+- **失效占位**：气泡/查看器中心 ⊘（`.play-badge.expired`）+ 类型化文案（`downloadText(s,size,kind)`：图片/视频/文件已失效）。
+- **清理边界**：`clearMediaCache` → `cacheClear` + 清 opt-in/dlfiles；**失效标记不清**（服务端已删是客观事实，清了只会再撞 404）。换账号清内存态、各 uid 各自持久化。
+- **已知未尽**：相册/详情宫格的原件 `<img>` 未各自接 `onError`（靠气泡/查看器先标失效后自愈）；iOS 三条被动路径仍 ⬜（见 CLIENT_PARITY 媒体失效行）。
+
 **修复用户手测 3 个新问题（2026-08-07，tsc + 138 vitest 绿）**
 - **① 详情文件「定位到聊天」个别文件失败**（浏览器实证修复 ✅）：根因**两处**——(a) `jumpToSeq` 用 `scrollTo({behavior:"smooth"})`，本 `.msgs` 容器上方大量异步布局媒体使平滑滚动**远距离目标滚不动**（实测 scrollTo smooth 纹丝不动、`scrollTop=` 瞬时赋值可靠）；(b) 从底部跳到较早目标后，下方媒体 onLoad 触发 `onMediaLoad` 因 `wasNearBottom` 仍 true 把 scrollTop 拽回底部，定位当场被冲掉。近处文件滚动距离小所以"正常"，seq 121 需大滚动就失败。修：`jumpToSeq` 改**瞬时滚动 + rAF 校正 + 置 `wasNearBottom=false`**。另加 `locateInChat`（详情读全量本地、聊天页是分页窗口——目标不在窗口内时**自动上翻分页直到加载到再定位**；跨会话先打开会话），三处「定位」入口（详情文件菜单/查看器/引用条）统一走它。
 - **② 媒体库点格后九宫格不消失**：`gallery-item` onClick 补 `setGalleryOpen(false)`（点格=关九宫格 + 开查看器）。
