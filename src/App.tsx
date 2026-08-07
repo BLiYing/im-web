@@ -1110,6 +1110,12 @@ export default function App() {
     setGroupInfos({});
     setDetail(null);
     setGroupsModal(null);
+    // 下载门控缓存（M4-7）：revoke 掉应用内 blob，清空下载态，避免 objectURL 泄漏与跨账号残留。
+    Object.values(dlBlobsRef.current).forEach((u) => URL.revokeObjectURL(u));
+    dlAbortRef.current = {};
+    setDlBlobs({});
+    setDlStates({});
+    setDataStorageOpen(false);
     setPhase("login");
   }, []);
 
@@ -1524,12 +1530,19 @@ export default function App() {
         const reader = resp.body.getReader();
         const chunks: Uint8Array[] = [];
         let received = 0;
+        // 进度节流：App 很大，若每个数据块都 setState 会整树重渲染上千次。只在整数百分比变化
+        // （总大小未知时按 256KB 步进）时才更新；最终 done 会补齐 100%。
+        let lastPct = -1, lastAt = 0;
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
           chunks.push(value);
           received += value.length;
-          setDlStates((p) => ({ ...p, [key]: { phase: "downloading", received, total } }));
+          const pct = total > 0 ? Math.floor((received / total) * 100) : -1;
+          if (pct !== lastPct || received - lastAt >= 262144) {
+            lastPct = pct; lastAt = received;
+            setDlStates((p) => ({ ...p, [key]: { phase: "downloading", received, total } }));
+          }
         }
         blob = new Blob(chunks as BlobPart[], { type: resp.headers.get("Content-Type") || "application/octet-stream" });
       } else {
@@ -3378,12 +3391,13 @@ export default function App() {
                           <span className={`msg-file${gate.phase === "failed" || gate.phase === "expired" ? " failed" : ""}`}
                                 onClick={() => onGateTap(m)}
                                 title={gate.phase === "expired" ? "文件已失效" : "点击下载"}>
-                            <span className="msg-file-dl">{downloadGlyph(gate) ?? "✕"}</span>
+                            {/* 已失效无从重试/取消，用中性 ⊘ 而非取消 ✕（避免误导可点取消）。 */}
+                            <span className="msg-file-dl">{downloadGlyph(gate) ?? "⊘"}</span>
                             <span className="msg-file-body">
                               <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
                               <span className="msg-file-size">
                                 {gate.phase === "notStarted"
-                                  ? `${formatFileSize(m.fileSize)} · 点击下载`
+                                  ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 点击下载` : "点击下载")
                                   : downloadText(gate, formatFileSize(m.fileSize))}
                               </span>
                               {gate.phase === "downloading" && (

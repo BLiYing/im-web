@@ -824,7 +824,9 @@ export class IMClient {
       mediaW: Number(d.media_w) > 0 ? Number(d.media_w) : undefined,
       mediaH: Number(d.media_h) > 0 ? Number(d.media_h) : undefined,
       duration: Number(d.duration) > 0 ? Number(d.duration) : undefined,
-      thumb: typeof d.thumb === "string" && d.thumb ? d.thumb : undefined, // 未下载卡片的模糊占位（M4-7）
+      // 未下载卡片的模糊占位（M4-7）：**只认内联 data:image/ 的 JPEG/PNG**。门控的意义就是"用户点之前绝不碰网络"，
+      // 若放行远程 URL，渲染 <img src> 时会在用户未下载前就去拉对端内容（追踪像素 / 泄漏 IP）——必须挡掉。
+      thumb: typeof d.thumb === "string" && /^data:image\//.test(d.thumb) ? d.thumb : undefined,
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，
