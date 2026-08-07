@@ -6,7 +6,9 @@ import type { ChatMessage, Conversation } from "./protocol";
 import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
-const DB_VERSION = 3;
+// v4：修「曾中途升到 v3 但 deletions store 没建成」的坏库（HMR 半态/失败升级）——版本不变时 onupgradeneeded 不再触发，
+// 缺的 store 永远补不上；bump 一版强制走一次 onupgradeneeded（`if(!contains)` 幂等，只补缺的、不动已有数据）。
+const DB_VERSION = 4;
 const STORE = "messages";
 const CURSOR_STORE = "sync_cursors";
 const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
