@@ -20,8 +20,18 @@
   `download_start` / `download_http_error status= expired=` / `download_completed bytes= duration_ms=` /
   `download_cancelled_by_user` / `media_cache_cleared`。**不在 `mediaGate` 里打**（每次 render 都会走）。
   （初版误用了 `LOG_TAG.http`，已按规范改回 `media`。）
-- **已知限制**：无断点续传（✕=重来）；blob 缓存活在本页生命周期内，**刷新即失效**（与上传 File 句柄同类限制）；
-  会话详情抽屉的媒体/文件 Tab **仍是直连 `<a>`，未门控**（待补）。
+**下载门控 阶段 6 — 对齐 iOS 详情 + 图片/视频改 URL 直取（2026-08-07，未编译按用户要求自测）**
+- **圆形图标 + 环形进度**（对齐 iOS `_disc`/`_ring`，共用 `FileGateIcon`）：文件条方形→圆形，进度改图标外围 SVG 圆环、去掉底部线性条；`.msg-file` 固定最小高度 → 下载切换**零高度抖动**。
+- **点击预览路由** `openReadyFile`：就绪文件可预览类型（pdf/图片/音视频/文本）**新标签预览**、其余**另存**；右键菜单加「下载」项直接落盘（`saveMessageToDisk`）。
+- **详情「文件」页签并入门控**（div + `mediaGate`，共享 `dlBlobs`）+ 右键菜单 **转发/定位到聊天/取消下载（仅下载中）/删除（占位，后端接口待建）**。
+- **图片/视频改 URL 直取（方案 B）**：解门控后不下 blob，直接 `<img/video src=远端>`，**浏览器 HTTP 缓存兜底持久（刷新仍在）**；门控判定保留（大图/视频先显模糊、点了才拉，省流量）。`mediaOptedIn: Set<content>` 记已解门控；blob/进度状态机**仅文件**再用。代价：图片/视频无进度环。
+- **文档**：Web↔移动端差异一览 + 方案 C（Cache Storage 持久缓存）待办 → `../IMServer/docs/DOWNLOAD_DATA_STORAGE_PLAN.md` §5.1/§阶段6/待办。
+- **已知限制**：无断点续传（✕=重来）；**文件** blob 缓存刷新即失效（图片/视频已靠浏览器 HTTP 缓存持久）。
+
+**自测三 bug 修复（2026-08-07，tsc + 135 vitest 绿，删除已浏览器实测）**
+- **① 门控图刷新退化 + opt-in 丢失**：`localStore` 未持久化 `thumb`（`MsgRecord` 补字段 + 存/读）；图片/视频「已解门控」记录存 `localStorage`（按 uid，`loadOptedIn`/`saveOptedIn`），登录恢复 → 刷新后已看过的媒体仍直显、未看的仍显磨砂而非斜纹底。
+- **② 已缓存媒体恒 0**：方案 B 后图片/视频不进 `dlBlobs` → 计数改 `dlBlobs 文件数 + mediaOptedIn.size`。
+- **③ 删了又冒出来 / 删不掉**：无服务端删消息接口，纯本地删。原实现只抹内存视图、还 `seenByConv.delete` → 实时/补拉同步当新消息重加回。改为**双层墓碑**：IndexedDB `deletions` 表（`markMessageDeleted`，`loadConversation` 读盘过滤，DB v2→v3）+ **内存墓碑 `deletedByConv`**（登录经 `client.loadDeletedSeqs` 载入，`onMessage` 收到服务端重推直接丢弃）。二者缺一都会复现：只 IndexedDB→实时重推绕过读盘；只内存→刷新丢失。**浏览器实测：删除后刷新不复现 ✅**。
 
 **Typing 提示位置对齐（2026-08-05，待用户手测）**：已移除输入栏上方的提示条；收到 typing 后聊天标题栏副标题显示「正在输入」，3 秒无新帧即恢复单聊在线态或群聊成员数。按本次要求未编译、未跑测试。
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
-import { loadConversation, clearMessages } from "./sdk/localStore";
+import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
@@ -388,6 +388,17 @@ function FileGateIcon({ state }: { state: DownloadState }) {
 const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac|txt|md|log|json|csv|xml)$/i;
 function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test(name); }
 
+// 图片/视频「已解门控」的持久化（方案 B）：opt-in 是内存 Set，刷新即失。存 localStorage（按 uid，末 500 条）→
+// 刷新后仍直显远端（浏览器 HTTP 缓存秒出），兑现「解门控后刷新仍在」。content URL 每条唯一、跨会话不冲突。
+const optedInKey = (uid: string) => `im.optedIn.${uid}`;
+function loadOptedIn(uid: string): Set<string> {
+  try { const a = JSON.parse(localStorage.getItem(optedInKey(uid)) || "[]"); return new Set(Array.isArray(a) ? a : []); }
+  catch { return new Set(); }
+}
+function saveOptedIn(uid: string, set: Set<string>): void {
+  try { localStorage.setItem(optedInKey(uid), JSON.stringify([...set].slice(-500))); } catch { /* 配额满等，忽略 */ }
+}
+
 /** 保持登录（与 iOS IMSessionStore 一致的 dev 骨架）：登录成功落 localStorage，刷新后静默重登。
  *  存凭据而非 token——token 24h 过期且断线重连本就要用密码重新换 token；生产应换更安全的方案。 */
 const SESSION_KEY = "im.session";
@@ -501,11 +512,14 @@ export default function App() {
   // Web 只吃 Wi-Fi 档（浏览器分不清移动/Wi-Fi），且**始终提供手动下载**；策略本身仍随账号多端同步。
   const [dataStorageOpen, setDataStorageOpen] = useState(false);        // 设置 ▸ 数据与存储 子面板
   const [dlSettings, setDlSettings] = useState<DownloadSettings | null>(null);
-  const [dlStates, setDlStates] = useState<Record<string, DownloadState>>({}); // content → 下载态
-  const [dlBlobs, setDlBlobs] = useState<Record<string, string>>({});          // content → objectURL（应用内缓存）
+  const [dlStates, setDlStates] = useState<Record<string, DownloadState>>({}); // content → 下载态（**仅文件**用状态机）
+  const [dlBlobs, setDlBlobs] = useState<Record<string, string>>({});          // content → objectURL（**仅文件**的应用内缓存）
   const dlBlobsRef = useRef<Record<string, string>>({});
   dlBlobsRef.current = dlBlobs;
   const dlAbortRef = useRef<Record<string, AbortController>>({}); // content → 在飞请求的中止句柄（✕ 取消要真中止）
+  // 图片/视频门控（方案 B）：不下到内存 blob，只记「已解门控」的 content——解门控后直接 <img/video src=远端>，
+  // 浏览器 HTTP 缓存兜底持久（刷新仍在）。门控判定本身保留：大图/视频先显模糊占位、点了才拉，省流量。
+  const [mediaOptedIn, setMediaOptedIn] = useState<Set<string>>(new Set());
   const [wallpaperOpen, setWallpaperOpen] = useState(false); // 通用设置 ▸ 聊天壁纸
   const [wallpaper, setWallpaper] = useState<WallpaperChoice>(loadWallpaper);
   const [wallpaperBlur, setWallpaperBlur] = useState(() => localStorage.getItem("im.wallpaperBlur") === "1");
@@ -540,6 +554,8 @@ export default function App() {
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const seenByConv = useRef<Record<string, Set<number>>>({});
+  // 内存删除墓碑（convId → 被本地删的 conv_seq）：登录时从 IndexedDB 载入，onMessage 据此拦住服务端重同步的复现。
+  const deletedByConv = useRef<Record<string, Set<number>>>({});
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
@@ -647,6 +663,9 @@ export default function App() {
       const local = await client.loadLocal(c.conv_id);
       const continuousCursor = await client.loadSyncCursor(c.conv_id);
       client.trackConversation(c.conv_id, continuousCursor);
+      // 载入删除墓碑（须早于 syncTracked）：被删的 conv_seq 进内存墓碑，onMessage 收到服务端重推时直接丢弃。
+      const del = await client.loadDeletedSeqs(c.conv_id);
+      if (del.length) deletedByConv.current[c.conv_id] = new Set(del);
       if (local.length === 0) continue;
       loaded[c.conv_id] = local;
       const seen = (seenByConv.current[c.conv_id] ??= new Set());
@@ -883,6 +902,8 @@ export default function App() {
         }
       },
       onMessage: (m) => {
+        // 本地已删的消息被服务端重同步推回来：直接丢弃（读盘时 loadConversation 也会过滤，这里挡实时路径）。
+        if (m.convSeq > 0 && deletedByConv.current[m.convId]?.has(m.convSeq)) return;
         const seen = (seenByConv.current[m.convId] ??= new Set());
         if (m.convSeq > 0) {
           if (seen.has(m.convSeq)) {
@@ -1041,6 +1062,7 @@ export default function App() {
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
+    setMediaOptedIn(loadOptedIn(uid)); // 恢复图片/视频「已解门控」记录（方案 B）：刷新后已看过的媒体仍直显，不回退门控
     localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
     setAuthBusy(false);
     setPhase("app");
@@ -1119,6 +1141,7 @@ export default function App() {
       conversationRefreshTimerRef.current = null;
     }
     seenByConv.current = {};
+    deletedByConv.current = {};
     currentConvRef.current = "";
     setConversations([]);
     setMsgsByConv({});
@@ -1146,6 +1169,7 @@ export default function App() {
     dlAbortRef.current = {};
     setDlBlobs({});
     setDlStates({});
+    setMediaOptedIn(new Set()); // 图片/视频解门控记录：换账号重新门控
     setDataStorageOpen(false);
     setPhase("login");
   }, []);
@@ -1517,13 +1541,20 @@ export default function App() {
     if (!m.content || m.from === uid || m.recalledAt) return undefined;
     const kind = m.contentType;
     if (kind !== "image" && kind !== "video" && kind !== "file") return undefined;
+    // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
+    const passesPolicy = shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId);
+    if (kind === "image" || kind === "video") {
+      // 方案 B：图片/视频不落 blob，只判「要不要拉原件」。已解门控 / 策略放行 → 直显远端；否则显模糊占位 + ↓。
+      if (mediaOptedIn.has(m.content) || passesPolicy) return undefined;
+      return { phase: "notStarted", received: 0, total: m.fileSize ?? 0 };
+    }
+    // 文件：保留应用内下载状态机（进度环 / 取消 / 失效 / 就绪走 blob）。
     if (dlBlobs[m.content]) return undefined;                       // 已下到应用内缓存
     const st = dlStates[m.content];
     if (st) return st.phase === "done" ? undefined : st;            // 进行中 / 失败 / 已失效
-    // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
-    if (shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId)) return undefined; // 策略放行=浏览器直取
+    if (passesPolicy) return undefined;                             // 策略放行=浏览器直取
     return { phase: "notStarted", received: 0, total: m.fileSize ?? 0 };
-  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId]);
+  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn]);
 
   /** 该消息应当渲染的地址：已手动下载过用应用内 blob，否则用远端 URL。 */
   const mediaSrc = useCallback((m: ChatMessage) => dlBlobs[m.content] || m.content, [dlBlobs]);
@@ -1542,6 +1573,19 @@ export default function App() {
       a.href = url; a.download = name; a.rel = "noreferrer";
       document.body.appendChild(a); a.click(); a.remove();
     }
+  }, []);
+
+  /**
+   * 右键菜单「下载」：把这条图片/视频/文件**保存到本地**（浏览器下载目录，如 ~/Downloads）。复用应用内已下的 blob
+   * （dlBlobs），否则拉远端 URL（同源，`download` 属性生效）——与 openReadyFile 的另存分支同一套落盘逻辑。
+   */
+  const saveMessageToDisk = useCallback((m: ChatMessage) => {
+    if (!m.content) return;
+    const name = m.fileName || fileNameFromContent(m.content);
+    const url = dlBlobsRef.current[m.content] || m.content;
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.rel = "noreferrer";
+    document.body.appendChild(a); a.click(); a.remove();
   }, []);
 
   /**
@@ -1615,6 +1659,12 @@ export default function App() {
 
   /** 门控卡片点击路由：下载中 → 取消（Web 无断点续传，只能重来）；已失效 → 不响应；其余 → 下载/重试。 */
   const onGateTap = useCallback((m: ChatMessage) => {
+    // 图片/视频（方案 B）：只「解门控」——不下 blob、不走状态机，直接用远端 URL 渲染，浏览器 HTTP 缓存兜底。
+    if (m.contentType === "image" || m.contentType === "video") {
+      setMediaOptedIn((s) => { const n = new Set(s); n.add(m.content); saveOptedIn(uid, n); return n; });
+      return;
+    }
+    // 文件：应用内下载状态机（进度环 / 取消 / 重试）。
     const st = dlStates[m.content];
     if (st?.phase === "expired") return;
     if (st?.phase === "downloading") {
@@ -1626,7 +1676,7 @@ export default function App() {
       return;
     }
     void startDownload(m);
-  }, [dlStates, startDownload]);
+  }, [uid, dlStates, startDownload]);
 
   /** 清空应用内媒体缓存（设置 ▸ 数据与存储）：只删本机，云端保留可重下 → 卡片回退"未下载"。 */
   const clearMediaCache = useCallback(() => {
@@ -1634,7 +1684,9 @@ export default function App() {
     Object.values(dlBlobsRef.current).forEach((u) => URL.revokeObjectURL(u));
     setDlBlobs({});
     setDlStates({});
-  }, []);
+    setMediaOptedIn(new Set()); // 图片/视频回退模糊占位（浏览器 HTTP 缓存里的字节由浏览器自管，无法在此清除）
+    try { localStorage.removeItem(optedInKey(uid)); } catch { /* ignore */ } // 持久 opt-in 一并清，刷新后也真回退
+  }, [uid]);
 
   const onMediaBubbleTap = useCallback((m: ChatMessage, openViewer: () => void) => {
     const mine = m.from === uid;
@@ -1774,7 +1826,10 @@ export default function App() {
       const list = (prev[cid] ?? []).filter((m) => !(m.convSeq > 0 && selected.has(m.convSeq)));
       return { ...prev, [cid]: list };
     });
-    selected.forEach((s) => seenByConv.current[cid]?.delete(s));
+    // 持久化删除（同 deleteMessage）：内存墓碑 + IndexedDB 墓碑，防实时/读盘两条路径复现。
+    selected.forEach((s) => {
+      if (s > 0) { (deletedByConv.current[cid] ??= new Set()).add(s); void markMessageDeleted(uid, cid, { convSeq: s }); }
+    });
     exitSelectMode();
   }, [peer, uid, groupConvId, selected, exitSelectMode]);
 
@@ -1839,7 +1894,14 @@ export default function App() {
       );
       return { ...prev, [m.convId]: list };
     });
-    if (m.convSeq > 0) seenByConv.current[m.convId]?.delete(m.convSeq);
+    // 持久化删除：落墓碑（IndexedDB 读盘过滤）+ 内存墓碑（拦服务端实时/补拉重推）+ 抹本地记录。
+    // 二者缺一都会"删了又冒出来"：只落 IndexedDB → 实时重推绕过读盘过滤；只记内存 → 刷新后内存墓碑丢失、读盘又载回。
+    if (m.convSeq > 0) {
+      (deletedByConv.current[m.convId] ??= new Set()).add(m.convSeq);
+      void markMessageDeleted(uid, m.convId, { convSeq: m.convSeq });
+    } else if (m.clientMsgId && m.status === "failed") {
+      void markMessageDeleted(uid, m.convId, { clientMsgId: m.clientMsgId });
+    }
     setMenu(null);
   }, [uid, teardownOutboxUpload]);
 
@@ -1971,6 +2033,7 @@ export default function App() {
       reply: replyMessage,
       forward: forwardMessage,
       favorite: favoriteMessage,
+      download: saveMessageToDisk,
       edit: editMessage,
       translate: translateMessage,
       multiSelect: enterSelectMode,
@@ -1981,7 +2044,7 @@ export default function App() {
       cancelSend: cancelSendMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
   );
 
   // 会话菜单动作（数据驱动，M4.5 全接后端）：置顶/免打扰切换、标已读/未读、删除会话。
@@ -2924,7 +2987,8 @@ export default function App() {
           const wifi = st.wifi;
           const tier: SpeedTier = tierOfPolicy(wifi);
           const patchWifi = (next: typeof wifi) => void saveDownloadSettings({ ...st, wifi: next });
-          const cachedCount = Object.keys(dlBlobs).length;
+          // 已缓存 = 应用内 blob（文件）+ 已解门控的图片/视频（方案 B，走浏览器 HTTP 缓存）。
+          const cachedCount = Object.keys(dlBlobs).length + mediaOptedIn.size;
           const limitRow = (kind: "video" | "file", label: string) => (
             <div className="range-row" key={kind}>
               <div className="range-top">
@@ -4022,10 +4086,11 @@ export default function App() {
           <div className="detail-mask" onClick={close}>
             <aside className="detail-panel" onClick={(e) => e.stopPropagation()}>
               {!manageOpen && (
-                <>
+                // 标题栏随面板滚动固定在顶部（对齐 iOS 大标题折叠为常驻导航栏）：关闭按钮一并锁在标题栏内。
+                <div className="detail-sticky-head">
                   <button className="detail-close" title="关闭" onClick={close}><X size={20} /></button>
                   <div className="detail-topbar">{d.isGroup ? "群组信息" : "用户信息"}</div>
-                </>
+                </div>
               )}
 
               {manageOpen && gp ? (

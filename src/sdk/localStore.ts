@@ -6,9 +6,10 @@ import type { ChatMessage, Conversation } from "./protocol";
 import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "messages";
 const CURSOR_STORE = "sync_cursors";
+const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
 
 interface MsgRecord {
   id: string;        // 已确认：owner|convId|convSeq；被拒(convSeq=0)：owner|convId|c:clientMsgId —— 唯一键，幂等覆盖
@@ -41,6 +42,12 @@ interface MsgRecord {
   mediaW?: number;    // 媒体像素宽（M4+）：按原比例渲染气泡，免加载完跳版
   mediaH?: number;    // 媒体像素高（M4+）
   duration?: number;  // 视频时长毫秒（M4+）：封面左上角角标
+  thumb?: string;     // 极小模糊预览 data URI（M4-7）：未下载卡片的磨砂占位。**必须持久化**，否则刷新后门控图退化成中性斜纹底
+}
+
+interface DeletionRecord {
+  id: string;        // 被删消息的记录键（owner|convId|convSeq 或 owner|convId|c:clientMsgId），与 MsgRecord.id 同形
+  ownerConv: string; // owner|convId —— 索引：loadConversation 时批量取本会话墓碑
 }
 
 interface SyncCursorRecord {
@@ -64,6 +71,10 @@ function openDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(CURSOR_STORE)) {
         db.createObjectStore(CURSOR_STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(DELETIONS_STORE)) {
+        const ds = db.createObjectStore(DELETIONS_STORE, { keyPath: "id" });
+        ds.createIndex("ownerConv", "ownerConv", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -91,7 +102,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
-    mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
+    mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration, thumb: m.thumb,
   };
 }
 
@@ -259,14 +270,20 @@ export async function loadConversation(owner: string, convId: string): Promise<C
   if (!owner || !convId) return [];
   try {
     const db = await openDB();
-    const recs = await new Promise<MsgRecord[]>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).index("ownerConv").getAll(`${owner}|${convId}`);
-      req.onsuccess = () => resolve((req.result as MsgRecord[]) ?? []);
-      req.onerror = () => reject(req.error);
+    // 消息与本会话的删除墓碑同事务读出：本人删过的消息即便被重同步重新落库，也在此过滤掉，不复现。
+    const { recs, deleted } = await new Promise<{ recs: MsgRecord[]; deleted: Set<string> }>((resolve, reject) => {
+      const tx = db.transaction([STORE, DELETIONS_STORE], "readonly");
+      const ownerConv = `${owner}|${convId}`;
+      const msgReq = tx.objectStore(STORE).index("ownerConv").getAll(ownerConv);
+      const delReq = tx.objectStore(DELETIONS_STORE).index("ownerConv").getAllKeys(ownerConv);
+      tx.oncomplete = () => resolve({
+        recs: (msgReq.result as MsgRecord[]) ?? [],
+        deleted: new Set(((delReq.result as IDBValidKey[]) ?? []).map(String)),
+      });
+      tx.onerror = () => reject(tx.error);
     });
     recs.sort((a, b) => a.convSeq - b.convSeq);
-    return recs.map((r) =>
+    return recs.filter((r) => !deleted.has(r.id)).map((r) =>
       r.status === "failed"
         ? {
             // 被拒收的失败消息：还原失败态 + 系统提示（红❗+下方系统行）。convSeq=0，渲染按 timestamp 落位。
@@ -277,7 +294,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
-            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration,
+            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb,
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
@@ -286,13 +303,65 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
-            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration,
+            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb,
           },
     );
   } catch (error) {
     logger.warn(LOG_TAG.store, "conversation_load_failed", { conv_id: convId, error });
     return [];
   }
+}
+
+/**
+ * 本地删除一条消息（对齐 iOS「删除」——服务端无删消息接口，纯本地）：落一条删除墓碑并抹掉消息记录。
+ * 墓碑令 `loadConversation` 永久过滤掉它，故刷新 / 后台重同步重新落库也不复现。
+ * 传 convSeq（已确认消息）或 clientMsgId（被拒的 convSeq=0 消息，按 saveRejected 的复合键）。
+ */
+export async function markMessageDeleted(
+  owner: string,
+  convId: string,
+  opts: { convSeq?: number; clientMsgId?: string },
+): Promise<void> {
+  if (!owner || !convId) return;
+  const id = opts.convSeq && opts.convSeq > 0
+    ? keyOf(owner, convId, opts.convSeq)
+    : opts.clientMsgId ? `${owner}|${convId}|c:${opts.clientMsgId}` : null;
+  if (!id) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE, DELETIONS_STORE], "readwrite");
+      tx.objectStore(DELETIONS_STORE).put({ id, ownerConv: `${owner}|${convId}` } satisfies DeletionRecord);
+      tx.objectStore(STORE).delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "message_delete_failed", { conv_id: convId, error });
+  }
+}
+
+/**
+ * 读某会话被本地删除的 conv_seq 列表：登录/进会话时载入内存，供 onMessage 挡住服务端重同步的**复现**。
+ * loadConversation 只在"读盘"时过滤墓碑，但服务端会通过实时同步(onMessage)把删掉的消息重新推来——那条路径绕过读盘过滤，
+ * 故必须另有一份内存墓碑在收帧时拦截。只取 conv_seq 型墓碑（c:clientMsgId 型是被拒消息，服务端本就不会重推）。
+ */
+export async function loadDeletedSeqs(owner: string, convId: string): Promise<number[]> {
+  if (!owner || !convId) return [];
+  try {
+    const db = await openDB();
+    const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+      const tx = db.transaction(DELETIONS_STORE, "readonly");
+      const req = tx.objectStore(DELETIONS_STORE).index("ownerConv").getAllKeys(`${owner}|${convId}`);
+      req.onsuccess = () => resolve((req.result as IDBValidKey[]) ?? []);
+      req.onerror = () => reject(req.error);
+    });
+    const prefix = `${owner}|${convId}|`;
+    return keys.map(String)
+      .filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}c:`))
+      .map((id) => Number(id.slice(prefix.length)))
+      .filter((n) => Number.isFinite(n) && n > 0);
+  } catch { return []; }
 }
 
 /** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。 */

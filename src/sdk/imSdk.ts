@@ -851,6 +851,11 @@ export class IMClient {
     return localStore.loadConversation(this.uid, convId);
   }
 
+  /** 读取某会话被本地删除的 conv_seq（内存墓碑），供收帧时拦住服务端重同步的复现。 */
+  loadDeletedSeqs(convId: string): Promise<number[]> {
+    return localStore.loadDeletedSeqs(this.uid, convId);
+  }
+
   /** 读取当前 uid 命名空间内独立持久化的连续同步游标。 */
   loadSyncCursor(convId: string): Promise<number> {
     return localStore.loadSyncCursor(this.uid, convId);

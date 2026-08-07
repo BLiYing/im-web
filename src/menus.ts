@@ -5,7 +5,7 @@ import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
-  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle,
+  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle, Download,
 } from "lucide-react";
 
 /** 一个菜单项：id 稳定标识、label 文案、icon 图标、danger 红色危险样式、visible 按上下文决定是否显示、run 执行。 */
@@ -43,6 +43,7 @@ export interface MessageHandlers {
   reply: (m: ChatMessage) => void;
   forward: (m: ChatMessage) => void;
   favorite: (m: ChatMessage) => void;
+  download: (m: ChatMessage) => void;
   edit: (m: ChatMessage) => void;
   translate: (m: ChatMessage) => void;
   multiSelect: (m: ChatMessage) => void;
@@ -77,6 +78,11 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
     // 必须 convSeq>0：未发出的乐观行 content 是本地 blob: URL，收藏它会存成一条永久失效的死链。
     { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
+    // 下载：图片/视频/文件保存到本地（浏览器下载目录）。复用应用内已下的 blob，否则拉远端。必须有 content（乐观行 blob: 不算）。
+    { id: "download", label: "下载", icon: Download,
+      visible: (c) => !c.m.recalledAt && c.m.convSeq > 0 && !!c.m.content
+        && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
+      run: (c) => h.download(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
