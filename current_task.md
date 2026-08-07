@@ -4,6 +4,11 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+**修复用户手测 3 个新问题（2026-08-07，tsc + 138 vitest 绿）**
+- **① 详情文件「定位到聊天」个别文件失败**（浏览器实证修复 ✅）：根因**两处**——(a) `jumpToSeq` 用 `scrollTo({behavior:"smooth"})`，本 `.msgs` 容器上方大量异步布局媒体使平滑滚动**远距离目标滚不动**（实测 scrollTo smooth 纹丝不动、`scrollTop=` 瞬时赋值可靠）；(b) 从底部跳到较早目标后，下方媒体 onLoad 触发 `onMediaLoad` 因 `wasNearBottom` 仍 true 把 scrollTop 拽回底部，定位当场被冲掉。近处文件滚动距离小所以"正常"，seq 121 需大滚动就失败。修：`jumpToSeq` 改**瞬时滚动 + rAF 校正 + 置 `wasNearBottom=false`**。另加 `locateInChat`（详情读全量本地、聊天页是分页窗口——目标不在窗口内时**自动上翻分页直到加载到再定位**；跨会话先打开会话），三处「定位」入口（详情文件菜单/查看器/引用条）统一走它。
+- **② 媒体库点格后九宫格不消失**：`gallery-item` onClick 补 `setGalleryOpen(false)`（点格=关九宫格 + 开查看器）。
+- **③ 查看器「更多」hover 即消失**：`viewer-more-wrap` 由 `onMouseEnter/Leave` 改**点击切换**（`setViewerMore(v=>!v)`）；点查看器图片/视频/蒙层收起弹窗。
+
 **修复：资料卡片「媒体/文件」列表全空（2026-08-07，tsc + 138 vitest 绿，浏览器实证修复逻辑 ✅）**
 > 根因（**日志锁定**：`im-web.log` 有 238 条 `conversation_load_failed` / `NotFoundError: object store not found` @`localStore.ts`）：
 > `loadConversation` 开 `[messages, deletions]` 双 store 事务，但用户浏览器那条 IndexedDB 连接是**缺 `deletions` store 的陈旧连接**

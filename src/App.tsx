@@ -1890,27 +1890,75 @@ export default function App() {
       node.classList.add("flash");
       window.setTimeout(() => node.classList.remove("flash"), 1200);
     };
-    // 目标已在视口内 → 立即闪；否则先平滑滚动，**到位后**再闪（原先边滚边闪，目标离得远时
-    // 1.2s 动画在滚动途中就放完了，人到了什么都看不见）。scrollend 一次性监听，老浏览器降级定时。
-    const r = node.getBoundingClientRect();
-    const br = box.getBoundingClientRect();
-    const visible = r.top >= br.top && r.bottom <= br.bottom;
-    if (visible) { flash(); return; }
-    // 同「进未读会话定位」：不用 scrollIntoView（会连带滚动 html/#root 把 .app 顶出视口、间距塌陷），
-    // 只动 .msgs 自身 scrollTop，把目标行滚到容器纵向居中。
-    box.scrollTo({
-      top: box.scrollTop + (r.top - br.top) - (box.clientHeight - r.height) / 2,
-      behavior: "smooth",
-    });
-    if ("onscrollend" in box) {
-      let done = false;
-      const once = () => { if (!done) { done = true; flash(); } };
-      box.addEventListener("scrollend", once, { once: true });
-      window.setTimeout(once, 1500); // 防御：极端情况 scrollend 不触发（如无需滚动）
-    } else {
-      window.setTimeout(flash, 700); // 无 scrollend 的老浏览器：按平滑滚动典型时长延迟
-    }
+    // 把目标行滚到容器纵向居中。只动 .msgs 自身 scrollTop（不用 scrollIntoView——会连带滚动 html/#root
+    // 把 .app 顶出视口、间距塌陷）。**用瞬时赋值而非 `scrollTo({behavior:"smooth"})`**：本容器上方有大量
+    // 异步布局的媒体（gated 缩略/视频），平滑滚动的动画目标被持续变化的 scrollHeight 打断，远距离目标**滚不动**
+    // （实测 scrollTo smooth 到 5000px 外的目标 scrollTop 纹丝不动）；瞬时赋值可靠命中。
+    const scrollToNode = () => {
+      const r = node.getBoundingClientRect();
+      const br = box.getBoundingClientRect();
+      box.scrollTop = box.scrollTop + (r.top - br.top) - (box.clientHeight - r.height) / 2;
+    };
+    const r0 = node.getBoundingClientRect();
+    const br0 = box.getBoundingClientRect();
+    if (r0.top >= br0.top && r0.bottom <= br0.bottom) { flash(); return; } // 已在视口内 → 直接闪
+    // 跳走后不再「贴底」：否则从底部跳到较早的目标时，下方媒体（视频/图片）异步加载完成会触发
+    // onMediaLoad 把 scrollTop 拽回 scrollHeight，定位当场被冲掉（远距离目标必现，近处目标因差值小看似正常）。
+    wasNearBottomRef.current = false;
+    scrollToNode();
+    // 下一帧再校正一次：抵消滚动后上方媒体继续异步布局造成的目标位移，然后高亮。
+    requestAnimationFrame(() => { scrollToNode(); flash(); });
   }, []);
+
+  // 「定位到聊天」跨窗口定位（详情文件/媒体列表读的是本地全量，聊天页是分页窗口——较早的目标不在窗口内，
+  // jumpToSeq 直接找不到）。机制：记一个待定位目标，**自动上翻分页直到目标进入窗口再滚动高亮**；到顶仍无=已删除。
+  const pendingLocateRef = useRef<{ convId: string; seq: number; tries: number } | null>(null);
+  const MAX_LOCATE_PAGES = 40; // 上限：极长历史兜底，避免异常时无限翻页
+  const driveLocate = useCallback(() => {
+    const pend = pendingLocateRef.current;
+    if (!pend || pend.convId !== currentConvRef.current) return; // 会话切走 → 交给新一轮 locateInChat
+    const list = messagesRef.current;
+    if (list.some((x) => x.convSeq === pend.seq)) {
+      pendingLocateRef.current = null;
+      requestAnimationFrame(() => jumpToSeq(pend.seq)); // 等新插入的行渲染出 DOM 节点再滚动高亮
+      return;
+    }
+    const oldest = minSeqOf(list);
+    if (oldest === 0) return;                              // 窗口尚未加载完，等下一次 msgsByConv 变化
+    if (oldest <= 1 || pend.tries >= MAX_LOCATE_PAGES) {   // 到顶仍没有 / 翻页超上限 → 判定已删除
+      pendingLocateRef.current = null;
+      setToast("原消息已被删除");
+      return;
+    }
+    if (pend.seq < oldest) {                               // 目标更早 → 继续上翻一页（保位，避免视觉跳动）
+      if (loadingOlderRef.current) return;                // 有一页在飞，等它到达后本流程再被触发
+      if (pend.tries === 0) setToast("正在定位…");
+      const box = msgsRef.current;
+      if (box) histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
+      pend.tries += 1;
+      loadingOlderRef.current = true;
+      clientRef.current?.loadOlder(pend.convId, oldest);
+    } else {                                               // 落在已加载窗口内却缺失 → 已被删除
+      pendingLocateRef.current = null;
+      setToast("原消息已被删除");
+    }
+  }, [jumpToSeq]);
+  // 每次消息窗口变化（分页到达）推进一步定位。
+  useEffect(() => { driveLocate(); }, [msgsByConv, driveLocate]);
+  const locateInChat = useCallback((cid: string, seq: number) => {
+    if (!cid || seq <= 0) { setToast("该消息无法定位"); return; }
+    pendingLocateRef.current = { convId: cid, seq, tries: 0 };
+    if (cid !== currentConvRef.current) {
+      // 详情所属会话未打开（如从通讯录/群成员进的资料页）→ 先打开它，加载窗口后由 effect 定位。
+      if (cid.startsWith("g_")) openGroupChat(cid);
+      else {
+        const peer = cid.replace(/^u_/, "").split("_u_").find((x) => x !== uid);
+        if (peer) openChat(peer); else { pendingLocateRef.current = null; setToast("该消息无法定位"); }
+      }
+      return;
+    }
+    driveLocate(); // 同会话：立即试一次（在窗口内直接跳；更早则启动自动上翻）
+  }, [uid, openChat, openGroupChat, driveLocate]);
 
   // 本地删除一条消息（仅本端：从内存列表 + 去重集移除，不影响对端）。
   const deleteMessage = useCallback((m: ChatMessage) => {
@@ -3456,7 +3504,7 @@ export default function App() {
                       {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                       {m.replyToConvSeq ? (
                         // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
-                        <div className="quote-bar" onClick={() => jumpToSeq(m.replyToConvSeq!)}>
+                        <div className="quote-bar" onClick={() => locateInChat(m.convId, m.replyToConvSeq!)}>
                           {(() => { const q = messages.find((x) => x.convSeq === m.replyToConvSeq); return <QuoteThumb m={q} gated={!!(q && mediaGate(q))} />; })()}
                           <span className="quote-lines">
                             {isGroupChat && m.replyToFrom && (
@@ -3750,7 +3798,7 @@ export default function App() {
               </div>
             ) : (
               <video className="image-viewer" src={viewer.m.content} controls
-                     onClick={(e) => e.stopPropagation()}
+                     onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
                      onError={() => {
                        logger.warn(LOG_TAG.media, "video_playback_unsupported", {
                          conv_id: viewer.m.convId, conv_seq: viewer.m.convSeq, has_poster: Boolean(viewer.m.posterUrl),
@@ -3759,18 +3807,19 @@ export default function App() {
                      }} />
             )
           ) : (
-            <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => e.stopPropagation()} />
+            <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }} />
           )}
           <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
             <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>
             {!viewer.fromGallery && (
               <button className="viewer-btn" title="媒体库" onClick={() => setGalleryOpen(true)}><LayoutGrid size={18} /></button>
             )}
-            <div className="viewer-more-wrap" onMouseEnter={() => setViewerMore(true)} onMouseLeave={() => setViewerMore(false)}>
-              <button className="viewer-btn" title="更多"><MoreHorizontal size={18} /></button>
+            <div className="viewer-more-wrap">
+              {/* 点击切换（原 hover：鼠标从按钮移向弹窗时穿过间隙触发 onMouseLeave 即消失，够不到菜单项）。 */}
+              <button className="viewer-btn" title="更多" onClick={(e) => { e.stopPropagation(); setViewerMore((v) => !v); }}><MoreHorizontal size={18} /></button>
               {viewerMore && (
                 <div className="viewer-more-pop">
-                  <button onClick={() => { const seq = viewer.m.convSeq; setViewer(null); setGalleryOpen(false); if (seq > 0) jumpToSeq(seq); }}>定位到聊天位置</button>
+                  <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}>定位到聊天位置</button>
                   <button onClick={() => favoriteMessage(viewer.m)}>收藏</button>
                   <a href={viewer.m.content} download>下载</a>
                   <button onClick={() => {
@@ -3807,7 +3856,7 @@ export default function App() {
                   // 点某格才 setViewer→用户主动看原图，此时才联网（对齐 iOS 媒体库宫格）。
                   const src = passivePreviewSource(!mediaGate(mm), !!mm.thumb);
                   return (
-                  <div key={mm.clientMsgId} className="gallery-item" onClick={() => setViewer({ m: mm, fromGallery: true })}>
+                  <div key={mm.clientMsgId} className="gallery-item" onClick={() => { setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}>
                     {src === "thumb"
                       ? <img className="gate-blur" src={mm.thumb} alt="" />
                       : src === "icon"
@@ -3967,7 +4016,7 @@ export default function App() {
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
             <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
               <Forward size={16} className="menu-icon" />转发</button>
-            <button onClick={() => { setFileMenu(null); setDetail(null); if (m.convSeq > 0) jumpToSeq(m.convSeq); else setToast("该消息无法定位"); }}>
+            <button onClick={() => { setFileMenu(null); setDetail(null); locateInChat(m.convId, m.convSeq); }}>
               <MessageCircle size={16} className="menu-icon" />定位到聊天</button>
             {downloading && (
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
