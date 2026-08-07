@@ -4,6 +4,7 @@ import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
 import { resolveDetailFollow } from "./detailFollow";
+import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
@@ -577,6 +578,8 @@ export default function App() {
   const [searchResults, setSearchResults] = useState<UserCard[] | null>(null); // null=未搜索；[]=搜过无结果
   const [busyUser, setBusyUser] = useState<string | null>(null); // 正在执行好友动作的对端 uid（防重复点击）
   const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatar_url: string; phone: string; tags: string } | null>(null); // 编辑资料弹窗（null=关闭）
+  // 头像裁切请求（方案 C）：选好图后开裁切弹窗；确定拿到 blob 交给 onDone（个人/群各自上传落库）。
+  const [cropReq, setCropReq] = useState<{ file: File; onDone: (blob: Blob) => void | Promise<void> } | null>(null);
   const [profileBusy, setProfileBusy] = useState(false);
   const [friendMenu, setFriendMenu] = useState<{ x: number; y: number; userId: string } | null>(null); // 好友行 ⋯ 菜单
   const [blockedList, setBlockedList] = useState<FriendEntry[] | null>(null); // 黑名单弹窗（null=关闭）
@@ -971,33 +974,22 @@ export default function App() {
   }, [profileDraft]);
 
   // 选本机图片做头像：<input type=file> 浏览器自动用当前系统(Mac/Windows/Linux)的原生文件框，无需检测系统。
-  // 读图 → canvas 缩放到 ≤192px → JPEG data URL（超 240KB 再降质，保证 < 后端 256KB 上限）→ 存 avatar_url。
+  // 个人头像（方案 C）：选图 → 圆形裁切 → 上传专用端点 → 存 /avatars/<hash>.jpg（不再 data URL）。
   const onPickAvatar = useCallback((file: File | undefined) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onerror = () => setToast("读取图片失败，请重试");
-    reader.onload = () => {
-      const img = new Image();
-      // 浏览器无法解码该格式（如 HEIC/HEIF）时 onload 不触发 → 提示换 JPG/PNG。
-      img.onerror = () => setToast("无法识别该图片格式，请改用 JPG / PNG");
-      img.onload = () => {
-        const max = 192;
-        let w = img.width, h = img.height;
-        if (w >= h && w > max) { h = Math.round((h * max) / w); w = max; }
-        else if (h > max) { w = Math.round((w * max) / h); h = max; }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, w, h);
-        let q = 0.82;
-        let dataUrl = canvas.toDataURL("image/jpeg", q);
-        while (dataUrl.length > 240 * 1024 && q > 0.4) { q -= 0.15; dataUrl = canvas.toDataURL("image/jpeg", q); }
-        setProfileDraft((d) => (d ? { ...d, avatar_url: dataUrl } : d));
-      };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
+    setCropReq({
+      file,
+      onDone: async (blob) => {
+        try {
+          setToast("上传中…");
+          const { url } = await clientRef.current!.uploadAvatar(blob);
+          setProfileDraft((d) => (d ? { ...d, avatar_url: url } : d));
+          setToast("头像已更新");
+        } catch (e) {
+          setToast(`头像上传失败：${(e as Error).message}`);
+        }
+      },
+    });
   }, []);
 
   const enterApp = useCallback(async (pwd: string) => {
@@ -2937,21 +2929,24 @@ export default function App() {
     await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url));
   };
 
-  // 设置群头像（仅群主/管理员）：选图片 → 上传 → updateGroup 带新 URL。
+  // 设置群头像（仅群主/管理员，方案 C）：选图 → 圆形裁切 → 头像专用上传 → updateGroup 带新 URL。
   const pickGroupAvatar = (gp: GroupInfo) => {
     const input = document.createElement("input");
     input.type = "file"; input.accept = "image/*";
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return;
-      void (async () => {
-        try {
-          setToast("上传中…");
-          const { url } = await clientRef.current!.uploadFile(file);
-          await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url));
-          setToast("群头像已更新");
-        } catch (e) { alert(`设置群头像失败：${(e as Error).message}`); }
-      })();
+      setCropReq({
+        file,
+        onDone: async (blob) => {
+          try {
+            setToast("上传中…");
+            const { url } = await clientRef.current!.uploadAvatar(blob);
+            await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url));
+            setToast("群头像已更新");
+          } catch (e) { setToast(`设置群头像失败：${(e as Error).message}`); }
+        },
+      });
     };
     input.click();
   };
@@ -3947,6 +3942,14 @@ export default function App() {
         </div>
         {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
       </main>
+
+      {cropReq && (
+        <AvatarCropper
+          file={cropReq.file}
+          onCancel={() => setCropReq(null)}
+          onConfirm={(blob) => { const req = cropReq; setCropReq(null); void req.onDone(blob); }}
+        />
+      )}
 
       {viewer && (
         // 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（hover 浮层 6 功能）。点击遮罩关闭。

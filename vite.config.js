@@ -41,6 +41,7 @@ export default defineConfig({
         proxy: {
             "/api": { target: "http://localhost:8080", changeOrigin: true },
             "/uploads": { target: "http://localhost:8080", changeOrigin: true },
+            "/avatars": { target: "http://localhost:8080", changeOrigin: true }, // 头像独立目录（方案 C），与 /uploads 同后端
             "/ws": { target: "ws://localhost:8080", ws: true },
         },
     },

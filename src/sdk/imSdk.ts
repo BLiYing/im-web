@@ -436,6 +436,21 @@ export class IMClient {
     };
   }
 
+  /**
+   * 上传头像（方案 C）：走**专用端点** `/api/v1/avatar`，服务端内容寻址落 `uploads/avatars/`，
+   * 返回 `/avatars/<hash>.jpg` 相对 URL。与聊天媒体分离、永不清理（见 docs/AVATAR_STORAGE_DESIGN.md）。
+   * 入参为裁切并缩到 ≤256px 的 JPEG blob；头像小，一次性 multipart，无需分片/进度。
+   */
+  async uploadAvatar(blob: Blob): Promise<{ url: string }> {
+    const fd = new FormData();
+    fd.append("file", blob, "avatar.jpg"); // 文件名带 .jpg，命中服务端扩展名白名单
+    const auth = { Authorization: `Bearer ${this.token}` };
+    const resp = await tracedFetch("/api/v1/avatar", { method: "POST", headers: auth, body: fd });
+    const body = await resp.json().catch(() => ({ code: -1, data: {} as Record<string, unknown> }));
+    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "头像上传失败"));
+    return { url: body.data.url as string };
+  }
+
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
   private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string } }): string {
     const clientMsgId = crypto.randomUUID();
