@@ -137,11 +137,16 @@ function avatarColor(seed: string): string {
 function Avatar({ url, label, seed, cls = "avatar", children, onClick }: {
   url?: string; label: string; seed?: string; cls?: string; children?: React.ReactNode; onClick?: () => void;
 }) {
-  const bg = url ? undefined : avatarColor(seed ?? label);
+  // 头像 <img> 加载失败（多为 avatar_url 指向的 /uploads 文件已被服务端清理/删除 → 404）时，
+  // 回退首字母色圈，与 iOS 一致；否则浏览器会画自带的「破图问号」。url 变更（换头像/切账号）后重试。
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [url]);
+  const showImg = !!url && !failed;
+  const bg = showImg ? undefined : avatarColor(seed ?? label);
   return (
     <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
          style={{ ...(onClick ? { cursor: "pointer" } : null), ...(bg ? { background: bg } : null) }}>
-      {url ? <img className="avatar-img" src={url} alt="" /> : (label || "").slice(-2)}
+      {showImg ? <img className="avatar-img" src={url} alt="" onError={() => setFailed(true)} /> : (label || "").slice(-2)}
       {children}
     </div>
   );
@@ -3913,8 +3918,15 @@ export default function App() {
             videoUnplayable ? (
               <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>
                 {viewer.m.posterUrl && <img src={viewer.m.posterUrl} alt="" />}
-                <p>当前浏览器不支持该视频的编码格式（如 HEVC）。</p>
-                <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地播放器打开</a>
+                {expiredSet.has(viewer.m.content) ? (
+                  // 404=服务端已清理：显失效、不给"下载后本地播放"（那个链接也会 404），别误导成编码问题（对齐 iOS 查看器）。
+                  <p>视频已失效（已被服务端清理）。</p>
+                ) : (
+                  <>
+                    <p>当前浏览器不支持该视频的编码格式（如 HEVC）。</p>
+                    <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地播放器打开</a>
+                  </>
+                )}
               </div>
             ) : (
               <video className="image-viewer" src={viewer.m.content} controls
