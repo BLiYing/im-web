@@ -59,9 +59,12 @@ interface SyncCursorRecord {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-function openDB(): Promise<IDBDatabase> {
+/** 本次连接期望具备的全部 object store —— 用于校验拿到的连接是不是「缺 store 的陈旧连接」。 */
+const EXPECTED_STORES = [STORE, CURSOR_STORE, DELETIONS_STORE] as const;
+
+function openDB(attempt = 0): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -77,8 +80,26 @@ function openDB(): Promise<IDBDatabase> {
         ds.createIndex("ownerConv", "ownerConv", { unique: false });
       }
     };
-    req.onsuccess = () => resolve(req.result);
+    // 另一标签页/连接占着旧版本 → 本次升级被阻塞（多标签页测号常见）。留痕，靠对方收到 versionchange 关闭后放行。
+    req.onblocked = () => logger.warn(LOG_TAG.store, "indexeddb_open_blocked", { db: DB_NAME, version: DB_VERSION });
+    req.onsuccess = () => {
+      const db = req.result;
+      // 别的标签页要升级 schema 时，关闭本连接并清缓存 —— 否则本连接会阻塞对方升级，且升级后本连接仍是旧结构（缺新 store）。
+      db.onversionchange = () => { try { db.close(); } finally { dbPromise = null; } };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
+  }).then((db) => {
+    // 兜底自愈：若拿到的是「缺某个 store 的陈旧连接」（曾以旧版本打开、被 dbPromise 缓存复用），
+    // 关掉并清缓存重开一次触发升级（此时本连接已不占用，升级可放行）。最多重试 2 次，避免被别的标签页
+    // 长期阻塞时死循环——仍缺则返回该连接，由各读函数按 objectStoreNames 兜底降级（见 loadConversation）。
+    const missing = EXPECTED_STORES.some((s) => !db.objectStoreNames.contains(s));
+    if (missing && attempt < 2) {
+      db.close();
+      dbPromise = null;
+      return openDB(attempt + 1);
+    }
+    return db;
   });
   return dbPromise;
 }
@@ -271,14 +292,18 @@ export async function loadConversation(owner: string, convId: string): Promise<C
   try {
     const db = await openDB();
     // 消息与本会话的删除墓碑同事务读出：本人删过的消息即便被重同步重新落库，也在此过滤掉，不复现。
+    // 兜底：陈旧连接可能缺 `deletions` store（升级被别的标签页阻塞时）——此时**只读 messages**，宁可暂不过滤墓碑，
+    // 也不能让整个事务抛 NotFoundError 而返回空（曾导致资料卡片「媒体/文件」列表全空）。
+    const hasDeletions = db.objectStoreNames.contains(DELETIONS_STORE);
+    const stores = hasDeletions ? [STORE, DELETIONS_STORE] : [STORE];
     const { recs, deleted } = await new Promise<{ recs: MsgRecord[]; deleted: Set<string> }>((resolve, reject) => {
-      const tx = db.transaction([STORE, DELETIONS_STORE], "readonly");
+      const tx = db.transaction(stores, "readonly");
       const ownerConv = `${owner}|${convId}`;
       const msgReq = tx.objectStore(STORE).index("ownerConv").getAll(ownerConv);
-      const delReq = tx.objectStore(DELETIONS_STORE).index("ownerConv").getAllKeys(ownerConv);
+      const delReq = hasDeletions ? tx.objectStore(DELETIONS_STORE).index("ownerConv").getAllKeys(ownerConv) : null;
       tx.oncomplete = () => resolve({
         recs: (msgReq.result as MsgRecord[]) ?? [],
-        deleted: new Set(((delReq.result as IDBValidKey[]) ?? []).map(String)),
+        deleted: new Set(((delReq?.result as IDBValidKey[] | undefined) ?? []).map(String)),
       });
       tx.onerror = () => reject(tx.error);
     });

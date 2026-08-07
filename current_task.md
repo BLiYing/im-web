@@ -4,7 +4,24 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
-**下载门控 + 数据与存储（任务三/四 阶段 5）✅ 完成（2026-08-06，tsc + 135 vitest 绿，待浏览器实测）**
+**修复：资料卡片「媒体/文件」列表全空（2026-08-07，tsc + 138 vitest 绿，浏览器实证修复逻辑 ✅）**
+> 根因（**日志锁定**：`im-web.log` 有 238 条 `conversation_load_failed` / `NotFoundError: object store not found` @`localStore.ts`）：
+> `loadConversation` 开 `[messages, deletions]` 双 store 事务，但用户浏览器那条 IndexedDB 连接是**缺 `deletions` store 的陈旧连接**
+> ——DB 升级到 v3 新增 `deletions` 前打开、被 `dbPromise` 模块级缓存复用（多标签页测号 / HMR 常见）→ 事务抛 `NotFoundError` → catch 返回 `[]` → 详情媒体/文件全空。
+> 修复两层（`src/sdk/localStore.ts`）：① `openDB` 加 `onblocked` + `db.onversionchange`（别的标签页升级时关闭本陈旧连接并清缓存）+ 拿到缺 store 的连接则关掉重开自愈（最多 2 次）；② `loadConversation` 按 `db.objectStoreNames.contains('deletions')` 决定事务 store 列表，缺则**只读 messages**（暂不过滤墓碑也不抛错）。`markMessageDeleted`/`loadDeletedSeqs` 本就 try/catch 安全降级。
+> 浏览器实证：缺 deletions 的连接上「旧写法抛 NotFoundError / 新写法正常返回」。**用户侧刷新一次页面即自愈**（openDB 升级补齐 deletions store）。
+
+**下载门控 阶段 7 — 对齐 iOS 手测场景（2026-08-07，tsc + 138 vitest 绿；已浏览器冒烟：气泡视频/图片门控磨砂占位 ✅、数据与存储页 ✅、无 JS 报错）**
+> 依据 `../IMProgram/docs/DOWNLOAD_TEST_SCENARIOS.md`（现为 iOS 基准 + §11 Web 场景/差异）逐条对齐；把原先"直连原件"的 4 处补进门控：
+- **相册宫格逐格门控（档 A）**：`AlbumGrid` 加 `gateFor`——未下载格 thumb 磨砂 + 中心 ↓ + 尺寸角标，点门控格=就地解门控（`onGateTap`）非进查看器。
+- **详情媒体宫格门控（档 A）**：`detail-media-tile` 加 `mediaGate`——磨砂 + ↓ + 尺寸；点门控格=解门控，就绪格=查看器（详情不自动预取，对齐 iOS `autoPrefetch=NO`）。
+- **引用缩略被动预览（档 B）**：`QuoteThumb` 加 `gated`——未下载**只用 thumb 磨砂、绝不联网拉原件/poster/远端抽帧**，无 thumb 退 ▶/🖼 图标；两处调用点（气泡引用块 + 输入框引用条）都传 gated。
+- **会话媒体库被动预览（档 B）**：`gallery-item` 用 `passivePreviewSource`——未下载磨砂、打开媒体库这一动作不拉原件；点某格才 setViewer 联网。
+- **打开查看器 = 标记已解门控**：新增 `useEffect([viewer])`——看过的图/视频 opt-in（落 localStorage），之后气泡/相册/详情/媒体库/引用条随之显真帧、刷新仍在（对齐 iOS「点某格才拉原件」）。
+- **纯函数 + 单测**：`src/download.ts passivePreviewSource(resolved,hasThumb)`（3 例，`download.test.ts`）——档 B 三态取图契约（original/thumb/icon）。CSS：`.gate-blur`/`.gate-empty`/`.album-dl`/`.detail-media-dl`/`.detail-media-size`/`.quote-thumb.gate-blur`/`.quote-thumb-ph`。
+- **文档**：`../IMProgram/docs/DOWNLOAD_TEST_SCENARIOS.md` 加 §11「Web 手测场景 + 独有差异」（§11.A–§11.K，含 §11.J 差异表）。**待用户逐条手测**（尤其 §11.E/§11.F 后端日志无 `/uploads` GET）。
+
+**下载门控 + 数据与存储（任务三/四 阶段 5）✅ 完成（2026-08-06，tsc + 138 vitest 绿，待浏览器实测）**
 - **`src/download.ts`**（纯逻辑，21 例单测）：策略类型/默认/解析容错、`shouldAutoDownload` 决策矩阵、
   低/中/高快捷档往返、下载状态机的字形与文案。逐条对齐后端 `internal/downloadsettings` 与 iOS `IMDownloadPolicy`。
 - **SDK**：`downloadSettings / saveDownloadSettings / resetDownloadSettings`（PUT 体**就是 settings 本身**，后端直接 Decode，别包一层）
