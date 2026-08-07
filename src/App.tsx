@@ -271,6 +271,22 @@ function QuoteThumb({ m, gated }: { m?: ChatMessage; gated?: boolean }) {
   return null;
 }
 
+/**
+ * 引用兜底图标：被引用原消息**不在本地 messages**（未同步到/已清）时 QuoteThumb 拿不到 `m` 会返回 null，
+ * 此时从 `reply_snapshot` 文本推媒体类型显图标——与 iOS「从 reply_snapshot 推 glyph」一致（iOS `IMMediaGlyphForSnippet`）。
+ * 快照可能是 wire 形 `[video]`/`[file] 名` 或本端本地化形 `[视频]`/`[文件] 名`，两形都认。文本/聊天记录 → 无图标（返回 null）。
+ */
+function QuoteSnapshotIcon({ snapshot }: { snapshot?: string }) {
+  const s = snapshot || "";
+  if (s === "[video]" || s === "[视频]") return <span className="quote-thumb quote-thumb-ph"><Video size={18} aria-label="视频" /></span>;
+  if (s === "[image]" || s === "[图片]") return <span className="quote-thumb quote-thumb-ph"><ImageIcon size={18} aria-label="图片" /></span>;
+  if (s === "[file]" || s === "[文件]" || s.startsWith("[file] ") || s.startsWith("[文件] ")) {
+    const name = s.startsWith("[file] ") ? s.slice(7) : s.startsWith("[文件] ") ? s.slice(4) : "";
+    return <FileTypeIcon name={name || "file"} size={32} className="quote-thumb" />;
+  }
+  return null;
+}
+
 /** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
  *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
 export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number };
@@ -3569,7 +3585,9 @@ export default function App() {
                       {m.replyToConvSeq ? (
                         // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
                         <div className="quote-bar" onClick={() => locateInChat(m.convId, m.replyToConvSeq!)}>
-                          {(() => { const q = messages.find((x) => x.convSeq === m.replyToConvSeq); return <QuoteThumb m={q} gated={!!(q && mediaGate(q))} />; })()}
+                          {(() => { const q = messages.find((x) => x.convSeq === m.replyToConvSeq);
+                            // 原消息在本地 → 真帧/磨砂/图标由 QuoteThumb 定；不在本地 → 从快照文本推兜底图标（与 iOS 一致，别只剩文本）。
+                            return q ? <QuoteThumb m={q} gated={!!mediaGate(q)} /> : <QuoteSnapshotIcon snapshot={m.replySnapshot} />; })()}
                           <span className="quote-lines">
                             {isGroupChat && m.replyToFrom && (
                               <span className="quote-who">{m.replyToFrom === uid ? "你" : (memberNick(m.convId, m.replyToFrom) || m.replyToFrom)}</span>
