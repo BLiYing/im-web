@@ -3650,13 +3650,16 @@ export default function App() {
               const durationText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
               // 下载门控（M4-7）：undefined=就绪；非空=未下载/下载中/失败/已失效 → 卡片显 ↓ 或进度，不加载原件。
               const gate = mediaGate(m);
+              // 右键/长按选中态（方案A）：菜单作用的目标消息稳态高亮。身份用 clientMsgId ?? serverMsgId ?? convSeq
+              // （与 React key 同口径）——发送中 convSeq=0 靠 clientMsgId 区分，避免多条 sending 一起亮。
+              const menuActive = !!menu && (menu.m.clientMsgId ?? menu.m.serverMsgId ?? menu.m.convSeq) === (m.clientMsgId ?? m.serverMsgId ?? m.convSeq);
               const bubbleBlock = (
                 <>
                   <div className="bubble-line">
                     {mine && m.status === "failed" && (
                       <span className="fail-badge" title={m.note || "发送失败"}>!</span>
                     )}
-                    <div className={`bubble${isMediaBubble ? " media" : ""}`}
+                    <div className={`bubble${isMediaBubble ? " media" : ""}${menuActive ? " ctx-active" : ""}`}
                       onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                       {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
                       {m.replyToConvSeq ? (

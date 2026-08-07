@@ -272,6 +272,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
    第二段兜住群聊对方气泡（嵌套在 them-wrap 下，直链不匹配）。 */
 .msg-item.flash > .row > .bubble-line > .bubble.media, .flash .bubble.media { animation: quoteflashmedia 1.2s ease; }
 @keyframes quoteflashmedia { 0%,100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 3px var(--accent); } }
+/* 右键/长按选中态（方案A）：稳态高亮，标出菜单作用的目标消息。由 menu 状态派生 class，菜单一关
+   （点空白/Esc/选任一动作）React 撤 class 自动消失，无需额外清理。与 .flash 同用 accent 语言，但常亮不脉冲：
+   文本气泡 = accent 描边 + 微染；媒体气泡背景被 <img> 盖住 = 仅描边（box-shadow 不受 overflow:hidden 裁剪）。 */
+.bubble.ctx-active { box-shadow: 0 0 0 2px var(--accent), 0 1px 1px var(--shadow-soft); }
+.bubble.ctx-active:not(.media) { background: var(--subtle-fill); }
 /* 转发溯源（M4-3）："转发自 X"小字，气泡顶部。 */
 .forward-from { flex-basis: 100%; font-size: 12px; color: var(--text-secondary); margin-bottom: 2px; }
 /* 多选（M4-3）：行内勾选圈 + 底部批量工具栏。 */
@@ -362,6 +367,14 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .msg-media .msg-image { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; border-radius: 0; }
 /* 尺寸未知（老消息/老端/转发件）：按图片自身比例显示并夹进同一个盒子，绝不裁切。 */
 .msg-media.auto .msg-image { width: auto; height: auto; max-width: 240px; max-height: 320px; object-fit: contain; }
+/* 修复A（左下角黑角）：带 blur()/scale() 的门控占位子图，在 WebKit 下不被父级 border-radius+overflow 裁剪——
+   暗像素以矩形溢出圆角，露成黑角（深色模式下更明显）。把「圆角+overflow」的裁剪盒提升为独立合成层，
+   强制按圆角裁掉被变换/滤镜的子元素。引擎无关，四类占位卡（气泡/媒体库/相册/详情宫格）共此一处。 */
+.msg-media, .gallery-item, .album-grid, .detail-media-tile { transform: translateZ(0); }
+/* 修复B（黑角/暗楔）：内圈媒体框的「尾巴角」跟随外圈气泡（them 左下 / me 右下 = --space-1），
+   消除内圈 18px 与外圈 4px 圆角不一致露出的楔形（浅色白、深色近黑）。 */
+.them .bubble.media .msg-media { border-bottom-left-radius: var(--space-1); }
+.me .bubble.media .msg-media { border-bottom-right-radius: var(--space-1); }
 /* 悬浮角标：底恒为半透明黑，浅色图上也读得清（不靠文字阴影）。 */
 .media-badge { position: absolute; padding: 1px 6px; border-radius: 9px; background: var(--overlay);
   color: var(--on-media); font-size: 11px; line-height: 16px; white-space: nowrap; pointer-events: none;
