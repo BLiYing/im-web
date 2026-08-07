@@ -1680,26 +1680,37 @@ export default function App() {
    * 就绪文件点击路由（对齐 iOS QuickLook 的 Web 诚实映射）：可预览类型（pdf/图片/音视频/文本）在**新标签预览**，
    * 其余（zip/dmg/office…）触发**另存**——绝不静默走浏览器下载。已手动下过的走应用内 blob，否则远端 URL。
    */
-  const openReadyFile = useCallback((m: ChatMessage) => {
+  const openReadyFile = useCallback(async (m: ChatMessage) => {
     const name = m.fileName || fileNameFromContent(m.content);
     const url = dlBlobsRef.current[m.content] || m.content;
     if (isPreviewableFile(name)) {
-      window.open(url, "_blank", "noopener,noreferrer");
-    } else {
-      const a = document.createElement("a");
-      a.href = url; a.download = name; a.rel = "noreferrer";
-      document.body.appendChild(a); a.click(); a.remove();
+      window.open(url, "_blank", "noopener,noreferrer"); // 预览：不 await（保用户手势，避免弹窗拦截），失效则新标签自显 404
+      return;
     }
+    // 另存：用远端 URL 时先验失效——避免"能看却下不了"只丢一个浏览器下载失败（见铁律 A 讨论）。
+    if (url === m.content && await markExpiredIfGoneRef.current(m)) {
+      setToast(m.contentType === "image" ? "图片已失效" : m.contentType === "video" ? "视频已失效" : "文件已失效");
+      return;
+    }
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.rel = "noreferrer";
+    document.body.appendChild(a); a.click(); a.remove();
   }, []);
 
   /**
    * 右键菜单「下载」：把这条图片/视频/文件**保存到本地**（浏览器下载目录，如 ~/Downloads）。复用应用内已下的 blob
    * （dlBlobs），否则拉远端 URL（同源，`download` 属性生效）——与 openReadyFile 的另存分支同一套落盘逻辑。
    */
-  const saveMessageToDisk = useCallback((m: ChatMessage) => {
+  const saveMessageToDisk = useCallback(async (m: ChatMessage) => {
     if (!m.content) return;
     const name = m.fileName || fileNameFromContent(m.content);
     const url = dlBlobsRef.current[m.content] || m.content;
+    // 用远端 URL 时先验失效：Chrome 可能靠 HTTP 缓存还显示着图，但源已删——下载会 404。先探一次，
+    // 命中则 toast「已失效」+ 标记（下次渲染各面统一显失效），不再丢一个懵的浏览器下载失败（铁律 A 讨论）。
+    if (url === m.content && await markExpiredIfGoneRef.current(m)) {
+      setToast(m.contentType === "image" ? "图片已失效" : m.contentType === "video" ? "视频已失效" : "文件已失效");
+      return;
+    }
     const a = document.createElement("a");
     a.href = url; a.download = name; a.rel = "noreferrer";
     document.body.appendChild(a); a.click(); a.remove();
@@ -1784,9 +1795,11 @@ export default function App() {
    * （服务端 /uploads 支持 Range）读状态码：404/410 → 落持久失效标记（掐 404 风暴）；其余（网络错/解码）不标，
    * 保留可重试/可重载。已知失效则直接跳过，避免 onError 反复触发复验。
    */
-  const markExpiredIfGone = useCallback(async (m: ChatMessage) => {
+  /** 复验 URL 是否已被服务端清理（404/410）：命中即标记并返回 true。已知失效直接 true；网络错/瞬时返回 false（不误标）。 */
+  const markExpiredIfGone = useCallback(async (m: ChatMessage): Promise<boolean> => {
     const key = m.content;
-    if (!key || expiredRef.current.has(key)) return;
+    if (!key) return false;
+    if (expiredRef.current.has(key)) return true; // 已知失效
     try {
       const resp = await fetch(key, { headers: { Range: "bytes=0-0" } });
       if (resp.status === 404 || resp.status === 410) {
@@ -1794,11 +1807,16 @@ export default function App() {
           conv_id: m.convId, conv_seq: m.convSeq, kind: m.contentType, status: resp.status,
         });
         markExpired(key);
+        return true;
       }
+      return false;
     } catch {
-      /* 网络错/断网：不标失效（可能只是暂时坏了），保留下次重载 */
+      return false; /* 网络错/断网：不标失效（可能只是暂时坏了），保留下次重载 */
     }
   }, [markExpired]);
+  // 供 openReadyFile / saveMessageToDisk（定义在前）在点击时调用，规避声明顺序；ref 恒稳、不入依赖数组。
+  const markExpiredIfGoneRef = useRef(markExpiredIfGone);
+  markExpiredIfGoneRef.current = markExpiredIfGone;
 
   /** 门控卡片点击路由：下载中 → 取消（Web 无断点续传，只能重来）；已失效 → 不响应；其余 → 下载/重试。 */
   const onGateTap = useCallback((m: ChatMessage) => {
