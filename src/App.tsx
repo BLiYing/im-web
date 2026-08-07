@@ -185,13 +185,15 @@ const selectableInMultiSelect = (m: ChatMessage): boolean =>
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
-function AlbumGrid({ members, timeLabel, progress, gateFor, onOpen, onMenu }: {
+function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, onOpen, onMenu, onMediaError }: {
   members: ChatMessage[];
   timeLabel: string;
   progress: Record<string, { sent: number; total: number }>;
   gateFor: (m: ChatMessage) => boolean; // 该格是否门控（收到的未下载图/视频）：档 A，逐格独立判定
+  expiredFor?: (m: ChatMessage) => boolean; // 该格是否已失效（服务端已清理）：失效则不给 ↓、只留磨砂 dim
   onOpen: (m: ChatMessage) => void;
   onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
+  onMediaError?: (m: ChatMessage) => void; // 原件 <img>/<video> 加载失败 → 复验 404 落失效标记（首屏即显失效）
 }) {
   const W = 240, GAP = 2;
   const pattern = albumRowPattern(members.length);
@@ -220,10 +222,10 @@ function AlbumGrid({ members, timeLabel, progress, gateFor, onOpen, onMenu }: {
                 {gated
                   ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
                   : m.contentType === "video"
-                    ? (m.posterUrl ? <img src={m.posterUrl} alt="" /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" />)
-                    : <img src={m.content} alt="" />}
+                    ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError?.(m)} /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => onMediaError?.(m)} />)
+                    : <img src={m.content} alt="" onError={() => onMediaError?.(m)} />}
                 {gated
-                  ? <span className="album-dl">↓</span>
+                  ? (expiredFor?.(m) ? null : <span className="album-dl">↓</span>) // 失效格不给 ↓（无从重下），只留磨砂 dim
                   : m.contentType === "video" && !(m.status === "sending" && m.convSeq === 0) && <span className="play-badge">▶</span>}
                 {/* 角标：门控显「尺寸(·时长)」；否则仅时长（上传中也显示——宫格进度在中心，左上角是空的，与 iOS 一致）。 */}
                 {gated
@@ -450,30 +452,62 @@ function loadSession(): { uid: string; pwd: string } | null {
 }
 
 /** 从视频文件抓取首帧封面（JPEG File），供上传作视频消息封面（M4+）。
- *  浏览器解不了码（如 HEVC）或抓帧失败 → 返回 null（消息则无封面，收端回退 <video>）。 */
+ *  浏览器解不了码（如 HEVC）或抓帧失败 → 返回 null（消息则无封面，收端回退 <video>）。
+ *
+ *  Safari 兼容（BUG-video-poster-safari 修复）：Safari 比 Chrome 严格——`preload="metadata"` 只缓冲元数据不解码帧，
+ *  且仅靠 seek/`seeked` 事件**不保证该帧已解码进可绘制缓冲**，drawImage 会得到空帧 → 旧实现在 Safari 上封面与
+ *  （由封面派生的）thumb 双双为空（收端只能退灰底占位）。现改为：`preload="auto"` 缓冲可绘制数据 + 静音自动播放
+ *  （muted+playsInline 允许无手势播放）强制解码 + `requestVideoFrameCallback` 在帧**真正呈现后**才抓，drawImage 必得真实像素；
+ *  并保留 seek / timeupdate / 超时多重兜底，Chrome 行为不变。 */
 function captureVideoPoster(file: File): Promise<File | null> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     let done = false;
-    const finish = (result: File | null) => { if (done) return; done = true; URL.revokeObjectURL(url); resolve(result); };
-    video.preload = "metadata";
+    const finish = (result: File | null) => {
+      if (done) return; done = true;
+      try { video.pause(); } catch { /* 忽略 */ }
+      video.removeAttribute("src");
+      URL.revokeObjectURL(url);
+      resolve(result);
+    };
+    video.preload = "auto";       // Safari：metadata 不解码帧，auto 才缓冲可绘制数据
     video.muted = true;
+    video.defaultMuted = true;    // 部分 Safari 版本据此判定“静音自动播放可放行”
     video.playsInline = true;
-    video.src = url;
-    video.onloadeddata = () => { try { video.currentTime = Math.min(0.1, (video.duration || 0.2) / 2); } catch { finish(null); } };
-    video.onseeked = () => {
+    video.onerror = () => finish(null); // 解不了码（HEVC 等）
+
+    // 帧就绪后抽一帧：videoWidth/Height=0 或 canvas 被 taint（drawImage 抛）→ 尽力兜底为 null。
+    const draw = () => {
       const w = video.videoWidth, h = video.videoHeight;
       if (!w || !h) { finish(null); return; }
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
       if (!ctx) { finish(null); return; }
-      ctx.drawImage(video, 0, 0, w, h);
+      try { ctx.drawImage(video, 0, 0, w, h); } catch { finish(null); return; }
       canvas.toBlob((blob) => finish(blob ? new File([blob], "poster.jpg", { type: "image/jpeg" }) : null), "image/jpeg", 0.8);
     };
-    video.onerror = () => finish(null); // 解不了码（HEVC 等）
+    // rVFC：新帧被送到合成器后回调，是“帧已解码可绘制”的可靠信号（Safari 15.4+/Chrome 均支持）。
+    const rvfc = (video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number, meta: unknown) => void) => number;
+    }).requestVideoFrameCallback?.bind(video);
+
+    video.onloadeddata = () => {
+      // 跳到极早一帧避开纯黑首帧（不超过片长中点）；seek 失败也无妨，播放兜底会推进。
+      try { video.currentTime = Math.min(0.1, (video.duration || 0.2) / 2); } catch { /* 播放兜底 */ }
+      // 关键：muted 自动播放强制 Safari 真正解码出帧；拿到帧即抓并在 finish() 里 pause。
+      video.play().then(() => {
+        if (rvfc) rvfc(() => draw());
+        else video.ontimeupdate = () => draw(); // 老浏览器无 rVFC：进度前进即已有可绘制帧
+      }).catch(() => {
+        // 自动播放被拒（极少数）→ 退回 seek 方案：seek 完成事件里抓（旧行为，Chrome 本就可用）。
+        video.onseeked = () => draw();
+      });
+    };
+
     window.setTimeout(() => finish(null), 8000); // 兜底超时，避免卡住发送
+    video.src = url;
   });
 }
 
@@ -3530,6 +3564,8 @@ export default function App() {
                       timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
                       progress={uploadProgress}
                       gateFor={(mm) => !!mediaGate(mm)}
+                      expiredFor={(mm) => mediaGate(mm)?.phase === "expired"}
+                      onMediaError={markExpiredIfGone}
                       onOpen={(mm) => (mediaGate(mm) ? onGateTap(mm) : onMediaBubbleTap(mm, () => setViewer({ m: mm })))}
                       onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
                   </div>
@@ -3948,9 +3984,11 @@ export default function App() {
                       : src === "icon"
                         ? <span className="gate-empty" />
                         : mm.contentType === "video"
-                          ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted />)
-                          : <img src={mm.content} alt="" />}
-                    {mm.contentType === "video" && <span className="play-badge">▶</span>}
+                          ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" onError={() => markExpiredIfGone(mm)} /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted onError={() => markExpiredIfGone(mm)} />)
+                          : <img src={mm.content} alt="" onError={() => markExpiredIfGone(mm)} />}
+                    {mediaGate(mm)?.phase === "expired"
+                      ? <span className="play-badge expired" title="已失效">⊘</span>
+                      : mm.contentType === "video" && <span className="play-badge">▶</span>}
                   </div>
                   );
                 })}
@@ -4415,9 +4453,9 @@ export default function App() {
                                     title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
                               {gate
                                 ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
-                                : <img src={m.contentType === "video" ? (m.posterUrl || m.content) : m.content} alt="" />}
+                                : <img src={m.contentType === "video" ? (m.posterUrl || m.content) : m.content} alt="" onError={() => markExpiredIfGone(m)} />}
                               {gate
-                                ? <span className="detail-media-dl">↓</span>
+                                ? (gate.phase === "expired" ? null : <span className="detail-media-dl">↓</span>) // 失效格不给 ↓，只留磨砂 dim
                                 : m.contentType === "video" && <span className="detail-media-play">▶</span>}
                               {gate && sizeText && <span className="detail-media-size">{sizeText}</span>}
                             </button>
