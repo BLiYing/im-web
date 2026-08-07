@@ -3,6 +3,7 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
+import { resolveDetailFollow } from "./detailFollow";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
@@ -709,6 +710,23 @@ export default function App() {
     // presence 故意不进依赖：只在「首次没有」时拉一次，避免拿到空态后反复重拉。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [peer, groupConvId]);
+
+  // 资料卡片跟随会话切换：卡片开着时切到另一个会话 → 卡片切到新会话对应的资料卡（群/单聊）。
+  // 只在会话 id 变化时触发（依赖 peer/groupConvId）；对「群成员资料页」这类不改变当前会话的入口无影响
+  // ——它们不改 peer/groupConvId，effect 不会跑，卡片保持不动。
+  useEffect(() => {
+    const activeCid = groupConvId || (peer ? convIdFor(uid, peer) : "");
+    const follow = resolveDetailFollow({
+      detailOpen: !!detail,
+      detailConvId: detail?.convId ?? "",
+      activeCid,
+      isGroup: !!groupConvId,
+    });
+    if (follow.action === "group") openGroupPanel(follow.convId);
+    else if (follow.action === "peer") openPeerDetail(peer, true); // fromOwnChat：已在该会话里，不显示「消息」入口
+    // openGroupPanel/openPeerDetail 为稳定的普通函数；detail 仅取快照判定，无需进依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peer, groupConvId, uid]);
 
   // 对端不在线时低频重拉快照（每 2 分钟）。
   // 单聊 topic 随首条消息才建立，故「好友但从没聊过」的对端不在 broadcastOnline 的收件人集合里——
