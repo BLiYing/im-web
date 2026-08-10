@@ -4549,7 +4549,13 @@ export default function App() {
                                     title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
                               {gate
                                 ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
-                                : <img src={m.contentType === "video" ? (m.posterUrl || m.content) : m.content} alt="" onError={() => markExpiredIfGone(m)} />}
+                                : (m.contentType === "video"
+                                    // 无 poster 的视频**不能**把视频 URL 塞进 <img>（渲染成裂图封面）；
+                                    // 回退 <video> 抓首帧当封面（对齐气泡/引用/合并转发详情的统一兜底）。
+                                    ? (m.posterUrl
+                                        ? <img src={m.posterUrl} alt="" onError={() => markExpiredIfGone(m)} />
+                                        : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => markExpiredIfGone(m)} />)
+                                    : <img src={m.content} alt="" onError={() => markExpiredIfGone(m)} />)}
                               {gate
                                 ? (gate.phase === "expired" ? null : <span className="detail-media-dl">↓</span>) // 失效格不给 ↓，只留磨砂 dim
                                 : m.contentType === "video" && <span className="detail-media-play">▶</span>}
