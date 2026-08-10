@@ -587,6 +587,11 @@ export default function App() {
   const [chatMenu, setChatMenu] = useState(false); // 聊天页右上 ⋮ 下拉菜单
   const [contactDraft, setContactDraft] = useState<{ peer: string; remark: string } | null>(null); // 编辑联系人（备注名）弹窗
   const [toast, setToast] = useState<string | null>(null); // 轻量浮层提示（如"xx（开发中）"）
+  // 应用内确认/输入弹窗（替代原生 window.confirm/prompt，统一 .modal 风格）。
+  const [confirmDlg, setConfirmDlg] = useState<
+    { message: string; okText: string; cancelText: string; danger: boolean; resolve: (ok: boolean) => void } | null>(null);
+  const [promptDlg, setPromptDlg] = useState<
+    { title: string; value: string; placeholder: string; okText: string; maxLength?: number; resolve: (v: string | null) => void } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
@@ -891,7 +896,7 @@ export default function App() {
       const users = await clientRef.current?.searchUsers(q);
       setSearchResults(users ?? []);
     } catch (e) {
-      alert(`搜索失败：${(e as Error).message}`);
+      setToast(`搜索失败：${(e as Error).message}`);
     }
   }, [searchQ]);
 
@@ -902,7 +907,7 @@ export default function App() {
       await fn();
       await refreshFriends();
     } catch (e) {
-      alert(`操作失败：${(e as Error).message}`);
+      setToast(`操作失败：${(e as Error).message}`);
     } finally {
       setBusyUser(null);
     }
@@ -923,7 +928,7 @@ export default function App() {
       // phone 后端是 omitempty：空时 JSON 无该键 → undefined，须兜底为 ""，否则 input 由非受控变受控告警。
       if (p) setProfileDraft({ nickname: p.nickname ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
     } catch (e) {
-      alert(`加载资料失败：${(e as Error).message}`);
+      setToast(`加载资料失败：${(e as Error).message}`);
     }
   }, []);
 
@@ -933,7 +938,7 @@ export default function App() {
       const list = await clientRef.current?.listFriends("blocked");
       setBlockedList(list ?? []);
     } catch (e) {
-      alert(`加载黑名单失败：${(e as Error).message}`);
+      setToast(`加载黑名单失败：${(e as Error).message}`);
     }
   }, []);
 
@@ -946,7 +951,7 @@ export default function App() {
       void refreshFriends(); // 同步主好友态：聊天页"已拉黑"横幅随之消失、输入恢复
 
     } catch (e) {
-      alert(`解除失败：${(e as Error).message}`);
+      setToast(`解除失败：${(e as Error).message}`);
     } finally {
       setBusyUser(null);
     }
@@ -967,7 +972,7 @@ export default function App() {
       if (updated) setMyInfo({ nickname: updated.nickname ?? "", phone: updated.phone ?? "", avatar_url: updated.avatar_url ?? "" });
       setProfileDraft(null);
     } catch (e) {
-      alert(`保存失败：${(e as Error).message}`);
+      setToast(`保存失败：${(e as Error).message}`);
     } finally {
       setProfileBusy(false);
     }
@@ -1130,10 +1135,12 @@ export default function App() {
       // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
       // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
       onAuthError: (msg) => {
-        if (window.confirm(`${msg}。点"确定"重新登录；"取消"可继续查看本地聊天记录。`)) {
-          logout();
-          setAuthErr(msg); // logout 会清 authErr，故放其后
-        }
+        void askConfirm(`${msg}。点"确定"重新登录；"取消"可继续查看本地聊天记录。`, { okText: "重新登录" })
+          .then((ok) => {
+            if (!ok) return;
+            logout();
+            setAuthErr(msg); // logout 会清 authErr，故放其后
+          });
       },
     });
     clientRef.current = client;
@@ -1222,7 +1229,7 @@ export default function App() {
 
   const openChat = useCallback((p: string) => {
     if (!p || p === uid) {
-      alert("请输入有效的对方 uid");
+      setToast("请输入有效的对方 uid");
       return;
     }
     const cid = convIdFor(uid, p);
@@ -2168,7 +2175,7 @@ export default function App() {
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
     setMenu(null);
     const what = kind === "message" ? "举报这条消息" : `举报用户 ${m.from}`;
-    const reason = window.prompt(`${what}\n请填写举报理由：`, "");
+    const reason = await askPrompt(what, "", { placeholder: "请填写举报理由", okText: "提交举报" });
     if (reason === null) return; // 取消
     try {
       if (kind === "message") {
@@ -2177,9 +2184,9 @@ export default function App() {
       } else {
         await clientRef.current?.report("user", m.from, reason);
       }
-      alert("举报已提交，感谢反馈。");
+      setToast("举报已提交，感谢反馈。");
     } catch (e) {
-      alert(`举报失败：${(e as Error).message}`);
+      setToast(`举报失败：${(e as Error).message}`);
     }
   }, []);
 
@@ -2190,6 +2197,30 @@ export default function App() {
     const t = window.setTimeout(() => setToast(null), 1800);
     return () => clearTimeout(t);
   }, [toast]);
+
+  // 应用内确认框：返回 Promise<boolean>，替代 window.confirm。danger=true 时确认按钮为危险色。
+  const askConfirm = useCallback(
+    (message: string, opts?: { okText?: string; cancelText?: string; danger?: boolean }) =>
+      new Promise<boolean>((resolve) => setConfirmDlg({
+        message,
+        okText: opts?.okText ?? "确定",
+        cancelText: opts?.cancelText ?? "取消",
+        danger: opts?.danger ?? false,
+        resolve,
+      })),
+    []);
+  // 应用内输入框：返回 Promise<string | null>（取消为 null），替代 window.prompt。
+  const askPrompt = useCallback(
+    (title: string, defaultValue = "", opts?: { placeholder?: string; okText?: string; maxLength?: number }) =>
+      new Promise<string | null>((resolve) => setPromptDlg({
+        title,
+        value: defaultValue,
+        placeholder: opts?.placeholder ?? "",
+        okText: opts?.okText ?? "确定",
+        maxLength: opts?.maxLength,
+        resolve,
+      })),
+    []);
 
   // 会话"设为已读"：推进已读位点（清未读数）+ 清除手动"标未读"标记，再刷新列表。
   const markReadConv = useCallback((c: Conversation) => {
@@ -2798,7 +2829,7 @@ export default function App() {
       void refreshGroupInfo(cid);
       void refreshConversations();
     } catch (e) {
-      alert(`操作失败：${(e as Error).message}`);
+      setToast(`操作失败：${(e as Error).message}`);
     }
   };
 
@@ -2808,7 +2839,7 @@ export default function App() {
       const list = await clientRef.current?.listGroups();
       setGroupsModal(list ?? []);
     } catch (e) {
-      alert(`加载群列表失败：${(e as Error).message}`);
+      setToast(`加载群列表失败：${(e as Error).message}`);
     }
   };
 
@@ -2838,8 +2869,8 @@ export default function App() {
 
   // 清空聊天记录（仅本机，对齐 iOS）：清 IndexedDB → 通知聊天区刷新 → 关面板。
   const doClearHistory = (cid: string) => {
-    if (!window.confirm("清空聊天记录？将删除此会话在本机的全部消息，且无法恢复。")) return;
     void (async () => {
+      if (!(await askConfirm("清空聊天记录？将删除此会话在本机的全部消息，且无法恢复。", { okText: "清空", danger: true }))) return;
       await clearMessages(uid, cid);
       setMsgsByConv((prev) => ({ ...prev, [cid]: [] })); // 内存同步清空（当前会话/缓存）
       setDetailMsgs([]);
@@ -2849,15 +2880,15 @@ export default function App() {
 
   // 解散群（仅群主，二次确认）。
   const doDissolveGroup = (cid: string) => {
-    if (!window.confirm("删除并解散该群？所有成员将被移出，且不可恢复。")) return;
     void (async () => {
+      if (!(await askConfirm("删除并解散该群？所有成员将被移出，且不可恢复。", { okText: "解散", danger: true }))) return;
       try {
         await clientRef.current!.dissolveGroup(cid);
         setDetail(null);
         setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
         if (currentConvRef.current === cid) deselect();
         void refreshConversations();
-      } catch (e) { alert(`解散失败：${(e as Error).message}`); }
+      } catch (e) { setToast(`解散失败：${(e as Error).message}`); }
     })();
   };
 
@@ -2876,13 +2907,13 @@ export default function App() {
 
   // 单聊拉黑/取消拉黑（拉黑二次确认）。
   const doToggleBlock = (peer: string, block: boolean) => {
-    if (block && !window.confirm("拉黑该联系人？拉黑后将不再收到对方消息。")) return;
     void (async () => {
+      if (block && !(await askConfirm("拉黑该联系人？拉黑后将不再收到对方消息。", { okText: "拉黑", danger: true }))) return;
       try {
         await clientRef.current!.friendAction(block ? "block" : "unblock", peer);
         void refreshFriends();
         setToast(block ? "已拉黑" : "已取消拉黑");
-      } catch (e) { alert(`操作失败：${(e as Error).message}`); }
+      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
     })();
   };
 
@@ -2902,7 +2933,7 @@ export default function App() {
       await refreshConversations();
       openGroupChat(info.conv_id);
     } catch (e) {
-      alert(`建群失败：${(e as Error).message}`);
+      setToast(`建群失败：${(e as Error).message}`);
     } finally {
       setCreateBusy(false);
     }
@@ -2910,7 +2941,7 @@ export default function App() {
 
   // 退出群聊（群主会被服务端拦：需先转让）。
   const doLeaveGroup = async (cid: string) => {
-    if (!window.confirm("确定退出该群聊？")) return;
+    if (!(await askConfirm("确定退出该群聊？", { okText: "退出", danger: true }))) return;
     try {
       await clientRef.current!.leaveGroup(cid);
       setDetail(null);
@@ -2918,13 +2949,13 @@ export default function App() {
       if (currentConvRef.current === cid) deselect();
       void refreshConversations();
     } catch (e) {
-      alert(`退出失败：${(e as Error).message}`);
+      setToast(`退出失败：${(e as Error).message}`);
     }
   };
 
   // 改群名（群主/管理员）：轻量 prompt，回车确定。
   const doRenameGroup = async (gp: GroupInfo) => {
-    const name = window.prompt("群名（1~30 字）", gp.name);
+    const name = await askPrompt("修改群名", gp.name, { placeholder: "群名（1~30 字）", okText: "保存", maxLength: 30 });
     if (name === null || !name.trim() || name.trim() === gp.name) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url));
   };
@@ -2961,7 +2992,7 @@ export default function App() {
       void refreshGroupInfo(cid);
       void refreshConversations();
     } catch (e) {
-      alert(`邀请失败：${(e as Error).message}`);
+      setToast(`邀请失败：${(e as Error).message}`);
     }
   };
 
@@ -2979,7 +3010,7 @@ export default function App() {
       void refreshConversations();
       void refreshFriends();
     } catch (e) {
-      alert(`保存备注失败：${(e as Error).message}`);
+      setToast(`保存备注失败：${(e as Error).message}`);
     }
   };
   const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
@@ -3216,26 +3247,37 @@ export default function App() {
           const patchWifi = (next: typeof wifi) => void saveDownloadSettings({ ...st, wifi: next });
           // 已缓存 = 应用内 blob（文件）+ 已解门控的图片/视频（方案 B，走浏览器 HTTP 缓存）。
           const cachedCount = Object.keys(dlBlobs).length + mediaOptedIn.size;
-          const limitRow = (kind: "video" | "file", label: string) => (
-            <div className="range-row" key={kind}>
-              <div className="range-top">
-                <span className="row-label">{label}大小上限</span>
-                <span className="row-value">{wifi[kind].max_bytes > 0 ? formatFileSize(wifi[kind].max_bytes) : "手动"}</span>
+          // 单聊/群聊自动下载开关子行（图片/视频/文件共用）。
+          const scopeToggles = (kind: "image" | "video" | "file") => (
+            <div className="settings-subrows media-card-toggles">
+              {(["single", "group"] as const).map((who) => (
+                <label className="switch-row" key={who}>
+                  <span className="row-label">{who === "single" ? "单聊" : "群聊"}</span>
+                  <input type="checkbox" checked={wifi[kind][who]}
+                         onChange={(e) => patchWifi({ ...wifi, [kind]: { ...wifi[kind], [who]: e.target.checked } })} />
+                </label>
+              ))}
+            </div>
+          );
+          // 视频 / 文件：带大小上限滑杆的独立卡片（图片体积小，无需上限，见下方单独卡片）。
+          const limitCard = (kind: "video" | "file", label: string, Icon: LucideIcon) => (
+            <div className="settings-group media-card" key={kind}>
+              <div className="media-card-head">
+                <Icon size={17} className="media-card-icon" />
+                <span className="media-card-title">{label}</span>
               </div>
-              {/* 0 = 手动（不自动下）；其余按 MB 取整，右端对齐后端 MaxAutoBytes(1.5 GiB)。 */}
-              <input type="range" min={0} max={Math.round(MAX_AUTO_BYTES / (1024 * 1024))} step={1}
-                     value={Math.round(wifi[kind].max_bytes / (1024 * 1024))}
-                     onChange={(e) => patchWifi({ ...wifi, [kind]: { ...wifi[kind], max_bytes: Number(e.target.value) * 1024 * 1024 } })} />
-              <div className="range-scale"><span>手动</span><span>1.5 GB</span></div>
-              <div className="settings-subrows">
-                {(["single", "group"] as const).map((who) => (
-                  <label className="switch-row" key={who}>
-                    <span className="row-label">{who === "single" ? "单聊" : "群聊"}</span>
-                    <input type="checkbox" checked={wifi[kind][who]}
-                           onChange={(e) => patchWifi({ ...wifi, [kind]: { ...wifi[kind], [who]: e.target.checked } })} />
-                  </label>
-                ))}
+              <div className="range-row">
+                <div className="range-top">
+                  <span className="row-label">大小上限</span>
+                  <span className="row-value">{wifi[kind].max_bytes > 0 ? formatFileSize(wifi[kind].max_bytes) : "手动"}</span>
+                </div>
+                {/* 0 = 手动（不自动下）；其余按 MB 取整，右端对齐后端 MaxAutoBytes(1.5 GiB)。 */}
+                <input type="range" min={0} max={Math.round(MAX_AUTO_BYTES / (1024 * 1024))} step={1}
+                       value={Math.round(wifi[kind].max_bytes / (1024 * 1024))}
+                       onChange={(e) => patchWifi({ ...wifi, [kind]: { ...wifi[kind], max_bytes: Number(e.target.value) * 1024 * 1024 } })} />
+                <div className="range-scale"><span>手动</span><span>1.5 GB</span></div>
               </div>
+              {scopeToggles(kind)}
             </div>
           );
           return (
@@ -3283,28 +3325,27 @@ export default function App() {
                 <div className="settings-foot">档位是快捷入口——一键设好下面的大小上限；手改任一上限后回到「自定义」。图片体积小，恒自动下载。</div>
 
                 <div className="section-label">媒体文件类型</div>
-                <div className="settings-group">
-                  <div className="settings-subrows">
-                    {(["single", "group"] as const).map((who) => (
-                      <label className="switch-row" key={who}>
-                        <span className="row-label">图片 · {who === "single" ? "单聊" : "群聊"}</span>
-                        <input type="checkbox" checked={wifi.image[who]}
-                               onChange={(e) => patchWifi({ ...wifi, image: { ...wifi.image, [who]: e.target.checked } })} />
-                      </label>
-                    ))}
+                <div className="settings-group media-card">
+                  <div className="media-card-head">
+                    <ImageIcon size={17} className="media-card-icon" />
+                    <span className="media-card-title">图片</span>
+                    <span className="media-card-hint">体积小 · 恒自动下载</span>
                   </div>
-                  {limitRow("video", "视频")}
-                  {limitRow("file", "文件")}
+                  {scopeToggles("image")}
                 </div>
+                {limitCard("video", "视频", Video)}
+                {limitCard("file", "文件", FileText)}
 
                 <div className="settings-group">
                   <button className="settings-row danger" onClick={() => {
-                    if (!window.confirm("恢复自动下载的出厂默认设置？")) return;
-                    const c = clientRef.current;
-                    if (!c) return;
-                    void c.resetDownloadSettings()
-                      .then((r) => setDlSettings(parseDownloadSettings(r?.settings)))
-                      .catch((e: Error) => setToast(`重置失败：${e.message}`));
+                    void askConfirm("恢复自动下载的出厂默认设置？", { okText: "恢复默认", danger: true }).then((ok) => {
+                      if (!ok) return;
+                      const c = clientRef.current;
+                      if (!c) return;
+                      void c.resetDownloadSettings()
+                        .then((r) => setDlSettings(parseDownloadSettings(r?.settings)))
+                        .catch((e: Error) => setToast(`重置失败：${e.message}`));
+                    });
                   }}>
                     <span className="row-label">重置自动下载设置</span>
                   </button>
@@ -4638,20 +4679,59 @@ export default function App() {
             {gp.my_role === "owner" && (
               <button onClick={() => {
                 setMemberMenu(null);
-                if (window.confirm(`确定把群主转让给 ${m.nickname || m.user_id}？你将变为普通成员。`)) {
-                  void doGroupAction(cid, () => clientRef.current!.transferGroup(cid, m.user_id));
-                }
+                void askConfirm(`确定把群主转让给 ${m.nickname || m.user_id}？你将变为普通成员。`, { okText: "转让", danger: true }).then((ok) => {
+                  if (ok) void doGroupAction(cid, () => clientRef.current!.transferGroup(cid, m.user_id));
+                });
               }}>转让群主</button>
             )}
             <button className="danger" onClick={() => {
               setMemberMenu(null);
-              if (window.confirm(`确定把 ${m.nickname || m.user_id} 移出群聊？`)) {
-                void doGroupAction(cid, () => clientRef.current!.removeGroupMember(cid, m.user_id));
-              }
+              void askConfirm(`确定把 ${m.nickname || m.user_id} 移出群聊？`, { okText: "移出", danger: true }).then((ok) => {
+                if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMember(cid, m.user_id));
+              });
             }}>移出群聊</button>
           </div>
         );
       })()}
+
+      {/* 应用内确认框（替代 window.confirm，统一 .modal 风格）。点遮罩 = 取消。 */}
+      {confirmDlg && (
+        <div className="modal-mask" onClick={() => { confirmDlg.resolve(false); setConfirmDlg(null); }}>
+          <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-msg">{confirmDlg.message}</div>
+            <div className="modal-actions">
+              <button className="link" onClick={() => { confirmDlg.resolve(false); setConfirmDlg(null); }}>
+                {confirmDlg.cancelText}
+              </button>
+              <button className={`mini-btn${confirmDlg.danger ? " danger" : ""}`} autoFocus
+                      onClick={() => { confirmDlg.resolve(true); setConfirmDlg(null); }}>
+                {confirmDlg.okText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 应用内输入框（替代 window.prompt）。回车确定、Esc/遮罩取消。 */}
+      {promptDlg && (
+        <div className="modal-mask" onClick={() => { promptDlg.resolve(null); setPromptDlg(null); }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{promptDlg.title}</h3>
+            <input autoFocus value={promptDlg.value} placeholder={promptDlg.placeholder} maxLength={promptDlg.maxLength}
+                   onChange={(e) => setPromptDlg({ ...promptDlg, value: e.target.value })}
+                   onKeyDown={(e) => {
+                     if (e.key === "Enter") { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }
+                     else if (e.key === "Escape") { promptDlg.resolve(null); setPromptDlg(null); }
+                   }} />
+            <div className="modal-actions">
+              <button className="link" onClick={() => { promptDlg.resolve(null); setPromptDlg(null); }}>取消</button>
+              <button className="mini-btn" onClick={() => { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }}>
+                {promptDlg.okText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
