@@ -1958,8 +1958,8 @@ export default function App() {
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => (m.from === uid ? uid : (m.fromNickname || groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.nickname || m.from));
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
     if (forwardMode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
@@ -1984,12 +1984,14 @@ export default function App() {
         // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
         const clientMsgId = ct === "text"
           ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
-          // 转发也要带上媒体尺寸/时长：源消息手上就有，丢了收端就只能按未知渲染（且事后补不回来）。
+          // 转发也要带上媒体尺寸/时长 + **封面/缩略图**：源消息手上就有，丢了收端就只能按未知渲染
+          // （视频没 poster → 资料卡宫格只能抓首帧甚至裂图；且事后补不回来）。poster/thumb 对文件为空，无害。
           : client.sendMedia(m.content, ct, to, target.conv_id, {
               forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize,
               mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
+              poster: m.posterUrl, thumb: m.thumb,
             });
-        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize);
+        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb);
       }
     }
     setForwarding(null);
