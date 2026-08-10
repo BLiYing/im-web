@@ -1941,10 +1941,10 @@ export default function App() {
     return c.linkPreview(url);
   }, []);
   const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwardMode("each"); setForwarding([m]); }, []);
-  // 进入多选态（M4-3）：预选当前消息。
-  const enterSelectMode = useCallback((m: ChatMessage) => {
-    setMenu(null); setSelectMode(true);
-    setSelected(new Set(m.convSeq > 0 ? [m.convSeq] : []));
+  // 进入多选态（M4-3）：从消息右键进入时预选当前消息；从标题栏「选择消息」进入时不预选（m 省略）。
+  const enterSelectMode = useCallback((m?: ChatMessage) => {
+    setMenu(null); setChatMenu(false); setSelectMode(true);
+    setSelected(new Set(m && m.convSeq > 0 ? [m.convSeq] : []));
   }, []);
   const exitSelectMode = useCallback(() => { setSelectMode(false); setSelected(new Set()); }, []);
   const toggleSelected = useCallback((seq: number) => {
@@ -3562,13 +3562,14 @@ export default function App() {
                         { id: "info", label: "群资料", icon: Info, run: () => openGroupPanel(groupConvId) },
                         { id: "invite", label: "邀请成员", icon: UserPlus, run: () => setInviteDraft({ convId: groupConvId, selected: [] }) },
                         { id: "mute", label: groupConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (groupConv) setConvMuted(groupConv, !groupConv.muted); } },
+                        { id: "select", label: "选择消息", icon: CheckSquare, run: () => enterSelectMode() },
                         { id: "leave", label: "退出群聊", icon: LogOut, danger: true, run: () => void doLeaveGroup(groupConvId) },
                       ] : [
                         { id: "edit", label: "编辑联系人", icon: SquarePen, run: () => setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
                         { id: "call", label: "视频通话", icon: Video, run: () => comingSoon("视频通话") },
                         { id: "mute", label: peerConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (peerConv) setConvMuted(peerConv, !peerConv.muted); } },
-                        { id: "select", label: "选择消息", icon: CheckSquare, run: () => comingSoon("选择消息") },
-                        { id: "block", label: "屏蔽用户", icon: Ban, run: () => comingSoon("屏蔽用户") },
+                        { id: "select", label: "选择消息", icon: CheckSquare, run: () => enterSelectMode() },
+                        { id: "block", label: peerBlocked ? "取消拉黑" : "拉黑", icon: Ban, danger: !peerBlocked, run: () => doToggleBlock(peer, !peerBlocked) },
                         { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => { if (peerConv) deleteConv(peerConv); } },
                       ]).map((r) => (
                         <button key={r.id} className={`menu-card-row${"danger" in r && r.danger ? " danger" : ""}`}
