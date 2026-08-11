@@ -177,7 +177,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .newchat button { padding: var(--space-2) var(--space-4); border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); cursor: pointer; }
 .convlist { flex: 1; overflow-y: auto; }
 .empty { padding: 40px var(--space-4); text-align: center; color: var(--text-secondary); }
-.convitem { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--separator); cursor: pointer; }
+.convitem { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--separator); cursor: pointer; }
 .convitem:hover { background: var(--surface-hover); }
 .convitem.active { background: var(--selection-bg); }
 /* 不加 overflow:hidden——头像图 .avatar-img 自带 border-radius:50% 已自裁成圆，而 overflow:hidden + 圆角会把
