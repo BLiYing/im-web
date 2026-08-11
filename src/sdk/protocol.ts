@@ -21,11 +21,13 @@ export const T = {
   CONV_UPDATE: "conv_update",
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：收到即重拉 GET /download-settings。 */
   CAPS_UPDATE: "capabilities_update",
+  /** 「仅为我删除」多设备同步（任务2）：本人另一端删了某条 → 本端物理移除该 (conv_id, conv_seq)。 */
+  MSG_HIDDEN: "msg_hidden",
   ERROR: "error",
 } as const;
 
 /** 消息操作 op（对齐后端 protocol.MsgOp*）。 */
-export const OP = { RECALL: "recall", EDIT: "edit", PIN: "pin" } as const;
+export const OP = { RECALL: "recall", EDIT: "edit", PIN: "pin", DELETE: "delete" } as const;
 
 export interface Envelope {
   type: string;

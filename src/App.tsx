@@ -1123,8 +1123,19 @@ export default function App() {
         });
         scheduleListRefresh(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
       },
-      // 我发起的操作被拒（如撤回超时 300008）→ toast 提示（不改消息本身）。
+      // 我发起的操作被拒（如撤回超时 300008、无权删除 300006）→ toast 提示（不改消息本身）。
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
+      // 消息被物理移除（任务2）：为所有人删除（op=delete）/ 仅为我删除（msg_hidden）→ 从聊天列表 + 详情文件列表移除该条。
+      onMessageRemoved: (cid, targetSeq) => {
+        setMsgsByConv((prev) => {
+          const list = prev[cid];
+          if (!list) return prev;
+          const next = list.filter((m) => m.convSeq !== targetSeq);
+          return next.length === list.length ? prev : { ...prev, [cid]: next };
+        });
+        setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
+        scheduleListRefresh(); // 会话列表末条预览可能随之变化
+      },
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
       onConvUpdate: () => { scheduleListRefresh(); },
       // 账号级配置变更（M4-7）：另一端改了自动下载策略 → 重拉（零新链路的多端同步）。
@@ -2223,6 +2234,21 @@ export default function App() {
         resolve,
       })),
     []);
+
+  // 为所有人删除（任务2）：Telegram 式，删除后对端也消失。发送者本人或群主/管理员可删（后端权限校验；
+  // 被拒走 onMsgOpFailed → toast）。走 WS msg_op op=delete，服务端广播回 onMessageRemoved 物理移除本地。
+  const deleteFileForEveryone = useCallback(async (m: ChatMessage) => {
+    if (m.convSeq <= 0) { setToast("该消息尚未同步，暂不能删除"); return; }
+    if (!(await askConfirm("为所有人删除这个文件？对方也将看不到。", { okText: "为所有人删除", danger: true }))) return;
+    clientRef.current?.deleteMessageForEveryone(m.convId, m.convSeq);
+  }, [askConfirm]);
+
+  // 仅删除自己（任务2）：仅从我的所有设备移除，对端不受影响。走 REST 落 per-user 隐藏表 + 多设备同步。
+  const hideFileForMe = useCallback(async (m: ChatMessage) => {
+    if (m.convSeq <= 0) { setToast("该消息尚未同步，暂不能删除"); return; }
+    try { await clientRef.current?.hideMessage(m.convId, m.convSeq); }
+    catch (e) { setToast(`删除失败：${(e as Error).message}`); }
+  }, []);
 
   // 会话"设为已读"：推进已读位点（清未读数）+ 清除手动"标未读"标记，再刷新列表。
   const markReadConv = useCallback((c: Conversation) => {
@@ -4235,9 +4261,14 @@ export default function App() {
       )}
 
       {fileMenu && (() => {
-        // 详情文件行右键菜单（对齐 iOS 长按 §04）：转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（占位，后端接口待建）。
+        // 详情文件行右键菜单（对齐 iOS 长按 §04）：转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（任务2 两档）。
         const m = fileMenu.m;
         const downloading = dlStates[m.content]?.phase === "downloading";
+        // 删除两档（Telegram 式）：我发的文件 → 【为所有人删除】+【仅删除自己】；他人文件 → 仅【仅删除自己】，
+        // 但群主/管理员亦可【为所有人删除】他人文件（v1 群治理，与后端权限一致）。
+        const mine = m.from === uid;
+        const gpRole = groupInfos[m.convId]?.my_role;
+        const canDeleteForEveryone = mine || gpRole === "owner" || gpRole === "admin";
         return (
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
             <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
@@ -4248,9 +4279,12 @@ export default function App() {
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
                 <X size={16} className="menu-icon" />取消下载</button>
             )}
-            {/* 删除文件消息：服务端接口尚缺（同 iOS deleteFileMessage 占位），先 toast 不误导已删。 */}
-            <button className="danger" onClick={() => { setFileMenu(null); comingSoon("删除文件"); }}>
-              <Trash2 size={16} className="menu-icon" />删除</button>
+            {canDeleteForEveryone && (
+              <button className="danger" onClick={() => { setFileMenu(null); void deleteFileForEveryone(m); }}>
+                <Trash2 size={16} className="menu-icon" />为所有人删除</button>
+            )}
+            <button className="danger" onClick={() => { setFileMenu(null); void hideFileForMe(m); }}>
+              <Trash2 size={16} className="menu-icon" />{canDeleteForEveryone ? "仅删除自己" : "删除"}</button>
           </AnchoredMenu>
         );
       })()}

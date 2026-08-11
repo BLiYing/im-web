@@ -55,6 +55,9 @@ export interface IMClientHandlers {
   onMsgRejected?: (clientMsgId: string, msg: string, code: number) => void;
   /** 消息操作（撤回/编辑/置顶）应用到某条消息：UI 据 patch 更新该条（convSeq 定位）。 */
   onMsgOp?: (convId: string, targetConvSeq: number, patch: MsgOpPatch) => void;
+  /** 某条消息被**物理移除**（任务2）：为所有人删除（op=delete，全体成员）或仅为我删除（msg_hidden，本人多端）。
+   *  UI 据 (convId, convSeq) 从消息列表 / 详情文件列表移除该条，区别于 recall 的"改状态显墓碑"。 */
+  onMessageRemoved?: (convId: string, targetConvSeq: number) => void;
   /** 我发起的消息操作被拒（如撤回超时 300008）：回滚提示。 */
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
   /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
@@ -505,6 +508,48 @@ export class IMClient {
     return this.sendMsgOp(OP.EDIT, convId, targetConvSeq, { content });
   }
 
+  /** 为所有人删除（任务2）：发出 msg_op op=delete；发送者本人或群主/管理员可删（后端校验），
+   *  成功由服务端广播回 msg_op 帧，收端物理移除该条（无墓碑，区别于 recall）。失败回 onMsgOpFailed。 */
+  deleteMessageForEveryone(convId: string, targetConvSeq: number): string {
+    return this.sendMsgOp(OP.DELETE, convId, targetConvSeq, {});
+  }
+
+  /** 仅为我删除（任务2）：走 REST 落 per-user 隐藏表 → 本端立即物理移除 → 服务端推 msg_hidden 同步本人其它设备。 */
+  async hideMessage(convId: string, targetConvSeq: number): Promise<void> {
+    await this.api("/api/v1/messages/hide", {
+      method: "POST",
+      body: JSON.stringify({ conv_id: convId, conv_seq: targetConvSeq }),
+    });
+    await this.removeMessageLocal(convId, targetConvSeq, 0);
+  }
+
+  /** 登录后拉本账号隐藏消息全集并本地移除（catch-up：补收敛离线期间在其它设备产生的「仅为我删除」）。best-effort。
+   *  每次重连都拉全集以捕捉离线窗口内在别端产生的隐藏；但用 uid 维度的 appliedHidden 记忆已处理项，
+   *  避免每次重连对同一批旧隐藏重复 markMessageDeleted + 触发列表刷新（只对本会话新出现的隐藏做实际移除）。 */
+  private appliedHidden = new Set<string>(); // "uid|convId|convSeq"：本会话已应用过的隐藏（uid 入键，换账号自然不串）
+  async fetchHidden(): Promise<void> {
+    try {
+      const data = await this.api("/api/v1/messages/hidden");
+      const items = (data?.items ?? []) as Array<{ conv_id?: string; conv_seq?: number }>;
+      for (const it of items) {
+        if (!it.conv_id || !it.conv_seq) continue;
+        const key = `${this.uid}|${it.conv_id}|${it.conv_seq}`;
+        if (this.appliedHidden.has(key)) continue; // 已处理过：跳过重复移除/刷新
+        this.appliedHidden.add(key);
+        await this.removeMessageLocal(it.conv_id, it.conv_seq, 0);
+      }
+    } catch (e) {
+      logger.warn(LOG_TAG.ws, "fetch_hidden_failed", { message: (e as Error).message });
+    }
+  }
+
+  /** 物理移除某条消息（落墓碑防重同步复现 + 通知 UI）。为所有人删除 / 仅为我删除 / msg_hidden 共用。 */
+  private async removeMessageLocal(convId: string, targetConvSeq: number, advanceCursorTo: number): Promise<void> {
+    await localStore.markMessageDeleted(this.uid, convId, { convSeq: targetConvSeq });
+    if (advanceCursorTo > 0) await localStore.advanceSyncCursor(this.uid, convId, advanceCursorTo);
+    this.handlers.onMessageRemoved?.(convId, targetConvSeq);
+  }
+
   /** 发一条 msg_op（撤回/编辑/置顶），返回其 client_msg_id（供对账/回滚）。 */
   private sendMsgOp(op: string, convId: string, targetConvSeq: number, extra: { content?: string; pinned?: boolean }): string {
     const clientMsgId = crypto.randomUUID();
@@ -524,6 +569,12 @@ export class IMClient {
     const convId = data.conv_id || "";
     const target = data.target_conv_seq || 0;
     if (!convId || !target) return;
+    // 为所有人删除（任务2）：物理移除该条，不走 patch（区别于 recall 的改状态显墓碑）。
+    if (data.op === OP.DELETE) {
+      if (data.client_msg_id) this.pendingOps.delete(data.client_msg_id); // 我方操作成功回执
+      void this.removeMessageLocal(convId, target, advanceCursorTo);
+      return;
+    }
     let patch: MsgOpPatch;
     if (data.op === OP.RECALL) patch = { recalledAt: Date.now() };
     else if (data.op === OP.EDIT) patch = { editedAt: Date.now(), content: data.content ?? "" };
@@ -591,6 +642,7 @@ export class IMClient {
       this.setState("connected");
       this.startPing();
       this.sendSyncReq([...this.tracked]); // 重连补偿
+      void this.fetchHidden(); // 「仅为我删除」catch-up（任务2）：补收敛离线期间在其它设备产生的隐藏
       if (this.watched.length) {
         // watch 连接级易失，重连重发；诊断记一条与首次 watch_sent 区分（看重连是否补上）。
         logger.info(LOG_TAG.ws, "watch_resent", { count: this.watched.length, targets: this.watched });
@@ -725,8 +777,11 @@ export class IMClient {
       case T.CAPS_UPDATE: // 账号级配置版本变更（M4-7）：另一端改了自动下载策略 → 本端重拉
         this.handlers.onCapabilitiesUpdate?.(Number(d.version) || 0);
         break;
-      case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶）：应用到本地
+      case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶/为所有人删除）：应用到本地
         this.applyMsgOp(d);
+        break;
+      case T.MSG_HIDDEN: // 「仅为我删除」多设备同步（任务2）：本人另一端删了 → 本端物理移除
+        if (d.conv_id && d.conv_seq) void this.removeMessageLocal(d.conv_id, Number(d.conv_seq), 0);
         break;
       case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
         this.handlers.onConvUpdate?.({
@@ -810,6 +865,13 @@ export class IMClient {
       } catch {
         /* 非法负载：忽略不崩 */
       }
+      if (isNextContiguous) this.updateSynced(convId, convSeq);
+      return;
+    }
+    // 「为所有人删除」直加载/同步收敛（任务2）：目标行带 deleted_at>0 → 物理移除、不入库为可见消息。
+    // 对齐 recalled_at 的直渲染：不再仅依赖单独的 msg_op 事件行（拿到目标行却漏事件行时会误显已删文件）。
+    if (Number(d.deleted_at) > 0 && convId && convSeq > 0) {
+      void this.removeMessageLocal(convId, convSeq, isNextContiguous ? convSeq : 0);
       if (isNextContiguous) this.updateSynced(convId, convSeq);
       return;
     }

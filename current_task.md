@@ -4,7 +4,17 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
-**媒体持久化 C1 + 持久失效标记（2026-08-07，tsc + 144 vitest 绿 + vite build 绿；待浏览器手测）**
+
+**任务二（IMServer 驱动）— 详情页删文件两档 ✅ 三端手测通过（2026-08-11，tsc + 165 vitest 绿）**
+> 完整设计/归档见 `../IMServer/current_task.archive.md`「2026-08-11 归档④」；逐端矩阵 `../IMServer/docs/CLIENT_PARITY.md`「任务二」。
+- **为所有人删除**：`sdk/protocol.ts` `OP.DELETE`；`imSdk.ts` `deleteMessageForEveryone`（WS `msg_op op=delete`）；`applyMsgOp` 收到 delete → `removeMessageLocal`（落墓碑 + `onMessageRemoved`，物理移除不显墓碑）；`processIncoming` 遇 `deleted_at>0` 目标行直接移除（不只靠事件行）。
+- **仅删除自己**：`hideMessage`（`POST /api/v1/messages/hide` + 本地移除）；`fetchHidden`（`GET /messages/hidden` 登录 catch-up，uid 维度 `appliedHidden` 去重、重连不重刷）；`msg_hidden` 帧 → 本端移除。
+- **UX**：`App.tsx` 详情文件右键两档——我发的/群主·管理员=【为所有人删除】+【仅删除自己】，他人=【删除】（=仅删自己）；`onMessageRemoved` 从聊天列表 + 详情文件列表移除。
+- `/code-review` 5 条已全修（含 `processIncoming` 跳过 deleted_at、`fetchHidden` 去重）。
+
+---
+
+**（更早·待浏览器手测）媒体持久化 C1 + 持久失效标记（2026-08-07，tsc + 144 vitest 绿 + vite build 绿）**
 > 对齐 iOS「原件落 sandbox 磁盘、`fileExistsAtPath` 命中即就绪」。解决两个刷新丢失：**已下载文件刷新又要下载**（含资料卡文件列表）＋ **expired 刷新变透明/条纹坏占位、重刷 404 风暴**。
 - **`src/mediaCache.ts`（新）+ 6 单测**：Cache Storage 薄封装（按 uid 命名空间 `im-media-<uid>`，跨账号隔离）
   `cachePutBlob/cacheMatchBlob/cacheClear` + 持久字符串集合 `loadStrSet/saveStrSet`（末 500 封顶）+ 键 `expiredKey/downloadedFilesKey`。
