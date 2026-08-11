@@ -3322,7 +3322,9 @@ export default function App() {
                       <button key={v} className={`tier-btn${tier === v ? " on" : ""}`} disabled={!wifi.enabled}
                               onClick={() => patchWifi(applyTier(wifi, v))}>{t}</button>
                     ))}
-                    {tier === "custom" && <span className="tier-custom">自定义</span>}
+                    {/* 自定义为只读指示（无预设可套用）→ 仅当前处于自定义时才出现的高亮按钮、不可点，
+                        与 低/中/高 同款样式（对齐 iOS「仅自定义时出现的第四档」）。 */}
+                    {tier === "custom" && <button className="tier-btn on" disabled>自定义</button>}
                   </div>
                 </div>
                 <div className="settings-foot">档位是快捷入口——一键设好下面的大小上限；手改任一上限后回到「自定义」。图片体积小，恒自动下载。</div>
