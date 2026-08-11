@@ -86,6 +86,48 @@ export function containsMentionToken(text: string, displayName: string): boolean
   }
 }
 
+/** 文本切段：普通段 `mention=false`，被 @ 的 token 段 `mention=true`（供渲染层高亮）。 */
+export interface MentionSegment { text: string; mention: boolean }
+
+/**
+ * 把文本按已知 `@显示名` token 切成"普通/高亮"段，供气泡渲染层给 @提及上色。
+ *
+ * 与 `containsMentionToken` 同一套 token 边界规则（token 后须紧跟空白或字符串结尾），
+ * 因此 `@小美` 不会误命中 `@小美丽`；`displayNames` 按长度降序优先匹配，保证长名先中。
+ * 只认半角 `@`（回填 token 一律半角，见 applyMentionToken）。names 为空时原样返回单段。
+ */
+export function segmentMentions(text: string, displayNames: string[]): MentionSegment[] {
+  const names = [...new Set(displayNames.filter((n) => !!n))].sort((a, b) => b.length - a.length);
+  if (!text) return [];
+  if (names.length === 0) return [{ text, mention: false }];
+  const segs: MentionSegment[] = [];
+  let buf = "";
+  let i = 0;
+  const flush = () => { if (buf) { segs.push({ text: buf, mention: false }); buf = ""; } };
+  while (i < text.length) {
+    let hit: string | null = null;
+    if (text[i] === "@") {
+      for (const n of names) {
+        const token = `@${n}`;
+        if (text.startsWith(token, i)) {
+          const after = i + token.length;
+          if (after >= text.length || /\s/.test(text[after])) { hit = n; break; }
+        }
+      }
+    }
+    if (hit) {
+      flush();
+      segs.push({ text: `@${hit}`, mention: true });
+      i += hit.length + 1;
+    } else {
+      buf += text[i];
+      i += 1;
+    }
+  }
+  flush();
+  return segs;
+}
+
 /**
  * 发送前把文本还原成被 @ 的 uid 列表：只保留**文本里仍存在完整 token** 的候选。
  * 结果去重且顺序稳定（按候选表插入序），便于测试与日志比对。

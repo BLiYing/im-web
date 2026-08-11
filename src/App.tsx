@@ -3,7 +3,7 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
-import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
+import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
@@ -2201,11 +2201,29 @@ export default function App() {
   const toggleTextExpand = useCallback((key: string) => {
     setExpandedTexts((prev) => { const nx = new Set(prev); if (nx.has(key)) nx.delete(key); else nx.add(key); return nx; });
   }, []);
+  // 被 @ 者的显示名集合（用于气泡内 @昵称 高亮）：mentions 是服务端过滤后的 uid，回本地群成员表取昵称；
+  // mention_all 追加「所有人」。取不到昵称的 uid 跳过（高亮不了但不影响文本）。单聊无 mentions，返回空。
+  const mentionNamesFor = (m: ChatMessage): string[] => {
+    const names: string[] = [];
+    if (m.mentionAll) names.push(MENTION_ALL_LABEL);
+    for (const uid of m.mentions ?? []) {
+      const nick = memberNick(m.convId, uid);
+      if (nick) names.push(nick);
+    }
+    return names;
+  };
+  // 把一段文本渲染为高亮 @提及的节点：命中的 `@昵称` token 上色，其余原样。无提及时直接返回字符串。
+  const renderMentionText = (m: ChatMessage, text: string) => {
+    const names = mentionNamesFor(m);
+    if (names.length === 0) return text;
+    return segmentMentions(text, names).map((s, i) =>
+      s.mention ? <span key={i} className="mention-hl">{s.text}</span> : s.text);
+  };
   // 文本消息内容的三档渲染（阈值见 longtext.ts，与 iOS 统一）：
-  //   short 全显；long 折叠 8 行 + 就地展开；huge 摘要卡 → 全屏阅读器。
+  //   short 全显；long 折叠 8 行 + 就地展开；huge 摘要卡 → 全屏阅读器。均对 @昵称 高亮。
   const renderMessageText = (m: ChatMessage) => {
     const tier = textTier(m.content);
-    if (tier === "short") return <span className="btext">{m.content}</span>;
+    if (tier === "short") return <span className="btext">{renderMentionText(m, m.content)}</span>;
     // 多选态：整行点击=勾选（见 .row onClick）。此时长文本不接管点击——摘要卡不开阅读器、
     // 折叠切换也不吞事件，让点击冒泡到行去切换选中（与 iOS `self.selecting` 早返回一致）。
     if (tier === "huge") {
@@ -2227,7 +2245,7 @@ export default function App() {
     const expanded = expandedTexts.has(key);
     return (
       <span className="btext">
-        <span className={expanded ? "lt-body" : "lt-body collapsed"}>{m.content}</span>
+        <span className={expanded ? "lt-body" : "lt-body collapsed"}>{renderMentionText(m, m.content)}</span>
         <span className="lt-toggle" onClick={(e) => { if (selectMode) return; e.stopPropagation(); toggleTextExpand(key); }}>
           {expanded ? <>收起 <ChevronUp size={13} /></> : <>展开全文 <ChevronDown size={13} /></>}
         </span>
@@ -4357,7 +4375,7 @@ export default function App() {
                         onClick={() => { void navigator.clipboard?.writeText(textReader.content); setToast("已复制全文"); }}><Copy size={16} /></button>
               </span>
             </div>
-            <div className="tr-body" style={{ fontSize: `${15 + readerFontStep}px` }}>{textReader.content}</div>
+            <div className="tr-body" style={{ fontSize: `${15 + readerFontStep}px` }}>{renderMentionText(textReader, textReader.content)}</div>
           </div>
         </div>
       )}

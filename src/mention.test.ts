@@ -7,6 +7,7 @@ import {
   filterMentionMembers,
   canMentionAll,
   containsMentionToken,
+  segmentMentions,
   countsAsUnread,
   MENTION_ALL_LABEL,
 } from "./mention";
@@ -174,5 +175,57 @@ describe("countsAsUnread（与服务端未读口径一致）", () => {
     expect(countsAsUnread("text")).toBe(true);
     expect(countsAsUnread("image")).toBe(true);
     expect(countsAsUnread(undefined)).toBe(true);
+  });
+});
+
+describe("segmentMentions（气泡 @高亮切段）", () => {
+  it("命中的 @名字 单独成高亮段，其余为普通段", () => {
+    expect(segmentMentions("你好 @小明 在吗", ["小明"])).toEqual([
+      { text: "你好 ", mention: false },
+      { text: "@小明", mention: true },
+      { text: " 在吗", mention: false },
+    ]);
+  });
+
+  it("token 边界：@小美 不误命中 @小美丽（长名优先）", () => {
+    expect(segmentMentions("@小美丽 开会", ["小美", "小美丽"])).toEqual([
+      { text: "@小美丽", mention: true },
+      { text: " 开会", mention: false },
+    ]);
+  });
+
+  it("结尾处的 token 也算完整（后无空白）", () => {
+    expect(segmentMentions("在吗 @小美", ["小美"])).toEqual([
+      { text: "在吗 ", mention: false },
+      { text: "@小美", mention: true },
+    ]);
+  });
+
+  it("同一条里多个 @ 各自高亮", () => {
+    expect(segmentMentions("@小美丽 和 @小美 都来", ["小美", "小美丽"])).toEqual([
+      { text: "@小美丽", mention: true },
+      { text: " 和 ", mention: false },
+      { text: "@小美", mention: true },
+      { text: " 都来", mention: false },
+    ]);
+  });
+
+  it("@所有人 也可高亮", () => {
+    expect(segmentMentions(`@${MENTION_ALL_LABEL} 集合`, [MENTION_ALL_LABEL])).toEqual([
+      { text: "@所有人", mention: true },
+      { text: " 集合", mention: false },
+    ]);
+  });
+
+  it("无名单或空文本：原样单段 / 空数组", () => {
+    expect(segmentMentions("纯文本", [])).toEqual([{ text: "纯文本", mention: false }]);
+    expect(segmentMentions("", ["小美"])).toEqual([]);
+  });
+
+  it("非完整 token（token 后紧跟非空白）不高亮——与 resolveMentions 同规则", () => {
+    // "@b" 后是 "c"（非空白）→ 不是完整 token；裸 "@" 也不成 token。整串一段不高亮。
+    expect(segmentMentions("发 a@bc 里的 @ 号", ["b"])).toEqual([
+      { text: "发 a@bc 里的 @ 号", mention: false },
+    ]);
   });
 });

@@ -5,7 +5,9 @@
 
 ## 当前焦点
 
-**三项 UX 优化 ✅ 代码完成 + `/code-review` 7 条全修（2026-08-11，tsc + 203 vitest + build 绿，**待浏览器手测**）** — 逐端矩阵见 `../IMServer/docs/CLIENT_PARITY.md`「UX」三行。
+**气泡内 `@昵称` 高亮 ✅（2026-08-11，tsc + 210 vitest + build 绿，待手测）**：`segmentMentions`（mention.ts，7 例）用消息 `mentions`+群昵称还原 `@昵称`，short/long 气泡 + 全屏阅读器均高亮（`.mention-hl`）；token 边界同 `containsMentionToken`、长名优先。
+
+**三项 UX 优化 ✅ 代码完成 + `/code-review` 7 条全修（2026-08-11，tsc + 210 vitest + build 绿，**待浏览器手测**）** — 逐端矩阵见 `../IMServer/docs/CLIENT_PARITY.md`「UX」三行。
 > 审查修复：① 展开 key 加 convId（防跨会话 seq-N 串号）；② 多选态长文本不接管点击（让位选中）；③ 阈值/字数改按码点计（与 iOS 对齐）；④ `textTier` 加短消息快路径；⑤ iOS `groupedCount` 收敛到 `+charCountLabelForText:`；⑥ 删无用 `COLLAPSED_LINES`；⑦ iOS 长文引用点击先于跳转（否则永远点不开）。
 1. **长文本三档显示**：`src/longtext.ts`（`textTier` + `charCountLabel`，8 例，阈值与 iOS 统一：huge `chars≥2000|lines≥60`、long `≥300|≥10`）。`App.tsx renderMessageText`——short 全显；long `.lt-body.collapsed` 夹 8 行 + `.lt-toggle` 展开/收起（`expandedTexts` 记忆）；huge `.longtext-card` 摘要卡 → 全屏阅读器 `.text-reader`（`textReader` 状态 + `readerFontStep` 字号 + 复制全文 + Esc）。CSS 全在 styles.css。
 2. **视频禁复制**：`viewer-more-pop` 复制按钮 `contentType!=="video"` 条件渲染（长按菜单 `menus.ts` 本就 `isText||image`，不含视频）。
