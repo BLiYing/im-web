@@ -512,6 +512,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .ctx-menu button { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
 .ctx-menu button:hover { background: var(--surface-hover); }
 .ctx-menu button.danger { color: var(--danger); }
+/* 删除两档子菜单 B：由菜单 A 的「删除」展开时，从锚点自然过渡（淡入 + 轻微上移/缩放），对齐 iOS 原生 push 子菜单观感。 */
+.ctx-menu.ctx-submenu-in { animation: ctxSubIn 0.16s cubic-bezier(0.32, 0.72, 0, 1); transform-origin: top left; }
+@keyframes ctxSubIn { from { opacity: 0; transform: translateY(-4px) scale(0.96); } to { opacity: 1; transform: none; } }
 
 /* 侧栏头部：左上角圆头像 + 账号信息（覆盖默认 space-between 布局）。 */
 .sidebar header { justify-content: flex-start; }

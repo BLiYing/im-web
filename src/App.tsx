@@ -645,6 +645,7 @@ export default function App() {
   const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "links">("media");
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
+  const [deleteMenu, setDeleteMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 删除两档子菜单 B（为所有人删除/仅删除自己）——由菜单 A 的「删除」展开，对齐 iOS 子菜单
   const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/占位项）
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
@@ -1134,6 +1135,7 @@ export default function App() {
           return next.length === list.length ? prev : { ...prev, [cid]: next };
         });
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
+        setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
         scheduleListRefresh(); // 会话列表末条预览可能随之变化
       },
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
@@ -2235,13 +2237,13 @@ export default function App() {
       })),
     []);
 
-  // 为所有人删除（任务2）：Telegram 式，删除后对端也消失。发送者本人或群主/管理员可删（后端权限校验；
-  // 被拒走 onMsgOpFailed → toast）。走 WS msg_op op=delete，服务端广播回 onMessageRemoved 物理移除本地。
-  const deleteFileForEveryone = useCallback(async (m: ChatMessage) => {
+  // 为所有人删除（任务2）：Telegram 式，删除后对端也消失。走 WS msg_op op=delete，服务端广播回
+  // onMessageRemoved 物理移除本地；被拒走 onMsgOpFailed → toast。**不再单独居中确认**——两档子菜单 B
+  // 里选中「为所有人删除」这一动作本身即确认（对齐 iOS 子菜单、去掉居中弹窗）。
+  const deleteFileForEveryone = useCallback((m: ChatMessage) => {
     if (m.convSeq <= 0) { setToast("该消息尚未同步，暂不能删除"); return; }
-    if (!(await askConfirm("为所有人删除这个文件？对方也将看不到。", { okText: "为所有人删除", danger: true }))) return;
     clientRef.current?.deleteMessageForEveryone(m.convId, m.convSeq);
-  }, [askConfirm]);
+  }, []);
 
   // 仅删除自己（任务2）：仅从我的所有设备移除，对端不受影响。走 REST 落 per-user 隐藏表 + 多设备同步。
   const hideFileForMe = useCallback(async (m: ChatMessage) => {
@@ -2249,6 +2251,21 @@ export default function App() {
     try { await clientRef.current?.hideMessage(m.convId, m.convSeq); }
     catch (e) { setToast(`删除失败：${(e as Error).message}`); }
   }, []);
+
+  // 能否「为所有人删除」某条消息：我发的，或我是该群群主/管理员（与后端权限一致）。
+  const canDeleteForEveryone = useCallback((m: ChatMessage) => {
+    if (m.from === uid) return true;
+    const role = groupInfos[m.convId]?.my_role;
+    return role === "owner" || role === "admin";
+  }, [uid, groupInfos]);
+
+  // 删除路由（聊天页 + 详情各 tab 统一，对齐 iOS）：本地未发出件→本地删；已发出且可为所有人删→弹两档子菜单 B；
+  // 只能删自己→直接仅删自己。x/y 为菜单 A 的锚点，子菜单 B 就地弹出并带过渡动画。
+  const requestDelete = useCallback((m: ChatMessage, x: number, y: number) => {
+    if (m.convSeq <= 0) { deleteMessage(m); return; }        // 本地失败/未发出：服务器无此消息，本地删
+    if (canDeleteForEveryone(m)) { setDeleteMenu({ x, y, m }); return; } // 两档子菜单
+    void hideFileForMe(m);                                    // 仅能删自己：直接隐藏
+  }, [deleteMessage, canDeleteForEveryone, hideFileForMe]);
 
   // 会话"设为已读"：推进已读位点（清未读数）+ 清除手动"标未读"标记，再刷新列表。
   const markReadConv = useCallback((c: Conversation) => {
@@ -2321,6 +2338,8 @@ export default function App() {
       translate: translateMessage,
       multiSelect: enterSelectMode,
       recall: recallMessage,
+      // 聊天菜单的「删除」在渲染层按锚点特判 → requestDelete（两档子菜单/仅删自己/本地删，需菜单 x/y）；
+      // 此 handler 不经 a.run 触发，仅为 buildMessageActions 的类型契约占位（requestDelete 内部另直接用 deleteMessage 处理 convSeq<=0）。
       delete: deleteMessage,
       reportMsg: (m) => void reportMessage(m, "message"),
       reportUser: (m) => void reportMessage(m, "user"),
@@ -2411,9 +2430,10 @@ export default function App() {
   // 在 `.detail-panel`（挂了 stopPropagation）内，冒泡阶段的 window 监听收不到面板内的点击。菜单自身点击由
   // `.ctx-menu` 排除（菜单项各自负责关闭），避免在按钮 handler 前先卸载菜单。
   useEffect(() => {
-    if (!fileMenu) return;
-    const close = (e: Event) => { if ((e.target as Element)?.closest?.(".ctx-menu")) return; setFileMenu(null); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFileMenu(null); };
+    if (!fileMenu && !deleteMenu) return;
+    const closeAll = () => { setFileMenu(null); setDeleteMenu(null); };
+    const close = (e: Event) => { if ((e.target as Element)?.closest?.(".ctx-menu")) return; closeAll(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeAll(); };
     window.addEventListener("click", close, true);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKey);
@@ -2422,7 +2442,7 @@ export default function App() {
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
     };
-  }, [fileMenu]);
+  }, [fileMenu, deleteMenu]);
 
   // 左上角头像卡片：点空白/Esc 关闭。
   useEffect(() => {
@@ -4082,7 +4102,12 @@ export default function App() {
                     }
                   }}>复制</button>
                   <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); setForwarding([mm]); }}>转发</button>
-                  <button className="danger" onClick={() => { deleteMessage(viewer.m); setViewer(null); }}>删除</button>
+                  <button className="danger" onClick={(e) => {
+                    // 统一走两档路由（对齐详情/聊天）：可为所有人删则弹子菜单 B，否则仅删自己；删成功后查看器由 onMessageRemoved 关闭。
+                    const m = viewer.m;
+                    if (m.convSeq <= 0) { deleteMessage(m); setViewer(null); return; }
+                    requestDelete(m, e.clientX, e.clientY);
+                  }}>删除</button>
                 </div>
               )}
             </div>
@@ -4242,7 +4267,11 @@ export default function App() {
             .filter((a) => a.visible({ m: menu.m, uid }))
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
-                onClick={() => { a.run({ m: menu.m, uid }); setMenu(null); }}>
+                onClick={() => {
+                  // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
+                  if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
+                  a.run({ m: menu.m, uid }); setMenu(null);
+                }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}
         </AnchoredMenu>
@@ -4261,14 +4290,10 @@ export default function App() {
       )}
 
       {fileMenu && (() => {
-        // 详情文件行右键菜单（对齐 iOS 长按 §04）：转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（任务2 两档）。
+        // 详情内容右键菜单（**文件/媒体/链接三 tab 共用**，成员除外；对齐 iOS 详情各 tab 长按）：
+        // 转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（任务2 两档）。菜单对任意 ChatMessage 通用。
         const m = fileMenu.m;
         const downloading = dlStates[m.content]?.phase === "downloading";
-        // 删除两档（Telegram 式）：我发的文件 → 【为所有人删除】+【仅删除自己】；他人文件 → 仅【仅删除自己】，
-        // 但群主/管理员亦可【为所有人删除】他人文件（v1 群治理，与后端权限一致）。
-        const mine = m.from === uid;
-        const gpRole = groupInfos[m.convId]?.my_role;
-        const canDeleteForEveryone = mine || gpRole === "owner" || gpRole === "admin";
         return (
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
             <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
@@ -4279,12 +4304,24 @@ export default function App() {
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
                 <X size={16} className="menu-icon" />取消下载</button>
             )}
-            {canDeleteForEveryone && (
-              <button className="danger" onClick={() => { setFileMenu(null); void deleteFileForEveryone(m); }}>
-                <Trash2 size={16} className="menu-icon" />为所有人删除</button>
-            )}
-            <button className="danger" onClick={() => { setFileMenu(null); void hideFileForMe(m); }}>
-              <Trash2 size={16} className="menu-icon" />{canDeleteForEveryone ? "仅删除自己" : "删除"}</button>
+            {/* 删除统一走两档路由：可为所有人删则展开子菜单 B，否则直接仅删自己（不再在此平铺两项）。 */}
+            <button className="danger" onClick={() => { const x = fileMenu.x, y = fileMenu.y; setFileMenu(null); requestDelete(m, x, y); }}>
+              <Trash2 size={16} className="menu-icon" />删除</button>
+          </AnchoredMenu>
+        );
+      })()}
+
+      {deleteMenu && (() => {
+        // 删除两档子菜单 B（由菜单 A 的「删除」展开，对齐 iOS 原生子菜单）：为所有人删除 / 仅删除自己。
+        // ctx-submenu-in：A→B 的自然过渡动画（从锚点淡入 + 轻微缩放/上移）。
+        const m = deleteMenu.m;
+        return (
+          <AnchoredMenu x={deleteMenu.x} y={deleteMenu.y} className="ctx-menu ctx-submenu-in">
+            {/* 破坏性重的「为所有人删除」放最后（destructive-last，与消息/会话菜单约定一致，降低误触不可逆项）。 */}
+            <button className="danger" onClick={() => { setDeleteMenu(null); void hideFileForMe(m); }}>
+              <Trash2 size={16} className="menu-icon" />仅删除自己</button>
+            <button className="danger" onClick={() => { setDeleteMenu(null); deleteFileForEveryone(m); }}>
+              <Trash2 size={16} className="menu-icon" />为所有人删除</button>
           </AnchoredMenu>
         );
       })()}
@@ -4586,6 +4623,7 @@ export default function App() {
                             return (
                             <button key={m.serverMsgId || m.convSeq} className="detail-media-tile"
                                     onClick={() => (gate ? onGateTap(m) : setViewer({ m }))}
+                                    onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}
                                     title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
                               {gate
                                 ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
@@ -4642,7 +4680,8 @@ export default function App() {
                       links.length === 0 ? <div className="detail-empty">暂无链接</div> : (
                         <div className="detail-filelist">
                           {links.map((m) => (
-                            <a key={m.serverMsgId || m.convSeq} className="detail-linkitem" href={m.content} target="_blank" rel="noreferrer">
+                            <a key={m.serverMsgId || m.convSeq} className="detail-linkitem" href={m.content} target="_blank" rel="noreferrer"
+                               onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}>
                               <Link2 size={16} /><span className="detail-file-name">{m.content}</span>
                             </a>
                           ))}
