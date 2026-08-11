@@ -472,7 +472,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 日期分隔胶囊（居中浮于壁纸上）。 */
 .date-pill { display: flex; justify-content: center; margin: 10px 0 6px; }
 .date-pill span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); font-weight: 600; padding: 3px 12px; border-radius: 999px; }
-.chat footer { display: flex; align-items: flex-end; gap: var(--space-2); padding: 10px var(--space-4); margin-top: var(--app-gap); border: 1px solid var(--separator); border-radius: var(--app-card-radius); background: var(--card-bg); box-shadow: 0 6px 22px var(--shadow-soft); }
+.chat footer { position: relative; display: flex; align-items: flex-end; gap: var(--space-2); padding: 10px var(--space-4); margin-top: var(--app-gap); border: 1px solid var(--separator); border-radius: var(--app-card-radius); background: var(--card-bg); box-shadow: 0 6px 22px var(--shadow-soft); }
 .chat footer textarea { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--surface); color: var(--text); font: inherit; line-height: 1.4; resize: none; overflow-y: auto; max-height: 120px; }
 .chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); cursor: pointer; flex-shrink: 0; }
 /* 拉黑者侧：输入框换成提示横幅 */
@@ -490,6 +490,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convitem.pinned { box-shadow: inset 3px 0 0 var(--accent); }
 .conv-pin { color: var(--accent); vertical-align: -1px; margin-right: 3px; }
 .conv-mute { color: var(--text-secondary); vertical-align: -1px; margin-left: 4px; }
+/* 群「有人@我」红字前缀（M4-8）：只染前缀，正文保持次要色（对齐 iOS 会话行）。 */
+.conv-mention { color: var(--danger); font-weight: 600; margin-right: 4px; }
 .badge.muted { background: var(--text-secondary); }
 .badge.dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; }
 /* 未读分割线（Telegram 风格的"未读消息"）。 */
@@ -1015,3 +1017,46 @@ button.detail-row:hover { background: var(--surface-hover); }
 .avatar-cropper .ac-btn.pri { background: var(--accent); color: var(--on-media, #fff); }
 .avatar-cropper .ac-btn:disabled { opacity: .5; cursor: default; }
 .avatar-cropper .ac-save-err { margin-right: auto; color: var(--danger, #dc2626); font-size: 12px; align-self: center; }
+
+/* ── @提及面板（M4-8）：贴输入框上方的内联下拉，桌面端替代 iOS 的半屏卡 ────────── */
+/* 面板配色沿用右键菜单 .ctx-menu 那套变量（--surface-elevated/--separator/--text）：明暗都验证过。
+   ⚠️ 行选择器**必须带 .mention-panel 前缀**：.mention-row 是 <button> 且落在 .chat footer 里，
+   而发送按钮那条 `.chat footer button{background:var(--accent);color:var(--on-accent)}`（特异性 0,1,2）
+   会盖过裸 .mention-row（0,1,0）——否则每行都被染成绿底白字（这正是方案 A 一度没生效的原因）。 */
+.mention-panel {
+  position: absolute; left: var(--space-4); right: var(--space-4); bottom: 100%;
+  margin-bottom: 6px; max-height: 260px; overflow-y: auto; z-index: 50;
+  background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: 10px;
+  box-shadow: 0 4px 16px var(--shadow-strong); padding: 4px;
+}
+/* 所有行底色统一（透明露出面板底），只有当前行高亮——无斑马纹、无分隔线。 */
+.mention-panel .mention-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px;
+  background: none; border: 0; border-radius: 6px; cursor: pointer; text-align: left;
+  color: var(--text); font-size: 14px;
+}
+/* 选中态复用全站既有的 --selection-bg（会话列表 .convitem.active 同款淡绿），全站"被选中"同一个颜色。
+   **不写 :hover** —— 鼠标移入由 onMouseEnter 改 .active，再挂 :hover 会与键盘高亮出现两行同亮。 */
+.mention-panel .mention-row.active { background: var(--selection-bg); }
+.mention-avatar { width: 26px; height: 26px; font-size: 11px; flex: none; }
+.mention-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 角色标直接复用群成员列表的 .role-badge（群主=绿底绿字），同一含义不做第二套样式。
+   它为行内文字流设计、自带 margin-left + vertical-align；这里是 flex 行，两者都要归零。 */
+.mention-panel .role-badge, .readby-row .role-badge { margin-left: 0; vertical-align: 0; flex: none; }
+.mention-all-ic {
+  width: 26px; height: 26px; border-radius: 50%; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-weight: 700;
+}
+
+/* ── 已读名单弹窗（M4-8）：已读/未读两栏，不显读取时刻 ─────────────────────── */
+.readby-modal { width: min(360px, 92vw); }
+.readby-tabs { display: flex; gap: 4px; padding: 4px; margin: 0 0 8px; background: var(--surface); border-radius: 9px; }
+.readby-tabs button {
+  flex: 1; padding: 6px 0; border: 0; border-radius: 7px; background: none;
+  color: var(--text-secondary); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.readby-tabs button.on { background: var(--card-bg); color: var(--text); box-shadow: 0 1px 3px var(--shadow-soft); }
+.readby-list { max-height: 46vh; overflow-y: auto; }
+.readby-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 14px; }
+.readby-empty { padding: 24px 0; text-align: center; color: var(--text-secondary); font-size: 13px; }

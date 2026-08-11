@@ -264,6 +264,20 @@ export class IMClient {
     return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`)) as GroupInfo;
   }
 
+  /**
+   * 群消息已读/未读名单（M4-8）：**仅消息发送者本人**可调（他人调用服务端回 403）。
+   * `enabled=false` 表示群规模超上限（>2000 人）——read/unread 为空，调用方应隐藏入口而非报错。
+   * 不含读取时刻：已读位点语义是"读到 conv_seq 为止"，无法反推某人何时读到这一条。
+   */
+  async fetchReadReceipts(convId: string, convSeq: number): Promise<{ read: string[]; unread: string[]; enabled: boolean }> {
+    const data = await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/messages/${convSeq}/read-by`);
+    return {
+      read: Array.isArray(data?.read) ? (data.read as string[]) : [],
+      unread: Array.isArray(data?.unread) ? (data.unread as string[]) : [],
+      enabled: data?.enabled === true,
+    };
+  }
+
   /** 改群资料（群主/管理员）。 */
   async updateGroup(convId: string, name: string, avatarUrl: string): Promise<void> {
     await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`, {
@@ -396,7 +410,7 @@ export class IMClient {
   }
 
   /** 发送文本，返回 client_msg_id。opts.replyTo=引用回复（M4-2）；opts.forwardFrom=转发溯源（M4-3）。 */
-  sendText(content: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string; from?: string }; forwardFrom?: string }): string {
+  sendText(content: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string; from?: string }; forwardFrom?: string; mentions?: string[]; mentionAll?: boolean }): string {
     return this.sendContent(content, "text", to, convId, opts);
   }
 
@@ -455,7 +469,7 @@ export class IMClient {
   }
 
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
-  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string } }): string {
+  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string }; mentions?: string[]; mentionAll?: boolean }): string {
     const clientMsgId = crypto.randomUUID();
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
@@ -478,6 +492,9 @@ export class IMClient {
     if (opts?.groupId) { data.group_id = opts.groupId; }
     if (opts?.poster) { data.poster = opts.poster; }
     if (opts?.thumb) { data.thumb = opts.thumb; } // 极小模糊预览（M4-7），收端未下载时显模糊占位
+    // @提及（M4-8，仅群聊有意义）：服务端会按当时群成员集过滤/去重，并校验 @所有人 的群角色权限。
+    if (opts?.mentions && opts.mentions.length > 0) { data.mentions = opts.mentions; }
+    if (opts?.mentionAll) { data.mention_all = true; }
     if (contentType === "file" && opts?.fileName) { data.file_name = opts.fileName; }
     // 媒体元数据（M4+，PROTOCOL §4.1）：尺寸/时长/字节数由发送端量出，收端据此按原比例排版 + 显时长角标。
     if (opts?.mediaW && opts.mediaW > 0) { data.media_w = opts.mediaW; }
@@ -904,6 +921,9 @@ export class IMClient {
       // 未下载卡片的模糊占位（M4-7）：**只认内联 data:image/ 的 JPEG/PNG**。门控的意义就是"用户点之前绝不碰网络"，
       // 若放行远程 URL，渲染 <img src> 时会在用户未下载前就去拉对端内容（追踪像素 / 泄漏 IP）——必须挡掉。
       thumb: typeof d.thumb === "string" && /^data:image\//.test(d.thumb) ? d.thumb : undefined,
+      // @提及（M4-8）：脏数据安全——只收字符串数组，非数组一律按"未 @ 任何人"。
+      mentions: Array.isArray(d.mentions) ? (d.mentions as unknown[]).filter((x): x is string => typeof x === "string") : undefined,
+      mentionAll: d.mention_all === true || undefined,
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

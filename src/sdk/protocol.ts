@@ -78,6 +78,10 @@ export interface ChatMessage {
   duration?: number;
   /** M4-7 极小模糊预览（~20px JPEG 的 data URI，image/video 带）：**未下载**卡片的模糊占位。空=回退中性占位。 */
   thumb?: string;
+  /** M4-8 被 @ 的成员 uid（仅群聊，服务端已按当时成员集过滤）：收端据此高亮气泡内 @昵称。 */
+  mentions?: string[];
+  /** M4-8 @所有人（发送时服务端已校验发送者为群主/管理员）。 */
+  mentionAll?: boolean;
 }
 
 /** 引用回复定位（发送时上行只带 convSeq，preview 为本端即时预览；服务端会冻结权威快照）。 */
@@ -142,6 +146,12 @@ export interface Conversation {
   pinned_at?: number;      // 置顶时间（0/缺省=未置顶；已置顶排在列表顶，越大越靠上）
   muted?: boolean;         // 免打扰（弱提示不响铃）
   marked_unread?: boolean; // 手动标为未读（红点，不计数）
+  /**
+   * 未读区间内有人 @我（含 @所有人），仅群聊（M4-8）。
+   * 列表显「[有人@我]」红字前缀，且**穿透免打扰**：命中时未读数仍高亮、不置灰。
+   * 读过那条 @ 后服务端自动转 false，无需额外清除接口。
+   */
+  mention_unread?: boolean;
 }
 
 /** conv_update 帧负载（下行，M4.5-1）：会话级设置变更的完整状态，多端同步覆盖本地。 */

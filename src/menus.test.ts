@@ -18,7 +18,8 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), comingSoon: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), readReceipts: vi.fn(),
+    comingSoon: vi.fn(),
 };
 const convHandlers = { setPinned: vi.fn(), setMuted: vi.fn(), markRead: vi.fn(), markUnread: vi.fn(), delete: vi.fn() };
 
@@ -29,9 +30,18 @@ describe("buildMessageActions", () => {
   it("返回固定顺序的全部 id", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
-      "copy", "reply", "forward", "favorite", "download", "recall", "edit",
+      "readReceipts", "copy", "reply", "forward", "favorite", "download", "recall", "edit",
       "multiSelect", "translate", "reportMsg", "reportUser", "cancelSend", "delete",
     ]);
+  });
+
+  it("已读详情仅在 群聊 && 自己发的 && 已落库 可见（隐私：只有发送者能看谁读了自己）", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "readReceipts")!.visible(ctx);
+    expect(find({ m: msg({ from: "1001", convSeq: 5 }), uid: "1001", isGroup: true })).toBe(true);
+    expect(find({ m: msg({ from: "2002", convSeq: 5 }), uid: "1001", isGroup: true })).toBe(false);  // 别人的消息
+    expect(find({ m: msg({ from: "1001", convSeq: 5 }), uid: "1001", isGroup: false })).toBe(false); // 单聊走 peer_read_seq
+    expect(find({ m: msg({ from: "1001", convSeq: 0 }), uid: "1001", isGroup: true })).toBe(false);  // 还没发出去
   });
 
   it("撤回仅在 本人 && 已落库 && 未撤回 && 2min 窗口内 可见", () => {

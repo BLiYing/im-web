@@ -3,11 +3,12 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
+import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
-import { buildMessageActions, buildConversationActions, type MenuAction } from "./menus";
+import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
@@ -638,6 +639,14 @@ export default function App() {
   // ---- 群聊（M3-4）----
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
+  // @提及（M4-8，仅群聊）：面板开合 + 过滤词 + 候选表（显示名→uid，发送时按文本里是否还留着 token 复核）。
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=面板关闭
+  const mentionCandidates = useRef<MentionCandidates>({});
+  const mentionAllPending = useRef(false);
+  const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
+  const mentionActiveRef = useRef<HTMLButtonElement>(null); // 当前高亮行：键盘移动时滚入视野
+  // 已读名单弹窗（M4-8）：null=关闭；tab 切换已读/未读。
+  const [readReceipts, setReadReceipts] = useState<{ read: string[]; unread: string[]; tab: "read" | "unread" } | null>(null);
   // 会话详情面板（右侧抽屉，对齐 iOS IMChatDetailViewController；单聊/群聊共用）。null=关闭。
   // fromOwnChat：从「当前正在聊的这个人」的聊天页顶栏头像进来的——此时不显示「消息」入口
   // （你已经在这个会话里了，点它等于原地不动）。与 iOS 的 showsMessagePill 取反同义。
@@ -1576,7 +1585,15 @@ export default function App() {
     const rt = replyTo && replyTo.convSeq > 0
       ? { convSeq: replyTo.convSeq, preview: replyPreviewOf(replyTo), from: replyTo.from }
       : undefined;
-    const clientMsgId = client.sendText(text, peer, cid, rt ? { replyTo: rt } : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
+    // @提及（M4-8）：按输入框里**仍留着**的 token 还原 uid（删了 token 就自动不 @ 他）。
+    const mentions = !peer ? resolveMentions(text, mentionCandidates.current) : [];
+    const mentionAll = !peer && resolveMentionAll(text, mentionAllPending.current);
+    const sendOpts = {
+      ...(rt ? { replyTo: rt } : {}),
+      ...(mentions.length ? { mentions } : {}),
+      ...(mentionAll ? { mentionAll: true } : {}),
+    };
+    const clientMsgId = client.sendText(text, peer, cid, Object.keys(sendOpts).length ? sendOpts : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
     appendMsg(cid, {
       clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
       convSeq: 0, timestamp: Date.now(), status: "sending",
@@ -1584,6 +1601,10 @@ export default function App() {
     });
     setInput("");
     setReplyTo(null);
+    // 发出即清提及态，下一条重新累积。
+    mentionCandidates.current = {};
+    mentionAllPending.current = false;
+    setMentionQuery(null);
   }, [input, peer, groupConvId, uid, appendMsg, replyTo, editingMsg, pastedImages, sendMediaBatch, uploadAndSend]);
 
   // 引用某条消息（M4-2）：进入引用态（输入框上方显示引用条，发送时带上）。
@@ -2326,8 +2347,22 @@ export default function App() {
     })();
   }, [refreshConversations, deselect]);
 
+  /** 打开某条自己发的群消息的已读名单（M4-8）：按需拉取，不做常驻轮询。 */
+  const openReadReceipts = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    void (async () => {
+      try {
+        const r = await clientRef.current?.fetchReadReceipts(m.convId, m.convSeq);
+        if (!r) return;
+        // 超限群（>2000 人）服务端回 enabled=false：静默不开面板，与 iOS 隐藏入口一致。
+        if (!r.enabled) { setToast("该群人数过多，不支持查看已读详情"); return; }
+        setReadReceipts({ read: r.read, unread: r.unread, tab: "read" });
+      } catch (e) { setToast(`拉取已读状态失败：${(e as Error).message}`); }
+    })();
+  }, []);
+
   // 消息菜单动作（数据驱动）：copy/delete/report* 接真实实现，其余 comingSoon。useMemo 避免每次渲染重建。
-  const messageActions = useMemo<MenuAction<{ m: ChatMessage; uid: string }>[]>(
+  const messageActions = useMemo<MenuAction<MessageCtx>[]>(
     () => buildMessageActions({
       copy: copyMessage,
       reply: replyMessage,
@@ -2337,6 +2372,7 @@ export default function App() {
       edit: editMessage,
       translate: translateMessage,
       multiSelect: enterSelectMode,
+      readReceipts: openReadReceipts,
       recall: recallMessage,
       // 聊天菜单的「删除」在渲染层按锚点特判 → requestDelete（两档子菜单/仅删自己/本地删，需菜单 x/y）；
       // 此 handler 不经 a.run 触发，仅为 buildMessageActions 的类型契约占位（requestDelete 内部另直接用 deleteMessage 处理 convSeq<=0）。
@@ -2553,17 +2589,88 @@ export default function App() {
 
   const onInputChange = useCallback((val: string) => {
     setInput(val);
+    // @提及（M4-8，仅群聊）：按光标位置判断是否处在 @ 输入态，据此开合面板并实时过滤。
+    // 桌面端用贴输入框的内联下拉（Web IM 惯例），语义与 iOS 的半屏卡一致。
+    if (groupConvId && !peer) {
+      const caret = composerRef.current?.selectionStart ?? val.length;
+      setMentionQuery(activeMentionQuery(val, caret));
+    } else if (mentionQuery !== null) {
+      setMentionQuery(null);
+    }
     const now = Date.now();
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
     if (val && cid && now - lastTypingSent.current > 2000) {
       lastTypingSent.current = now;
       clientRef.current?.sendTyping(cid);
     }
-  }, [peer, groupConvId, uid]);
+  }, [peer, groupConvId, uid, mentionQuery]);
+
+  /**
+   * @面板当前候选行（渲染与键盘导航共用同一份，避免两处各算一次导致高亮与实际选中错位）。
+   * 「@所有人」占首位、仅群主/管理员且无过滤词时出现（一旦开始搜人，列表就该只剩人）。
+   */
+  const mentionRows = useMemo(() => {
+    if (mentionQuery === null || !groupConvId || peer) return [];
+    const info = groupInfos[groupConvId];
+    if (!info) return [];
+    const others = info.members
+      .filter((m) => m.user_id !== uid)
+      .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, role: m.role, avatarUrl: m.avatar_url }));
+    const hits = filterMentionMembers(others, mentionQuery);
+    const rows: { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string }[] =
+      hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
+    if (canMentionAll(info.my_role) && mentionQuery.trim() === "") {
+      rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });
+    }
+    return rows;
+  }, [mentionQuery, groupConvId, peer, groupInfos, uid]);
+
+  // 键盘导航的高亮项；过滤词一变就回到首项（否则旧下标会指向另一个人）。
+  const [mentionActive, setMentionActive] = useState(0);
+  useEffect(() => { setMentionActive(0); }, [mentionQuery]);
+  // 高亮项滚入视野：成员多时用 ↓ 走到列表下缘，高亮不能停在可视区外。
+  useEffect(() => { mentionActiveRef.current?.scrollIntoView({ block: "nearest" }); }, [mentionActive]);
+
+  /** 选中某成员 / @所有人：回填 token、记入候选表、关面板并把焦点与光标交还输入框。 */
+  const pickMention = useCallback((displayName: string, userId: string | null) => {
+    const el = composerRef.current;
+    const caret = el?.selectionStart ?? input.length;
+    const next = applyMentionToken(input, caret, displayName);
+    setInput(next.text);
+    if (userId) mentionCandidates.current[userId] = displayName; // 键必须是 uid：同名成员不能互相覆盖
+    else mentionAllPending.current = true;
+    setMentionQuery(null);
+    window.setTimeout(() => {
+      el?.focus();
+      el?.setSelectionRange(next.caret, next.caret);
+    }, 0);
+  }, [input]);
 
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
   const convId = peer ? convIdFor(uid, peer) : groupConvId;
+  // 切换会话时清空 @提及态（M4-8）：input 不随会话清空，候选表若留到下一个会话，
+  // 手打同名成员时会命中**上一个群**的 uid —— 服务端按新群成员集过滤后把它丢掉，
+  // 结果本群那位同名成员一条提醒都收不到，发送方却毫无察觉。面板同理必须收起。
+  useEffect(() => {
+    mentionCandidates.current = {};
+    mentionAllPending.current = false;
+    setMentionQuery(null);
+  }, [convId]);
+  // @面板的关闭路径（M4-8）：Esc 或点击面板外。没有这条路径时面板会一直悬在输入框上方，
+  // 只能靠"打一个空格"才消失——用户想手打昵称或去点别处时无从关闭。
+  useEffect(() => {
+    if (mentionQuery === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMentionQuery(null); };
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && (mentionPanelRef.current?.contains(t) || composerRef.current?.contains(t))) return;
+      setMentionQuery(null);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("mousedown", onDown); };
+  }, [mentionQuery]);
   // 按时间戳排序（发送中/失败的 convSeq=0 但有发送时刻，故按时间能正确落位——
   // 否则它们会被挤到末尾，导致"解除拉黑后新发的消息排在更早的失败消息之前"）。
   // conv_seq 仅作同一毫秒内的次级排序，保证已送达消息间仍按服务端顺序。
@@ -2572,8 +2679,13 @@ export default function App() {
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
+  // **必须与服务端未读口径一致**（M4-8）：服务端 unreadCount 排除 msg_op 事件行与 system 系统消息，
+  // 这里若只按 from !== uid 找，分割线会落到不计未读的系统行上——
+  // 表现为「以下为 N 条新消息」下方实际多出几行（群改名/入群留痕都会触发）。
   const firstUnreadIdx =
-    entryUnread > 0 ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq) : -1;
+    entryUnread > 0
+      ? messages.findIndex((m) => m.from !== uid && m.convSeq > entryReadSeq && countsAsUnread(m.contentType))
+      : -1;
   // 末条"自己消息"的状态签名：被拒收/ack 会改其 status/note（条数不变），用它当滚动 effect 的依赖，
   // 否则仅 messages.length 不变 → effect 不重跑 → 系统行变高后不贴底（问题1）。
   const tail = messages[messages.length - 1];
@@ -3162,10 +3274,15 @@ export default function App() {
                     {c.last_message ? formatTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>
                 </div>
-                <div className="convlast">{convPreview(c)}</div>
+                <div className="convlast">
+                  {/* 群「@我」红字前缀（M4-8）：未读区间内被 @（含 @所有人）。不另加右侧红 @ 角标——左侧红字已够醒目。 */}
+                  {c.is_group && c.mention_unread ? <span className="conv-mention">[有人@我]</span> : null}
+                  {convPreview(c)}
+                </div>
               </div>
+              {/* 免打扰置灰未读数，但**被 @ 时破例回到高亮**——免打扰只压普通消息，不压 @我（M4-8）。 */}
               {c.unread > 0
-                ? <span className={`badge ${c.muted ? "muted" : ""}`}>{c.unread > 99 ? "99+" : c.unread}</span>
+                ? <span className={`badge ${c.muted && !c.mention_unread ? "muted" : ""}`}>{c.unread > 99 ? "99+" : c.unread}</span>
                 : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label="未读" /> : null}
             </div>
           ))}
@@ -4019,11 +4136,57 @@ export default function App() {
                   )}
                 </div>
                 <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={onFilePicked} />
+                {/* @提及面板（M4-8，仅群聊）：贴输入框上方的内联下拉，边打字边过滤。
+                    支持 ↑/↓ 移动、Enter/Tab 选中、Esc 关闭（见 composer 的 onKeyDown）。
+                    「@所有人」仅群主/管理员可见——普通成员整行不渲染（服务端另有角色校验）。 */}
+                {mentionRows.length > 0 && (
+                  <div className="mention-panel" role="listbox" aria-label="提醒谁" ref={mentionPanelRef}>
+                    {mentionRows.map((r, i) => (
+                      <button
+                        key={r.userId ?? "@all"}
+                        role="option"
+                        aria-selected={i === mentionActive}
+                        ref={i === mentionActive ? mentionActiveRef : undefined}
+                        className={`mention-row${i === mentionActive ? " active" : ""}`}
+                        // 用 mousedown 而非 click：click 之前 textarea 已 blur，光标位置会先丢。
+                        onMouseDown={(e) => { e.preventDefault(); pickMention(r.label, r.userId); }}
+                        onMouseEnter={() => setMentionActive(i)}
+                      >
+                        {r.userId
+                          ? <Avatar label={r.label} seed={r.userId} url={r.avatarUrl} cls="avatar mention-avatar" />
+                          : <span className="mention-all-ic">@</span>}
+                        <span className="mention-name">{r.label}</span>
+                        {r.note && <span className="role-badge">{r.note}</span>}
+                        {r.role === "owner" && <span className="role-badge owner">群主</span>}
+                        {r.role === "admin" && <span className="role-badge">管理员</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
                   placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
                   onChange={(e) => onInputChange(e.target.value)}
                   onPaste={onComposerPaste}
                   onKeyDown={(e) => {
+                    // @面板打开时优先接管导航键：↑/↓ 移动、Enter/Tab 选中、Esc 关闭。
+                    // 必须 preventDefault，否则 ↑/↓ 会移动文本光标、Enter 会把消息发出去。
+                    if (mentionRows.length > 0 && !e.nativeEvent.isComposing) {
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setMentionActive((i) => (i + 1) % mentionRows.length);
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setMentionActive((i) => (i - 1 + mentionRows.length) % mentionRows.length);
+                        return;
+                      }
+                      if (e.key === "Enter" || e.key === "Tab") {
+                        const r = mentionRows[Math.min(mentionActive, mentionRows.length - 1)];
+                        if (r) { e.preventDefault(); pickMention(r.label, r.userId); return; }
+                      }
+                      if (e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return; }
+                    }
                     if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
                     // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
                     const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
@@ -4261,16 +4424,55 @@ export default function App() {
         </div>
       )}
 
+      {readReceipts && (
+        // 已读名单（M4-8）：已读/未读两栏切换，**不显读取时刻**（位点语义给不出可靠单条时间）。
+        <div className="modal-mask" onClick={() => setReadReceipts(null)}>
+          <div className="modal readby-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">已读详情</div>
+            <div className="readby-tabs">
+              <button className={readReceipts.tab === "read" ? "on" : ""}
+                onClick={() => setReadReceipts((r) => (r ? { ...r, tab: "read" } : r))}>
+                已读 {readReceipts.read.length}
+              </button>
+              <button className={readReceipts.tab === "unread" ? "on" : ""}
+                onClick={() => setReadReceipts((r) => (r ? { ...r, tab: "unread" } : r))}>
+                未读 {readReceipts.unread.length}
+              </button>
+            </div>
+            <div className="readby-list">
+              {(readReceipts.tab === "read" ? readReceipts.read : readReceipts.unread).map((memberId) => {
+                const gm = groupConvId ? groupInfos[groupConvId]?.members.find((x) => x.user_id === memberId) : undefined;
+                const label = gm?.nickname || memberId;
+                return (
+                  <div key={memberId} className="readby-row">
+                    <Avatar label={label} seed={memberId} url={gm?.avatar_url} cls="avatar mention-avatar" />
+                    <span className="mention-name">{label}</span>
+                    {gm?.role === "owner" && <span className="role-badge owner">群主</span>}
+                    {gm?.role === "admin" && <span className="role-badge">管理员</span>}
+                  </div>
+                );
+              })}
+              {(readReceipts.tab === "read" ? readReceipts.read : readReceipts.unread).length === 0 && (
+                <div className="readby-empty">
+                  {readReceipts.tab === "read" ? "还没有人读过这条消息" : "所有人都已读"}
+                </div>
+              )}
+            </div>
+            <button className="modal-close" onClick={() => setReadReceipts(null)}>关闭</button>
+          </div>
+        </div>
+      )}
+
       {menu && (
         <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
           {messageActions
-            .filter((a) => a.visible({ m: menu.m, uid }))
+            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer }))
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
                 onClick={() => {
                   // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
                   if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
-                  a.run({ m: menu.m, uid }); setMenu(null);
+                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer }); setMenu(null);
                 }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}

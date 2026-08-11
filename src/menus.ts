@@ -5,7 +5,7 @@ import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
-  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle, Download,
+  Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle, Download, Eye,
 } from "lucide-react";
 
 /** 一个菜单项：id 稳定标识、label 文案、icon 图标、danger 红色危险样式、visible 按上下文决定是否显示、run 执行。 */
@@ -19,7 +19,7 @@ export type MenuAction<C> = {
 };
 
 /** 消息菜单上下文：当前消息 + 本人 uid（判断"我发的/对方发的"）。 */
-export type MessageCtx = { m: ChatMessage; uid: string };
+export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean };
 
 /** 会话菜单上下文：当前会话。 */
 export type ConvCtx = { c: Conversation };
@@ -49,6 +49,7 @@ export interface MessageHandlers {
   multiSelect: (m: ChatMessage) => void;
   recall: (m: ChatMessage) => void;
   delete: (m: ChatMessage) => void;
+  readReceipts: (m: ChatMessage) => void;
   reportMsg: (m: ChatMessage) => void;
   reportUser: (m: ChatMessage) => void;
   cancelSend: (m: ChatMessage) => void;
@@ -71,6 +72,10 @@ export interface ConversationHandlers {
  */
 export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[] {
   return [
+    // 已读详情（M4-8）：**只对自己发的群消息**显示——只有发送者能看谁读了自己（隐私，服务端另有 403 校验）。
+    // 放首位，对齐 iOS 长按菜单顶部的读者行。人数在弹出的名单里显示（菜单构建是同步的，不做异步取数）。
+    { id: "readReceipts", label: "已读详情", icon: Eye,
+      visible: (c) => !!c.isGroup && c.m.from === c.uid && c.m.convSeq > 0, run: (c) => h.readReceipts(c.m) },
     // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发）。
     { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image", run: (c) => h.copy(c.m) },
     { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
