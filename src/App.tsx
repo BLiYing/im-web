@@ -2201,23 +2201,30 @@ export default function App() {
   const toggleTextExpand = useCallback((key: string) => {
     setExpandedTexts((prev) => { const nx = new Set(prev); if (nx.has(key)) nx.delete(key); else nx.add(key); return nx; });
   }, []);
-  // 被 @ 者的显示名集合（用于气泡内 @昵称 高亮）：mentions 是服务端过滤后的 uid，回本地群成员表取昵称；
-  // mention_all 追加「所有人」。取不到昵称的 uid 跳过（高亮不了但不影响文本）。单聊无 mentions，返回空。
-  const mentionNamesFor = (m: ChatMessage): string[] => {
-    const names: string[] = [];
-    if (m.mentionAll) names.push(MENTION_ALL_LABEL);
+  // 被 @ 者条目（气泡内 @昵称 高亮 + 点击跳资料）：mentions 是服务端过滤后的 uid，回本地群成员表取昵称；
+  // mention_all 追加「所有人」（uid 空＝仅高亮不可点）。取不到昵称的 uid 跳过。单聊无 mentions，返回空。
+  const mentionEntriesFor = (m: ChatMessage): { name: string; uid: string }[] => {
+    const out: { name: string; uid: string }[] = [];
+    if (m.mentionAll) out.push({ name: MENTION_ALL_LABEL, uid: "" });
     for (const uid of m.mentions ?? []) {
       const nick = memberNick(m.convId, uid);
-      if (nick) names.push(nick);
+      if (nick) out.push({ name: nick, uid });
     }
-    return names;
+    return out;
   };
-  // 把一段文本渲染为高亮 @提及的节点：命中的 `@昵称` token 上色，其余原样。无提及时直接返回字符串。
+  // 把一段文本渲染为高亮 @提及的节点：命中的 `@昵称` token 上色；有 uid 且非多选态时可点 → 跳该成员资料页。
+  // @所有人 无 uid 只高亮不可点。无提及时直接返回字符串。
   const renderMentionText = (m: ChatMessage, text: string) => {
-    const names = mentionNamesFor(m);
-    if (names.length === 0) return text;
-    return segmentMentions(text, names).map((s, i) =>
-      s.mention ? <span key={i} className="mention-hl">{s.text}</span> : s.text);
+    const entries = mentionEntriesFor(m);
+    if (entries.length === 0) return text;
+    const uidByName = new Map(entries.map((e) => [e.name, e.uid]));
+    return segmentMentions(text, entries.map((e) => e.name)).map((s, i) => {
+      if (!s.mention) return s.text;
+      const uid = uidByName.get(s.text.slice(1)); // 去掉 @ 取昵称查 uid
+      if (selectMode || !uid) return <span key={i} className="mention-hl">{s.text}</span>;
+      return <span key={i} className="mention-hl mention-tap"
+                   onClick={(e) => { e.stopPropagation(); setTextReader(null); openPeerDetail(uid); }}>{s.text}</span>;
+    });
   };
   // 文本消息内容的三档渲染（阈值见 longtext.ts，与 iOS 统一）：
   //   short 全显；long 折叠 8 行 + 就地展开；huge 摘要卡 → 全屏阅读器。均对 @昵称 高亮。

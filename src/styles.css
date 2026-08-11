@@ -240,6 +240,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .btext { white-space: pre-wrap; word-break: break-word; font-size: var(--msg-font); }
 /* 气泡内 @提及高亮（M4-8 渲染层）：命中的 @昵称 上强调色加重（含 @所有人）。 */
 .mention-hl { color: var(--accent); font-weight: 500; }
+/* 可点的 @昵称（有 uid，非 @所有人）：点开该成员资料页。 */
+.mention-tap { cursor: pointer; }
+.mention-tap:hover { text-decoration: underline; }
 .bmeta { font-size: 11px; color: var(--meta-time); margin-left: var(--space-2); align-self: flex-end; white-space: nowrap; }
 .bmeta .ck { color: var(--meta-time); }
 .bmeta .ck.read { color: var(--check-read); }
