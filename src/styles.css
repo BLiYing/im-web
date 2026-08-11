@@ -242,6 +242,31 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .bmeta .ck { color: var(--meta-time); }
 .bmeta .ck.read { color: var(--check-read); }
 .bmeta .failed { color: var(--danger); }
+/* 长文本三档显示（阈值见 longtext.ts，与 iOS 统一）：long 折叠+就地展开、huge 摘要卡 → 全屏阅读器。 */
+.btext .lt-body { display: block; white-space: pre-wrap; word-break: break-word; }
+.btext .lt-body.collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 8; overflow: hidden; }
+.lt-toggle { display: inline-flex; align-items: center; gap: 3px; margin-top: 4px; color: var(--accent); font-size: 13px; cursor: pointer; user-select: none; }
+.lt-toggle:hover { text-decoration: underline; }
+.longtext-card { display: block; cursor: pointer; min-width: 190px; }
+.lt-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.lt-card-icon { width: 30px; height: 30px; border-radius: 8px; background: var(--selection-bg); color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.lt-card-meta { display: flex; flex-direction: column; min-width: 0; }
+.lt-card-title { font-size: 14px; font-weight: 500; color: var(--text); }
+.lt-card-sub { font-size: 12px; color: var(--text-secondary); }
+.lt-card-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  white-space: pre-wrap; word-break: break-word; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+/* 超长文本全屏阅读器：顶栏（关闭/字号/复制）+ 可滚动正文。 */
+.text-reader { width: 560px; max-width: calc(100vw - 32px); max-height: calc(100vh - 80px);
+  background: var(--surface-elevated); border-radius: var(--radius-card); display: flex; flex-direction: column;
+  overflow: hidden; box-shadow: 0 8px 32px var(--shadow-strong); }
+.tr-bar { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--separator); }
+.tr-title { flex: 1; font-size: 14px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-actions { display: flex; align-items: center; gap: 4px; }
+.tr-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 30px; padding: 0 6px;
+  border: 0; background: none; color: var(--text-secondary); font-size: 14px; font-weight: 600; border-radius: var(--radius-card); cursor: pointer; }
+.tr-btn:hover { background: var(--surface-hover); color: var(--text); }
+.tr-btn:disabled { opacity: .4; cursor: default; }
+.tr-body { padding: 16px 18px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.7; color: var(--text); }
 /* 发送失败：气泡左侧红色感叹号（微信式）。.row 是纵向列，用 .bubble-line 横向裹住 [❗ 气泡]。 */
 .bubble-line { display: flex; align-items: center; gap: 6px; max-width: 100%; }
 .fail-badge { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--danger); color: var(--on-accent);

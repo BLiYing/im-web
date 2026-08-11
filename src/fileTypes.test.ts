@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileTypeForName } from "./fileTypes";
+import { fileTypeForName, mediaKindForFile } from "./fileTypes";
 
 describe("fileTypeForName", () => {
   it("maps mainstream Windows, macOS and media formats", () => {
@@ -18,5 +18,24 @@ describe("fileTypeForName", () => {
     expect(fileTypeForName("https://host/uploads/id__Quarterly%20Report.XLSX?token=1")).toBe("excel");
     expect(fileTypeForName("mystery.custom-format")).toBe("unknown");
     expect(fileTypeForName(undefined)).toBe("unknown");
+  });
+});
+
+describe("mediaKindForFile", () => {
+  it("classifies by MIME prefix first", () => {
+    expect(mediaKindForFile({ name: "a.jpg", type: "image/jpeg" })).toBe("image");
+    expect(mediaKindForFile({ name: "a.mp4", type: "video/mp4" })).toBe("video");
+  });
+
+  it("falls back to extension when MIME is missing (drag/paste)", () => {
+    expect(mediaKindForFile({ name: "photo.HEIC", type: "" })).toBe("image");
+    expect(mediaKindForFile({ name: "clip.mov", type: "" })).toBe("video");
+  });
+
+  it("rejects non-media and svg (server refuses svg → block early)", () => {
+    expect(mediaKindForFile({ name: "report.pdf", type: "application/pdf" })).toBeNull();
+    expect(mediaKindForFile({ name: "logo.svg", type: "image/svg+xml" })).toBeNull();
+    expect(mediaKindForFile({ name: "logo.svg", type: "" })).toBeNull();
+    expect(mediaKindForFile({ name: "mystery", type: "" })).toBeNull();
   });
 });

@@ -5,6 +5,12 @@
 
 ## 当前焦点
 
+**三项 UX 优化 ✅ 代码完成 + `/code-review` 7 条全修（2026-08-11，tsc + 203 vitest + build 绿，**待浏览器手测**）** — 逐端矩阵见 `../IMServer/docs/CLIENT_PARITY.md`「UX」三行。
+> 审查修复：① 展开 key 加 convId（防跨会话 seq-N 串号）；② 多选态长文本不接管点击（让位选中）；③ 阈值/字数改按码点计（与 iOS 对齐）；④ `textTier` 加短消息快路径；⑤ iOS `groupedCount` 收敛到 `+charCountLabelForText:`；⑥ 删无用 `COLLAPSED_LINES`；⑦ iOS 长文引用点击先于跳转（否则永远点不开）。
+1. **长文本三档显示**：`src/longtext.ts`（`textTier` + `charCountLabel`，8 例，阈值与 iOS 统一：huge `chars≥2000|lines≥60`、long `≥300|≥10`）。`App.tsx renderMessageText`——short 全显；long `.lt-body.collapsed` 夹 8 行 + `.lt-toggle` 展开/收起（`expandedTexts` 记忆）；huge `.longtext-card` 摘要卡 → 全屏阅读器 `.text-reader`（`textReader` 状态 + `readerFontStep` 字号 + 复制全文 + Esc）。CSS 全在 styles.css。
+2. **视频禁复制**：`viewer-more-pop` 复制按钮 `contentType!=="video"` 条件渲染（长按菜单 `menus.ts` 本就 `isText||image`，不含视频）。
+3. **媒体入口类型校验**：`fileTypes.ts mediaKindForFile`（MIME 前缀优先→扩展名回退，svg 拒收，5 例）；`onFilePicked` 媒体档过滤非图/视频并 toast。**后端 `allowedUploadExt` 仍是权威白名单**，此闸只为体验。
+
 **任务二（IMServer 驱动）— 详情页删文件两档 ✅ 三端手测通过（2026-08-11，tsc + 165 vitest 绿）**
 > 完整设计/归档见 `../IMServer/current_task.archive.md`「2026-08-11 归档④」；逐端矩阵 `../IMServer/docs/CLIENT_PARITY.md`「任务二」。
 - **为所有人删除**：`sdk/protocol.ts` `OP.DELETE`；`imSdk.ts` `deleteMessageForEveryone`（WS `msg_op op=delete`）；`applyMsgOp` 收到 delete → `removeMessageLocal`（落墓碑 + `onMessageRemoved`，物理移除不显墓碑）；`processIncoming` 遇 `deleted_at>0` 目标行直接移除（不只靠事件行）。

@@ -12,6 +12,8 @@ import { buildMessageActions, buildConversationActions, type MenuAction, type Me
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { mediaKindForFile } from "./fileTypes";
+import { textTier, charCountLabel } from "./longtext";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
 import {
@@ -30,6 +32,7 @@ import {
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
   Download, LayoutGrid, MoreHorizontal,
   Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward,
+  ChevronDown, ChevronUp, Copy,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -566,6 +569,9 @@ export default function App() {
   const [viewer, setViewer] = useState<{ m: ChatMessage; fromGallery?: boolean } | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false); // 会话媒体库（蒙层网格）
   const [viewerMore, setViewerMore] = useState(false);   // 查看器「更多」浮层（hover 显示）
+  const [expandedTexts, setExpandedTexts] = useState<Set<string>>(new Set()); // 中长文本"展开全文"记忆（按消息 key）
+  const [textReader, setTextReader] = useState<ChatMessage | null>(null); // 超长文本全屏阅读器（null=关闭）
+  const [readerFontStep, setReaderFontStep] = useState(0); // 阅读器字号档：-1/0/1/2
   // 本浏览器解不了该视频的编码（HEVC 等）→ 换成"下载后本地播放"的降级卡片，避免黑屏。
   // 按被查看的 URL 复位：换一条视频要重新给它一次播放机会，否则一次失败会连累后面每条。
   const [videoUnplayable, setVideoUnplayable] = useState(false);
@@ -1934,8 +1940,14 @@ export default function App() {
     const files = Array.from(e.target.files ?? []);
     if (files.length === 0) return;
     const mode = attachmentPickModeRef.current;
-    if (shouldSendAsMediaBatch(mode)) { void sendMediaBatch(files); }
-    else { for (const f of files) void uploadAndSend(f, "file"); }
+    if (shouldSendAsMediaBatch(mode)) {
+      // 「图片或视频」入口的类型闸：accept 只是 UI 提示，用户可在文件框切"所有文件"绕过 →
+      // 这里按 MIME/扩展名复核，非图片/视频一律拒收（否则会被当成 image 发出→坏气泡 + 服务端拒传）。svg 也拒。
+      const valid = files.filter((f) => mediaKindForFile(f) !== null);
+      const rejected = files.length - valid.length;
+      if (rejected > 0) setToast(rejected === files.length ? "只能发送图片或视频" : `已忽略 ${rejected} 个非图片/视频文件`);
+      if (valid.length) void sendMediaBatch(valid);
+    } else { for (const f of files) void uploadAndSend(f, "file"); }
   }, [uploadAndSend, sendMediaBatch]);
 
   // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
@@ -2183,6 +2195,46 @@ export default function App() {
     void navigator.clipboard?.writeText(m.content);
   }, []);
 
+  // 长文本消息 key（记忆"展开全文"用）：**必须带 convId**——conv_seq 每会话各自从 1 递增，
+  // 不加会话前缀会让 A 会话 seq-5 与 B 会话 seq-5 撞键、展开态跨会话串号。发送中无 convSeq → 退回 clientMsgId。
+  const msgTextKey = (m: ChatMessage) => `${m.convId}:${m.convSeq > 0 ? `seq-${m.convSeq}` : m.clientMsgId || ""}`;
+  const toggleTextExpand = useCallback((key: string) => {
+    setExpandedTexts((prev) => { const nx = new Set(prev); if (nx.has(key)) nx.delete(key); else nx.add(key); return nx; });
+  }, []);
+  // 文本消息内容的三档渲染（阈值见 longtext.ts，与 iOS 统一）：
+  //   short 全显；long 折叠 8 行 + 就地展开；huge 摘要卡 → 全屏阅读器。
+  const renderMessageText = (m: ChatMessage) => {
+    const tier = textTier(m.content);
+    if (tier === "short") return <span className="btext">{m.content}</span>;
+    // 多选态：整行点击=勾选（见 .row onClick）。此时长文本不接管点击——摘要卡不开阅读器、
+    // 折叠切换也不吞事件，让点击冒泡到行去切换选中（与 iOS `self.selecting` 早返回一致）。
+    if (tier === "huge") {
+      return (
+        <span className="btext longtext-card" onClick={selectMode ? undefined : () => { setTextReader(m); setReaderFontStep(0); }} title={selectMode ? undefined : "查看全文"}>
+          <span className="lt-card-head">
+            <span className="lt-card-icon"><FileText size={16} /></span>
+            <span className="lt-card-meta">
+              <span className="lt-card-title">长文本 · {charCountLabel(m.content)}</span>
+              <span className="lt-card-sub">点击查看全文</span>
+            </span>
+          </span>
+          <span className="lt-card-preview">{m.content}</span>
+        </span>
+      );
+    }
+    // long：折叠/展开就地切换。
+    const key = msgTextKey(m);
+    const expanded = expandedTexts.has(key);
+    return (
+      <span className="btext">
+        <span className={expanded ? "lt-body" : "lt-body collapsed"}>{m.content}</span>
+        <span className="lt-toggle" onClick={(e) => { if (selectMode) return; e.stopPropagation(); toggleTextExpand(key); }}>
+          {expanded ? <>收起 <ChevronUp size={13} /></> : <>展开全文 <ChevronDown size={13} /></>}
+        </span>
+      </span>
+    );
+  };
+
   // 撤回自己的消息（M4-1）：发 msg_op；成功由服务端广播回 msg_op 帧应用（onMsgOp），失败（超窗）toast。
   const recallMessage = useCallback((m: ChatMessage) => {
     setMenu(null);
@@ -2384,6 +2436,14 @@ export default function App() {
     }),
     [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
   );
+
+  // 全屏文本阅读器：Esc 关闭（点蒙层/✕ 已在 JSX 处理）。
+  useEffect(() => {
+    if (!textReader) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTextReader(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [textReader]);
 
   // 会话菜单动作（数据驱动，M4.5 全接后端）：置顶/免打扰切换、标已读/未读、删除会话。
   const conversationActions = useMemo<MenuAction<{ c: Conversation }>[]>(
@@ -3993,7 +4053,7 @@ export default function App() {
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
                         <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
                       ) : (
-                        <span className="btext">{m.content}</span>
+                        renderMessageText(m)
                       )}
                       {!isMediaBubble && (
                         <span className="bmeta">
@@ -4255,15 +4315,18 @@ export default function App() {
                   <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}>定位到聊天位置</button>
                   <button onClick={() => favoriteMessage(viewer.m)}>收藏</button>
                   <a href={viewer.m.content} download>下载</a>
-                  <button onClick={() => {
-                    // 图片：复制图片字节（可粘贴回输入框直接发图）；视频等：复制链接。
-                    if (viewer.m.contentType === "image") {
-                      copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))
-                        .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接"); });
-                    } else {
-                      void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
-                    }
-                  }}>复制</button>
+                  {/* 视频不提供复制：无"复制字节"语义，产品上禁止复制视频消息（与 iOS 对齐）。图片才有复制。 */}
+                  {viewer.m.contentType !== "video" && (
+                    <button onClick={() => {
+                      // 图片：复制图片字节（可粘贴回输入框直接发图）；其余非视频：复制链接。
+                      if (viewer.m.contentType === "image") {
+                        copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))
+                          .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接"); });
+                      } else {
+                        void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
+                      }
+                    }}>复制</button>
+                  )}
                   <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); setForwarding([mm]); }}>转发</button>
                   <button className="danger" onClick={(e) => {
                     // 统一走两档路由（对齐详情/聊天）：可为所有人删则弹子菜单 B，否则仅删自己；删成功后查看器由 onMessageRemoved 关闭。
@@ -4274,6 +4337,27 @@ export default function App() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {textReader && (
+        // 超长文本全屏阅读器：可滚动 / 选中复制 / 字号调节。点蒙层或 ✕ 关闭。
+        <div className="modal-mask" onClick={() => setTextReader(null)}>
+          <div className="text-reader" onClick={(e) => e.stopPropagation()}>
+            <div className="tr-bar">
+              <button className="tr-btn" title="关闭" onClick={() => setTextReader(null)}><X size={18} /></button>
+              <span className="tr-title">全文 · {charCountLabel(textReader.content)}</span>
+              <span className="tr-actions">
+                <button className="tr-btn" title="缩小字号" disabled={readerFontStep <= -1}
+                        onClick={() => setReaderFontStep((s) => Math.max(-1, s - 1))}>A−</button>
+                <button className="tr-btn" title="放大字号" disabled={readerFontStep >= 3}
+                        onClick={() => setReaderFontStep((s) => Math.min(3, s + 1))}>A+</button>
+                <button className="tr-btn" title="复制全文"
+                        onClick={() => { void navigator.clipboard?.writeText(textReader.content); setToast("已复制全文"); }}><Copy size={16} /></button>
+              </span>
+            </div>
+            <div className="tr-body" style={{ fontSize: `${15 + readerFontStep}px` }}>{textReader.content}</div>
           </div>
         </div>
       )}
