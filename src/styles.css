@@ -986,8 +986,9 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* 总开关关闭：整排档位置淡、禁止交互（对齐 iOS 档位滑杆置灰不可滑动）。 */
 .tier-row.disabled { opacity: 0.4; pointer-events: none; }
 .tier-custom { color: var(--text-secondary); font-size: 12px; }
-/* 「重置自动下载设置」已是默认时置灰不可点（对齐 iOS）。 */
-.settings-row:disabled { opacity: 0.4; cursor: default; }
+/* 「重置自动下载设置」已是默认时置灰不可点（对齐 iOS：中性灰而非暗红）。 */
+.settings-row:disabled { cursor: default; }
+.settings-row.danger:disabled { color: var(--text-tertiary); }
 
 /* ---- 头像圆形裁切弹窗（方案 C，规格见 docs/UX_SKETCH.html §Web） ---- */
 .avatar-cropper-mask { background: rgba(0,0,0,0.55); }

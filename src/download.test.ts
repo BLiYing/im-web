@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   defaultDownloadSettings,
+  isDefaultDownloadSettings,
   parseDownloadSettings,
   shouldAutoDownload,
   tierLimits,
@@ -26,6 +27,31 @@ describe("默认值（与后端 downloadsettings.Defaults / iOS 对齐）", () =
     expect(d.wifi.file.max_bytes).toBe(3 * MB);
     expect(d.wifi.image.max_bytes).toBe(0); // 图片无大小闸
     expect(d.wifi.image.single && d.wifi.image.group).toBe(true);
+  });
+});
+
+describe("isDefaultDownloadSettings（重置按钮置灰判定，对齐 iOS settingsAtDefault）", () => {
+  it("出厂默认 → true", () => {
+    expect(isDefaultDownloadSettings(defaultDownloadSettings())).toBe(true);
+  });
+  it("解析出的、与默认等价的服务端负载 → true（不受键序影响）", () => {
+    const roundTripped = parseDownloadSettings(JSON.parse(JSON.stringify(defaultDownloadSettings())));
+    expect(isDefaultDownloadSettings(roundTripped)).toBe(true);
+  });
+  it("改动任一字段 → false（wifi 视频上限）", () => {
+    const s = defaultDownloadSettings();
+    s.wifi.video.max_bytes = 50 * MB;
+    expect(isDefaultDownloadSettings(s)).toBe(false);
+  });
+  it("改动移动数据档（Web 不可编辑但可被其他端改）→ false", () => {
+    const s = defaultDownloadSettings();
+    s.cellular.enabled = false;
+    expect(isDefaultDownloadSettings(s)).toBe(false);
+  });
+  it("改动单/群开关 → false", () => {
+    const s = defaultDownloadSettings();
+    s.wifi.image.group = false;
+    expect(isDefaultDownloadSettings(s)).toBe(false);
   });
 });
 

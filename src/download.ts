@@ -86,9 +86,18 @@ export function parseDownloadSettings(raw: unknown): DownloadSettings {
   };
 }
 
-/** 当前策略是否等于出厂默认（决定「重置自动下载设置」是否可点，对齐 iOS）。 */
+function categoryRuleEqual(a: CategoryRule, b: CategoryRule): boolean {
+  return a.single === b.single && a.group === b.group && a.max_bytes === b.max_bytes;
+}
+function networkPolicyEqual(a: NetworkPolicy, b: NetworkPolicy): boolean {
+  return a.enabled === b.enabled && categoryRuleEqual(a.image, b.image)
+    && categoryRuleEqual(a.video, b.video) && categoryRuleEqual(a.file, b.file);
+}
+/** 当前策略是否等于出厂默认（决定「重置自动下载设置」是否可点，对齐 iOS）。
+ *  逐字段结构化比较——不依赖 JSON.stringify 的键序，字段增减/序列化差异不会静默误判。 */
 export function isDefaultDownloadSettings(s: DownloadSettings): boolean {
-  return JSON.stringify(s) === JSON.stringify(defaultDownloadSettings());
+  const d = defaultDownloadSettings();
+  return networkPolicyEqual(s.cellular, d.cellular) && networkPolicyEqual(s.wifi, d.wifi);
 }
 
 export type MediaKind = "image" | "video" | "file";
