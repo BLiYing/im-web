@@ -2202,13 +2202,14 @@ export default function App() {
     setExpandedTexts((prev) => { const nx = new Set(prev); if (nx.has(key)) nx.delete(key); else nx.add(key); return nx; });
   }, []);
   // 被 @ 者条目（气泡内 @昵称 高亮 + 点击跳资料）：mentions 是服务端过滤后的 uid，回本地群成员表取昵称；
-  // mention_all 追加「所有人」（uid 空＝仅高亮不可点）。取不到昵称的 uid 跳过。单聊无 mentions，返回空。
+  // mention_all 追加「所有人」（uid 空＝仅高亮不可点）。单聊无 mentions，返回空。
+  // 无昵称成员：发送侧回填的 token 就是 `@<uid>`（displayName = nickname || user_id），
+  // 故这里同样回退 uid 才能匹配上——否则 `@1002` 这类既不高亮也点不动（修复用户反馈）。
   const mentionEntriesFor = (m: ChatMessage): { name: string; uid: string }[] => {
     const out: { name: string; uid: string }[] = [];
     if (m.mentionAll) out.push({ name: MENTION_ALL_LABEL, uid: "" });
     for (const uid of m.mentions ?? []) {
-      const nick = memberNick(m.convId, uid);
-      if (nick) out.push({ name: nick, uid });
+      out.push({ name: memberNick(m.convId, uid) || uid, uid });
     }
     return out;
   };

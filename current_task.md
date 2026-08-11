@@ -5,6 +5,8 @@
 
 ## 当前焦点
 
+**修 `@<uid>` 不高亮/不可点 ✅（2026-08-12）**：无昵称成员回填的是 `@<uid>`（如 `@1002`），`mentionEntriesFor` 取昵称失败时未回退 uid 就跳过了 → 改 `memberNick||uid`。
+
 **气泡内 `@昵称` 高亮 + 点击跳资料 ✅（2026-08-12，tsc + 210 vitest + build 绿，待手测）**：`segmentMentions`（mention.ts，7 例）用消息 `mentions`+群昵称还原 `@昵称`，short/long 气泡 + 全屏阅读器均高亮（`.mention-hl`）；可点的 `@昵称`（有 uid，`@所有人` 除外）= `.mention-tap`，onClick `stopPropagation`+`openPeerDetail(uid)`，多选态不接管点击。token 边界同 `containsMentionToken`、长名优先。
 
 **三项 UX 优化 ✅ 代码完成 + `/code-review` 7 条全修（2026-08-11，tsc + 210 vitest + build 绿，**待浏览器手测**）** — 逐端矩阵见 `../IMServer/docs/CLIENT_PARITY.md`「UX」三行。
