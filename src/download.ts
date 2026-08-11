@@ -86,6 +86,11 @@ export function parseDownloadSettings(raw: unknown): DownloadSettings {
   };
 }
 
+/** 当前策略是否等于出厂默认（决定「重置自动下载设置」是否可点，对齐 iOS）。 */
+export function isDefaultDownloadSettings(s: DownloadSettings): boolean {
+  return JSON.stringify(s) === JSON.stringify(defaultDownloadSettings());
+}
+
 export type MediaKind = "image" | "video" | "file";
 
 /**

@@ -14,7 +14,7 @@ import { FileTypeIcon } from "./FileTypeIcon";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
 import {
-  applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, parseDownloadSettings,
+  applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, isDefaultDownloadSettings, parseDownloadSettings,
   passivePreviewSource, shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
   type DownloadSettings, type DownloadState, type SpeedTier, type MediaKind,
 } from "./download";
@@ -3316,9 +3316,10 @@ export default function App() {
 
                 <div className="section-label">流量档位</div>
                 <div className="settings-group">
-                  <div className="tier-row">
+                  {/* 总开关关闭 → 全部手动、档位无意义：整排置淡且不可点（对齐 iOS 档位滑杆置灰）。 */}
+                  <div className={`tier-row${wifi.enabled ? "" : " disabled"}`}>
                     {([["low", "低"], ["medium", "中"], ["high", "高"]] as const).map(([v, t]) => (
-                      <button key={v} className={`tier-btn${tier === v ? " on" : ""}`}
+                      <button key={v} className={`tier-btn${tier === v ? " on" : ""}`} disabled={!wifi.enabled}
                               onClick={() => patchWifi(applyTier(wifi, v))}>{t}</button>
                     ))}
                     {tier === "custom" && <span className="tier-custom">自定义</span>}
@@ -3339,7 +3340,8 @@ export default function App() {
                 {limitCard("file", "文件", FileText)}
 
                 <div className="settings-group">
-                  <button className="settings-row danger" onClick={() => {
+                  {/* 已是出厂默认 → 无可重置：置灰不可点（对齐 iOS）。用户改动后自动恢复可点。 */}
+                  <button className="settings-row danger" disabled={isDefaultDownloadSettings(st)} onClick={() => {
                     void askConfirm("恢复自动下载的出厂默认设置？", { okText: "恢复默认", danger: true }).then((ok) => {
                       if (!ok) return;
                       const c = clientRef.current;
