@@ -647,6 +647,7 @@ export default function App() {
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
   // @提及（M4-8，仅群聊）：面板开合 + 过滤词 + 候选表（显示名→uid，发送时按文本里是否还留着 token 复核）。
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=面板关闭
+  const [mentionFilter, setMentionFilter] = useState(""); // 面板过滤词：既随消息框里 @后文字同步，也可在面板顶部搜索框直接编辑
   const mentionCandidates = useRef<MentionCandidates>({});
   const mentionAllPending = useRef(false);
   const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
@@ -2679,7 +2680,9 @@ export default function App() {
     // 桌面端用贴输入框的内联下拉（Web IM 惯例），语义与 iOS 的半屏卡一致。
     if (groupConvId && !peer) {
       const caret = composerRef.current?.selectionStart ?? val.length;
-      setMentionQuery(activeMentionQuery(val, caret));
+      const q = activeMentionQuery(val, caret);
+      setMentionQuery(q);
+      if (q !== null) setMentionFilter(q); // 消息框里 @后打字 → 同步到过滤词（面板搜索框也随之显示）
     } else if (mentionQuery !== null) {
       setMentionQuery(null);
     }
@@ -2702,18 +2705,18 @@ export default function App() {
     const others = info.members
       .filter((m) => m.user_id !== uid)
       .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, role: m.role, avatarUrl: m.avatar_url }));
-    const hits = filterMentionMembers(others, mentionQuery);
+    const hits = filterMentionMembers(others, mentionFilter);
     const rows: { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string }[] =
       hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
-    if (canMentionAll(info.my_role) && mentionQuery.trim() === "") {
+    if (canMentionAll(info.my_role) && mentionFilter.trim() === "") {
       rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });
     }
     return rows;
-  }, [mentionQuery, groupConvId, peer, groupInfos, uid]);
+  }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, uid]);
 
   // 键盘导航的高亮项；过滤词一变就回到首项（否则旧下标会指向另一个人）。
   const [mentionActive, setMentionActive] = useState(0);
-  useEffect(() => { setMentionActive(0); }, [mentionQuery]);
+  useEffect(() => { setMentionActive(0); }, [mentionQuery, mentionFilter]);
   // 高亮项滚入视野：成员多时用 ↓ 走到列表下缘，高亮不能停在可视区外。
   useEffect(() => { mentionActiveRef.current?.scrollIntoView({ block: "nearest" }); }, [mentionActive]);
 
@@ -2732,6 +2735,20 @@ export default function App() {
     }, 0);
   }, [input]);
 
+  /** @面板导航键（消息框与面板搜索框共用）：↑/↓ 移动、Enter/Tab 选中、Esc 关闭。返回 true=已消费。 */
+  const onMentionNavKey = (e: React.KeyboardEvent<HTMLElement>): boolean => {
+    if (mentionQuery === null || e.nativeEvent.isComposing) return false;
+    if (e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return true; }
+    if (mentionRows.length === 0) return false;
+    if (e.key === "ArrowDown") { e.preventDefault(); setMentionActive((i) => (i + 1) % mentionRows.length); return true; }
+    if (e.key === "ArrowUp") { e.preventDefault(); setMentionActive((i) => (i - 1 + mentionRows.length) % mentionRows.length); return true; }
+    if (e.key === "Enter" || e.key === "Tab") {
+      const r = mentionRows[Math.min(mentionActive, mentionRows.length - 1)];
+      if (r) { e.preventDefault(); pickMention(r.label, r.userId); return true; }
+    }
+    return false;
+  };
+
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
   const convId = peer ? convIdFor(uid, peer) : groupConvId;
@@ -2742,6 +2759,7 @@ export default function App() {
     mentionCandidates.current = {};
     mentionAllPending.current = false;
     setMentionQuery(null);
+    setMentionFilter("");
   }, [convId]);
   // @面板的关闭路径（M4-8）：Esc 或点击面板外。没有这条路径时面板会一直悬在输入框上方，
   // 只能靠"打一个空格"才消失——用户想手打昵称或去点别处时无从关闭。
@@ -4225,9 +4243,13 @@ export default function App() {
                 {/* @提及面板（M4-8，仅群聊）：贴输入框上方的内联下拉，边打字边过滤。
                     支持 ↑/↓ 移动、Enter/Tab 选中、Esc 关闭（见 composer 的 onKeyDown）。
                     「@所有人」仅群主/管理员可见——普通成员整行不渲染（服务端另有角色校验）。 */}
-                {mentionRows.length > 0 && (
+                {mentionQuery !== null && (
                   <div className="mention-panel" role="listbox" aria-label="提醒谁" ref={mentionPanelRef}>
-                    {mentionRows.map((r, i) => (
+                    {/* 顶部搜索框：桌面端仍可直接在消息框里 @后打字过滤（此处同步显示），也可在这里直接搜。 */}
+                    <input className="mention-search" value={mentionFilter} placeholder="搜索成员" aria-label="搜索成员"
+                      onChange={(e) => setMentionFilter(e.target.value)}
+                      onKeyDown={(e) => { onMentionNavKey(e); }} />
+                    {mentionRows.length > 0 ? mentionRows.map((r, i) => (
                       <button
                         key={r.userId ?? "@all"}
                         role="option"
@@ -4246,7 +4268,7 @@ export default function App() {
                         {r.role === "owner" && <span className="role-badge owner">群主</span>}
                         {r.role === "admin" && <span className="role-badge">管理员</span>}
                       </button>
-                    ))}
+                    )) : <div className="mention-empty">无匹配成员</div>}
                   </div>
                 )}
                 <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
@@ -4254,25 +4276,8 @@ export default function App() {
                   onChange={(e) => onInputChange(e.target.value)}
                   onPaste={onComposerPaste}
                   onKeyDown={(e) => {
-                    // @面板打开时优先接管导航键：↑/↓ 移动、Enter/Tab 选中、Esc 关闭。
-                    // 必须 preventDefault，否则 ↑/↓ 会移动文本光标、Enter 会把消息发出去。
-                    if (mentionRows.length > 0 && !e.nativeEvent.isComposing) {
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault();
-                        setMentionActive((i) => (i + 1) % mentionRows.length);
-                        return;
-                      }
-                      if (e.key === "ArrowUp") {
-                        e.preventDefault();
-                        setMentionActive((i) => (i - 1 + mentionRows.length) % mentionRows.length);
-                        return;
-                      }
-                      if (e.key === "Enter" || e.key === "Tab") {
-                        const r = mentionRows[Math.min(mentionActive, mentionRows.length - 1)];
-                        if (r) { e.preventDefault(); pickMention(r.label, r.userId); return; }
-                      }
-                      if (e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return; }
-                    }
+                    // @面板打开时优先接管导航键：↑/↓ 移动、Enter/Tab 选中、Esc 关闭（与面板搜索框共用一套）。
+                    if (onMentionNavKey(e)) return;
                     if (e.key !== "Enter" || e.nativeEvent.isComposing) return; // 中文输入法组词中不触发
                     // enter 模式：Enter 发送、Shift+Enter 换行；cmd 模式：Cmd/Ctrl+Enter 发送、Enter 换行。
                     const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;

@@ -1059,6 +1059,14 @@ button.detail-row:hover { background: var(--surface-hover); }
   background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: 10px;
   box-shadow: 0 4px 16px var(--shadow-strong); padding: 4px;
 }
+/* 顶部搜索框：sticky 悬顶，行滚动时不随之滚走。桌面端在消息框 @后打字也会同步到这里。 */
+.mention-search {
+  position: sticky; top: 0; z-index: 1; box-sizing: border-box; width: 100%;
+  margin-bottom: 4px; padding: 7px 9px; border: 0; border-bottom: 1px solid var(--separator);
+  background: var(--surface-elevated); color: var(--text); font-size: 14px; outline: none;
+}
+.mention-search::placeholder { color: var(--text-secondary); }
+.mention-empty { padding: 10px 9px; color: var(--text-secondary); font-size: 13px; text-align: center; }
 /* 所有行底色统一（透明露出面板底），只有当前行高亮——无斑马纹、无分隔线。 */
 .mention-panel .mention-row {
   display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px;
