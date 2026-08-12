@@ -102,6 +102,19 @@ export interface Favorite {
 }
 
 /** msg_op 应用到某条消息的补丁（撤回/编辑/置顶）。 */
+/** 会话置顶消息（G0，GET /conversations/{id}/pinned 的一项）：顶部横幅与置顶列表的渲染源。
+ *  字段是横幅所需最小集——点它跳到聊天里那条消息本体，不在这里重建富渲染。 */
+export interface PinnedMessage {
+  convSeq: number;
+  serverMsgId: string;
+  from: string;
+  fromNickname?: string; // 仅群聊带（空则回退 uid）
+  contentType: string;
+  content: string;
+  timestamp: number;
+  pinnedAt: number;
+}
+
 export interface MsgOpPatch {
   recalledAt?: number;
   recalledBy?: string;
@@ -205,9 +218,11 @@ export type GroupRole = "owner" | "admin" | "member";
 export interface GroupMember {
   user_id: string;
   nickname: string;
+  group_nickname?: string; // 我在本群的昵称（G1，空=未设置；显示时优先于 nickname）
   avatar_url: string;
   role: GroupRole;
   joined_at: number;
+  mute_until?: number; // 成员级禁言到期（G2；0=未禁言）
 }
 
 /** 群资料 + 成员列表（对齐后端 group.Info；conv_id 即群 topic_id）。 */
@@ -219,6 +234,29 @@ export interface GroupInfo {
   created_at: number;
   my_role: GroupRole;
   members: GroupMember[];
+  // G1 群资料闭环字段。
+  intro?: string;
+  announcement?: string;
+  announcement_by?: string;
+  announcement_at?: number;
+  member_count?: number;
+  my_nickname?: string;
+  mute_until?: number; // 全员禁言到期（0=未禁言）
+  // G2 群治理开关组。
+  join_approval?: boolean;
+  perm_invite?: boolean;
+  perm_edit_info?: boolean;
+  perm_pin?: boolean;
+  history_visible?: boolean;
+  my_mute_until?: number; // 我的成员级禁言到期（G2）
+}
+
+/** 群黑名单一项（G2）。 */
+export interface GroupBan {
+  user_id: string;
+  banned_by: string;
+  banned_at: number;
+  expires_at: number; // 0=永久
 }
 
 /** 我的群列表项（对齐后端 group.Summary）。 */

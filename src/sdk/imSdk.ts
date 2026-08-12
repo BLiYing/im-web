@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -279,10 +279,64 @@ export class IMClient {
   }
 
   /** 改群资料（群主/管理员）。 */
-  async updateGroup(convId: string, name: string, avatarUrl: string): Promise<void> {
+  async updateGroup(convId: string, name: string, avatarUrl: string, intro = ""): Promise<void> {
+    // 整体替换语义：name/avatar_url/intro 都回带当前值，省略即清空（后端 G1）。
     await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`, {
-      method: "PUT", body: JSON.stringify({ name, avatar_url: avatarUrl }),
+      method: "PUT", body: JSON.stringify({ name, avatar_url: avatarUrl, intro }),
     });
+  }
+
+  /** 发布/撤下群公告（G1，群主/管理员）：text 空即撤下。 */
+  async setGroupAnnouncement(convId: string, text: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/announcement`, {
+      method: "PUT", body: JSON.stringify({ text }),
+    });
+  }
+
+  /** 群主/管理员自助全员禁言（G1）：until=0 解除 / -1 永久 / 其余到期毫秒时间戳。 */
+  async setGroupMute(convId: string, until: number): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/mute`, {
+      method: "PUT", body: JSON.stringify({ until }),
+    });
+  }
+
+  /** 我在本群的昵称（G1，任意成员）：空串=清除回退全局昵称。 */
+  async setGroupMyNickname(convId: string, nickname: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/me/nickname`, {
+      method: "PUT", body: JSON.stringify({ nickname }),
+    });
+  }
+
+  /** 群治理开关组（G2，群主/管理员整体替换）。 */
+  async setGroupSettings(convId: string, s: {
+    join_approval: boolean; perm_invite: boolean; perm_edit_info: boolean; perm_pin: boolean; history_visible: boolean;
+  }): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/settings`, {
+      method: "PUT", body: JSON.stringify(s),
+    });
+  }
+
+  /** 单独禁言成员（G2）：until=0 解禁 / -1 永久 / 其余到期毫秒。 */
+  async muteGroupMember(convId: string, userId: string, until: number): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}/mute`, {
+      method: "PUT", body: JSON.stringify({ until }),
+    });
+  }
+
+  /** 移出成员带封禁档（G2）：ban=none|cooldown|forever。 */
+  async removeGroupMemberWithBan(convId: string, userId: string, ban: "none" | "cooldown" | "forever"): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}?ban=${ban}`, { method: "DELETE" });
+  }
+
+  /** 群黑名单列表（G2，群主/管理员）。 */
+  async fetchGroupBans(convId: string): Promise<GroupBan[]> {
+    const data = await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/bans`);
+    return (data?.bans ?? []) as GroupBan[];
+  }
+
+  /** 解除拉黑（G2，群主/管理员）。 */
+  async unbanGroupMember(convId: string, userId: string): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/bans/${encodeURIComponent(userId)}`, { method: "DELETE" });
   }
 
   /** 邀请入群（任意成员可邀）。 */
@@ -531,6 +585,28 @@ export class IMClient {
     return this.sendMsgOp(OP.DELETE, convId, targetConvSeq, {});
   }
 
+  /** 聊天内置顶 / 取消置顶（G0）。群内限群主/管理员（服务端 300006 权威），单聊任一方可置顶。
+   *  成功由服务端广播回 msg_op 帧应用（onMsgOp 带 pinnedAt 补丁），失败回 onMsgOpFailed。 */
+  pinMessage(convId: string, targetConvSeq: number, pinned: boolean): string {
+    return this.sendMsgOp(OP.PIN, convId, targetConvSeq, { pinned });
+  }
+
+  /** 拉会话当前置顶消息集合（G0，进会话时回填顶部横幅；之后靠实时 msg_op 帧增量维护，不轮询）。 */
+  async fetchPinned(convId: string): Promise<PinnedMessage[]> {
+    const data = await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/pinned`);
+    const items = (data?.items ?? []) as Array<Record<string, any>>;
+    return items.map((it) => ({
+      convSeq: it.conv_seq ?? 0,
+      serverMsgId: it.server_msg_id ?? "",
+      from: it.sender ?? "",
+      fromNickname: it.from_nickname || undefined,
+      contentType: it.content_type ?? "text",
+      content: it.content ?? "",
+      timestamp: it.timestamp ?? 0,
+      pinnedAt: it.pinned_at ?? 0,
+    }));
+  }
+
   /** 仅为我删除（任务2）：走 REST 落 per-user 隐藏表 → 本端立即物理移除 → 服务端推 msg_hidden 同步本人其它设备。 */
   async hideMessage(convId: string, targetConvSeq: number): Promise<void> {
     await this.api("/api/v1/messages/hide", {
@@ -580,7 +656,10 @@ export class IMClient {
 
   /** 应用一条消息操作到本地（落库 + 通知 UI）。data 来自实时 msg_op 帧或 sync 的 msg_op 事件行负载。 */
   private applyMsgOp(
-    data: { op?: string; conv_id?: string; target_conv_seq?: number; content?: string; client_msg_id?: string },
+    data: {
+      op?: string; conv_id?: string; target_conv_seq?: number; content?: string; client_msg_id?: string;
+      pinned?: boolean; timestamp?: number;
+    },
     advanceCursorTo = 0,
   ): void {
     const convId = data.conv_id || "";
@@ -595,7 +674,10 @@ export class IMClient {
     let patch: MsgOpPatch;
     if (data.op === OP.RECALL) patch = { recalledAt: Date.now() };
     else if (data.op === OP.EDIT) patch = { editedAt: Date.now(), content: data.content ?? "" };
-    else if (data.op === OP.PIN) patch = { pinnedAt: Date.now() };
+    // 置顶：**必须看 data.pinned**——取消置顶（pinned:false）与置顶走同一个 op，
+    // 早先一律 `pinnedAt: Date.now()` 会把「取消置顶」也记成置顶（G0 接横幅时发现并修）。
+    // 时间取服务端 timestamp（多端一致），缺省才回退本地时钟。
+    else if (data.op === OP.PIN) patch = { pinnedAt: data.pinned === false ? 0 : (data.timestamp || Date.now()) };
     else return; // 未知 op：忽略不崩
     void localStore.applyMsgOpLocal(this.uid, convId, target, patch, advanceCursorTo);
     if (data.client_msg_id) this.pendingOps.delete(data.client_msg_id); // 我方操作成功回执

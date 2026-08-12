@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), readReceipts: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), pin: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), readReceipts: vi.fn(),
     comingSoon: vi.fn(),
 };
 const convHandlers = { setPinned: vi.fn(), setMuted: vi.fn(), markRead: vi.fn(), markUnread: vi.fn(), delete: vi.fn() };
@@ -30,9 +30,33 @@ describe("buildMessageActions", () => {
   it("返回固定顺序的全部 id", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
-      "readReceipts", "copy", "reply", "forward", "favorite", "download", "recall", "edit",
+      "readReceipts", "copy", "reply", "forward", "favorite", "download", "recall", "pin", "unpin", "edit",
       "multiSelect", "translate", "reportMsg", "reportUser", "cancelSend", "delete",
     ]);
+  });
+
+  it("置顶↔取消置顶是切换对：按 pinnedAt 只显示其一，且都要 canPin", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const vis = (id: string, ctx: MessageCtx) => actions.find((a) => a.id === id)!.visible(ctx);
+    const base: MessageCtx = { m: msg({}), uid: "1001", canPin: true };
+    expect(vis("pin", base)).toBe(true);
+    expect(vis("unpin", base)).toBe(false);
+    const pinned: MessageCtx = { m: msg({ pinnedAt: 123 }), uid: "1001", canPin: true };
+    expect(vis("pin", pinned)).toBe(false);
+    expect(vis("unpin", pinned)).toBe(true);
+    // 无权限（群内普通成员）：两项都不显示，不给必然被 300006 拒的入口
+    expect(vis("pin", { ...base, canPin: false })).toBe(false);
+    expect(vis("unpin", { ...pinned, canPin: false })).toBe(false);
+  });
+
+  it("撤回态 / 未发出 / 系统消息不可置顶（横幅不能指向墓碑或本地行）", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const vis = (id: string, ctx: MessageCtx) => actions.find((a) => a.id === id)!.visible(ctx);
+    expect(vis("pin", { m: msg({ recalledAt: 1 }), uid: "1001", canPin: true })).toBe(false);
+    expect(vis("pin", { m: msg({ convSeq: 0 }), uid: "1001", canPin: true })).toBe(false);
+    expect(vis("pin", { m: msg({ contentType: "system" }), uid: "1001", canPin: true })).toBe(false);
+    // 但**取消**置顶不看撤回态：已撤回的置顶消息仍要能摘下来
+    expect(vis("unpin", { m: msg({ recalledAt: 1, pinnedAt: 9 }), uid: "1001", canPin: true })).toBe(true);
   });
 
   it("已读详情仅在 群聊 && 自己发的 && 已落库 可见（隐私：只有发送者能看谁读了自己）", () => {

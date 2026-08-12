@@ -1117,3 +1117,50 @@ button.detail-row:hover { background: var(--surface-hover); }
 .readby-list { max-height: 46vh; overflow-y: auto; }
 .readby-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 14px; }
 .readby-empty { padding: 24px 0; text-align: center; color: var(--text-secondary); font-size: 13px; }
+
+/* ── 置顶消息横幅（G0）：聊天区顶部常驻条，公告横幅（G1）落地后排在其上 ── */
+.pin-banner {
+  flex: none; display: flex; align-items: stretch; gap: 4px;
+  padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--separator);
+  background: var(--surface-elevated);
+}
+.pin-banner-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: inherit;
+}
+.pin-banner-bar { flex: none; width: 3px; align-self: stretch; min-height: 30px; border-radius: 2px; background: var(--accent); }
+/* 多条置顶：竖条切成"当前段亮 + 其余暗"，一眼看出还有别的置顶（对齐 Telegram） */
+.pin-banner-bar.multi {
+  background: linear-gradient(180deg, var(--accent) 0 46%, color-mix(in srgb, var(--accent) 28%, transparent) 52% 100%);
+}
+.pin-banner-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.pin-banner-kicker { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--accent); }
+.pin-banner-count { font-variant-numeric: tabular-nums; opacity: .8; }
+.pin-banner-from { color: var(--text-secondary); font-weight: 500; }
+.pin-banner-text { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pin-banner-list { flex: none; align-self: center; }
+
+.pinned-modal { width: 420px; }
+.pinned-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
+.pinned-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--separator); }
+.pinned-row:last-child { border-bottom: none; }
+.pinned-row-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+  background: none; border: none; padding: 4px 2px; cursor: pointer; text-align: left; color: inherit; border-radius: var(--radius-card);
+}
+.pinned-row-main:hover { background: var(--page-bg); }
+.pinned-row-from { font-size: 11px; color: var(--text-secondary); }
+.pinned-row-text { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── 群公告横幅（G1）：黄/橙条，与置顶横幅同结构、换强调色 ── */
+.pin-banner.announce .pin-banner-bar { background: var(--warning, #F5A623); }
+.pin-banner.announce .pin-banner-kicker { color: var(--warning, #F5A623); }
+/* 群公告卡（详情面板，只读展示） */
+.detail-announce { padding: 10px 12px; }
+.detail-announce-head { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--warning, #F5A623); margin-bottom: 4px; }
+.detail-announce-body { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+
+/* ── 群管理面板分组标题 + 禁言时长选择（G2） ── */
+.detail-card-title { font-size: 12px; color: var(--text-secondary); margin: 14px 4px 4px; text-transform: none; }
+.mute-durations { display: flex; flex-direction: column; gap: 8px; margin: 4px 0; }
+.mute-durations .mini-btn { width: 100%; }

@@ -18,8 +18,10 @@ export type MenuAction<C> = {
   run: (c: C) => void;
 };
 
-/** 消息菜单上下文：当前消息 + 本人 uid（判断"我发的/对方发的"）。 */
-export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean };
+/** 消息菜单上下文：当前消息 + 本人 uid（判断"我发的/对方发的"）。
+ *  canPin：能否置顶（G0）。群内 = 群主/管理员（对齐服务端 perm；越权服务端回 300006），单聊 = 任一方。
+ *  由调用方按 my_role 算好传入——菜单层不查群资料。 */
+export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean; canPin?: boolean };
 
 /** 会话菜单上下文：当前会话。 */
 export type ConvCtx = { c: Conversation };
@@ -48,6 +50,7 @@ export interface MessageHandlers {
   translate: (m: ChatMessage) => void;
   multiSelect: (m: ChatMessage) => void;
   recall: (m: ChatMessage) => void;
+  pin: (m: ChatMessage, pinned: boolean) => void;
   delete: (m: ChatMessage) => void;
   readReceipts: (m: ChatMessage) => void;
   reportMsg: (m: ChatMessage) => void;
@@ -89,6 +92,13 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
         && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
       run: (c) => h.download(c.m) },
     { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
+    // 置顶↔取消置顶（G0）：**切换对**，按当前状态只显示其一（与会话菜单的置顶同款写法）。
+    // 撤回态不可置顶（横幅会指向一条墓碑）；未发出的乐观行（convSeq=0）也不行。
+    { id: "pin", label: "置顶", icon: Pin,
+      visible: (c) => !!c.canPin && c.m.convSeq > 0 && !c.m.recalledAt && !c.m.pinnedAt && c.m.contentType !== "system",
+      run: (c) => h.pin(c.m, true) },
+    { id: "unpin", label: "取消置顶", icon: PinOff,
+      visible: (c) => !!c.canPin && c.m.convSeq > 0 && !!c.m.pinnedAt, run: (c) => h.pin(c.m, false) },
     { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },

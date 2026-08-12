@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan } from "./sdk/protocol";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
+import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
@@ -30,9 +31,9 @@ import {
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
-  Image as ImageIcon, UserPlus, LogOut, Info, Pin,
+  Image as ImageIcon, UserPlus, LogOut, Info, Pin, PinOff, List,
   Download, LayoutGrid, MoreHorizontal, Play,
-  Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward,
+  Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward, Eye,
   ChevronDown, ChevronUp, Copy,
 } from "lucide-react";
 
@@ -682,7 +683,11 @@ export default function App() {
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
   const [deleteMenu, setDeleteMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 删除两档子菜单 B（为所有人删除/仅删除自己）——由菜单 A 的「删除」展开，对齐 iOS 子菜单
-  const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/占位项）
+  const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/简介/公告/禁言）
+  const [groupRemarkTick, setGroupRemarkTick] = useState(0); // 群备注（本地）变更计数，触发标题/列表重渲染
+  const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null); // 当前群黑名单（管理面板显示计数）
+  const [groupBansModal, setGroupBansModal] = useState<{ convId: string; bans: GroupBan[] } | null>(null); // 黑名单弹窗
+  const [muteDurationFor, setMuteDurationFor] = useState<{ convId: string; m: GroupMember } | null>(null); // 成员禁言时长选择
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
   const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
@@ -696,6 +701,11 @@ export default function App() {
   const [sendKey, setSendKey] = useState<"enter" | "cmd">(() => (localStorage.getItem("im.sendKey") as "enter" | "cmd") || "enter");
 
   const clientRef = useRef<IMClient | null>(null);
+  // 会话置顶消息（G0）：conv_id -> 置顶集合（服务端按 pinned_at 倒序）。进会话拉一次，
+  // 之后靠实时 msg_op{op:pin} 帧触发重拉——置顶是低频操作，重拉比在本地拼装列表更不容易错。
+  const [pinnedByConv, setPinnedByConv] = useState<Record<string, PinnedMessage[]>>({});
+  const [pinnedIdx, setPinnedIdx] = useState(0);          // 多条置顶时横幅显示第几条（点条轮转）
+  const [pinnedListOpen, setPinnedListOpen] = useState(false);
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
@@ -1158,6 +1168,8 @@ export default function App() {
           if (!list) return prev;
           return { ...prev, [cid]: list.map((m) => (m.convSeq === targetSeq ? { ...m, ...patch } : m)) };
         });
+        // 置顶态变化（G0）：重拉该会话置顶集合刷新顶部横幅（含别人置顶/取消置顶的实时同步）。
+        if (patch.pinnedAt !== undefined) void refreshPinned(cid);
         // 全屏阅读器持有的是 ChatMessage 快照：被读的这条一旦撤回/编辑，快照即失真（撤回内容仍可读可复制）→ 关闭，让用户回到会话看最新态。
         setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r));
         scheduleListRefresh(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
@@ -1165,7 +1177,9 @@ export default function App() {
       // 我发起的操作被拒（如撤回超时 300008、无权删除 300006）→ toast 提示（不改消息本身）。
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
       // 消息被物理移除（任务2）：为所有人删除（op=delete）/ 仅为我删除（msg_hidden）→ 从聊天列表 + 详情文件列表移除该条。
+      // 若删掉的正好是一条置顶消息，服务端下次不再返回它——重拉一次免得横幅指向已消失的消息。
       onMessageRemoved: (cid, targetSeq) => {
+        void refreshPinned(cid);
         setMsgsByConv((prev) => {
           const list = prev[cid];
           if (!list) return prev;
@@ -2068,7 +2082,7 @@ export default function App() {
     if (!client || !msgs) return;
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
-    const nameOf = (m: ChatMessage) => (m.from === uid ? uid : (m.fromNickname || groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.nickname || m.from));
+    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
     const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string) =>
       appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
@@ -2329,6 +2343,24 @@ export default function App() {
     );
   };
 
+  // 重新拉某会话的置顶集合（G0）。best-effort：拉不到就不显横幅，绝不打断聊天。
+  const refreshPinned = useCallback(async (cid: string) => {
+    if (!cid) return;
+    try {
+      const items = (await clientRef.current?.fetchPinned(cid)) ?? [];
+      setPinnedByConv((prev) => ({ ...prev, [cid]: items }));
+    } catch (e) {
+      logger.warn(LOG_TAG.ui, "fetch_pinned_failed", { conv_id: cid, message: (e as Error).message });
+    }
+  }, []);
+
+  // 置顶 / 取消置顶（G0）：发 msg_op，成功由服务端广播回 msg_op 帧（onMsgOp 里重拉横幅），
+  // 越权/失效由 onMsgOpFailed toast。乐观更新交给帧回来那一下，避免本地先亮再被打回。
+  const pinMessage = useCallback((m: ChatMessage, pinned: boolean) => {
+    setMenu(null);
+    if (m.convSeq > 0) clientRef.current?.pinMessage(m.convId, m.convSeq, pinned);
+  }, []);
+
   // 撤回自己的消息（M4-1）：发 msg_op；成功由服务端广播回 msg_op 帧应用（onMsgOp），失败（超窗）toast。
   const recallMessage = useCallback((m: ChatMessage) => {
     setMenu(null);
@@ -2520,6 +2552,7 @@ export default function App() {
       multiSelect: enterSelectMode,
       readReceipts: openReadReceipts,
       recall: recallMessage,
+      pin: pinMessage,
       // 聊天菜单的「删除」在渲染层按锚点特判 → requestDelete（两档子菜单/仅删自己/本地删，需菜单 x/y）；
       // 此 handler 不经 a.run 触发，仅为 buildMessageActions 的类型契约占位（requestDelete 内部另直接用 deleteMessage 处理 convSeq<=0）。
       delete: deleteMessage,
@@ -2528,7 +2561,7 @@ export default function App() {
       cancelSend: cancelSendMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
   );
 
   // 全屏文本阅读器：Esc 关闭（点蒙层/✕ 已在 JSX 处理）。
@@ -2824,6 +2857,13 @@ export default function App() {
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
   const convId = peer ? convIdFor(uid, peer) : groupConvId;
+  // 进会话拉一次置顶集合（G0）；切会话时把横幅索引复位到第一条。
+  useEffect(() => {
+    setPinnedIdx(0);
+    setPinnedListOpen(false);
+    if (convId) void refreshPinned(convId);
+  }, [convId, refreshPinned]);
+
   // 切换会话时清空 @提及态（M4-8）：input 不随会话清空，候选表若留到下一个会话，
   // 手打同名成员时会命中**上一个群**的 uid —— 服务端按新群成员集过滤后把它丢掉，
   // 结果本群那位同名成员一条提醒都收不到，发送方却毫无察觉。面板同理必须收起。
@@ -3129,8 +3169,29 @@ export default function App() {
   // ---- 群聊派生 + 动作（早退 return 之后：全部普通函数，禁用 Hook）----
   const isGroupChat = !!groupConvId;
   const activeGroupInfo = groupConvId ? groupInfos[groupConvId] : undefined;
+  // 当前会话的置顶集合与横幅上那条。索引可能因别人取消置顶而越界 → 夹紧。
+  const activePinned = pinnedByConv[convId] ?? [];
+  const pinnedShownIdx = clampPinnedIndex(pinnedIdx, activePinned.length);
+  const pinnedShown = activePinned[pinnedShownIdx];
+  // 能否置顶：群内限群主/管理员（= 服务端 perm_pin 的默认值，G2 落设置后改读群设置）；单聊任一方可。
+  const canPinHere = isGroupChat ? (activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin") : !!peer;
+  // G2 输入栏禁言锁：成员级禁言（my_mute_until）或全员禁言（且我是普通成员）→ 禁用输入并改占位。
+  // 服务端仍是权威（发上来照样拒 300208/300206），这里只提前告知、不给试错。
+  const composerMuteReason: string | null = (() => {
+    if (!isGroupChat || !activeGroupInfo) return null;
+    if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return "你已被管理员禁言";
+    if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return "本群已开启全员禁言";
+    return null;
+  })();
+
   const activeGroupConv = groupConvId ? conversations.find((c) => c.conv_id === groupConvId) : undefined;
-  const chatTitle = isGroupChat ? (activeGroupInfo?.name || activeGroupConv?.name || "群聊") : peerLabel;
+  // 群备注（G1，仅本人可见，本地存储）——定义在 chatTitle/详情用它之前，避免 TDZ。
+  const groupRemarkKey = (cid: string) => `im.grpremark.${uid}.${cid}`;
+  const groupRemark = (cid: string): string => localStorage.getItem(groupRemarkKey(cid)) ?? "";
+  const chatTitle = isGroupChat
+    ? (groupRemark(groupConvId) || activeGroupInfo?.name || activeGroupConv?.name || "群聊")
+    : peerLabel;
+  void groupRemarkTick; // 群备注（本地）变更后重渲染聊天标题
   const chatMemberCount = activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
@@ -3143,7 +3204,8 @@ export default function App() {
   // 群成员昵称（气泡回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
   const memberNick = (cid: string, id: string): string => {
     const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
-    return (m?.nickname && m.nickname.trim()) || "";
+    // 群昵称优先（G1），回退全局昵称；都无返回空串让调用方回退 uid。
+    return (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
   };
   const senderLabel = (m: ChatMessage): string => m.fromNickname || memberNick(m.convId, m.from) || m.from;
   // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
@@ -3324,7 +3386,72 @@ export default function App() {
   const doRenameGroup = async (gp: GroupInfo) => {
     const name = await askPrompt("修改群名", gp.name, { placeholder: "群名（1~30 字）", okText: "保存", maxLength: 30 });
     if (name === null || !name.trim() || name.trim() === gp.name) return;
-    await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url));
+    await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url, gp.intro ?? ""));
+  };
+
+  // 群简介（G1，群主/管理员）：整体替换，随群资料写。
+  const doEditIntro = async (gp: GroupInfo) => {
+    const intro = await askPrompt("群简介", gp.intro ?? "", { placeholder: "介绍这个群（≤200 字）", okText: "保存", maxLength: 200 });
+    if (intro === null || intro.trim() === (gp.intro ?? "")) return;
+    await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, gp.avatar_url, intro.trim()));
+  };
+
+  // 群公告（G1，群主/管理员）：发布走独立接口并落系统消息；清空文本=撤下。
+  const doEditAnnouncement = async (gp: GroupInfo) => {
+    const text = await askPrompt("群公告", gp.announcement ?? "", { placeholder: "发布后通知全体成员（清空以撤下）", okText: "发布", maxLength: 500 });
+    if (text === null || text.trim() === (gp.announcement ?? "")) return;
+    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupAnnouncement(gp.conv_id, text.trim()));
+  };
+
+  // 全员禁言开关（G1，群主/管理员）：开=永久（-1），关=解除（0）。
+  const doToggleGroupMute = async (gp: GroupInfo, turnOn: boolean) => {
+    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMute(gp.conv_id, turnOn ? -1 : 0));
+  };
+
+  // 群治理开关组（G2，群主/管理员）：翻转某个布尔位，整组回带当前值上报（后端整体替换）。
+  const doToggleGroupSetting = async (gp: GroupInfo, key: "join_approval" | "perm_invite" | "perm_edit_info" | "perm_pin" | "history_visible") => {
+    const s = {
+      join_approval: !!gp.join_approval, perm_invite: !!gp.perm_invite,
+      perm_edit_info: !!gp.perm_edit_info, perm_pin: !!gp.perm_pin, history_visible: !!gp.history_visible,
+    };
+    s[key] = !s[key];
+    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupSettings(gp.conv_id, s));
+  };
+
+  // 打开黑名单弹窗（G2）：拉一次列表。
+  const openGroupBans = async (cid: string) => {
+    try {
+      const bans = await clientRef.current!.fetchGroupBans(cid);
+      setGroupBansModal({ convId: cid, bans });
+      setGroupBans(bans);
+    } catch (e) { setToast(`加载黑名单失败：${(e as Error).message}`); }
+  };
+  const doUnban = async (cid: string, userId: string) => {
+    try {
+      await clientRef.current!.unbanGroupMember(cid, userId);
+      const bans = await clientRef.current!.fetchGroupBans(cid);
+      setGroupBansModal({ convId: cid, bans });
+      setGroupBans(bans);
+      setToast("已解除");
+    } catch (e) { setToast(`解除失败：${(e as Error).message}`); }
+  };
+
+  // 我在本群的昵称（G1，任意成员）：走后端 → 刷新群资料（气泡回退名随之更新）。
+  const doEditMyGroupNickname = async (gp: GroupInfo) => {
+    const nick = await askPrompt("我在本群的昵称", gp.my_nickname ?? "", { placeholder: "群内可见（≤20 字，留空恢复默认）", okText: "保存", maxLength: 20 });
+    if (nick === null || nick.trim() === (gp.my_nickname ?? "")) return;
+    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMyNickname(gp.conv_id, nick.trim()));
+  };
+
+  // 群备注（G1，仅本人可见）：改我看到的群名，本地存储（localStorage keyed by uid+convId）。
+  // 说明：后端已有会话级 remark 字段（多端同步），Web 现用本地存储与 iOS 对齐，多端同步为后续项。
+  const doEditGroupRemark = async (gp: GroupInfo) => {
+    const cur = groupRemark(gp.conv_id);
+    const v = await askPrompt("群备注", cur, { placeholder: `${gp.name}（仅自己可见）`, okText: "保存", maxLength: 30 });
+    if (v === null || v.trim() === cur) return;
+    if (v.trim()) localStorage.setItem(groupRemarkKey(gp.conv_id), v.trim());
+    else localStorage.removeItem(groupRemarkKey(gp.conv_id));
+    setGroupRemarkTick((n) => n + 1); // 触发标题/会话列表重渲染
   };
 
   // 设置群头像（仅群主/管理员，方案 C）：选图 → 圆形裁切 → 头像专用上传 → updateGroup 带新 URL。
@@ -3340,7 +3467,7 @@ export default function App() {
           try {
             setToast("上传中…");
             const { url } = await clientRef.current!.uploadAvatar(blob);
-            await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url));
+            await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url, gp.intro ?? ""));
             setToast("群头像已更新");
           } catch (e) { setToast(`设置群头像失败：${(e as Error).message}`); }
         },
@@ -3967,6 +4094,42 @@ export default function App() {
               )}
             </span>
           </header>
+          {/* 群公告横幅（G1，黄条）：排在置顶横幅之上（优先级 公告 > 置顶）。点条进群资料看全文。 */}
+          {isGroupChat && activeGroupInfo?.announcement && (
+            <div className="pin-banner announce" onClick={() => openGroupPanel(groupConvId)} role="button">
+              <span className="pin-banner-main" style={{ cursor: "pointer" }}>
+                <span className="pin-banner-bar" />
+                <span className="pin-banner-copy">
+                  <span className="pin-banner-kicker"><Megaphone size={12} /> 群公告</span>
+                  <span className="pin-banner-text">{activeGroupInfo.announcement}</span>
+                </span>
+              </span>
+            </div>
+          )}
+          {/* 置顶消息横幅（G0）：点条=跳到那条并轮转到下一条；右侧 ☰=展开全部置顶。 */}
+          {pinnedShown && (
+            <div className="pin-banner">
+              <button className="pin-banner-main"
+                title="跳转到该消息"
+                onClick={() => { jumpToSeq(pinnedShown.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}>
+                <span className={`pin-banner-bar${activePinned.length > 1 ? " multi" : ""}`} />
+                <span className="pin-banner-copy">
+                  <span className="pin-banner-kicker">
+                    <Pin size={12} /> 置顶消息
+                    {activePinned.length > 1 && <span className="pin-banner-count">{pinnedShownIdx + 1}/{activePinned.length}</span>}
+                    {pinnedSenderLabel(pinnedShown, isGroupChat) && (
+                      <span className="pin-banner-from">· {pinnedSenderLabel(pinnedShown, isGroupChat)}</span>
+                    )}
+                  </span>
+                  <span className="pin-banner-text">{pinnedPreview(pinnedShown)}</span>
+                </span>
+              </button>
+              {activePinned.length > 1 && (
+                <button className="icon-btn pin-banner-list" title="全部置顶消息"
+                  onClick={() => setPinnedListOpen(true)}><List size={18} /></button>
+              )}
+            </div>
+          )}
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
             {messages.map((m, i) => {
               const mine = m.from === uid;
@@ -4381,8 +4544,8 @@ export default function App() {
                     )) : <div className="mention-empty">无匹配成员</div>}
                   </div>
                 )}
-                <textarea ref={composerRef} value={input} rows={1} disabled={!convId}
-                  placeholder={convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…"}
+                <textarea ref={composerRef} value={input} rows={1} disabled={!convId || composerMuteReason !== null}
+                  placeholder={composerMuteReason || (convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…")}
                   onChange={(e) => onInputChange(e.target.value)}
                   onPaste={onComposerPaste}
                   onKeyDown={(e) => {
@@ -4393,7 +4556,7 @@ export default function App() {
                     const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
                     if (shouldSend) { e.preventDefault(); send(); }
                   }} />
-                <button onClick={send} disabled={!convId}>发送</button>
+                <button onClick={send} disabled={!convId || composerMuteReason !== null}>发送</button>
               </footer>
             </>
           )}
@@ -4721,16 +4884,41 @@ export default function App() {
         </div>
       )}
 
+      {/* 全部置顶消息（G0）：横幅右侧 ☰ 打开。点行跳转；有权限者可就地取消置顶。 */}
+      {pinnedListOpen && (
+        <div className="modal-mask" onClick={() => setPinnedListOpen(false)}>
+          <div className="modal pinned-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">置顶消息（{activePinned.length}）</div>
+            <div className="pinned-list">
+              {activePinned.map((pm) => (
+                <div className="pinned-row" key={pm.convSeq}>
+                  <button className="pinned-row-main"
+                    onClick={() => { setPinnedListOpen(false); jumpToSeq(pm.convSeq); }}>
+                    <span className="pinned-row-from">{pinnedSenderLabel(pm, isGroupChat) || formatTime(pm.timestamp, timeFormat)}</span>
+                    <span className="pinned-row-text">{pinnedPreview(pm)}</span>
+                  </button>
+                  {canPinHere && (
+                    <button className="icon-btn" title="取消置顶"
+                      onClick={() => clientRef.current?.pinMessage(convId, pm.convSeq, false)}><PinOff size={16} /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button className="modal-close" onClick={() => setPinnedListOpen(false)}>关闭</button>
+          </div>
+        </div>
+      )}
+
       {menu && (
         <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
           {messageActions
-            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer }))
+            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere }))
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
                 onClick={() => {
                   // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
                   if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
-                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer }); setMenu(null);
+                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere }); setMenu(null);
                 }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}
@@ -4904,8 +5092,9 @@ export default function App() {
         const gp = d.isGroup ? groupInfos[d.convId] : undefined;
         const canManage = !!gp && gp.my_role !== "member";
         const isOwner = !!gp && gp.my_role === "owner";
-        const title = d.isGroup ? (gp?.name ?? conv?.name ?? "群聊")
+        const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || "群聊")
           : (conv?.peer_remark || conv?.peer_nickname || d.peer || "");
+        void groupRemarkTick; // 群备注变更后重渲染标题
         const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url) : conv?.peer_avatar_url;
         const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (d.peer ?? "");
         const pinned = (conv?.pinned_at ?? 0) > 0;
@@ -4958,14 +5147,47 @@ export default function App() {
                       <span className="detail-row-ic"><SquarePen size={18} /></span><span>群名称</span>
                       <span className="detail-row-val">{gp.name}</span><ChevronRight size={16} className="detail-row-chev" />
                     </button>
-                    <div className="detail-row disabled"><span className="detail-row-ic"><Info size={18} /></span><span>简介</span><span className="detail-row-val muted">即将上线</span></div>
+                    <button className="detail-row" onClick={() => void doEditIntro(gp)}>
+                      <span className="detail-row-ic"><Info size={18} /></span><span>简介</span>
+                      <span className="detail-row-val">{gp.intro || "未填写"}</span><ChevronRight size={16} className="detail-row-chev" />
+                    </button>
+                    <button className="detail-row" onClick={() => void doEditAnnouncement(gp)}>
+                      <span className="detail-row-ic"><Megaphone size={18} /></span><span>群公告</span>
+                      <span className="detail-row-val">{gp.announcement ? "已发布" : "未发布"}</span><ChevronRight size={16} className="detail-row-chev" />
+                    </button>
                   </div>
+                  <div className="detail-card-title">加入与发言</div>
                   <div className="detail-card">
-                    {[["进群确认"], ["全员禁言"], ["自定义壁纸"]].map(([label]) => (
-                      <div key={label} className="detail-row disabled"><span className="detail-row-ic"><Lock size={18} /></span><span>{label}</span><span className="detail-row-val muted">即将上线</span></div>
-                    ))}
+                    <div className="detail-row"><span className="detail-row-ic"><Lock size={18} /></span><span>进群确认</span>
+                      <button className={`switch ${gp.join_approval ? "on" : ""}`}
+                        onClick={() => void doToggleGroupSetting(gp, "join_approval")} /></div>
+                    <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>全员禁言</span>
+                      <button className={`switch ${(gp.mute_until ?? 0) > Date.now() ? "on" : ""}`}
+                        onClick={() => void doToggleGroupMute(gp, !((gp.mute_until ?? 0) > Date.now()))} /></div>
                   </div>
-                  <div className="detail-foot-note">进群确认 / 全员禁言 / 自定义壁纸即将上线（待后端）。</div>
+                  <div className="detail-card-title">成员权限</div>
+                  <div className="detail-card">
+                    <div className="detail-row"><span className="detail-row-ic"><UserPlus size={18} /></span><span>仅管理员可邀请</span>
+                      <button className={`switch ${gp.perm_invite ? "on" : ""}`}
+                        onClick={() => void doToggleGroupSetting(gp, "perm_invite")} /></div>
+                    <div className="detail-row"><span className="detail-row-ic"><SquarePen size={18} /></span><span>仅管理员可改群资料</span>
+                      <button className={`switch ${gp.perm_edit_info ? "on" : ""}`}
+                        onClick={() => void doToggleGroupSetting(gp, "perm_edit_info")} /></div>
+                    <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>仅管理员可置顶消息</span>
+                      <button className={`switch ${gp.perm_pin ? "on" : ""}`}
+                        onClick={() => void doToggleGroupSetting(gp, "perm_pin")} /></div>
+                    <div className="detail-row"><span className="detail-row-ic"><Eye size={18} /></span><span>新成员仅可见入群后历史</span>
+                      <button className={`switch ${gp.history_visible ? "on" : ""}`}
+                        onClick={() => void doToggleGroupSetting(gp, "history_visible")} /></div>
+                  </div>
+                  <div className="detail-card-title">治理</div>
+                  <div className="detail-card">
+                    <button className="detail-row" onClick={() => void openGroupBans(gp.conv_id)}>
+                      <span className="detail-row-ic"><Ban size={18} /></span><span>黑名单</span>
+                      <span className="detail-row-val">{groupBans ? `${groupBans.length} 人` : ""}</span><ChevronRight size={16} className="detail-row-chev" />
+                    </button>
+                  </div>
+                  <div className="detail-foot-note">「新成员仅可见入群后历史」开启后，新成员看不到加入前的聊天记录。</div>
                 </div>
               ) : (
                 <>
@@ -5017,6 +5239,15 @@ export default function App() {
                   </div>
 
                   {showDetailBody && (<>
+                  {/* ---- 群公告卡（G1，只读展示；管理员可在群管理里编辑） ---- */}
+                  {d.isGroup && gp?.announcement && (
+                    <div className="detail-card">
+                      <div className="detail-announce">
+                        <div className="detail-announce-head"><Megaphone size={14} /> 群公告</div>
+                        <div className="detail-announce-body">{gp.announcement}</div>
+                      </div>
+                    </div>
+                  )}
                   {/* ---- 设置：置顶 / 免打扰 (+群管理) ---- */}
                   <div className="detail-card">
                     <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>置顶聊天</span>
@@ -5030,6 +5261,20 @@ export default function App() {
                       </button>
                     )}
                   </div>
+
+                  {/* ---- 群：我在本群的昵称 / 群备注（任意成员，G1） ---- */}
+                  {d.isGroup && gp && (
+                    <div className="detail-card">
+                      <button className="detail-row" onClick={() => void doEditMyGroupNickname(gp)}>
+                        <span className="detail-row-ic"><SquarePen size={18} /></span><span>我在本群的昵称</span>
+                        <span className="detail-row-val">{gp.my_nickname || "未设置"}</span><ChevronRight size={16} className="detail-row-chev" />
+                      </button>
+                      <button className="detail-row" onClick={() => void doEditGroupRemark(gp)}>
+                        <span className="detail-row-ic"><Bookmark size={18} /></span><span>群备注</span>
+                        <span className="detail-row-val">{groupRemark(gp.conv_id) || "未设置"}</span><ChevronRight size={16} className="detail-row-chev" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* ---- 单聊：备注名 / 用户名 ---- */}
                   {!d.isGroup && (
@@ -5057,9 +5302,9 @@ export default function App() {
                         {gp.members.map((m) => (
                           <div key={m.user_id} className="detail-member"
                             onClick={() => m.user_id !== uid && openPeerDetail(m.user_id)} role="button">
-                            <Avatar url={m.avatar_url} label={m.nickname || m.user_id} seed={m.user_id} />
+                            <Avatar url={m.avatar_url} label={m.group_nickname || m.nickname || m.user_id} seed={m.user_id} />
                             <div className="detail-member-body">
-                              <div className="detail-member-name">{m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
+                              <div className="detail-member-name">{m.group_nickname || m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
                               <div className="detail-member-sub">{m.user_id}</div>
                             </div>
                             {m.role === "owner" && <span className="role-badge owner">群主</span>}
@@ -5230,15 +5475,70 @@ export default function App() {
                 });
               }}>转让群主</button>
             )}
+            {/* 禁言 / 解禁（G2）：已禁言显解除，否则弹时长选择。 */}
+            {(m.mute_until ?? 0) > Date.now() ? (
+              <button onClick={() => run(() => clientRef.current!.muteGroupMember(cid, m.user_id, 0))}>解除禁言</button>
+            ) : (
+              <button onClick={() => { setMemberMenu(null); setMuteDurationFor({ convId: cid, m }); }}>禁言…</button>
+            )}
             <button className="danger" onClick={() => {
               setMemberMenu(null);
-              void askConfirm(`确定把 ${m.nickname || m.user_id} 移出群聊？`, { okText: "移出", danger: true }).then((ok) => {
-                if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMember(cid, m.user_id));
+              void askConfirm(`确定把 ${m.nickname || m.user_id} 移出群聊？24 小时内不可再被邀请。`, { okText: "移出", danger: true }).then((ok) => {
+                if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMemberWithBan(cid, m.user_id, "cooldown"));
               });
             }}>移出群聊</button>
+            <button className="danger" onClick={() => {
+              setMemberMenu(null);
+              void askConfirm(`确定把 ${m.nickname || m.user_id} 移出并不再允许加入？`, { okText: "移出并拉黑", danger: true }).then((ok) => {
+                if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMemberWithBan(cid, m.user_id, "forever"));
+              });
+            }}>移出并不再允许加入</button>
           </div>
         );
       })()}
+
+      {/* 禁言时长选择（G2）：10 分钟 / 1 小时 / 1 天 / 永久。 */}
+      {muteDurationFor && (
+        <div className="modal-mask" onClick={() => setMuteDurationFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">禁言时长</div>
+            <div className="mute-durations">
+              {([["10 分钟", 10 * 60_000], ["1 小时", 60 * 60_000], ["1 天", 24 * 60 * 60_000], ["永久", -1]] as [string, number][]).map(([label, ms]) => (
+                <button key={label} className="mini-btn" onClick={() => {
+                  const { convId, m } = muteDurationFor;
+                  const until = ms < 0 ? -1 : Date.now() + ms;
+                  setMuteDurationFor(null);
+                  void doGroupAction(convId, () => clientRef.current!.muteGroupMember(convId, m.user_id, until));
+                }}>{label}</button>
+              ))}
+            </div>
+            <button className="modal-close" onClick={() => setMuteDurationFor(null)}>取消</button>
+          </div>
+        </div>
+      )}
+
+      {/* 群黑名单弹窗（G2）：解除拉黑。 */}
+      {groupBansModal && (
+        <div className="modal-mask" onClick={() => setGroupBansModal(null)}>
+          <div className="modal pinned-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">黑名单（{groupBansModal.bans.length}）</div>
+            <div className="pinned-list">
+              {groupBansModal.bans.length === 0 ? (
+                <div className="detail-empty">暂无被拉黑成员</div>
+              ) : groupBansModal.bans.map((b) => (
+                <div className="pinned-row" key={b.user_id}>
+                  <div className="pinned-row-main" style={{ cursor: "default" }}>
+                    <span className="pinned-row-from">{b.user_id}</span>
+                    <span className="pinned-row-text">{b.expires_at === 0 ? "永久" : "冷却中"}</span>
+                  </div>
+                  <button className="mini-btn danger" onClick={() => void doUnban(groupBansModal.convId, b.user_id)}>解除</button>
+                </div>
+              ))}
+            </div>
+            <button className="modal-close" onClick={() => setGroupBansModal(null)}>关闭</button>
+          </div>
+        </div>
+      )}
 
       {/* 应用内确认框（替代 window.confirm，统一 .modal 风格）。点遮罩 = 取消。 */}
       {confirmDlg && (

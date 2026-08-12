@@ -5,6 +5,16 @@
 
 ## 当前焦点
 
+**G2 群治理 ✅（2026-08-13，tsc+234 vitest+build 绿，待手测）** — 方案 `../IMServer/docs/GROUP_FEATURES_DESIGN.md` §G2、草图 §04/§07。
+群管理面板加三卡：加入与发言（进群确认/全员禁言开关）· 成员权限（仅管理员可邀请/改资料/置顶三开关 + 新成员可见历史）· 治理（黑名单入口）。黑名单弹窗（解除拉黑）。成员菜单加「禁言…(10min/1h/1d/永久时长选择弹窗)」「移出群聊(24h冷却)」「移出并不再允许加入(永久)」。聊天区 composer 禁言锁（`composerMuteReason`：成员级/全员禁言时禁用输入+占位）。SDK 加 setGroupSettings/muteGroupMember/removeGroupMemberWithBan/fetchGroupBans/unbanGroupMember。
+
+**G1 群资料闭环 ✅（2026-08-12，tsc+234 vitest+build 绿，待手测）** — 方案 `../IMServer/docs/GROUP_FEATURES_DESIGN.md` §G1、草图 §04/§08。
+群管理面板三行（简介/公告/全员禁言开关，删「即将上线」占位）+ 详情面板公告卡·「我在本群的昵称」·「群备注」行 + 聊天区**公告黄条横幅**（`.pin-banner.announce`，排在置顶蓝条之上）。`memberNick` 群昵称优先（气泡发送者名/成员列表/引用/@列表同步）。群备注本地存储（`localStorage im.grpremark.<uid>.<cid>`，与单聊备注同范式；后端 remark 字段就绪、多端同步后续）。SDK 加 `setGroupAnnouncement`/`setGroupMute`/`setGroupMyNickname` + `updateGroup` 扩 intro。
+
+**G0 置顶消息横幅 ✅（2026-08-12，tsc + 234 vitest + build 绿，待手测）** — 方案/草图见 `../IMServer/docs/GROUP_FEATURES_DESIGN.md` §G0 与 `GROUP_FEATURES_UX_SKETCH.html` §03（**实现须严格对齐草图**）。
+进会话拉 `GET /conversations/{id}/pinned` 回填 `.pin-banner`（竖条 + `📌 置顶消息 i/N · 发送者` + 单行预览），点条=跳转并轮转到下一条，多条时右侧 ☰ 开置顶列表弹窗（可就地取消置顶）；右键菜单加「置顶↔取消置顶」切换对（群内仅群主/管理员可见）。纯逻辑在 `src/pinned.ts`（12 例）。
+**顺带修**：`applyMsgOp` 对 `op=pin` 写死 `pinnedAt: Date.now()`，把「取消置顶」也记成置顶——改为认 `data.pinned`，时间取服务端 `timestamp`。
+
 **修 `@<uid>` 不高亮/不可点 ✅（2026-08-12）**：无昵称成员回填的是 `@<uid>`（如 `@1002`），`mentionEntriesFor` 取昵称失败时未回退 uid 就跳过了 → 改 `memberNick||uid`。
 
 **气泡内 `@昵称` 高亮 + 点击跳资料 ✅（2026-08-12，tsc + 210 vitest + build 绿，待手测）**：`segmentMentions`（mention.ts，7 例）用消息 `mentions`+群昵称还原 `@昵称`，short/long 气泡 + 全屏阅读器均高亮（`.mention-hl`）；可点的 `@昵称`（有 uid，`@所有人` 除外）= `.mention-tap`，onClick `stopPropagation`+`openPeerDetail(uid)`，多选态不接管点击。token 边界同 `containsMentionToken`、长名优先。
