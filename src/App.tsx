@@ -12,6 +12,7 @@ import { buildMessageActions, buildConversationActions, type MenuAction, type Me
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
+import { VirtualList } from "./VirtualList";
 import { mediaKindForFile, webCanRenderMedia } from "./fileTypes";
 import { textTier, charCountLabel } from "./longtext";
 import { formatFileSize } from "./fileMetadata";
@@ -580,6 +581,7 @@ export default function App() {
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
+  const contactsScrollRef = useRef<HTMLDivElement>(null); // 通讯录滚动容器（好友列表虚拟化的滚动父，见 VirtualList）
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
   const [searchQ, setSearchQ] = useState(""); // 找人搜索框
   const [searchResults, setSearchResults] = useState<UserCard[] | null>(null); // null=未搜索；[]=搜过无结果
@@ -3463,7 +3465,7 @@ export default function App() {
           <div className="contact-entries">
             {contactEntries.map((r) => renderRow(r, "entry-row"))}
           </div>
-          <div className="convlist">
+          <div className="convlist" ref={contactsScrollRef}>
             {searchResults !== null && (
               <>
                 <div className="section-label">搜索结果</div>
@@ -3521,21 +3523,28 @@ export default function App() {
 
             <div className="section-label">好友（{accepted.length}）</div>
             {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
-            {accepted.map((f) => (
-              <div key={`f-${f.user_id}`} className="convitem" onClick={() => openFriendChat(f.user_id)}>
-                <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}>
-                  {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
-                </Avatar>
-                <div className="convbody">
-                  <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
-                  <div className="convlast">{f.user_id}</div>
+            {/* 好友列表虚拟化：只渲染视口内可见行，2000 好友首屏渲染从 ≈530ms 降到 <100ms
+                （LOAD_TESTING 场景⑥）。共用 .convlist 滚动，上方搜索/新朋友/标签同处一个滚动条。 */}
+            <VirtualList
+              items={accepted}
+              scrollElRef={contactsScrollRef}
+              getKey={(f) => f.user_id}
+              renderRow={(f) => (
+                <div className="convitem" onClick={() => openFriendChat(f.user_id)}>
+                  <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}>
+                    {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
+                  </Avatar>
+                  <div className="convbody">
+                    <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
+                    <div className="convlast">{f.user_id}</div>
+                  </div>
+                  <div className="row-actions">
+                    <button className="mini-btn ghost" title="更多"
+                      onClick={(e) => { e.stopPropagation(); setFriendMenu({ x: e.clientX, y: e.clientY, userId: f.user_id }); }}>⋯</button>
+                  </div>
                 </div>
-                <div className="row-actions">
-                  <button className="mini-btn ghost" title="更多"
-                    onClick={(e) => { e.stopPropagation(); setFriendMenu({ x: e.clientX, y: e.clientY, userId: f.user_id }); }}>⋯</button>
-                </div>
-              </div>
-            ))}
+              )}
+            />
           </div>
         </div>
         )}
