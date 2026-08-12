@@ -18,3 +18,8 @@ npm-debug.log*
 
 # Codex Code Graph 本地索引（机器相关缓存）
 /.codegraph/
+
+# tsc -b 对 vite.config.ts 的输出（emitDeclarationOnly；js 若被发射会盖住 ts 配置）
+vite.config.js
+vite.config.d.ts
+*.tsbuildinfo

@@ -8,7 +8,11 @@
     "moduleResolution": "bundler",
     "types": ["node"],
     "allowSyntheticDefaultImports": true,
-    "strict": true
+    "strict": true,
+    // 只出声明不发射 JS：composite 工程必须有输出，但若发射 vite.config.js，
+    // vite 的配置解析会**优先加载 js 而忽略 ts**（曾致改 ts 的代理目标不生效，见
+    // IMServer/docs/LOAD_TESTING.md 场景⑥教训）。声明文件与 tsbuildinfo 已 gitignore。
+    "emitDeclarationOnly": true
   },
   "include": ["vite.config.ts"]
 }

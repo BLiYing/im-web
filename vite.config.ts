@@ -33,15 +33,19 @@ function devLogSink(): Plugin {
 
 // 开发期把 /api 与 /ws 代理到本地后端，避免跨域（CORS）。
 // 生产部署时由部署层（nginx 等）转发，前端用同源相对路径。
+// IM_SERVER_TARGET 可覆盖后端地址（默认 localhost:8080）——压测/多后端联调时指到别的端口，
+// 如：IM_SERVER_TARGET=http://localhost:8081 npm run dev（见 IMServer/docs/LOAD_TESTING.md 场景⑥）。
+const target = process.env.IM_SERVER_TARGET || "http://localhost:8080";
+const wsTarget = target.replace(/^http/, "ws");
 export default defineConfig({
   plugins: [react(), devLogSink()],
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:8080", changeOrigin: true },
-      "/uploads": { target: "http://localhost:8080", changeOrigin: true },
-      "/avatars": { target: "http://localhost:8080", changeOrigin: true }, // 头像独立目录（方案 C），与 /uploads 同后端
-      "/ws": { target: "ws://localhost:8080", ws: true },
+      "/api": { target, changeOrigin: true },
+      "/uploads": { target, changeOrigin: true },
+      "/avatars": { target, changeOrigin: true }, // 头像独立目录（方案 C），与 /uploads 同后端
+      "/ws": { target: wsTarget, ws: true },
     },
   },
 });
