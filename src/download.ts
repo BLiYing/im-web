@@ -159,7 +159,7 @@ export function applyTier(p: NetworkPolicy, tier: Exclude<SpeedTier, "custom">):
 }
 
 /** 下载状态机（与 iOS `IMDownloadProgress` 五态镜像）。 */
-export type DownloadPhase = "notStarted" | "downloading" | "failed" | "expired" | "done";
+export type DownloadPhase = "notStarted" | "downloading" | "failed" | "expired" | "done" | "unsupported";
 
 export interface DownloadState {
   phase: DownloadPhase;
@@ -184,6 +184,7 @@ export function downloadGlyph(s: DownloadState | undefined): string | null {
     case "downloading": return "✕";
     case "failed": return "↻";
     case "expired": return null; // 服务端已清理：无从重试
+    case "unsupported": return "↓"; // 网页端无法预览：给下载入口（下载到本地用其它程序打开）
     case "done": return null;    // 完成即止，绝不自动打开
   }
 }
@@ -208,6 +209,7 @@ export function downloadText(s: DownloadState | undefined, sizeText: string, kin
     case "downloading": return `${Math.round(downloadFraction(s) * 100)}%`;
     case "failed": return "下载失败，点击重试";
     case "expired": return kind === "image" ? "图片已失效" : kind === "video" ? "视频已失效" : "文件已失效";
+    case "unsupported": return kind === "video" ? "网页端无法播放 · 点击下载" : "网页端无法预览 · 点击下载";
     case "done": return sizeText;
   }
 }

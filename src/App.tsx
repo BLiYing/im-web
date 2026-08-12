@@ -12,7 +12,7 @@ import { buildMessageActions, buildConversationActions, type MenuAction, type Me
 import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
-import { mediaKindForFile } from "./fileTypes";
+import { mediaKindForFile, webCanRenderMedia } from "./fileTypes";
 import { textTier, charCountLabel } from "./longtext";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
@@ -571,7 +571,7 @@ export default function App() {
   const [viewerMore, setViewerMore] = useState(false);   // 查看器「更多」浮层（hover 显示）
   const [expandedTexts, setExpandedTexts] = useState<Set<string>>(new Set()); // 中长文本"展开全文"记忆（按消息 key）
   const [textReader, setTextReader] = useState<ChatMessage | null>(null); // 超长文本全屏阅读器（null=关闭）
-  const [readerFontStep, setReaderFontStep] = useState(0); // 阅读器字号档：-1/0/1/2
+  const [readerFontStep, setReaderFontStep] = useState(0); // 阅读器字号档偏移：-1/0/1/2/3（与 iOS IMTextReader 一致）
   // 本浏览器解不了该视频的编码（HEVC 等）→ 换成"下载后本地播放"的降级卡片，避免黑屏。
   // 按被查看的 URL 复位：换一条视频要重新给它一次播放机会，否则一次失败会连累后面每条。
   const [videoUnplayable, setVideoUnplayable] = useState(false);
@@ -620,6 +620,15 @@ export default function App() {
   const [expiredSet, setExpiredSet] = useState<Set<string>>(new Set());
   const expiredRef = useRef<Set<string>>(expiredSet);
   expiredRef.current = expiredSet;
+  // 「网页端无法渲染」运行期标记（编解码级失败，扩展名看不出，如 mp4 里的 HEVC）：<img>/<video> onError 且非 404 时落此集。
+  // 容器级已知不支持（heic/mkv 等）由 webCanRenderMedia 直接判定、无需入集。仅内存：刷新后一次加载尝试即可复得，无需持久化。
+  const [unsupportedSet, setUnsupportedSet] = useState<Set<string>>(new Set());
+  const unsupportedRef = useRef<Set<string>>(unsupportedSet);
+  unsupportedRef.current = unsupportedSet;
+  const markUnsupported = useCallback((content: string) => {
+    if (!content) return;
+    setUnsupportedSet((s) => (s.has(content) ? s : new Set(s).add(content)));
+  }, []);
   /** 把某 content 标记为永久失效（幂等）：更新内存态 + 持久化。 */
   const markExpired = useCallback((content: string) => {
     if (!content) return;
@@ -1138,6 +1147,8 @@ export default function App() {
           if (!list) return prev;
           return { ...prev, [cid]: list.map((m) => (m.convSeq === targetSeq ? { ...m, ...patch } : m)) };
         });
+        // 全屏阅读器持有的是 ChatMessage 快照：被读的这条一旦撤回/编辑，快照即失真（撤回内容仍可读可复制）→ 关闭，让用户回到会话看最新态。
+        setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r));
         scheduleListRefresh(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
       },
       // 我发起的操作被拒（如撤回超时 300008、无权删除 300006）→ toast 提示（不改消息本身）。
@@ -1152,6 +1163,7 @@ export default function App() {
         });
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
         setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
+        setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r)); // 正在全屏读的文本被删（为所有人删/仅删我）→ 关阅读器
         scheduleListRefresh(); // 会话列表末条预览可能随之变化
       },
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
@@ -1406,10 +1418,18 @@ export default function App() {
   // 粘贴攒批（对齐 iOS 预览条）：图片与**任意文件**都先进预览条，发送键统一发出。
   const [pastedImages, setPastedImages] = useState<{ file: File; url: string; kind: "image" | "file" }[]>([]);
   const addPastedFiles = useCallback((files: File[]) => {
-    if (files.length) setPastedImages((prev) => [...prev, ...files.map((f) => ({
-      file: f, url: URL.createObjectURL(f),
-      kind: (f.type.startsWith("image/") ? "image" : "file") as "image" | "file",
-    }))]);
+    // 走与文件选择器同一个类型闸：可发送的图片/视频进"媒体批量"通道（kind=image），
+    // 其余（含 svg——MIME 是 image/svg+xml，旧代码会误判成 image 送进批量→服务端拒传坏气泡）走文件通道。
+    // 网页端解不了码的媒体（HEIC 等）直接丢弃：发出去自己看不了。（非媒体文件仍按文件发，行为不变。）
+    const keep: { file: File; url: string; kind: "image" | "file" }[] = [];
+    let dropped = 0;
+    for (const f of files) {
+      const k = mediaKindForFile(f);
+      if (k !== null && !webCanRenderMedia(k, f.name)) { dropped++; continue; }
+      keep.push({ file: f, url: URL.createObjectURL(f), kind: k !== null ? "image" : "file" });
+    }
+    if (dropped) setToast("为保证各端可见，已忽略 HEIC 等格式");
+    if (keep.length) setPastedImages((prev) => [...prev, ...keep]);
   }, []);
   const removePastedImage = useCallback((idx: number) => {
     setPastedImages((prev) => { const nx = prev.slice(); const [rm] = nx.splice(idx, 1); if (rm) URL.revokeObjectURL(rm.url); return nx; });
@@ -1439,11 +1459,17 @@ export default function App() {
     const cid = opts?.convId ?? (peer ? convIdFor(uid, peer) : groupConvId);
     if (!client || !cid || files.length === 0) return;
     const groupId = opts?.groupId ?? (files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined);
-    const locals = files.map((f) => ({ f, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined, meta: { width: 0, height: 0, durationMs: 0 } }));
+    // 图/视频归类走统一入口 mediaKindForFile（含扩展名回退）：MIME 缺失的 .mov 等也能判成 video，
+    // 否则乐观气泡会当成 image（<img> 放视频→坏图）且跳过封面/时长探测。null（异常漏进来的）退回 MIME。
+    const locals = files.map((f) => {
+      const mk = mediaKindForFile(f);
+      const isVideo = mk === "video" || (mk === null && f.type.startsWith("video/"));
+      return { f, isVideo, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined, meta: { width: 0, height: 0, durationMs: 0 } };
+    });
     for (const l of locals) {
       appendMsg(cid, {
         clientMsgId: l.localId, convId: cid, from: uid, content: l.blobUrl,
-        contentType: l.f.type.startsWith("video/") ? "video" : "image",
+        contentType: l.isVideo ? "video" : "image",
         convSeq: 0, timestamp: Date.now(), status: "sending", groupId,
       });
       setUploadProgress((prev) => ({ ...prev, [l.localId]: { sent: 0, total: l.f.size } })); // 排队中：先显“等待中”
@@ -1453,7 +1479,7 @@ export default function App() {
     await Promise.all(locals.map(async (l) => {
       l.meta = await probeMediaMetadata(l.f);
       if (l.meta.width > 0) { patchMsg(cid, l.localId, { mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size }); }
-      if (!l.f.type.startsWith("video/")) return;
+      if (!l.isVideo) return;
       const pf = await captureVideoPoster(l.f);
       if (pf) { l.posterFile = pf; l.posterBlobUrl = URL.createObjectURL(pf); patchMsg(cid, l.localId, { posterUrl: l.posterBlobUrl }); }
     }));
@@ -1711,9 +1737,16 @@ export default function App() {
    * 自己发的、上传中的、撤回的一律不门控（本地就有原件或还没有远端地址）。
    */
   const mediaGate = useCallback((m: ChatMessage): DownloadState | undefined => {
-    if (!m.content || m.from === uid || m.recalledAt) return undefined;
+    if (!m.content || m.recalledAt) return undefined;
     const kind = m.contentType;
     if (kind !== "image" && kind !== "video" && kind !== "file") return undefined;
+    // 网页端无法渲染的媒体 → 显"无法预览·点击下载"降级卡（避免破图/黑屏）。**判定靠本浏览器实测**（<img>/<video>
+    // onError 落 unsupportedSet），不写死黑名单——HEIC/TIFF 等能否渲染是**浏览器相关**的（Safari 支持 HEIC、Chrome 不支持），
+    // 写死会把 Safari 上本可显示的图也误降级。放在 from===uid 之前：自己从 iOS 发的 HEIC 在不支持的浏览器同样看不了。
+    if ((kind === "image" || kind === "video") && unsupportedSet.has(m.content)) {
+      return { phase: "unsupported", received: 0, total: m.fileSize ?? 0 };
+    }
+    if (m.from === uid) return undefined; // 自己发的（本浏览器可渲染）不门控
     // 持久失效标记优先（草图 §06）：已知服务端已清理 → 直接失效态、不回源（掐 404 风暴）。三类消息统一。
     if (expiredSet.has(m.content)) return { phase: "expired", received: 0, total: m.fileSize ?? 0 };
     // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
@@ -1729,7 +1762,7 @@ export default function App() {
     if (st) return st.phase === "done" ? undefined : st;            // 进行中 / 失败 / 已失效
     if (passesPolicy) return undefined;                             // 策略放行=浏览器直取
     return { phase: "notStarted", received: 0, total: m.fileSize ?? 0 };
-  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn, expiredSet]);
+  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn, expiredSet, unsupportedSet]);
 
   /** 该消息应当渲染的地址：已手动下载过用应用内 blob，否则用远端 URL。 */
   const mediaSrc = useCallback((m: ChatMessage) => dlBlobs[m.content] || m.content, [dlBlobs]);
@@ -1876,8 +1909,20 @@ export default function App() {
   const markExpiredIfGoneRef = useRef(markExpiredIfGone);
   markExpiredIfGoneRef.current = markExpiredIfGone;
 
+  /** 被动展示（气泡/宫格/资料卡的原件 <img>/<video>）加载失败统一入口：先复验 404→失效；否则=编解码失败→标"网页端无法渲染"降级卡（不再破图）。 */
+  const onPassiveMediaError = useCallback(async (m: ChatMessage) => {
+    const gone = await markExpiredIfGone(m);
+    if (!gone) markUnsupported(m.content);
+  }, [markExpiredIfGone, markUnsupported]);
+
   /** 门控卡片点击路由：下载中 → 取消（Web 无断点续传，只能重来）；已失效 → 不响应；其余 → 下载/重试。 */
   const onGateTap = useCallback((m: ChatMessage) => {
+    // 本浏览器实测无法渲染的媒体（HEIC 于 Chrome、HEVC 视频等）：无从"解门控预览"，
+    // 点击=打开查看器里的降级卡（统一"先开卡再下载"，与媒体库一致）。
+    if ((m.contentType === "image" || m.contentType === "video") && unsupportedRef.current.has(m.content)) {
+      setViewer({ m });
+      return;
+    }
     // 图片/视频（方案 B）：只「解门控」——不下 blob、不走状态机，直接用远端 URL 渲染，浏览器 HTTP 缓存兜底。
     if (m.contentType === "image" || m.contentType === "video") {
       setMediaOptedIn((s) => { const n = new Set(s); n.add(m.content); saveOptedIn(uid, n); return n; });
@@ -1942,11 +1987,19 @@ export default function App() {
     if (files.length === 0) return;
     const mode = attachmentPickModeRef.current;
     if (shouldSendAsMediaBatch(mode)) {
-      // 「图片或视频」入口的类型闸：accept 只是 UI 提示，用户可在文件框切"所有文件"绕过 →
-      // 这里按 MIME/扩展名复核，非图片/视频一律拒收（否则会被当成 image 发出→坏气泡 + 服务端拒传）。svg 也拒。
-      const valid = files.filter((f) => mediaKindForFile(f) !== null);
-      const rejected = files.length - valid.length;
-      if (rejected > 0) setToast(rejected === files.length ? "只能发送图片或视频" : `已忽略 ${rejected} 个非图片/视频文件`);
+      // 「图片或视频」入口两道闸：① 只收图片/视频（与 iOS 对齐，非媒体请走「文件」入口——accept 只是 UI 提示可被绕过）；
+      // ② 挡跨端兼容差的格式：HEIC/MKV 等在多数网页端（Chrome/Firefox）看不了——即便本机是 Safari 能看，
+      //    发出去也坑其它网页端收件人 → 拒发，请转成 JPG/PNG/MP4 再发。
+      const valid: File[] = [];
+      let notMedia = 0, notRenderable = 0;
+      for (const f of files) {
+        const k = mediaKindForFile(f);
+        if (k === null) { notMedia++; continue; }
+        if (!webCanRenderMedia(k, f.name)) { notRenderable++; continue; }
+        valid.push(f);
+      }
+      if (notRenderable > 0) setToast("为保证各端可见，已忽略 HEIC 等格式；请转成 JPG/PNG 再发");
+      else if (notMedia > 0) setToast(notMedia === files.length ? "只能发送图片或视频" : `已忽略 ${notMedia} 个非图片/视频文件`);
       if (valid.length) void sendMediaBatch(valid);
     } else { for (const f of files) void uploadAndSend(f, "file"); }
   }, [uploadAndSend, sendMediaBatch]);
@@ -2197,8 +2250,10 @@ export default function App() {
   }, []);
 
   // 长文本消息 key（记忆"展开全文"用）：**必须带 convId**——conv_seq 每会话各自从 1 递增，
-  // 不加会话前缀会让 A 会话 seq-5 与 B 会话 seq-5 撞键、展开态跨会话串号。发送中无 convSeq → 退回 clientMsgId。
-  const msgTextKey = (m: ChatMessage) => `${m.convId}:${m.convSeq > 0 ? `seq-${m.convSeq}` : m.clientMsgId || ""}`;
+  // 不加会话前缀会让 A 会话 seq-5 与 B 会话 seq-5 撞键、展开态跨会话串号。
+  // **优先用 clientMsgId**（本端消息发送中→ack 全程都在，且不随 convSeq 从 0 变 N 而翻转）；
+  // 对端消息无 clientMsgId → 退回 seq-N。若两者都无（极少）则空串。
+  const msgTextKey = (m: ChatMessage) => `${m.convId}:${m.clientMsgId ? `c-${m.clientMsgId}` : m.convSeq > 0 ? `seq-${m.convSeq}` : ""}`;
   const toggleTextExpand = useCallback((key: string) => {
     setExpandedTexts((prev) => { const nx = new Set(prev); if (nx.has(key)) nx.delete(key); else nx.add(key); return nx; });
   }, []);
@@ -2237,7 +2292,7 @@ export default function App() {
     // 折叠切换也不吞事件，让点击冒泡到行去切换选中（与 iOS `self.selecting` 早返回一致）。
     if (tier === "huge") {
       return (
-        <span className="btext longtext-card" onClick={selectMode ? undefined : () => { setTextReader(m); setReaderFontStep(0); }} title={selectMode ? undefined : "查看全文"}>
+        <span className="btext longtext-card" onClick={selectMode ? undefined : () => { if (window.getSelection()?.toString()) return; setTextReader(m); setReaderFontStep(0); }} title={selectMode ? undefined : "查看全文"}>
           <span className="lt-card-head">
             <span className="lt-card-icon"><FileText size={16} /></span>
             <span className="lt-card-meta">
@@ -2245,7 +2300,8 @@ export default function App() {
               <span className="lt-card-sub">点击查看全文</span>
             </span>
           </span>
-          <span className="lt-card-preview">{m.content}</span>
+          {/* 预览只切前 200 字：卡片仅 3 行可见，全文塞进 DOM 会让每次列表重渲染 diff 数十 KB 文本节点（全文留给阅读器）。 */}
+          <span className="lt-card-preview">{m.content.slice(0, 200)}</span>
         </span>
       );
     }
@@ -3918,7 +3974,7 @@ export default function App() {
                       progress={uploadProgress}
                       gateFor={(mm) => !!mediaGate(mm)}
                       expiredFor={(mm) => mediaGate(mm)?.phase === "expired"}
-                      onMediaError={markExpiredIfGone}
+                      onMediaError={onPassiveMediaError}
                       onOpen={(mm) => (mediaGate(mm) ? onGateTap(mm) : onMediaBubbleTap(mm, () => setViewer({ m: mm })))}
                       onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
                   </div>
@@ -4002,9 +4058,9 @@ export default function App() {
                                 : <span className="msg-image msg-image-empty" />)
                             : m.contentType === "video"
                               ? (m.posterUrl
-                                  ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} onError={() => markExpiredIfGone(m)} />
-                                  : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} onError={() => markExpiredIfGone(m)} />)
-                              : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} onError={() => markExpiredIfGone(m)} />}
+                                  ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />
+                                  : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} onError={() => void onPassiveMediaError(m)} />)
+                              : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />}
                           {gate
                             ? (gate.phase === "expired"
                                 ? <span className="play-badge expired" title="已失效">⊘</span>
@@ -4331,9 +4387,16 @@ export default function App() {
                        void markExpiredIfGone(viewer.m); // 404=源已清理（非编码问题）→ 落持久失效标记
                      }} />
             )
+          ) : mediaGate(viewer.m)?.phase === "unsupported" ? (
+            // 网页端无法渲染的图片格式（HEIC 等）：不塞进 <img> 变破图，显缩略(若有)+提示+下载入口（与视频降级卡同版式）。
+            <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>
+              {viewer.m.thumb && <img src={viewer.m.thumb} alt="" />}
+              <p>当前浏览器无法预览该图片格式（如 HEIC）。</p>
+              <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地程序打开</a>
+            </div>
           ) : (
             <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
-                 onError={() => markExpiredIfGone(viewer.m)} />
+                 onError={() => void onPassiveMediaError(viewer.m)} />
           )}
           <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
             <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>
@@ -4390,7 +4453,8 @@ export default function App() {
                         onClick={() => { void navigator.clipboard?.writeText(textReader.content); setToast("已复制全文"); }}><Copy size={16} /></button>
               </span>
             </div>
-            <div className="tr-body" style={{ fontSize: `${15 + readerFontStep}px` }}>{renderMentionText(textReader, textReader.content)}</div>
+            {/* 基准跟随用户设置的聊天正文字号 --msg-font（14~22px），再叠加档位偏移——否则读长文的界面反而无视字号偏好。 */}
+            <div className="tr-body" style={{ fontSize: `calc(var(--msg-font) + ${readerFontStep}px)` }}>{renderMentionText(textReader, textReader.content)}</div>
           </div>
         </div>
       )}
@@ -4417,8 +4481,8 @@ export default function App() {
                       : src === "icon"
                         ? <span className="gate-empty" />
                         : mm.contentType === "video"
-                          ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" onError={() => markExpiredIfGone(mm)} /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted onError={() => markExpiredIfGone(mm)} />)
-                          : <img src={mm.content} alt="" onError={() => markExpiredIfGone(mm)} />}
+                          ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" onError={() => void onPassiveMediaError(mm)} /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted onError={() => void onPassiveMediaError(mm)} />)
+                          : <img src={mm.content} alt="" onError={() => void onPassiveMediaError(mm)} />}
                     {mediaGate(mm)?.phase === "expired"
                       ? <span className="play-badge expired" title="已失效">⊘</span>
                       : mm.contentType === "video" && <span className="play-badge">▶</span>}
@@ -4950,9 +5014,9 @@ export default function App() {
                                     // 无 poster 的视频**不能**把视频 URL 塞进 <img>（渲染成裂图封面）；
                                     // 回退 <video> 抓首帧当封面（对齐气泡/引用/合并转发详情的统一兜底）。
                                     ? (m.posterUrl
-                                        ? <img src={m.posterUrl} alt="" onError={() => markExpiredIfGone(m)} />
-                                        : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => markExpiredIfGone(m)} />)
-                                    : <img src={m.content} alt="" onError={() => markExpiredIfGone(m)} />)}
+                                        ? <img src={m.posterUrl} alt="" onError={() => void onPassiveMediaError(m)} />
+                                        : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => void onPassiveMediaError(m)} />)
+                                    : <img src={m.content} alt="" onError={() => void onPassiveMediaError(m)} />)}
                               {gate
                                 ? (gate.phase === "expired" ? null : <span className="detail-media-dl">↓</span>) // 失效格不给 ↓，只留磨砂 dim
                                 : m.contentType === "video" && <span className="detail-media-play">▶</span>}
