@@ -9,7 +9,7 @@ import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
-import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember } from "./album";
+import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
@@ -31,7 +31,7 @@ import {
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
-  Download, LayoutGrid, MoreHorizontal,
+  Download, LayoutGrid, MoreHorizontal, Play,
   Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward,
   ChevronDown, ChevronUp, Copy,
 } from "lucide-react";
@@ -576,8 +576,13 @@ export default function App() {
   // 本浏览器解不了该视频的编码（HEVC 等）→ 换成"下载后本地播放"的降级卡片，避免黑屏。
   // 按被查看的 URL 复位：换一条视频要重新给它一次播放机会，否则一次失败会连累后面每条。
   const [videoUnplayable, setVideoUnplayable] = useState(false);
-  const viewedContent = viewer?.m.content;
-  useEffect(() => { setVideoUnplayable(false); }, [viewedContent]);
+  // 封面待点（对齐 iOS，任务3 优化）：视频页默认只显封面图，点 ▶ 才挂 <video> 播放。
+  // 否则每翻到一条视频都要挂原生 controls 条 + preload=metadata 拉流，出现"黑色加载条"并使翻页发卡。
+  const [videoStarted, setVideoStarted] = useState(false);
+  // 按被查看**消息**（非 content URL）复位：两条不同消息可能引用同一视频 URL（如转发件），
+  // 用 URL 作 key 会漏复位 → 第二条跳过封面直接自动播/沿用上一条的不可播态。mediaIdentity 逐消息唯一。
+  const viewedKey = viewer ? mediaIdentity(viewer.m) : undefined;
+  useEffect(() => { setVideoUnplayable(false); setVideoStarted(false); }, [viewedKey]);
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
@@ -2845,6 +2850,37 @@ export default function App() {
     .slice()
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
+  // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
+  // 口径与媒体库一致（image|video && 未撤回 && content 非空）；仅覆盖**内存中已加载**的消息——翻到头即停，
+  // 不自动拉更早（第一版约定）。合成消息（收藏/记录预览：convSeq=0 且不在会话流内）mediaId 找不到 → 不显箭头、不翻页。
+  //
+  // 稳定标识 mediaId：**必须用 convSeq**（会话内唯一，收到/同步的消息都有）。绝不能用 clientMsgId——
+  // 入站消息（别人发的 + 自己刷新后重新同步的）在 imSdk.processIncoming 里根本不写 clientMsgId（全为 undefined），
+  // 一旦拿它 findIndex，会一律命中"第一条 undefined"的媒体，导致点最后一张却定位到最前、翻页错乱/卡死。
+  // 仅本地待发件（convSeq=0）无 convSeq，回退用其本地生成的 clientMsgId。见 album.ts mediaIdentity。
+  const viewerList = viewer
+    ? messages.filter((mm) => isViewableMedia(mm) && !!mm.content)
+    : [];
+  const viewerIdx = viewer ? viewerList.findIndex((mm) => mediaIdentity(mm) === mediaIdentity(viewer.m)) : -1;
+  const goViewer = (delta: number) => {
+    if (viewerIdx < 0) return;
+    const ni = viewerIdx + delta;
+    if (ni < 0 || ni >= viewerList.length) return;
+    setViewerMore(false); // 翻页收起「更多」浮层，避免停留在上一张的菜单上
+    setViewer((v) => (v ? { m: viewerList[ni], fromGallery: v.fromGallery } : v));
+  };
+  useEffect(() => {
+    if (!viewer) return;
+    const onKey = (e: KeyboardEvent) => {
+      // 视频获焦时把 ←/→ 让给原生播放器做 ±5s 跳转，不劫持为翻页（点箭头仍可翻页）。
+      if (document.activeElement instanceof HTMLVideoElement) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); goViewer(-1); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); goViewer(1); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewer, viewerIdx, viewerList.length]);
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
   // **必须与服务端未读口径一致**（M4-8）：服务端 unreadCount 排除 msg_op 事件行与 system 系统消息，
   // 这里若只按 from !== uid 找，分割线会落到不计未读的系统行上——
@@ -4388,8 +4424,19 @@ export default function App() {
                   </>
                 )}
               </div>
+            ) : !videoStarted ? (
+              // 封面待点：只显封面图 + 居中 ▶，点了才挂 <video>。翻页到视频＝翻到图片一样轻，无黑色控件条/无 metadata 预拉。
+              <>
+                <img className="image-viewer viewer-video-cover" src={viewer.m.posterUrl || viewer.m.thumb || undefined} alt="视频封面"
+                     onClick={(e) => { e.stopPropagation(); setViewerMore(false); setVideoStarted(true); }} />
+                <button className="viewer-play-btn" title="播放" onClick={(e) => { e.stopPropagation(); setVideoStarted(true); }}>
+                  <Play size={30} fill="currentColor" />
+                </button>
+              </>
             ) : (
-              <video className="image-viewer" src={viewer.m.content} controls
+              <video key={mediaIdentity(viewer.m) /* 翻页换视频时重挂元素，避免上一段播放状态残留 */}
+                     className="image-viewer" src={viewer.m.content} controls autoPlay
+                     poster={viewer.m.posterUrl}
                      onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
                      onError={() => {
                        logger.warn(LOG_TAG.media, "video_playback_unsupported", {
@@ -4407,8 +4454,20 @@ export default function App() {
               <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地程序打开</a>
             </div>
           ) : (
-            <img className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
+            <img key={mediaIdentity(viewer.m)} className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
                  onError={() => void onPassiveMediaError(viewer.m)} />
+          )}
+          {/* 任务3 · 左右翻页箭头：仅当前查看项在会话媒体时间线内（viewerIdx>=0）且有相邻项时显示。翻到头即停。 */}
+          {viewerIdx > 0 && (
+            <button className="viewer-nav prev" title="上一张（←）"
+                    onClick={(e) => { e.stopPropagation(); goViewer(-1); }}><ChevronLeft size={28} /></button>
+          )}
+          {viewerIdx >= 0 && viewerIdx < viewerList.length - 1 && (
+            <button className="viewer-nav next" title="下一张（→）"
+                    onClick={(e) => { e.stopPropagation(); goViewer(1); }}><ChevronRight size={28} /></button>
+          )}
+          {viewerIdx >= 0 && viewerList.length > 1 && (
+            <div className="viewer-count" onClick={(e) => e.stopPropagation()}>{viewerIdx + 1} / {viewerList.length}</div>
           )}
           <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
             <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>
@@ -4477,17 +4536,17 @@ export default function App() {
           <div className="gallery-panel" onClick={(e) => e.stopPropagation()}>
             <div className="modal-title">图片与视频</div>
             <div className="gallery-grid">
-              {messages.filter((mm) => (mm.contentType === "image" || mm.contentType === "video") && !mm.recalledAt).length === 0 && (
+              {messages.filter(isViewableMedia).length === 0 && (
                 <div className="fwd-empty">暂无图片或视频</div>
               )}
               {messages
-                .filter((mm) => (mm.contentType === "image" || mm.contentType === "video") && !mm.recalledAt)
+                .filter(isViewableMedia)
                 .map((mm) => {
                   // 会话媒体库 = 档 B·被动预览：未下载**只显 thumb 磨砂、绝不联网拉原图/远端抽帧**（打开这一动作不该拉几十条原件）；
                   // 点某格才 setViewer→用户主动看原图，此时才联网（对齐 iOS 媒体库宫格）。
                   const src = passivePreviewSource(!mediaGate(mm), !!mm.thumb);
                   return (
-                  <div key={mm.clientMsgId} className="gallery-item" onClick={() => { setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}>
+                  <div key={mediaIdentity(mm)} className="gallery-item" onClick={() => { setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}>
                     {src === "thumb"
                       ? <img className="gate-blur" src={mm.thumb} alt="" />
                       : src === "icon"

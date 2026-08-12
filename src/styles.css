@@ -385,6 +385,18 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .viewer-mask { background: rgba(0, 0, 0, 0.9); }
 .image-viewer { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
 
+/* 任务3 · 查看器左右翻页箭头（会话媒体时间线，竖直居中贴边）+ 顶部计数 */
+.viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1; }
+.viewer-nav:hover { background: var(--overlay-strong); }
+.viewer-nav.prev { left: 24px; }
+.viewer-nav.next { right: 24px; }
+.viewer-count { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 12px; background: var(--overlay); color: var(--on-media); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+/* 任务3 · 视频封面待点：封面图 + 居中 ▶（点了才挂 <video>，翻页流畅、无原生控件黑条） */
+.viewer-video-cover { cursor: pointer; }
+.viewer-play-btn { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 72px; height: 72px; border-radius: 50%; border: 0; background: var(--overlay-strong); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding-left: 4px; z-index: 2; }
+.viewer-play-btn:hover { background: rgba(0, 0, 0, 0.66); }
+
 /* 媒体查看器工具条（右下：下载/媒体库/更多，镜像 iOS） */
 .viewer-bar { position: fixed; right: 24px; bottom: 24px; display: flex; gap: 12px; align-items: center; }
 .viewer-btn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
