@@ -656,7 +656,7 @@ export default function App() {
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
   // @提及（M4-8，仅群聊）：面板开合 + 过滤词 + 候选表（显示名→uid，发送时按文本里是否还留着 token 复核）。
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=面板关闭
-  const [mentionFilter, setMentionFilter] = useState(""); // 面板过滤词：既随消息框里 @后文字同步，也可在面板顶部搜索框直接编辑
+  const [mentionFilter, setMentionFilter] = useState(""); // 面板顶部搜索框的**独立**搜索词（从空开始，不随消息框 @后文字回填；空时列表跟随 mentionQuery）
   const mentionCandidates = useRef<MentionCandidates>({});
   const mentionAllPending = useRef(false);
   const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
@@ -2735,8 +2735,8 @@ export default function App() {
     // @提及（M4-8，仅群聊）：按光标位置判断是否处在 @ 输入态，据此开合面板并实时过滤。
     // 桌面端用贴输入框的内联下拉（Web IM 惯例），语义与 iOS 的半屏卡一致。
     if (groupConvId && !peer) {
-      // 消息框里 @ 只负责开合面板与作为插入锚点，**不驱动过滤、也不回填搜索框**——
-      // 过滤只认面板顶部搜索框（用户没主动在搜索框打字时，搜索框保持空、列表显全部）。
+      // 消息框里 @ 后的字符**实时驱动列表匹配**（任务1）：query 存进 mentionQuery，由 mentionRows 据此过滤。
+      // **不写** mentionFilter——面板顶部搜索框是独立搜索，用户没在其中打字时保持空。
       const caret = composerRef.current?.selectionStart ?? val.length;
       setMentionQuery(activeMentionQuery(val, caret));
     } else if (mentionQuery !== null) {
@@ -2761,10 +2761,13 @@ export default function App() {
     const others = info.members
       .filter((m) => m.user_id !== uid)
       .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, role: m.role, avatarUrl: m.avatar_url }));
-    const hits = filterMentionMembers(others, mentionFilter);
+    // 生效过滤词：用户在面板搜索框主动打字时以搜索框为准（独立搜索）；否则跟随消息框 @后的字符（mentionQuery）。
+    // 二者互不写入对方，故搜索框不会被 @文字自动回填；清空搜索框即回落到消息框驱动。
+    const effQuery = mentionFilter.trim() !== "" ? mentionFilter : mentionQuery;
+    const hits = filterMentionMembers(others, effQuery);
     const rows: { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string }[] =
       hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
-    if (canMentionAll(info.my_role) && mentionFilter.trim() === "") {
+    if (canMentionAll(info.my_role) && effQuery.trim() === "") {
       rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });
     }
     return rows;
@@ -4303,7 +4306,7 @@ export default function App() {
                     「@所有人」仅群主/管理员可见——普通成员整行不渲染（服务端另有角色校验）。 */}
                 {mentionQuery !== null && (
                   <div className="mention-panel" role="listbox" aria-label="提醒谁" ref={mentionPanelRef}>
-                    {/* 顶部搜索框：桌面端仍可直接在消息框里 @后打字过滤（此处同步显示），也可在这里直接搜。 */}
+                    {/* 顶部搜索框＝独立搜索：从空开始、不被消息框 @后文字回填；在此打字则以它为准过滤（否则列表跟随 @后字符）。 */}
                     <input className="mention-search" value={mentionFilter} placeholder="搜索成员" aria-label="搜索成员"
                       onChange={(e) => setMentionFilter(e.target.value)}
                       onKeyDown={(e) => { onMentionNavKey(e); }} />
