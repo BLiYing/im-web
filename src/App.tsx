@@ -2679,10 +2679,10 @@ export default function App() {
     // @提及（M4-8，仅群聊）：按光标位置判断是否处在 @ 输入态，据此开合面板并实时过滤。
     // 桌面端用贴输入框的内联下拉（Web IM 惯例），语义与 iOS 的半屏卡一致。
     if (groupConvId && !peer) {
+      // 消息框里 @ 只负责开合面板与作为插入锚点，**不驱动过滤、也不回填搜索框**——
+      // 过滤只认面板顶部搜索框（用户没主动在搜索框打字时，搜索框保持空、列表显全部）。
       const caret = composerRef.current?.selectionStart ?? val.length;
-      const q = activeMentionQuery(val, caret);
-      setMentionQuery(q);
-      if (q !== null) setMentionFilter(q); // 消息框里 @后打字 → 同步到过滤词（面板搜索框也随之显示）
+      setMentionQuery(activeMentionQuery(val, caret));
     } else if (mentionQuery !== null) {
       setMentionQuery(null);
     }
@@ -2714,6 +2714,8 @@ export default function App() {
     return rows;
   }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, uid]);
 
+  // 面板关闭时清空搜索框：下次打开是干净的空框（搜索词不跨会话/跨次残留）。
+  useEffect(() => { if (mentionQuery === null) setMentionFilter(""); }, [mentionQuery]);
   // 键盘导航的高亮项；过滤词一变就回到首项（否则旧下标会指向另一个人）。
   const [mentionActive, setMentionActive] = useState(0);
   useEffect(() => { setMentionActive(0); }, [mentionQuery, mentionFilter]);
