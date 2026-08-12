@@ -39,6 +39,28 @@ export function isAlbumLeader(list: ChatMessage[], i: number): boolean {
   return true;
 }
 
+/**
+ * 「定位到聊天位置」(jumpToSeq) 决定高亮哪个元素——纯逻辑抽出以便回归。
+ *
+ * - 相册成员（目标 convSeq 有 groupId）→ 优先高亮**那一格** tile（`data-album-seq`）；
+ *   非 leader 成员的消息行不渲染自己的 `data-seq`，故 tile 找不到时回退到宫格**主行**（leader 的 seq）。
+ * - 其余（单张媒体 / 文本 / 文件）→ 直接定位消息行本身（`data-seq`）。
+ *
+ * 组件按此结果做 DOM 查询：album-tile 先查 `[data-album-seq=seq]`，缺失再查 `[data-seq=leaderSeq]`。
+ */
+export type JumpTarget =
+  | { kind: "album-tile"; seq: number; leaderSeq: number }
+  | { kind: "message"; seq: number };
+
+export function resolveJumpTarget(list: ChatMessage[], seq: number): JumpTarget {
+  const target = list.find((x) => x.convSeq === seq);
+  if (target?.groupId) {
+    const leader = list.find((x) => x.groupId === target.groupId && isAlbumMember(x));
+    return { kind: "album-tile", seq, leaderSeq: leader?.convSeq ?? seq };
+  }
+  return { kind: "message", seq };
+}
+
 /** 宫格行模式（Telegram 近似）：如 3 → [1,2]=首行 1 大块 + 次行 2 块。9 封顶（selectionLimit=9）。 */
 export function albumRowPattern(n: number): number[] {
   switch (n) {

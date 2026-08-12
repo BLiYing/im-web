@@ -1,6 +1,6 @@
 // 相册聚簇纯函数单测（M4+）。
 import { describe, expect, it } from "vitest";
-import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity } from "./album";
+import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity, resolveJumpTarget } from "./album";
 import type { ChatMessage } from "./sdk/protocol";
 
 const msg = (over: Partial<ChatMessage>): ChatMessage => ({
@@ -68,6 +68,43 @@ describe("album clustering", () => {
     expect(isAlbumLeader(list, 0)).toBe(false);
     expect(isAlbumLeader(list, 1)).toBe(true);
     expect(albumMembers(list, "g1")).toHaveLength(1);
+  });
+
+  describe("resolveJumpTarget（定位到聊天位置：相册高亮那一格，任务3 回归）", () => {
+    const list = [
+      msg({ convSeq: 10, content: "hi", contentType: "text" }), // 普通文本
+      msg({ groupId: "g1", convSeq: 20 }),                       // 相册 leader
+      msg({ groupId: "g1", convSeq: 21 }),                       // 相册非 leader 成员
+      msg({ groupId: "g1", convSeq: 22, contentType: "video" }),// 相册非 leader 成员（视频）
+      msg({ convSeq: 30 }),                                      // 单张图片（无 groupId）
+    ];
+
+    it("非相册消息 → 定位消息行本身", () => {
+      expect(resolveJumpTarget(list, 10)).toEqual({ kind: "message", seq: 10 });
+      expect(resolveJumpTarget(list, 30)).toEqual({ kind: "message", seq: 30 });
+    });
+
+    it("相册 leader → 高亮该格 tile，leaderSeq 指向自己", () => {
+      expect(resolveJumpTarget(list, 20)).toEqual({ kind: "album-tile", seq: 20, leaderSeq: 20 });
+    });
+
+    it("相册非 leader 成员 → 高亮各自的格子，回退主行=leader（20），修复只闪整条主行", () => {
+      expect(resolveJumpTarget(list, 21)).toEqual({ kind: "album-tile", seq: 21, leaderSeq: 20 });
+      expect(resolveJumpTarget(list, 22)).toEqual({ kind: "album-tile", seq: 22, leaderSeq: 20 });
+    });
+
+    it("撤回的 leader 退组后：leaderSeq 落到剩余首个成员，而非已退出的撤回件", () => {
+      const withRecalled = [
+        msg({ groupId: "g2", convSeq: 40, recalledAt: 99 }), // 撤回 → 退出宫格
+        msg({ groupId: "g2", convSeq: 41 }),
+        msg({ groupId: "g2", convSeq: 42 }),
+      ];
+      expect(resolveJumpTarget(withRecalled, 42)).toEqual({ kind: "album-tile", seq: 42, leaderSeq: 41 });
+    });
+
+    it("目标 seq 不在列表（已删/未加载）：无 groupId 可判 → 按普通消息行处理，交上层跨窗口定位", () => {
+      expect(resolveJumpTarget(list, 999)).toEqual({ kind: "message", seq: 999 });
+    });
   });
 
   it("行模式总块数等于成员数（1..9）", () => {

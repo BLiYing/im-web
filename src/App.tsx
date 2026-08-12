@@ -9,7 +9,7 @@ import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
-import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity } from "./album";
+import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
@@ -228,6 +228,7 @@ function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, onOpen, 
               const sizeText = formatFileSize(m.fileSize);
               return (
               <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className="album-tile"
+                data-album-seq={m.convSeq || undefined}
                 style={{ width: row.length === 1 ? W : tileW, height: tileH }}
                 onClick={() => onOpen(m)}
                 onContextMenu={(e) => onMenu(e, m)}>
@@ -652,6 +653,9 @@ export default function App() {
     if (vm.contentType !== "image" && vm.contentType !== "video") return;
     setMediaOptedIn((s) => { if (s.has(vm.content)) return s; const n = new Set(s); n.add(vm.content); saveOptedIn(uid, n); return n; });
   }, [viewer, uid]);
+  // 查看器一关（点蒙层 / ✕ / 定位·转发·删除等 setViewer(null) 的任一路径），「更多」浮层一并收起：
+  // 否则残留的 viewerMore=true 会在下次打开任意媒体时立刻弹出上一张的菜单。
+  useEffect(() => { if (!viewer) setViewerMore(false); }, [viewer]);
   const [wallpaperOpen, setWallpaperOpen] = useState(false); // 通用设置 ▸ 聊天壁纸
   const [wallpaper, setWallpaper] = useState<WallpaperChoice>(loadWallpaper);
   const [wallpaperBlur, setWallpaperBlur] = useState(() => localStorage.getItem("im.wallpaperBlur") === "1");
@@ -2129,15 +2133,15 @@ export default function App() {
   const jumpToSeq = useCallback((seq: number) => {
     const box = msgsRef.current;
     if (!box) { setToast("原消息不在当前视图"); return; }
-    let el = box.querySelector(`[data-seq="${seq}"]`);
     const list = messagesRef.current;
-    if (!el) {
-      // 相册宫格从行不渲染自己的 data-seq（只有主行有）：目标在模型里且属于宫格 → 定位到宫格主行。
-      const target = list.find((x) => x.convSeq === seq);
-      if (target?.groupId) {
-        const leader = list.find((x) => x.groupId === target.groupId && isAlbumMember(x));
-        if (leader) el = box.querySelector(`[data-seq="${leader.convSeq}"]`);
-      }
+    let el = box.querySelector(`[data-seq="${seq}"]`);
+    // 相册宫格成员：优先定位并高亮**那一格**（tile 带 data-album-seq），而非整条宫格主行。
+    // 主行只有 leader 带 data-seq，非 leader 成员靠 tile 命中；找不到 tile 再回退到主行。目标决策见 resolveJumpTarget。
+    const tgt = resolveJumpTarget(list, seq);
+    if (tgt.kind === "album-tile") {
+      const tile = box.querySelector(`[data-album-seq="${seq}"]`);
+      if (tile) el = tile;
+      else if (!el) el = box.querySelector(`[data-seq="${tgt.leaderSeq}"]`);
     }
     if (!el) {
       // 跳不到分两种，**按模型判定而非 DOM**（宫格从行/未来虚拟化都可能不渲染节点）：
@@ -4539,8 +4543,10 @@ export default function App() {
               {messages.filter(isViewableMedia).length === 0 && (
                 <div className="fwd-empty">暂无图片或视频</div>
               )}
-              {messages
+              {/* 与资料卡片「媒体」页签一致：最新的排在最前（messages 为 convSeq 升序，故 reverse 取降序）。 */}
+              {[...messages]
                 .filter(isViewableMedia)
+                .reverse()
                 .map((mm) => {
                   // 会话媒体库 = 档 B·被动预览：未下载**只显 thumb 磨砂、绝不联网拉原图/远端抽帧**（打开这一动作不该拉几十条原件）；
                   // 点某格才 setViewer→用户主动看原图，此时才联网（对齐 iOS 媒体库宫格）。

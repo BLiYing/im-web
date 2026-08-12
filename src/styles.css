@@ -308,6 +308,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
    第二段兜住群聊对方气泡（嵌套在 them-wrap 下，直链不匹配）。 */
 .msg-item.flash > .row > .bubble-line > .bubble.media, .flash .bubble.media { animation: quoteflashmedia 1.2s ease; }
 @keyframes quoteflashmedia { 0%,100% { box-shadow: 0 0 0 0 transparent; } 30% { box-shadow: 0 0 0 3px var(--accent); } }
+/* 相册宫格「定位到聊天位置」高亮：单格脉冲。tile 被 <img>/<video> 铺满，inset 阴影会被内容盖住看不见；
+   外描边又会被父级 .album-grid 的 overflow:hidden 裁掉 → 用盖在图片**上方**的 ::after 覆盖层画内描边脉冲。 */
+.album-tile.flash::after { content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2; animation: quoteflashtile 1.2s ease; }
+@keyframes quoteflashtile { 0%,100% { box-shadow: inset 0 0 0 0 transparent; } 30% { box-shadow: inset 0 0 0 3px var(--accent); } }
 /* 右键/长按选中态（方案A）：稳态高亮，标出菜单作用的目标消息。由 menu 状态派生 class，菜单一关
    （点空白/Esc/选任一动作）React 撤 class 自动消失，无需额外清理。与 .flash 同用 accent 语言，但常亮不脉冲：
    文本气泡 = accent 描边 + 微染；媒体气泡背景被 <img> 盖住 = 仅描边（box-shadow 不受 overflow:hidden 裁剪）。 */
