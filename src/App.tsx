@@ -729,6 +729,15 @@ export default function App() {
   const [pinnedByConv, setPinnedByConv] = useState<Record<string, PinnedMessage[]>>({});
   const [pinnedIdx, setPinnedIdx] = useState(0);          // 多条置顶时横幅显示第几条（点条轮转）
   const [pinnedListOpen, setPinnedListOpen] = useState(false);
+  // 顶部横幅本地收起（✕）：按「账号 + 会话 + 内容签名」记，仅隐藏视图、不动服务端置顶/公告。
+  // 持久化到 localStorage——退出会话/刷新后仍保持收起，直到内容变化（新置顶/改公告）签名变了才复现。
+  const [dismissedBanners, setDismissedBanners] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem("im_dismissed_banners") || "{}") as Record<string, boolean>; }
+    catch { return {}; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("im_dismissed_banners", JSON.stringify(dismissedBanners)); } catch { /* 隐私模式写失败可忽略 */ }
+  }, [dismissedBanners]);
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
@@ -3337,6 +3346,9 @@ export default function App() {
   const activePinned = pinnedByConv[convId] ?? [];
   const pinnedShownIdx = clampPinnedIndex(pinnedIdx, activePinned.length);
   const pinnedShown = activePinned[pinnedShownIdx];
+  // 横幅收起键**带账号 + 内容签名**（对齐 iOS）：换账号互不影响；新置顶/改公告生成新键 → 自动复现，而非一收永久隐藏。
+  const pinDismissKey = `${uid}:${convId}:pin:${activePinned.length}:${activePinned[0]?.convSeq ?? 0}`;
+  const annDismissKey = `${uid}:${groupConvId}:announce:${activeGroupInfo?.announcement_at ?? 0}`;
   // 能否置顶：群内读 perm_pin——开=仅群主/管理员，关=全员可置顶（对齐服务端 hub.go 校验）；单聊任一方可。
   const canPinHere = isGroupChat
     ? (!activeGroupInfo?.perm_pin || activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin")
@@ -4454,19 +4466,21 @@ export default function App() {
             </div>
           )}
           {/* 群公告横幅（G1，黄条）：排在置顶横幅之上（优先级 公告 > 置顶）。点条直接开公告全文视图（决策 16）。 */}
-          {isGroupChat && activeGroupInfo?.announcement && (
-            <div className="pin-banner announce" onClick={() => openGroupText("announcement", groupConvId)} role="button">
-              <span className="pin-banner-main" style={{ cursor: "pointer" }}>
+          {isGroupChat && activeGroupInfo?.announcement && !dismissedBanners[annDismissKey] && (
+            <div className="pin-banner announce">
+              <button className="pin-banner-main" onClick={() => openGroupText("announcement", groupConvId)}>
                 <span className="pin-banner-bar" />
                 <span className="pin-banner-copy">
                   <span className="pin-banner-kicker"><Megaphone size={12} /> 群公告</span>
                   <span className="pin-banner-text">{activeGroupInfo.announcement}</span>
                 </span>
-              </span>
+              </button>
+              <button className="icon-btn pin-banner-close" title="收起公告"
+                onClick={() => setDismissedBanners((d) => ({ ...d, [annDismissKey]: true }))}><X size={16} /></button>
             </div>
           )}
           {/* 置顶消息横幅（G0）：点条=跳到那条并轮转到下一条；右侧 ☰=展开全部置顶。 */}
-          {pinnedShown && (
+          {pinnedShown && !dismissedBanners[pinDismissKey] && (
             <div className="pin-banner">
               <button className="pin-banner-main"
                 title="跳转到该消息"
@@ -4487,6 +4501,8 @@ export default function App() {
                 <button className="icon-btn pin-banner-list" title="全部置顶消息"
                   onClick={() => setPinnedListOpen(true)}><List size={18} /></button>
               )}
+              <button className="icon-btn pin-banner-close" title="收起置顶"
+                onClick={() => setDismissedBanners((d) => ({ ...d, [pinDismissKey]: true }))}><X size={16} /></button>
             </div>
           )}
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>

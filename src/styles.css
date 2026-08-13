@@ -147,7 +147,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 }
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: transparent; overflow: hidden; position: relative; }
 /* 未选会话时覆盖在 chat 之上（chat 始终挂载，保证 VList 早早测到高度）。 */
-.main-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--card-bg); border: 1px solid var(--separator); border-radius: var(--app-card-radius); box-shadow: 0 8px 28px var(--shadow-soft); }
+.main-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--card-bg); border: 1px solid var(--separator); border-radius: var(--app-card-radius); }
 .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 .sidebar header, .chat header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--separator); font-weight: 600; }
 .chat > header {
@@ -155,7 +155,6 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   background: var(--card-bg);
   border: 1px solid var(--separator);
   border-radius: var(--app-card-radius);
-  box-shadow: 0 6px 22px var(--shadow-soft);
   margin-bottom: var(--app-gap);
 }
 .link { border: 0; background: none; color: var(--accent); font-size: 15px; cursor: pointer; }
@@ -824,7 +823,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .msg-item.grouped { padding-top: 0; }
 /* 角色徽章：群主/管理员 */
 .role-badge { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; background: var(--surface); color: var(--text-secondary); border: 1px solid var(--separator); vertical-align: 1px; }
-.role-badge.owner { background: var(--selection-bg); color: var(--accent); border-color: transparent; }
+/* 群主：实色绿底 + 白字，与绿色文字/管理员灰标拉开区分度（原绿底绿字对比度不足）。 */
+.role-badge.owner { background: var(--accent); color: var(--on-accent); border-color: transparent; }
 .me-tag { margin-left: 6px; font-size: 11px; color: var(--text-secondary); }
 /* 群资料弹窗 */
 .group-modal { width: 360px; max-height: min(560px, calc(100vh - 64px)); }
@@ -1131,9 +1131,13 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* ── 置顶消息横幅（G0）：聊天区顶部常驻条，公告横幅（G1）落地后排在其上 ── */
 .pin-banner {
   flex: none; display: flex; align-items: stretch; gap: 4px;
-  padding: 6px 10px 6px 12px; border-bottom: 1px solid var(--separator);
+  padding: 6px 8px 6px 12px; margin: 8px 8px 0;
+  border: 1px solid var(--separator); border-radius: 12px;
   background: var(--surface-elevated);
 }
+/* 关闭（✕）：非破坏性收起横幅（不取消置顶/不撤下公告）；固定在右端，文字 trailing 已让位不重叠。 */
+.pin-banner-close { flex: none; align-self: center; color: var(--text-secondary); }
+.pin-banner-close:hover { color: var(--text); }
 .pin-banner-main {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
   background: none; border: none; padding: 0; cursor: pointer; text-align: left; color: inherit;
