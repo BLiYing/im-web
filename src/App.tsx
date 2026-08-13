@@ -3374,6 +3374,13 @@ export default function App() {
     return (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
   };
   const senderLabel = (m: ChatMessage): string => m.fromNickname || memberNick(m.convId, m.from) || m.from;
+  // 发送者在本群的角色（群主/管理员气泡徽标用）：**优先本群成员表的当前角色**（晋升/降级后老消息随之变化，
+  // 微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role（仅 owner/admin 冗余下发）兜底。
+  const senderRole = (m: ChatMessage): "owner" | "admin" | undefined => {
+    const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from);
+    const role = gm?.role ?? m.fromRole;
+    return role === "owner" ? "owner" : role === "admin" ? "admin" : undefined;
+  };
   // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
   const senderAvatar = (m: ChatMessage): string | undefined =>
     groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
@@ -4559,7 +4566,13 @@ export default function App() {
                             {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} seed={m.from} onClick={() => openPeerDetail(m.from)} />}
                           </div>
                           <div className="them-stack">
-                            {showSender && <span className="sender-name">{senderLabel(m)}</span>}
+                            {showSender && (
+                            <span className="sender-row">
+                              <span className="sender-name">{senderLabel(m)}</span>
+                              {senderRole(m) === "owner" && <span className="role-badge owner">群主</span>}
+                              {senderRole(m) === "admin" && <span className="role-badge">管理员</span>}
+                            </span>
+                          )}
                             {grid}
                           </div>
                         </div>
@@ -4765,7 +4778,13 @@ export default function App() {
                           {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} seed={m.from} onClick={() => openPeerDetail(m.from)} />}
                         </div>
                         <div className="them-stack">
-                          {showSender && <span className="sender-name">{senderLabel(m)}</span>}
+                          {showSender && (
+                            <span className="sender-row">
+                              <span className="sender-name">{senderLabel(m)}</span>
+                              {senderRole(m) === "owner" && <span className="role-badge owner">群主</span>}
+                              {senderRole(m) === "admin" && <span className="role-badge">管理员</span>}
+                            </span>
+                          )}
                           {bubbleBlock}
                         </div>
                       </div>

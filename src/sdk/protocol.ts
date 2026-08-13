@@ -44,6 +44,8 @@ export interface ChatMessage {
   from: string;
   /** 发送者昵称（仅群聊消息带，服务端冗余下发；空回退 uid）。 */
   fromNickname?: string;
+  /** 发送者在本群角色（仅群聊、且为 owner/admin 时带；成员表未加载/发送者已退群时的徽标兜底，见 senderRole）。 */
+  fromRole?: string;
   content: string;
   contentType: string;
   fileName?: string;

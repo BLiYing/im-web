@@ -1106,6 +1106,7 @@ export class IMClient {
       convId: d.conv_id,
       from: d.from,
       fromNickname: d.from_nickname || undefined, // 群消息冗余带发送者昵称（空不占字段）
+      fromRole: d.from_role || undefined,         // 群主/管理员气泡徽标兜底（仅 owner/admin 带）
       content: typeof d.content === "string" ? d.content : "",
       contentType: d.content_type || "text",
       fileName: d.file_name || undefined,
