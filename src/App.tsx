@@ -928,6 +928,9 @@ export default function App() {
     const conv = conversations.find((c) => c.conv_id === cid);
     const readSeq = conv?.read_seq ?? 0;
     const latestSeq = conv?.latest_conv_seq ?? 0;
+    // 群聊已读双勾：用「全员已读位点」播种 peerReadSeq —— 群里没有单一对端，只有**人人都读过**
+    // 才算已读（读得最慢的成员决定位点）。非实时：进会话/刷新列表时取快照值（后端不推群 receipt）。
+    setPeerReadSeq((prev) => ({ ...prev, [cid]: Math.max(prev[cid] ?? 0, conv?.group_read_seq ?? 0) }));
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
     setEntryReadSeq(readSeq);
@@ -946,6 +949,17 @@ export default function App() {
     }
     void refreshConversations();
   }, [conversations, refreshConversations, refreshGroupInfo]);
+
+  // 群聊已读双勾「非实时」刷新：会话列表刷新（进会话/sync 后）时，把当前打开群的「全员已读位点」
+  // 喂进 peerReadSeq，使「全员都读过→绿✓✓」无需退出会话即可更新——后端刻意不推群 receipt
+  // （避免 O(N²) 扇出），会话列表快照是这个绿勾唯一的更新时机。单调只增，不覆盖单聊的实时位点。
+  useEffect(() => {
+    if (!groupConvId) return;
+    const gseq = conversations.find((c) => c.conv_id === groupConvId)?.group_read_seq ?? 0;
+    if (gseq > 0) {
+      setPeerReadSeq((prev) => (gseq > (prev[groupConvId] ?? 0) ? { ...prev, [groupConvId]: gseq } : prev));
+    }
+  }, [conversations, groupConvId]);
 
   const doSearch = useCallback(async () => {
     const q = searchQ.trim();

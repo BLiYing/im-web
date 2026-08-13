@@ -151,6 +151,12 @@ export interface Conversation {
   unread: number;
   read_seq: number; // 本人已读位点（首条未读 = convSeq > read_seq 的第一条）
   peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表绿✓✓/灰✓）
+  /**
+   * 群聊「全员已读位点」= min(其他成员已读位点)；单聊恒 0（走 peer_read_seq）。
+   * 群聊据此判断「我发的、conv_seq ≤ 该位点」是否**全员已读** → 绿✓✓，否则灰✓。
+   * 非实时：仅随会话列表/sync 刷新（后端刻意不推群 receipt，避免 O(N²) 扇出）。
+   */
+  group_read_seq?: number;
   // 在线态快照（仅单聊）：presence 帧只报"变化"，进页面时的初始值取自这里。语义见 presence.ts。
   peer_presence?: PresenceLevel;
   peer_online_until?: number;
