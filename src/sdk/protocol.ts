@@ -298,6 +298,39 @@ export interface QRResolved {
   data: QRUserCard | QRGroupCard | { text: string };
 }
 
+/** 扫码登录票据状态（QR P1，对齐后端 loginState*）。consumed 为已领取 token 的终态。 */
+export type QRLoginState = "new" | "scanned" | "confirmed" | "consumed" | "expired" | "rejected";
+
+/** POST /qr/login/new 返回：poll_key 仅此一次出现（防截屏劫持，不进二维码）。 */
+export interface QRLoginTicket {
+  ticket: string;
+  url: string; // 二维码内容串（端本地生成图片）
+  expires_at: number;
+  poll_key: string;
+}
+
+/** GET /qr/login/poll 返回：state 变即返回；confirmed 首次领取时带一次性 token。 */
+export interface QRLoginPollResult {
+  state: QRLoginState;
+  token?: string; // 仅 confirmed 首次领取时带
+  uid?: string; // scanned/confirmed 时回显，供 Web 确认账号
+  nickname?: string;
+}
+
+/** GET /api/v1/devices 列表一项（多设备管理 P2，对齐后端 device.DeviceView）。 */
+export interface DeviceView {
+  session_id: string;
+  platform: string; // ios | android | web | desktop | ""
+  device_name: string;
+  app_version?: string;
+  login_ip?: string;
+  login_loc?: string;
+  created_at: number;
+  last_active_at: number;
+  online: boolean;
+  current: boolean; // 本机（当前 JWT 的 sid）
+}
+
 /** 入群申请一项（G3；对齐后端 group.JoinRequestView）。 */
 export interface JoinRequest {
   user_id: string;

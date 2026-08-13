@@ -2,9 +2,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
-import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./sdk/protocol";
+import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal, QRLoginTab } from "./QRUI";
 import { errorCode } from "./qr";
+import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
@@ -36,7 +37,7 @@ import {
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, PinOff, List,
   Download, LayoutGrid, MoreHorizontal, Play,
   Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward, Eye,
-  ChevronDown, ChevronUp, Copy, QrCode,
+  ChevronDown, ChevronUp, Copy, QrCode, RefreshCw,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -460,10 +461,12 @@ function saveOptedIn(uid: string, set: Set<string>): void {
 /** 保持登录（与 iOS IMSessionStore 一致的 dev 骨架）：登录成功落 localStorage，刷新后静默重登。
  *  存凭据而非 token——token 24h 过期且断线重连本就要用密码重新换 token；生产应换更安全的方案。 */
 const SESSION_KEY = "im.session";
-function loadSession(): { uid: string; pwd: string } | null {
+function loadSession(): { uid: string; pwd: string; token?: string } | null {
   try {
     const s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
-    return s && typeof s.uid === "string" && s.uid ? { uid: s.uid, pwd: typeof s.pwd === "string" ? s.pwd : "" } : null;
+    if (!s || typeof s.uid !== "string" || !s.uid) return null;
+    // token=扫码登录会话（无密码）；pwd=密码/免密会话。二者其一。
+    return { uid: s.uid, pwd: typeof s.pwd === "string" ? s.pwd : "", token: typeof s.token === "string" ? s.token : undefined };
   } catch { return null; }
 }
 
@@ -536,10 +539,14 @@ export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
   const [uid, setUid] = useState(() => loadSession()?.uid || "1001");
   const [password, setPassword] = useState(""); // 登录密码（空=走开发期免密）
-  const restoreRef = useRef<{ uid: string; pwd: string } | null>(loadSession()); // 待静默重登的已存会话
+  const restoreRef = useRef<{ uid: string; pwd: string; token?: string } | null>(loadSession()); // 待静默重登的已存会话
   const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
   const [authErr, setAuthErr] = useState(""); // 登录/注册错误文案
+  const [loginTab, setLoginTab] = useState<"password" | "qr">("password"); // 登录页页签：密码 / 扫码
+  // 扫码登录待入场会话：poll 领到 {uid,token} 后先 setUid 再由 effect 用新 uid 闭包跑 enterApp。
+  const pendingQrRef = useRef<{ uid: string; token: string } | null>(null);
+  const [qrTrigger, setQrTrigger] = useState(0);
   const [state, setState] = useState<ConnState>("disconnected");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [msgsByConv, setMsgsByConv] = useState<Record<string, ChatMessage[]>>({});
@@ -618,6 +625,11 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
+  // ---- 已登录设备 / 多设备管理（P2）子面板 ----
+  const [devicesOpen, setDevicesOpen] = useState(false);
+  const [devices, setDevices] = useState<DeviceView[] | null>(null); // null=加载中；[]=空
+  const [devicesErr, setDevicesErr] = useState("");
+  const [revokingSid, setRevokingSid] = useState(""); // 正在踢下线的 sid（禁用该行按钮）；"__others__"=退出其他
   // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
   // Web 只吃 Wi-Fi 档（浏览器分不清移动/Wi-Fi），且**始终提供手动下载**；策略本身仍随账号多端同步。
   const [dataStorageOpen, setDataStorageOpen] = useState(false);        // 设置 ▸ 数据与存储 子面板
@@ -1069,7 +1081,8 @@ export default function App() {
     });
   }, []);
 
-  const enterApp = useCallback(async (pwd: string) => {
+  // token 非空=扫码登录路径（无密码，走 connectWithToken）；否则密码/免密登录。
+  const enterApp = useCallback(async (pwd: string, token?: string) => {
     if (!uid) {
       setAuthErr("请填写用户名");
       return;
@@ -1250,7 +1263,8 @@ export default function App() {
     clientRef.current = client;
     setLogContext(uid); // 让后续每条 dev 日志带上当前账号标签，便于多标签页/多账号汇聚时 grep 分离
     try {
-      await client.connect(uid, pwd); // 首次登录失败（密码错误等）会抛错
+      if (token) await client.connectWithToken(uid, token); // 扫码登录：直接用已签发 JWT
+      else await client.connect(uid, pwd); // 首次登录失败（密码错误等）会抛错
     } catch (e) {
       const code = (e as { code?: number }).code;
       const cached = client.cachedConversations();
@@ -1259,7 +1273,7 @@ export default function App() {
         clientRef.current = client;
         setConversations(cached);
         await preloadLocal(cached);
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd }));
+        localStorage.setItem(SESSION_KEY, JSON.stringify(token ? { uid, token } : { uid, pwd }));
         setAuthBusy(false);
         setPhase("app");
         return;
@@ -1298,7 +1312,8 @@ export default function App() {
         logger.info(LOG_TAG.media, "media_cache_rehydrated", { count: Object.keys(restored).length });
       }
     })();
-    localStorage.setItem(SESSION_KEY, JSON.stringify({ uid, pwd })); // 保持登录：刷新后静默重登（Web #4）
+    // 保持登录：刷新后静默重登（Web #4）。扫码登录存 token（无密码，过期即回登录）。
+    localStorage.setItem(SESSION_KEY, JSON.stringify(token ? { uid, token } : { uid, pwd }));
     setAuthBusy(false);
     setPhase("app");
   }, [uid, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
@@ -1309,9 +1324,18 @@ export default function App() {
     const r = restoreRef.current;
     if (!r || phase !== "login") return;
     restoreRef.current = null;
-    void enterApp(r.pwd).finally(() => setRestoring(false));
+    if (r.token) setUid(r.uid); // 扫码会话恢复：确保处理器闭包用回该 uid
+    void enterApp(r.pwd, r.token).finally(() => setRestoring(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 扫码登录入场：等 setUid 落地（uid===待入场 uid）后，用带正确 uid 的 enterApp 闭包连接。
+  useEffect(() => {
+    const p = pendingQrRef.current;
+    if (!p || phase !== "login" || uid !== p.uid) return;
+    pendingQrRef.current = null;
+    void enterApp("", p.token);
+  }, [uid, phase, qrTrigger, enterApp]);
 
   // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
@@ -1390,6 +1414,8 @@ export default function App() {
     setShowSettings(false);
     setProfileDraft(null);
     setGeneralOpen(false);
+    setDevicesOpen(false);
+    setDevices(null);
     setWallpaperOpen(false);
     setWallpaperColorOpen(false);
     setMyInfo(null);
@@ -2461,6 +2487,52 @@ export default function App() {
         resolve,
       })),
     []);
+
+  // ---- 已登录设备（P2）----
+  const loadDevices = useCallback(async () => {
+    setDevices(null); setDevicesErr("");
+    try {
+      const list = await clientRef.current?.listDevices();
+      setDevices(list ?? []);
+    } catch (e) {
+      setDevices([]); setDevicesErr((e as Error).message || "加载失败");
+    }
+  }, []);
+
+  // 踢下线某设备。本机不走此路径（UI 已禁用，想退走「退出登录」）。
+  const revokeDevice = useCallback(async (d: DeviceView) => {
+    if (d.current) return;
+    const ok = await askConfirm(`退出「${deviceName(d)}」？该设备将立即下线并需重新登录。若非你本人设备，建议退出后修改密码。`,
+      { okText: "退出登录", danger: true });
+    if (!ok) return;
+    setRevokingSid(d.session_id);
+    try {
+      await clientRef.current?.revokeDevice(d.session_id);
+      setToast("已退出该设备");
+      await loadDevices();
+    } catch (e) {
+      setToast(`操作失败：${(e as Error).message}`);
+    } finally {
+      setRevokingSid("");
+    }
+  }, [askConfirm, loadDevices]);
+
+  const revokeOtherDevices = useCallback(async () => {
+    const ok = await askConfirm("退出其他所有设备？除这台设备外的全部登录都将立即下线。换密码后建议这样做。",
+      { okText: "全部退出", danger: true });
+    if (!ok) return;
+    setRevokingSid("__others__");
+    try {
+      await clientRef.current?.revokeOtherDevices();
+      setToast("已退出其他所有设备");
+      await loadDevices();
+    } catch (e) {
+      setToast(`操作失败：${(e as Error).message}`);
+    } finally {
+      setRevokingSid("");
+    }
+  }, [askConfirm, loadDevices]);
+
   // 应用内输入框：返回 Promise<string | null>（取消为 null），替代 window.prompt。
   const askPrompt = useCallback(
     (title: string, defaultValue = "", opts?: {
@@ -3199,17 +3271,31 @@ export default function App() {
       <div className="login">
         <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
         <h1>IM Web 登录</h1>
-        <label>用户名<input value={uid} autoFocus onChange={(e) => setUid(e.target.value.trim())} /></label>
-        <label>密码<input type="password" value={password} placeholder="≥ 6 位"
-          onChange={(e) => setPassword(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") void enterApp(password); }} /></label>
-        {authErr && <p className="auth-err">{authErr}</p>}
-        <button disabled={authBusy} onClick={() => void enterApp(password)}>登录</button>
-        <button className="secondary" disabled={authBusy} onClick={() => void doRegister()}>注册并登录</button>
-        <p className="hint">
-          真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
-          仅调试：<button className="link-inline" disabled={authBusy} onClick={() => void enterApp("")}>免密登录</button>（需后端开启 dev-login）。
-        </p>
+        <div className="login-tabs">
+          <button className={`login-tab${loginTab === "password" ? " on" : ""}`} onClick={() => setLoginTab("password")}>密码登录</button>
+          <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => setLoginTab("qr")}>扫码登录</button>
+        </div>
+        {loginTab === "password" ? (
+          <>
+            <label>用户名<input value={uid} autoFocus onChange={(e) => setUid(e.target.value.trim())} /></label>
+            <label>密码<input type="password" value={password} placeholder="≥ 6 位"
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void enterApp(password); }} /></label>
+            {authErr && <p className="auth-err">{authErr}</p>}
+            <button disabled={authBusy} onClick={() => void enterApp(password)}>登录</button>
+            <button className="secondary" disabled={authBusy} onClick={() => void doRegister()}>注册并登录</button>
+            <p className="hint">
+              真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
+              仅调试：<button className="link-inline" disabled={authBusy} onClick={() => void enterApp("")}>免密登录</button>（需后端开启 dev-login）。
+            </p>
+          </>
+        ) : (
+          <QRLoginTab onLogin={(loginUid, token) => {
+            pendingQrRef.current = { uid: loginUid, token };
+            setUid(loginUid);
+            setQrTrigger((n) => n + 1); // uid 不变时也强制触发入场 effect
+          }} />
+        )}
       </div>
     );
   }
@@ -3718,7 +3804,7 @@ export default function App() {
       { id: "data", label: "数据与存储", icon: Database, chevron: true, onClick: () => setDataStorageOpen(true) },
       { id: "privacy", label: "隐私与安全", icon: Lock, chevron: true, onClick: () => void openBlacklist() },
       { id: "folders", label: "聊天文件夹", icon: Folder, chevron: true, onClick: () => comingSoon("聊天文件夹") },
-      { id: "devices", label: "已登录设备", icon: MonitorSmartphone, chevron: true, onClick: () => comingSoon("已登录设备") },
+      { id: "devices", label: "已登录设备", icon: MonitorSmartphone, chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
       { id: "language", label: "语言", icon: Languages, value: "简体中文", chevron: true, onClick: () => comingSoon("语言") },
       { id: "stickers", label: "贴纸与表情", icon: Smile, chevron: true, onClick: () => comingSoon("贴纸与表情") },
     ],
@@ -4087,6 +4173,55 @@ export default function App() {
                   <input value={profileDraft.tags} placeholder="空格或逗号分隔"
                     onChange={(e) => setProfileDraft({ ...profileDraft, tags: e.target.value })} /></label>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* 已登录设备子面板（多设备管理 P2，草图 DEVICE_MANAGEMENT_UX_SKETCH §3）：
+            以登录设备(session)为行，本机置顶标灰不可退（想退＝退出登录），底部一键退出其他所有设备。 */}
+        {devicesOpen && (
+          <div className="settings-panel devices-panel">
+            <header className="settings-head">
+              <button className="icon-btn" title="返回" onClick={() => setDevicesOpen(false)}><ChevronLeft size={24} /></button>
+              <span className="settings-title">已登录设备</span>
+              <button className="icon-btn" title="刷新" disabled={devices === null} onClick={() => void loadDevices()}><RefreshCw size={20} /></button>
+            </header>
+            <div className="settings-body">
+              {devices === null && <div className="devices-empty">加载中…</div>}
+              {devices !== null && devicesErr && <div className="devices-empty devices-err">{devicesErr}</div>}
+              {devices !== null && !devicesErr && devices.length === 0 && <div className="devices-empty">没有其他登录设备</div>}
+              {devices !== null && devices.length > 0 && (
+                <>
+                  <div className="section-label">这些设备当前登录了你的账号</div>
+                  <div className="settings-group devices-list">
+                    {devices.map((d) => (
+                      <div key={d.session_id} className="device-row">
+                        <span className="device-ic">{platformIcon(d.platform)}</span>
+                        <div className="device-meta">
+                          <div className="device-name">
+                            <span>{deviceName(d)}</span>
+                            {d.current && <span className="device-cur-pill">这台设备</span>}
+                          </div>
+                          <div className="device-sub">
+                            <span className={d.online ? "device-dot on" : "device-dot off"} />
+                            {deviceSubtitle(d, Date.now())}
+                          </div>
+                        </div>
+                        {d.current
+                          ? <span className="device-btn cur">当前</span>
+                          : <button className="device-btn" disabled={!!revokingSid} onClick={() => void revokeDevice(d)}>
+                              {revokingSid === d.session_id ? "退出中…" : "退出"}
+                            </button>}
+                      </div>
+                    ))}
+                  </div>
+                  {devices.some((d) => !d.current) && (
+                    <button className="devices-revoke-all" disabled={!!revokingSid} onClick={() => void revokeOtherDevices()}>
+                      {revokingSid === "__others__" ? "退出中…" : "退出其他所有设备"}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}

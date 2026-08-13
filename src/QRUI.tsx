@@ -6,8 +6,9 @@ import {
   QrCode, X, Camera, Image as ImageIcon, RefreshCw, Download, Copy, Check,
   UserPlus, LogIn, Users, ExternalLink, ScanLine, Clock,
 } from "lucide-react";
-import type { QRCard, QRResolved, QRUserCard, QRGroupCard, JoinRequest } from "./sdk/protocol";
-import { decodeImageData, decodeImageFile, drawToImageData, userCardAction, groupCardAction, classifyUnknown, type GroupAction } from "./qr";
+import type { QRCard, QRResolved, QRUserCard, QRGroupCard, JoinRequest, QRLoginState, QRLoginTicket } from "./sdk/protocol";
+import { decodeImageData, decodeImageFile, drawToImageData, userCardAction, groupCardAction, classifyUnknown, errorCode, type GroupAction } from "./qr";
+import { loginNew, loginPoll } from "./sdk/qrLogin";
 
 /** 生成二维码图片 dataURL（容错级 M，中留白，端本地生成）。失败返回空串。 */
 async function toQRDataURL(text: string): Promise<string> {
@@ -360,6 +361,136 @@ function UnknownBranch({ text }: { text: string }) {
         : <div className="modal-actions"><button className="mini-btn ghost" onClick={copy}><Copy size={15} /> 复制内容</button></div>}
     </div>
   );
+}
+
+// ---- Web 扫码登录（QR P1）：四态一屏，二维码常驻、状态用覆盖层表达 ----
+
+// UI 相位：loading=正在申请票据；error=申请失败；其余直接映射票据状态机。
+type LoginPhase = "loading" | "error" | QRLoginState;
+
+export function QRLoginTab(props: { onLogin: (uid: string, token: string) => void }) {
+  const { onLogin } = props;
+  const [phase, setPhase] = useState<LoginPhase>("loading");
+  const [img, setImg] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [errMsg, setErrMsg] = useState("");
+  // 每次「刷新」自增，作 effect 的钥匙：旧轮询以 cancelled 收尾，新轮询重开。
+  const [round, setRound] = useState(0);
+  const onLoginRef = useRef(onLogin);
+  onLoginRef.current = onLogin;
+
+  useEffect(() => {
+    let cancelled = false;
+    setImg(""); setNickname(""); setErrMsg(""); setPhase("loading");
+
+    (async () => {
+      let ticket: QRLoginTicket;
+      try {
+        ticket = await loginNew();
+      } catch (e) {
+        if (cancelled) return;
+        setErrMsg((e as Error).message || "二维码申请失败"); setPhase("error");
+        return;
+      }
+      if (cancelled) return;
+      void toQRDataURL(ticket.url).then((u) => { if (!cancelled) setImg(u); });
+      setPhase("new");
+
+      // 长轮询：state 相对已知态一变即返回；确认后一次性领 token → 登录。
+      let known: QRLoginState = "new";
+      while (!cancelled) {
+        let res;
+        try {
+          res = await loginPoll(ticket.ticket, ticket.poll_key, known);
+        } catch (e) {
+          if (cancelled) return;
+          // poll_key 错(100103)=票据不属于我，按失效处理；其余(网络/限流)稍候重试。
+          if (errorCode(e) === 100103) { setPhase("expired"); return; }
+          await sleep(1500);
+          continue;
+        }
+        if (cancelled) return;
+        known = res.state;
+        if (res.state === "scanned") {
+          setNickname(res.nickname || res.uid || ""); setPhase("scanned"); continue;
+        }
+        if (res.state === "confirmed" && res.token && res.uid) {
+          setPhase("confirmed");
+          onLoginRef.current(res.uid, res.token); // 父组件会切到 app 相位并卸载本组件
+          return;
+        }
+        if (res.state === "expired" || res.state === "rejected" || res.state === "consumed") {
+          setPhase(res.state === "consumed" ? "expired" : res.state); return;
+        }
+        // new / 其它：无变化的超时返回，继续轮询。
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [round]);
+
+  const refresh = () => setRound((n) => n + 1);
+  const dim = phase === "expired" || phase === "rejected";
+
+  return (
+    <div className="qr-login">
+      <div className="qr-login-tip-top"><ScanLine size={15} /> 扫码登录</div>
+      <div className="qr-login-box">
+        {img
+          ? <img className={`qr-login-img${dim ? " dim" : ""}`} src={img} alt="登录二维码" />
+          : <div className="qr-login-img qr-img-loading" />}
+
+        {phase === "loading" && (
+          <div className="qr-login-cover"><div className="qr-login-spin" /><div className="qr-login-cover-t">生成二维码…</div></div>
+        )}
+        {phase === "error" && (
+          <div className="qr-login-cover">
+            <div className="qr-login-cover-t">二维码申请失败</div>
+            <div className="qr-login-cover-s">{errMsg}</div>
+            <button className="qr-login-refresh" onClick={refresh}><RefreshCw size={14} /> 重试</button>
+          </div>
+        )}
+        {phase === "scanned" && (
+          <div className="qr-login-cover">
+            <div className="qr-login-badge ok"><Check size={22} /></div>
+            <div className="qr-login-cover-t">扫描成功</div>
+            <div className="qr-login-cover-s">请在手机上确认登录</div>
+          </div>
+        )}
+        {phase === "confirmed" && (
+          <div className="qr-login-cover">
+            <div className="qr-login-badge ok"><Check size={22} /></div>
+            <div className="qr-login-cover-t">登录成功</div>
+            <div className="qr-login-cover-s">正在进入…</div>
+          </div>
+        )}
+        {phase === "expired" && (
+          <button className="qr-login-cover as-btn" onClick={refresh}>
+            <div className="qr-login-badge gray"><RefreshCw size={20} /></div>
+            <div className="qr-login-cover-t">二维码已过期</div>
+            <div className="qr-login-cover-s">点击刷新</div>
+          </button>
+        )}
+        {phase === "rejected" && (
+          <button className="qr-login-cover as-btn" onClick={refresh}>
+            <div className="qr-login-badge bad"><X size={20} /></div>
+            <div className="qr-login-cover-t">已在手机上拒绝登录</div>
+            <div className="qr-login-cover-s">点击换一个二维码</div>
+          </button>
+        )}
+      </div>
+
+      <div className="qr-login-tip">
+        {phase === "scanned"
+          ? <>已识别账号 <b>{nickname || "…"}</b>，在手机上点「确认登录」</>
+          : <>打开手机 App，点 <b>＋ → 扫一扫</b>，扫描上方二维码登录</>}
+      </div>
+    </div>
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 // ---- G3 待审入群申请列表（群主/管理员）----

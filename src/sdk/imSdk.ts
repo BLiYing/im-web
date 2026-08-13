@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -77,6 +77,7 @@ export class IMClient {
   private seq = 0;
   private uid = "";
   private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
+  private sessionToken = ""; // 扫码登录换来的 JWT（无密码）：置位后（重）连复用它、不再走 /login 换 token
   private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
   private state: ConnState = "disconnected";
   private pingTimer: number | null = null;
@@ -126,9 +127,35 @@ export class IMClient {
     }
     this.uid = uid;
     this.password = password;
+    this.sessionToken = ""; // 密码登录路径：清掉可能残留的扫码 token，避免重连误用旧会话
     this.manualClose = false;
     this.clearReconnectTimer();
     logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid });
+    await this.openSocket(true);
+  }
+
+  /** 用扫码登录换来的 JWT 直接建立会话（无密码）。
+   *  断线重连复用该 token 并做一次鉴权探活：被踢下线/过期(auth 码)即回登录，网络失败继续重试。 */
+  async connectWithToken(uid: string, token: string): Promise<void> {
+    if (this.uid && this.uid !== uid) {
+      // 与 connect() 同款切账号清理：绝不沿用上个 uid 的游标/在途状态。
+      this.syncedSeq.clear();
+      this.tracked.clear();
+      this.syncingConvs.clear();
+      this.syncPending.clear();
+      this.pagedPending.clear();
+      this.pendingOps.clear();
+      this.sendTimers.forEach((timer) => clearTimeout(timer));
+      this.sendTimers.clear();
+      this.pendingSends.clear();
+    }
+    this.uid = uid;
+    this.password = "";
+    this.sessionToken = token;
+    this.token = token;
+    this.manualClose = false;
+    this.clearReconnectTimer();
+    logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid, via: "qr_login" });
     await this.openSocket(true);
   }
 
@@ -149,6 +176,7 @@ export class IMClient {
     this.pendingOps.clear();
     this.ws?.close(1000);
     this.ws = null;
+    this.sessionToken = ""; // 退出后不再复用扫码 token
     this.setState("disconnected");
   }
 
@@ -193,6 +221,24 @@ export class IMClient {
   /** 恢复出厂默认（草图 §05-3「重置自动下载设置」）。 */
   async resetDownloadSettings(): Promise<{ version: number; settings: unknown }> {
     return (await this.api("/api/v1/download-settings/reset", { method: "POST" })) as { version: number; settings: unknown };
+  }
+
+  // ---- 已登录设备 / 多设备管理（P2）----
+
+  /** 我的登录设备列表（本机置顶、在线优先）：GET /api/v1/devices。 */
+  async listDevices(): Promise<DeviceView[]> {
+    const data = await this.api("/api/v1/devices");
+    return (data?.devices ?? []) as DeviceView[];
+  }
+
+  /** 踢下线某设备（吊销 sid + 断活连接）：POST /api/v1/devices/{sid}/revoke。踢本机=退出登录。 */
+  async revokeDevice(sid: string): Promise<void> {
+    await this.api(`/api/v1/devices/${encodeURIComponent(sid)}/revoke`, { method: "POST" });
+  }
+
+  /** 退出除本机外的所有设备（换密码后常见动作）：POST /api/v1/devices/revoke-others。 */
+  async revokeOtherDevices(): Promise<void> {
+    await this.api("/api/v1/devices/revoke-others", { method: "POST" });
   }
 
   /** 链接富预览：抓取 URL 的 OG 元信息（后端带 SSRF 防护 + 缓存）。失败抛错，调用方回退纯链接。 */
@@ -833,12 +879,25 @@ export class IMClient {
     };
   }
 
-  /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。 */
+  /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。
+   *  扫码登录（sessionToken 置位）无密码：复用已签发 token，并做一次轻量鉴权探活——被踢/过期(auth 码)即抛，
+   *  由 openSocket 现有分支路由到 onAuthError 回登录；网络失败抛非 auth 错，继续重连。 */
   private async fetchToken(uid: string, password: string): Promise<string> {
+    if (this.sessionToken) {
+      const probe = await fetchJSON("/api/v1/devices", {
+        headers: { Authorization: `Bearer ${this.sessionToken}` },
+      });
+      if (probe.code !== 0) {
+        const e = new Error(friendlyMessage(probe.code, probe.message || "登录已失效")) as Error & { code?: number };
+        e.code = probe.code; // 100101/100102=吊销/过期(auth 码) → 回登录；其它按网络失败重试
+        throw e;
+      }
+      return this.sessionToken;
+    }
     const body = await fetchJSON("/api/v1/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: uid, password }),
+      body: JSON.stringify({ username: uid, password, platform: "web", device_name: webDeviceName() }),
     });
     if (body.code !== 0 || !body.data?.token) {
       const e = new Error(friendlyMessage(body.code, body.message || "登录失败")) as Error & { code?: number };
@@ -1251,6 +1310,23 @@ async function fetchJSON(path: string, init?: RequestInit): Promise<any> {
   } catch {
     throw new Error("服务器无响应，请确认后端已启动"); // 空/非 JSON：原"Unexpected end of JSON input"
   }
+}
+
+/** 概括本机为「浏览器 · 系统」，登录时上报作设备名（供设备管理页展示）。尽力而为，非精确。
+ *  与后端 webDeviceName(UA) 同源，但浏览器端直接读 navigator，命中率更高。 */
+export function webDeviceName(): string {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent || "";
+  if (!ua) return "网页版";
+  const browser = /Edg\//.test(ua) ? "Edge"
+    : /Chrome\//.test(ua) ? "Chrome"
+    : /Firefox\//.test(ua) ? "Firefox"
+    : /Safari\//.test(ua) ? "Safari" : "浏览器";
+  const os = /Mac OS X|Macintosh/.test(ua) ? "macOS"
+    : /Windows/.test(ua) ? "Windows"
+    : /Android/.test(ua) ? "Android"
+    : /iPhone|iPad/.test(ua) ? "iOS"
+    : /Linux/.test(ua) ? "Linux" : "";
+  return os ? `${browser} · ${os}` : browser;
 }
 
 /** 业务错误码 → 友好中文（对齐 errcode / iOS IMFriendlyMessageForCode）。未收录回退服务端原文。
