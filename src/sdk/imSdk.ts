@@ -905,7 +905,7 @@ export class IMClient {
     const body = await fetchJSON("/api/v1/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: uid, password, platform: "web", device_name: webDeviceName() }),
+      body: JSON.stringify({ username: uid, password, platform: "web", device_id: webDeviceId(), device_name: webDeviceName() }),
     });
     if (body.code !== 0 || !body.data?.token) {
       const e = new Error(friendlyMessage(body.code, body.message || "登录失败")) as Error & { code?: number };
@@ -1335,6 +1335,22 @@ export function webDeviceName(): string {
     : /iPhone|iPad/.test(ua) ? "iOS"
     : /Linux/.test(ua) ? "Linux" : "";
   return os ? `${browser} · ${os}` : browser;
+}
+
+/** 本机稳定设备 ID（对齐 iOS 的 device_id）：首次生成一枚 UUID 落 localStorage，之后复用。
+ *  后端按 (uid, device_id) 顶替去重——没有它，Web 每次刷新/重登都新建一条 session，设备列表会堆满同一台。
+ *  localStorage 不可用（隐私模式/禁用）或读写抛错时回退每会话临时 ID，功能降级为不去重，但不崩。 */
+const DEVICE_ID_KEY = "im.deviceId";
+export function webDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_ID_KEY);
+    if (existing) return existing;
+    const id = crypto.randomUUID();
+    localStorage.setItem(DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    return crypto.randomUUID(); // localStorage 不可用：退化为一次性 ID（不去重，但不阻断登录）
+  }
 }
 
 /** 业务错误码 → 友好中文（对齐 errcode / iOS IMFriendlyMessageForCode）。未收录回退服务端原文。
