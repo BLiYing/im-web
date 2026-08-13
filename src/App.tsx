@@ -3188,8 +3188,10 @@ export default function App() {
   const activePinned = pinnedByConv[convId] ?? [];
   const pinnedShownIdx = clampPinnedIndex(pinnedIdx, activePinned.length);
   const pinnedShown = activePinned[pinnedShownIdx];
-  // 能否置顶：群内限群主/管理员（= 服务端 perm_pin 的默认值，G2 落设置后改读群设置）；单聊任一方可。
-  const canPinHere = isGroupChat ? (activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin") : !!peer;
+  // 能否置顶：群内读 perm_pin——开=仅群主/管理员，关=全员可置顶（对齐服务端 hub.go 校验）；单聊任一方可。
+  const canPinHere = isGroupChat
+    ? (!activeGroupInfo?.perm_pin || activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin")
+    : !!peer;
   // G2 输入栏禁言锁：成员级禁言（my_mute_until）或全员禁言（且我是普通成员）→ 禁用输入并改占位。
   // 服务端仍是权威（发上来照样拒 300208/300206），这里只提前告知、不给试错。
   const composerMuteReason: string | null = (() => {
