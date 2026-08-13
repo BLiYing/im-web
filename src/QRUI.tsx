@@ -168,10 +168,18 @@ export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: (
     rafRef.current = requestAnimationFrame(loop);
   }, [fire]);
 
+  // 拖拽/粘贴进来的不一定是图片（PDF、压缩包…），decodeImageFile 会 reject；
+  // 不接住的话就是一条未处理的 rejection + 界面毫无反应（file input 的 accept 拦不住这两条路）。
   const handleFile = useCallback(async (file: File | undefined | null) => {
     if (!file) return;
     setHint("");
-    const raw = await decodeImageFile(file);
+    let raw: string | null = null;
+    try {
+      raw = await decodeImageFile(file);
+    } catch {
+      setHint("这个文件读不出图片，请换一张图片试试");
+      return;
+    }
     if (raw) fire(raw);
     else setHint("这张图片里没有识别到二维码，换一张试试");
   }, [fire]);

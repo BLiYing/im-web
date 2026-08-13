@@ -11,6 +11,10 @@
 - **纯逻辑**（`src/qr.ts` + `qr.test.ts` 15 例）：`userCardAction`/`groupCardAction`/`classifyUnknown`/`errorCode` + `decodeImageData`/`decodeImageFile`/`drawToImageData`（jsqr 封装）。
 - **UI**（`src/QRUI.tsx` + `App.tsx` 接线）：① 侧栏搜索框右侧 QR 图标 → **扫码浮层**（摄像头取景 + 上传/拖拽/⌘V 粘贴图片；无摄像头/非 HTTPS 只留图片通道；权限被拒引导）；② **我的名片码 / 群二维码模态**（本地生成 QR、下载 PNG、复制链接、重置带二次确认）；③ **resolve 四分支**（名片=加好友/发消息/看资料、群预览=加入/需审批带附言/进群/满/黑名单、失效码=`200110` 提示、外来码=域名加粗二次确认不自动跳转）；④ **G3**：群管理「治理」卡加「待审入群申请(N)」→审批列表（同意/拒绝），`onGroup` 处理 `join_request`(重拉列表/刷 `pending_count` 角标)、`join_result`(通过/拒绝 toast)。
 - **入口**：侧栏 QR 图标（扫一扫，含「我的二维码」快捷）· 设置页「我的二维码」行 · 群资料抽屉「群二维码」行 · 群管理「待审入群申请(N)」。
+- **`/code-review` 修复（2026-08-13，三仓 5 项全修，Web 占 2 项；tsc + 249 vitest 复跑绿）**：
+  ① `resetQRCard` 补 try/catch + 失败 toast——模态里的确认按钮只有 try/finally，重置失败会变成未处理的 rejection 且界面毫无反馈；
+  ② `handleFile` 捕获 `decodeImageFile` 的 reject——拖拽/粘贴进非图片文件（PDF/压缩包）时 `accept="image/*"` 拦不住，
+  原先静默无反应，现提示「这个文件读不出图片」。另三项在 IMServer（邀请入群原子上限）与 iOS（扫码会话竞态 / 名片码页签只显 uid）。
 - **已知限制**：① 图片识别用 jsqr **单码**（未做「一图多码候选点选」，设计的进阶项）；② 群码资料抽屉入口对普通成员也显示，`perm_invite=1` 时点了由后端 300204 拦（toast），未在前端预隐藏；③ 扫码登录 `q/l`（P1）未做，扫到走 unknown。**摄像头实扫需浏览器手测**（自动化环境无相机）。**后端需重启带 QR 路由的新二进制再测。**
 
 **G2 群治理 ✅（2026-08-13，tsc+234 vitest+build 绿，待手测）** — 方案 `../IMServer/docs/GROUP_FEATURES_DESIGN.md` §G2、草图 §04/§07。

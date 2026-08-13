@@ -3484,14 +3484,19 @@ export default function App() {
   };
 
   // 名片码/群码重置：换新码（旧码立即失效），更新模态内展示。
+  // 失败必须自己吞并提示——模态里的确认按钮只有 try/finally，抛出去会变成未处理的 rejection 且界面毫无反馈。
   const resetQRCard = async () => {
     const m = qrCardModal;
     if (!m) return;
-    const card = m.kind === "me"
-      ? await clientRef.current!.qrResetMyCard()
-      : await clientRef.current!.groupQRReset(m.convId!);
-    setQrCardModal({ ...m, card });
-    setToast("二维码已重置，旧码已失效");
+    try {
+      const card = m.kind === "me"
+        ? await clientRef.current!.qrResetMyCard()
+        : await clientRef.current!.groupQRReset(m.convId!);
+      setQrCardModal({ ...m, card });
+      setToast("二维码已重置，旧码已失效");
+    } catch (e) {
+      setToast(`重置失败：${(e as Error).message}`);
+    }
   };
 
   // 扫码结果的动作集：加好友 / 发消息 / 看资料 / 加群 / 进群。
