@@ -3672,7 +3672,10 @@ export default function App() {
       void refreshGroupInfo(cid);
       void refreshConversations();
     } catch (e) {
-      setToast(`邀请失败：${(e as Error).message}`);
+      // 按业务码分支（勿直接透传服务端 message，i18n）：300207 = 被邀请者已被移出/冷却期，
+      // 用邀请场景的第三人称文案，区别于自加群映射表里的第二人称「你已被移出」。
+      if (errorCode(e) === 300207) setToast("该成员已被移出本群，暂时无法再次邀请");
+      else setToast(`邀请失败：${(e as Error).message}`);
     }
   };
 
