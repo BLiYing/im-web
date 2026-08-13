@@ -371,7 +371,10 @@ export function JoinRequestsModal(props: {
 }) {
   const { requests, loading, onDecide, onClose } = props;
   const [busyUid, setBusyUid] = useState("");
+  const [tab, setTab] = useState<"pending" | "done">("pending");
   const pending = requests.filter((r) => r.status === "pending");
+  const done = requests.filter((r) => r.status !== "pending");
+  const shown = tab === "pending" ? pending : done;
   const decide = async (uid: string, accept: boolean) => {
     setBusyUid(uid);
     try { await onDecide(uid, accept); } finally { setBusyUid(""); }
@@ -380,21 +383,31 @@ export function JoinRequestsModal(props: {
     <div className="modal-mask" onClick={onClose}>
       <div className="modal join-req-modal" onClick={(e) => e.stopPropagation()}>
         <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
-        <h3 className="modal-title"><UserPlus size={18} /> 待审入群申请</h3>
+        <h3 className="modal-title"><UserPlus size={18} /> 入群申请</h3>
+        <div className="join-req-seg">
+          <button className={`join-req-seg-btn${tab === "pending" ? " on" : ""}`} onClick={() => setTab("pending")}>待处理{pending.length ? ` (${pending.length})` : ""}</button>
+          <button className={`join-req-seg-btn${tab === "done" ? " on" : ""}`} onClick={() => setTab("done")}>已处理</button>
+        </div>
         {loading && <div className="join-req-empty">加载中…</div>}
-        {!loading && pending.length === 0 && <div className="join-req-empty">暂无待审批的入群申请</div>}
+        {!loading && shown.length === 0 && (
+          <div className="join-req-empty">{tab === "pending" ? "暂无待审批的入群申请" : "暂无已处理的申请"}</div>
+        )}
         <div className="join-req-list">
-          {pending.map((r) => (
+          {shown.map((r) => (
             <div className="join-req-row" key={r.user_id}>
               <Avatar url={r.avatar_url} name={r.nickname} size={40} />
               <div className="join-req-info">
                 <div className="join-req-name">{r.nickname || r.user_id}</div>
                 {r.hello && <div className="join-req-hello">{r.hello}</div>}
               </div>
-              <div className="join-req-btns">
-                <button className="mini-btn" disabled={busyUid === r.user_id} onClick={() => decide(r.user_id, true)}>同意</button>
-                <button className="mini-btn ghost" disabled={busyUid === r.user_id} onClick={() => decide(r.user_id, false)}>拒绝</button>
-              </div>
+              {tab === "pending" ? (
+                <div className="join-req-btns">
+                  <button className="mini-btn" disabled={busyUid === r.user_id} onClick={() => decide(r.user_id, true)}>同意</button>
+                  <button className="mini-btn ghost" disabled={busyUid === r.user_id} onClick={() => decide(r.user_id, false)}>拒绝</button>
+                </div>
+              ) : (
+                <div className={`join-req-status ${r.status}`}>{r.status === "approved" ? "已同意" : "已拒绝"}</div>
+              )}
             </div>
           ))}
         </div>

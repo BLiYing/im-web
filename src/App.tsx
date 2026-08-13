@@ -609,7 +609,11 @@ export default function App() {
   const [confirmDlg, setConfirmDlg] = useState<
     { message: string; okText: string; cancelText: string; danger: boolean; resolve: (ok: boolean) => void } | null>(null);
   const [promptDlg, setPromptDlg] = useState<
-    { title: string; value: string; placeholder: string; okText: string; maxLength?: number; resolve: (v: string | null) => void } | null>(null);
+    { title: string; value: string; placeholder: string; okText: string; maxLength?: number;
+      multiline?: boolean; extraAction?: { label: string; value: string; danger?: boolean };
+      resolve: (v: string | null) => void } | null>(null);
+  // 群公告/群简介全文视图（决策 16/17）：只读全文 + 复制 +（管理员）编辑；简介无发布者/时间/编辑。
+  const [fullTextModal, setFullTextModal] = useState<{ kind: "announcement" | "intro"; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
@@ -1154,8 +1158,13 @@ export default function App() {
         }
         scheduleListRefresh();
         if (event !== "dissolve") void refreshGroupInfo(cid); // 被移出时 fetch 报 300203 → 自动清缓存；解散后群已不存在，无需再拉
-        // G3 join_request 只推群主/管理员：待审列表开着就重拉（pending_count 角标随 refreshGroupInfo 更新）。
-        if (event === "join_request") { void reloadJoinRequests(cid); return; }
+        // G3 join_request 只推群主/管理员：pending_count 随上面 refreshGroupInfo 更新 → 聊天页审批横幅/详情页红点即时刷新。
+        // 待审列表开着则重拉；未开则给一条轻提示（横幅才是主要落点，保持不吵）。
+        if (event === "join_request") {
+          void reloadJoinRequests(cid);
+          setToast("有新的入群申请");
+          return;
+        }
         // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
         if ((event === "remove" && target === uid) || event === "dissolve") {
           setToast(event === "dissolve" ? "该群已被解散" : "你已被移出群聊");
@@ -2440,16 +2449,25 @@ export default function App() {
     []);
   // 应用内输入框：返回 Promise<string | null>（取消为 null），替代 window.prompt。
   const askPrompt = useCallback(
-    (title: string, defaultValue = "", opts?: { placeholder?: string; okText?: string; maxLength?: number }) =>
+    (title: string, defaultValue = "", opts?: {
+      placeholder?: string; okText?: string; maxLength?: number;
+      multiline?: boolean; extraAction?: { label: string; value: string; danger?: boolean };
+    }) =>
       new Promise<string | null>((resolve) => setPromptDlg({
         title,
         value: defaultValue,
         placeholder: opts?.placeholder ?? "",
         okText: opts?.okText ?? "确定",
         maxLength: opts?.maxLength,
+        multiline: opts?.multiline,
+        extraAction: opts?.extraAction,
         resolve,
       })),
     []);
+  // 打开群公告/简介全文视图（三入口共用：横幅点击 / 详情页卡点击）。
+  const openGroupText = useCallback((kind: "announcement" | "intro", cid: string) => {
+    setFullTextModal({ kind, convId: cid });
+  }, []);
 
   // 为所有人删除（任务2）：Telegram 式，删除后对端也消失。走 WS msg_op op=delete，服务端广播回
   // onMessageRemoved 物理移除本地；被拒走 onMsgOpFailed → toast。**不再单独居中确认**——两档子菜单 B
@@ -3408,14 +3426,18 @@ export default function App() {
 
   // 群简介（G1，群主/管理员）：整体替换，随群资料写。
   const doEditIntro = async (gp: GroupInfo) => {
-    const intro = await askPrompt("群简介", gp.intro ?? "", { placeholder: "介绍这个群（≤200 字）", okText: "保存", maxLength: 200 });
+    const intro = await askPrompt("群简介", gp.intro ?? "", { placeholder: "介绍这个群（≤200 字）", okText: "保存", maxLength: 200, multiline: true });
     if (intro === null || intro.trim() === (gp.intro ?? "")) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, gp.avatar_url, intro.trim()));
   };
 
   // 群公告（G1，群主/管理员）：发布走独立接口并落系统消息；清空文本=撤下。
   const doEditAnnouncement = async (gp: GroupInfo) => {
-    const text = await askPrompt("群公告", gp.announcement ?? "", { placeholder: "发布后通知全体成员（清空以撤下）", okText: "发布", maxLength: 500 });
+    const text = await askPrompt("群公告", gp.announcement ?? "", {
+      placeholder: "发布后通知全体成员", okText: "发布", maxLength: 500, multiline: true,
+      // 已有公告时提供「撤下」危险动作 = 发空串（决策 18，与「发布」区分）。
+      extraAction: (gp.announcement ?? "").trim() ? { label: "撤下公告", value: "", danger: true } : undefined,
+    });
     if (text === null || text.trim() === (gp.announcement ?? "")) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupAnnouncement(gp.conv_id, text.trim()));
   };
@@ -3542,7 +3564,7 @@ export default function App() {
   const openJoinRequests = async (cid: string) => {
     setJoinReqModal({ convId: cid, requests: [], loading: true });
     try {
-      const requests = await clientRef.current!.fetchJoinRequests(cid);
+      const requests = await clientRef.current!.fetchJoinRequests(cid, ""); // ""=全部（待处理 + 已处理分段）
       setJoinReqModal({ convId: cid, requests, loading: false });
     } catch (e) {
       setJoinReqModal(null);
@@ -3551,7 +3573,7 @@ export default function App() {
   };
   const reloadJoinRequests = async (cid: string) => {
     try {
-      const requests = await clientRef.current!.fetchJoinRequests(cid);
+      const requests = await clientRef.current!.fetchJoinRequests(cid, "");
       setJoinReqModal((m) => (m && m.convId === cid ? { ...m, requests, loading: false } : m));
     } catch { /* 列表已关或无权限，忽略 */ }
   };
@@ -4224,9 +4246,22 @@ export default function App() {
               )}
             </span>
           </header>
-          {/* 群公告横幅（G1，黄条）：排在置顶横幅之上（优先级 公告 > 置顶）。点条进群资料看全文。 */}
+          {/* 入群审批横幅（G3，蓝条）：仅群主/管理员且有待审申请时显示，点条开审批列表。排在最上（需处置）。 */}
+          {isGroupChat && (activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin")
+            && (activeGroupInfo?.pending_count ?? 0) > 0 && (
+            <div className="pin-banner approve" onClick={() => void openJoinRequests(groupConvId)} role="button">
+              <span className="pin-banner-main" style={{ cursor: "pointer" }}>
+                <span className="pin-banner-bar" />
+                <span className="pin-banner-copy">
+                  <span className="pin-banner-kicker"><UserPlus size={12} /> 入群申请</span>
+                  <span className="pin-banner-text">{activeGroupInfo!.pending_count} 人申请加入本群 · 点击审批</span>
+                </span>
+              </span>
+            </div>
+          )}
+          {/* 群公告横幅（G1，黄条）：排在置顶横幅之上（优先级 公告 > 置顶）。点条直接开公告全文视图（决策 16）。 */}
           {isGroupChat && activeGroupInfo?.announcement && (
-            <div className="pin-banner announce" onClick={() => openGroupPanel(groupConvId)} role="button">
+            <div className="pin-banner announce" onClick={() => openGroupText("announcement", groupConvId)} role="button">
               <span className="pin-banner-main" style={{ cursor: "pointer" }}>
                 <span className="pin-banner-bar" />
                 <span className="pin-banner-copy">
@@ -5373,13 +5408,21 @@ export default function App() {
                   </div>
 
                   {showDetailBody && (<>
-                  {/* ---- 群公告卡（G1，只读展示；管理员可在群管理里编辑） ---- */}
-                  {d.isGroup && gp?.announcement && (
+                  {/* ---- 群公告 / 群简介卡（决策 17，Pills 下第一卡，全员只读；一行预览 + 点开全文视图） ---- */}
+                  {d.isGroup && gp && (gp.announcement || gp.intro) && (
                     <div className="detail-card">
-                      <div className="detail-announce">
-                        <div className="detail-announce-head"><Megaphone size={14} /> 群公告</div>
-                        <div className="detail-announce-body">{gp.announcement}</div>
-                      </div>
+                      {gp.announcement && (
+                        <button className="detail-row" onClick={() => openGroupText("announcement", d.convId)}>
+                          <span className="detail-row-ic"><Megaphone size={18} /></span><span>群公告</span>
+                          <span className="detail-row-val">{gp.announcement}</span><ChevronRight size={16} className="detail-row-chev" />
+                        </button>
+                      )}
+                      {gp.intro && (
+                        <button className="detail-row" onClick={() => openGroupText("intro", d.convId)}>
+                          <span className="detail-row-ic"><Info size={18} /></span><span>群简介</span>
+                          <span className="detail-row-val">{gp.intro}</span><ChevronRight size={16} className="detail-row-chev" />
+                        </button>
+                      )}
                     </div>
                   )}
                   {/* ---- 设置：置顶 / 免打扰 (+群管理) ---- */}
@@ -5391,7 +5434,10 @@ export default function App() {
                     {canManage && (
                       <button className="detail-row" onClick={() => setManageOpen(true)}>
                         <span className="detail-row-ic"><Settings2 size={18} /></span><span>群管理</span>
-                        <span className="detail-row-val muted">仅群主/管理员</span><ChevronRight size={16} className="detail-row-chev" />
+                        {(gp?.pending_count ?? 0) > 0
+                          ? <span className="detail-badge">{gp!.pending_count}</span>
+                          : <span className="detail-row-val muted">仅群主/管理员</span>}
+                        <ChevronRight size={16} className="detail-row-chev" />
                       </button>
                     )}
                     {d.isGroup && (
@@ -5722,6 +5768,39 @@ export default function App() {
         />
       )}
 
+      {/* 群公告 / 群简介全文视图（决策 16/17）：三入口共用；只读全文 + 复制 +（管理员，仅公告）编辑。 */}
+      {fullTextModal && (() => {
+        const gp = groupInfos[fullTextModal.convId];
+        if (!gp) return null;
+        const isAnn = fullTextModal.kind === "announcement";
+        const text = (isAnn ? gp.announcement : gp.intro) ?? "";
+        const canEdit = isAnn && gp.my_role !== "member";
+        const byName = isAnn && gp.announcement_by ? (memberNick(gp.conv_id, gp.announcement_by) || gp.announcement_by) : "";
+        const at = isAnn ? (gp.announcement_at ?? 0) : 0;
+        const close = () => setFullTextModal(null);
+        const copy = () => {
+          navigator.clipboard?.writeText(text).then(() => setToast("已复制"), () => setToast("复制失败"));
+        };
+        return (
+          <div className="modal-mask" onClick={close}>
+            <div className="modal grouptext-modal" onClick={(e) => e.stopPropagation()}>
+              <button className="qr-close" onClick={close} aria-label="关闭"><X size={18} /></button>
+              <h3 className="modal-title">{isAnn ? <Megaphone size={18} /> : <Info size={18} />} {isAnn ? "群公告" : "群简介"}</h3>
+              {isAnn && (byName || at > 0) && (
+                <div className="grouptext-meta">{byName}{byName && at > 0 ? " · " : ""}{at > 0 ? `${fmtDateTime(at)} 发布` : ""}</div>
+              )}
+              <div className="grouptext-body">{text || (isAnn ? "暂无公告" : "暂无简介")}</div>
+              <div className="modal-actions">
+                <button className="mini-btn ghost" onClick={copy}><Copy size={15} /> 复制</button>
+                {canEdit && (
+                  <button className="mini-btn" onClick={() => { close(); void doEditAnnouncement(gp); }}><SquarePen size={15} /> 编辑</button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 应用内确认框（替代 window.confirm，统一 .modal 风格）。点遮罩 = 取消。 */}
       {confirmDlg && (
         <div className="modal-mask" onClick={() => { confirmDlg.resolve(false); setConfirmDlg(null); }}>
@@ -5740,19 +5819,34 @@ export default function App() {
         </div>
       )}
 
-      {/* 应用内输入框（替代 window.prompt）。回车确定、Esc/遮罩取消。 */}
+      {/* 应用内输入框（替代 window.prompt）。单行=回车确定；多行=textarea + 字数计数（决策 18）。Esc/遮罩取消。 */}
       {promptDlg && (
         <div className="modal-mask" onClick={() => { promptDlg.resolve(null); setPromptDlg(null); }}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>{promptDlg.title}</h3>
-            <input autoFocus value={promptDlg.value} placeholder={promptDlg.placeholder} maxLength={promptDlg.maxLength}
-                   onChange={(e) => setPromptDlg({ ...promptDlg, value: e.target.value })}
-                   onKeyDown={(e) => {
-                     if (e.key === "Enter") { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }
-                     else if (e.key === "Escape") { promptDlg.resolve(null); setPromptDlg(null); }
-                   }} />
+            {promptDlg.multiline ? (
+              <textarea autoFocus className="modal-textarea" value={promptDlg.value} placeholder={promptDlg.placeholder} maxLength={promptDlg.maxLength}
+                        onChange={(e) => setPromptDlg({ ...promptDlg, value: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Escape") { promptDlg.resolve(null); setPromptDlg(null); } }} />
+            ) : (
+              <input autoFocus value={promptDlg.value} placeholder={promptDlg.placeholder} maxLength={promptDlg.maxLength}
+                     onChange={(e) => setPromptDlg({ ...promptDlg, value: e.target.value })}
+                     onKeyDown={(e) => {
+                       if (e.key === "Enter") { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }
+                       else if (e.key === "Escape") { promptDlg.resolve(null); setPromptDlg(null); }
+                     }} />
+            )}
+            {promptDlg.maxLength && (
+              <div className="modal-counter">{promptDlg.value.length}/{promptDlg.maxLength}</div>
+            )}
             <div className="modal-actions">
               <button className="link" onClick={() => { promptDlg.resolve(null); setPromptDlg(null); }}>取消</button>
+              {promptDlg.extraAction && (
+                <button className={`mini-btn${promptDlg.extraAction.danger ? " danger" : " ghost"}`}
+                        onClick={() => { promptDlg.resolve(promptDlg.extraAction!.value); setPromptDlg(null); }}>
+                  {promptDlg.extraAction.label}
+                </button>
+              )}
               <button className="mini-btn" onClick={() => { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }}>
                 {promptDlg.okText}
               </button>
@@ -5782,6 +5876,16 @@ function dayHeader(ts: number): string {
   if (isSameDay(ts, yesterday.getTime())) return "昨天";
   if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+// 毫秒时间戳 → "M月d日 HH:mm"（往年带年份）。群公告发布时间用。
+function fmtDateTime(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts), now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (d.getFullYear() === now.getFullYear()) return `${md} ${hm}`;
+  return `${d.getFullYear()}年${md} ${hm}`;
 }
 
 // 消息列表里的最大 conv_seq（发送中的 0 不计）。
