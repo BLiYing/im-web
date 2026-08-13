@@ -78,7 +78,7 @@ export class IMClient {
   private seq = 0;
   private uid = "";
   private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
-  private sessionToken = ""; // 扫码登录换来的 JWT（无密码）：置位后（重）连复用它、不再走 /login 换 token
+  private sessionToken = ""; // 扫码登录标记（置位=本会话无密码可回退）：重连探活失效时无法 /login 自愈，一律回登录
   private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
   private state: ConnState = "disconnected";
   private pingTimer: number | null = null;
@@ -880,20 +880,27 @@ export class IMClient {
     };
   }
 
-  /** POST /api/v1/login 换 token。带 password=真账号登录；password 空=开发期免密直签。失败抛带服务端文案的 Error。
-   *  扫码登录（sessionToken 置位）无密码：复用已签发 token，并做一次轻量鉴权探活——被踢/过期(auth 码)即抛，
-   *  由 openSocket 现有分支路由到 onAuthError 回登录；网络失败抛非 auth 错，继续重连。 */
+  /** 取本次（重）连要用的 token。首次登录走 POST /api/v1/login（password 真账号 / 空=免密直签）。
+   *
+   *  **重连关键**：有现成 token（扫码会话，或密码会话重连时上一枚）时**先拿它探活 /devices**，
+   *  在重登之前发现吊销——否则密码会话重连直接 /login 会重新签发新会话，把「踢下线」自愈掉。
+   *   - 探活 code=0：复用该 token（顺带省一次 /login）。
+   *   - code=100101 吊销：一律抛（两类会话都强制回登录）。
+   *   - 其它失效（如 100102 过期）：扫码会话无密码救不了→抛回登录；**密码会话**才落到下面 /login 自愈。
+   *  抛出的 auth 码由 openSocket 现有分支路由到 onAuthError；网络失败抛非 auth 错，继续重连。 */
   private async fetchToken(uid: string, password: string): Promise<string> {
-    if (this.sessionToken) {
+    if (this.token) {
       const probe = await fetchJSON("/api/v1/devices", {
-        headers: { Authorization: `Bearer ${this.sessionToken}` },
+        headers: { Authorization: `Bearer ${this.token}` },
       });
-      if (probe.code !== 0) {
+      if (probe.code === 0) return this.token; // 仍有效，复用
+      if (probe.code === 100101 || this.sessionToken) {
+        // 100101 吊销(两类会话)；或扫码会话无密码、任何失效都救不了 → 回登录。
         const e = new Error(friendlyMessage(probe.code, probe.message || "登录已失效")) as Error & { code?: number };
-        e.code = probe.code; // 100101/100102=吊销/过期(auth 码) → 回登录；其它按网络失败重试
+        e.code = probe.code;
         throw e;
       }
-      return this.sessionToken;
+      // 密码会话 + 非吊销（如 100102 过期）→ 落下去用 /login 重新签发（自愈）。
     }
     const body = await fetchJSON("/api/v1/login", {
       method: "POST",
