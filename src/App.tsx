@@ -3474,13 +3474,24 @@ export default function App() {
   };
 
   const openGroupCard = async (cid: string) => {
+    const gi = groupInfos[cid];
+    const canManage = gi?.my_role === "owner" || gi?.my_role === "admin";
+    // perm_invite=1 时群码即邀请链接，仅群主/管理员可出示。无权限时不打开模态、直接中文吐司（对齐 iOS）。
+    if (gi?.perm_invite && !canManage) {
+      setToast("群主已开启「仅管理员可邀请」，你无法出示群二维码");
+      return;
+    }
     try {
       const card = await clientRef.current!.groupQR(cid);
-      const gi = groupInfos[cid];
-      const canReset = gi?.my_role === "owner" || gi?.my_role === "admin";
       setQrCardModal({ title: "群二维码", subtitle: "扫描二维码，加入群聊",
-        name: gi?.name || "群聊", avatarUrl: gi?.avatar_url, card, canReset, kind: "group", convId: cid });
-    } catch (e) { setToast(`获取群二维码失败：${(e as Error).message}`); }
+        name: gi?.name || "群聊", avatarUrl: gi?.avatar_url, card, canReset: canManage, kind: "group", convId: cid });
+    } catch (e) {
+      // 服务端兜底（本地 perm_invite 可能过期）：300204 映射为中文，其余透传。
+      const msg = errorCode(e) === 300204
+        ? "群主已开启「仅管理员可邀请」，你无法出示群二维码"
+        : `获取群二维码失败：${(e as Error).message}`;
+      setToast(msg);
+    }
   };
 
   // 名片码/群码重置：换新码（旧码立即失效），更新模态内展示。
@@ -5384,7 +5395,7 @@ export default function App() {
                     {d.isGroup && (
                       <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
                         <span className="detail-row-ic"><QrCode size={18} /></span><span>群二维码</span>
-                        <ChevronRight size={16} className="detail-row-chev" />
+                        <ChevronRight size={16} className="detail-row-chev end" />
                       </button>
                     )}
                   </div>

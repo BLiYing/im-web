@@ -908,6 +908,9 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-row-val.muted { color: var(--text-secondary); }
 .detail-row .switch { margin-left: auto; }
 .detail-row-chev { color: var(--text-secondary); flex-shrink: 0; }
+/* 无 detail-row-val 的行（如「群二维码」）箭头右对齐；有 val 的行不能加，否则两个
+   margin-left:auto 会平分空白把 val 挤到中间。故仅给这类行的箭头单独标记。 */
+.detail-row-chev.end { margin-left: auto; }
 
 /* 开关 */
 .switch { position: relative; width: 42px; height: 25px; border-radius: 13px; border: 0; background: var(--separator); cursor: pointer; transition: background .2s; flex-shrink: 0; }
@@ -1161,7 +1164,8 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-announce-body { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 
 /* ── 群管理面板分组标题 + 禁言时长选择（G2） ── */
-.detail-card-title { font-size: 12px; color: var(--text-secondary); margin: 14px 4px 4px; text-transform: none; }
+/* 左内边距对齐卡片左缘（.detail-card margin:16px），不再比卡片左突出 12px。 */
+.detail-card-title { font-size: 12px; color: var(--text-secondary); margin: 14px 16px 4px; text-transform: none; }
 .mute-durations { display: flex; flex-direction: column; gap: 8px; margin: 4px 0; }
 .mute-durations .mini-btn { width: 100%; }
 
