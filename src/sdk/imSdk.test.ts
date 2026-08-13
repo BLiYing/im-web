@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { friendlyMessage, shouldHealGap } from "./imSdk";
+import { friendlyMessage, shouldHealGap, nextSyncCursor } from "./imSdk";
 
 describe("friendlyMessage 错误码友好中文", () => {
   it("已知业务码映射为中文（被拉黑用模糊文案）", () => {
@@ -44,5 +44,19 @@ describe("shouldHealGap 离线空洞自愈判定", () => {
   it("回退/历史分页(seq<=已同步) → 不自愈", () => {
     expect(shouldHealGap(5, 3, true)).toBe(false);
     expect(shouldHealGap(5, 5, true)).toBe(false);
+  });
+});
+
+describe("nextSyncCursor 按 covered_conv_seq 推进游标（破解可见性空洞死循环）", () => {
+  it("covered 大于当前游标 → 跳过不可见空洞推进到 covered", () => {
+    // history_visible 新成员：游标 0，本页只下发入群后消息，服务端 covered=141 覆盖入群前空洞。
+    expect(nextSyncCursor(0, 141)).toBe(141);
+  });
+  it("covered 等于/小于当前游标 → 不动（空页 / 已追平）", () => {
+    expect(nextSyncCursor(141, 141)).toBe(141);
+    expect(nextSyncCursor(141, 100)).toBe(141);
+  });
+  it("缺字段 covered=0 → 保持原位（老服务端兼容，不倒退）", () => {
+    expect(nextSyncCursor(50, 0)).toBe(50);
   });
 });

@@ -965,18 +965,20 @@ export class IMClient {
           for (const m of conv.messages || []) this.processIncoming(m, false);
           if (isPaged) {
             // 聊天历史分页只返回一页，不参与自动追平。
-          } else if (conv.has_more && conv.conv_id) {
-            const responseLatest = Number(conv.latest_conv_seq) || 0;
-            const continuous = this.syncedSeq.get(conv.conv_id) ?? 0;
-            if (continuous === responseLatest) {
-              this.sendSyncReq([conv.conv_id]); // 只从本页实际连续处理完成的位置继续翻页
-            } else {
-              logger.warn(LOG_TAG.ws, "sync_page_not_contiguous", {
-                conv_id: conv.conv_id,
-                response_latest_seq: responseLatest,
-                continuous_seq: continuous,
-              });
-            }
+            continue;
+          }
+          const convId = typeof conv.conv_id === "string" ? conv.conv_id : "";
+          if (!convId) continue;
+          // 权威覆盖位点：服务端断言 (since, covered] 内每个 conv_seq 要么已下发、要么对本人不可见
+          // （G2 history_visible 抬入群下界、「仅为我删除」隐藏项）。据此把游标直接推过这些永远拿不到的
+          // 可见性空洞——不能用 latest_conv_seq（只记实际下发的最大序号，会漏跳过的空洞导致游标永久卡死）。
+          const covered = Number(conv.covered_conv_seq) || 0;
+          const before = this.syncedSeq.get(convId) ?? 0;
+          const next = nextSyncCursor(before, covered);
+          if (next > before) {
+            this.updateSynced(convId, next);
+            void localStore.advanceSyncCursor(this.uid, convId, next); // 消息已先落库，再持久化游标
+            if (conv.has_more) this.sendSyncReq([convId]); // 从新游标继续翻页
           }
         }
         break;
@@ -1290,6 +1292,13 @@ export class IMClient {
  *  初始位置为 0 但首条直接是较大序号同样是空洞，不能当作已同步。 */
 export function shouldHealGap(prevSynced: number, incomingConvSeq: number, tracked: boolean): boolean {
   return tracked && prevSynced >= 0 && incomingConvSeq > prevSynced + 1;
+}
+
+/** sync 游标推进规则（纯函数，导出供单测）：服务端 covered_conv_seq 权威覆盖 (since, covered]——
+ *  区间内每个序号要么已下发、要么对本人不可见（history_visible 抬入群下界 / 「仅为我删除」隐藏项）。
+ *  据此把游标推过永远拿不到的可见性空洞，破解死循环；covered 未超过当前游标则不动（空页/已追平）。 */
+export function nextSyncCursor(before: number, covered: number): number {
+  return covered > before ? covered : before;
 }
 
 /** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。
