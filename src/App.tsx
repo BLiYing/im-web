@@ -1249,9 +1249,17 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
-      // 鉴权失效（账号没了/密码错/token 失效）→ 弹框让用户选，不强制踢走：
-      // 确定→重新登录；取消→留在当前界面继续看本地聊天记录（socket 已停重连，不刷屏）。
-      onAuthError: (msg) => {
+      // 鉴权失效分两类处理：
+      // ① 100101 吊销/被踢下线 → 强制退登，直接跳登录页（不给可取消弹窗——被踢是不可协商的，
+      //    「边看本地边被踢」自相矛盾）；原因写到登录页顶部红字。与 iOS 握手 401 直跳登录对齐。
+      // ② 其余（100102 过期等良性失效）→ 仍弹框二选一：确定重新登录 / 取消留看本地缓存聊天记录。
+      onAuthError: (msg, code) => {
+        if (code === 100101) {
+          logout();
+          // 重连路径里 100101 只会是「会话被吊销」（活 token 老化只会得 100102），即被踢/退其他/超限 LRU。
+          setAuthErr("此设备的登录已被移除，请重新登录"); // logout 会清 authErr，故放其后
+          return;
+        }
         void askConfirm(`${msg}。点"确定"重新登录；"取消"可继续查看本地聊天记录。`, { okText: "重新登录" })
           .then((ok) => {
             if (!ok) return;
@@ -3275,13 +3283,14 @@ export default function App() {
           <button className={`login-tab${loginTab === "password" ? " on" : ""}`} onClick={() => setLoginTab("password")}>密码登录</button>
           <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => setLoginTab("qr")}>扫码登录</button>
         </div>
+        {/* 鉴权失效原因（如被踢下线）在两个页签下都要可见——被踢时可能正停在扫码页。 */}
+        {authErr && <p className="auth-err">{authErr}</p>}
         {loginTab === "password" ? (
           <>
             <label>用户名<input value={uid} autoFocus onChange={(e) => setUid(e.target.value.trim())} /></label>
             <label>密码<input type="password" value={password} placeholder="≥ 6 位"
               onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void enterApp(password); }} /></label>
-            {authErr && <p className="auth-err">{authErr}</p>}
             <button disabled={authBusy} onClick={() => void enterApp(password)}>登录</button>
             <button className="secondary" disabled={authBusy} onClick={() => void doRegister()}>注册并登录</button>
             <p className="hint">

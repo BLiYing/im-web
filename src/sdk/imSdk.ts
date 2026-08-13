@@ -49,8 +49,9 @@ export interface IMClientHandlers {
   /** 群成员/资料变更（invite/leave/remove/role/transfer/profile；G3 加 join_request/join_result）：提示刷新该群与会话列表。
    *  result 仅 join_result 帧带（approved|rejected），其余为空。 */
   onGroup?: (event: string, convId: string, from: string, target: string, result: string) => void;
-  /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。 */
-  onAuthError?: (msg: string) => void;
+  /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。
+   *  code 为业务码，供 UI 区分处理：100101 吊销/被踢=强制退登（直接跳登录），100102 过期=可留看本地缓存。 */
+  onAuthError?: (msg: string, code?: number) => void;
   /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。
    *  code 为服务端业务码（200102 被拉黑 / 200103 非好友 …），UI 据此决定是否给恢复入口。 */
   onMsgRejected?: (clientMsgId: string, msg: string, code: number) => void;
@@ -825,7 +826,7 @@ export class IMClient {
       const code = (e as { code?: number }).code;
       if (isAuthCode(code)) {
         this.manualClose = true; // 停止后续自动重连
-        this.handlers.onAuthError?.((e as Error).message || "登录已失效，请重新登录");
+        this.handlers.onAuthError?.((e as Error).message || "登录已失效，请重新登录", code);
       } else if (!this.manualClose) {
         this.scheduleReconnect();
       }
