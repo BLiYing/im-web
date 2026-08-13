@@ -5,6 +5,14 @@
 
 ## 当前焦点
 
+**QRCODE P0 + 群组 G3 入群 ✅（2026-08-13，tsc + build + 249 vitest 绿 + HTTP E2E 全通，待浏览器手测）** — 方案 `../IMServer/docs/QRCODE_DESIGN.md` / `GROUP_FEATURES_DESIGN.md` §4-G3、草图 `QRCODE_UX_SKETCH.html`。
+- **依赖**：新增 `qrcode`（出码，本地生成 PNG）+ `jsqr`（图片/摄像头解码）+ `@types/qrcode`。**bundle 因此 398→572KB**（超 500KB 告警，非错误；后续可 `React.lazy` 拆 `QRUI`）。
+- **SDK**（`sdk/protocol.ts` 加 QR/G3 类型；`sdk/imSdk.ts`）：`qrMyCard`/`qrResetMyCard`/`groupQR`/`groupQRReset`/`qrResolve`/`joinGroupByCode`/`fetchJoinRequests`/`decideJoinRequest`；`api()` 把 errcode **挂到 `Error.code`**（join 300210/码失效 200110 要按码分支）；`onGroup` 回调加第 5 参 `result`（join_result 用）；`friendlyMessage` 加 200110/300207/300208。
+- **纯逻辑**（`src/qr.ts` + `qr.test.ts` 15 例）：`userCardAction`/`groupCardAction`/`classifyUnknown`/`errorCode` + `decodeImageData`/`decodeImageFile`/`drawToImageData`（jsqr 封装）。
+- **UI**（`src/QRUI.tsx` + `App.tsx` 接线）：① 侧栏搜索框右侧 QR 图标 → **扫码浮层**（摄像头取景 + 上传/拖拽/⌘V 粘贴图片；无摄像头/非 HTTPS 只留图片通道；权限被拒引导）；② **我的名片码 / 群二维码模态**（本地生成 QR、下载 PNG、复制链接、重置带二次确认）；③ **resolve 四分支**（名片=加好友/发消息/看资料、群预览=加入/需审批带附言/进群/满/黑名单、失效码=`200110` 提示、外来码=域名加粗二次确认不自动跳转）；④ **G3**：群管理「治理」卡加「待审入群申请(N)」→审批列表（同意/拒绝），`onGroup` 处理 `join_request`(重拉列表/刷 `pending_count` 角标)、`join_result`(通过/拒绝 toast)。
+- **入口**：侧栏 QR 图标（扫一扫，含「我的二维码」快捷）· 设置页「我的二维码」行 · 群资料抽屉「群二维码」行 · 群管理「待审入群申请(N)」。
+- **已知限制**：① 图片识别用 jsqr **单码**（未做「一图多码候选点选」，设计的进阶项）；② 群码资料抽屉入口对普通成员也显示，`perm_invite=1` 时点了由后端 300204 拦（toast），未在前端预隐藏；③ 扫码登录 `q/l`（P1）未做，扫到走 unknown。**摄像头实扫需浏览器手测**（自动化环境无相机）。**后端需重启带 QR 路由的新二进制再测。**
+
 **G2 群治理 ✅（2026-08-13，tsc+234 vitest+build 绿，待手测）** — 方案 `../IMServer/docs/GROUP_FEATURES_DESIGN.md` §G2、草图 §04/§07。
 群管理面板加三卡：加入与发言（进群确认/全员禁言开关）· 成员权限（仅管理员可邀请/改资料/置顶三开关 + 新成员可见历史）· 治理（黑名单入口）。黑名单弹窗（解除拉黑）。成员菜单加「禁言…(10min/1h/1d/永久时长选择弹窗)」「移出群聊(24h冷却)」「移出并不再允许加入(永久)」。聊天区 composer 禁言锁（`composerMuteReason`：成员级/全员禁言时禁用输入+占位）。SDK 加 setGroupSettings/muteGroupMember/removeGroupMemberWithBan/fetchGroupBans/unbanGroupMember。
 

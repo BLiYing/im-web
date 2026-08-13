@@ -249,6 +249,53 @@ export interface GroupInfo {
   perm_pin?: boolean;
   history_visible?: boolean;
   my_mute_until?: number; // 我的成员级禁言到期（G2）
+  pending_count?: number; // 待审入群申请数（G3，仅群主/管理员下发）
+}
+
+/** 名片码/群码返回体（QRCODE P0；端本地据 url 生成二维码图片）。 */
+export interface QRCard {
+  url: string;
+  token: string;
+  expires_at: number; // 0=长期有效（名片码）
+  inviter?: string; // 群码：邀请人 uid
+}
+
+/** resolve kind=user 的 data（扫名片码后展示的对方资料）。 */
+export interface QRUserCard {
+  user_id: string;
+  nickname: string;
+  avatar_url: string;
+  relation: "stranger" | "friend" | "self" | "blocked";
+}
+
+/** resolve kind=group 的 data（扫群码后的群预览 + 准入判定）。 */
+export interface QRGroupCard {
+  group_id: string;
+  name: string;
+  avatar_url: string;
+  member_count: number;
+  inviter_nickname: string;
+  joined: boolean;
+  joinable: boolean;
+  reason: string; // "" 可直接入群 | approval 可申请需审批 | joined | full | banned
+}
+
+/** POST /qr/resolve 返回：kind 决定 data 形状。 */
+export interface QRResolved {
+  kind: "user" | "group" | "unknown";
+  data: QRUserCard | QRGroupCard | { text: string };
+}
+
+/** 入群申请一项（G3；对齐后端 group.JoinRequestView）。 */
+export interface JoinRequest {
+  user_id: string;
+  nickname: string;
+  avatar_url: string;
+  hello: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: number;
+  decided_by?: string;
+  decided_at?: number;
 }
 
 /** 群黑名单一项（G2）。 */

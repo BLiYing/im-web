@@ -2,7 +2,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
+import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
+import { errorCode } from "./qr";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
@@ -34,7 +36,7 @@ import {
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, PinOff, List,
   Download, LayoutGrid, MoreHorizontal, Play,
   Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward, Eye,
-  ChevronDown, ChevronUp, Copy,
+  ChevronDown, ChevronUp, Copy, QrCode,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -687,6 +689,11 @@ export default function App() {
   const [groupRemarkTick, setGroupRemarkTick] = useState(0); // 群备注（本地）变更计数，触发标题/列表重渲染
   const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null); // 当前群黑名单（管理面板显示计数）
   const [groupBansModal, setGroupBansModal] = useState<{ convId: string; bans: GroupBan[] } | null>(null); // 黑名单弹窗
+  // 二维码体系（QRCODE P0）+ G3 入群 UI 状态。
+  const [qrScan, setQrScan] = useState(false); // 扫一扫浮层
+  const [qrCardModal, setQrCardModal] = useState<{ title: string; subtitle: string; name: string; avatarUrl?: string; card: QRCard; canReset: boolean; kind: "me" | "group"; convId?: string } | null>(null);
+  const [qrResult, setQrResult] = useState<{ data: QRResolved | { kind: "expired" }; raw: string } | null>(null);
+  const [joinReqModal, setJoinReqModal] = useState<{ convId: string; requests: JoinRequest[]; loading: boolean } | null>(null);
   const [muteDurationFor, setMuteDurationFor] = useState<{ convId: string; m: GroupMember } | null>(null); // 成员禁言时长选择
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
@@ -1138,9 +1145,17 @@ export default function App() {
       // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
       onFriend: () => { void refreshFriends(); },
       // 群成员/资料实时变更：刷新会话列表 + 该群资料缓存；自己被移出 → 提示并退出该会话。
-      onGroup: (event, cid, _from, target) => {
+      onGroup: (event, cid, _from, target, result) => {
+        // G3 join_result 推给非成员申请人：审批结果只提示，不去拉群资料（被拒时非成员，会 403）。
+        if (event === "join_result") {
+          setToast(result === "approved" ? "你的入群申请已通过，进群聊天吧" : "你的入群申请未通过");
+          if (result === "approved") scheduleListRefresh();
+          return;
+        }
         scheduleListRefresh();
         if (event !== "dissolve") void refreshGroupInfo(cid); // 被移出时 fetch 报 300203 → 自动清缓存；解散后群已不存在，无需再拉
+        // G3 join_request 只推群主/管理员：待审列表开着就重拉（pending_count 角标随 refreshGroupInfo 更新）。
+        if (event === "join_request") { void reloadJoinRequests(cid); return; }
         // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
         if ((event === "remove" && target === uid) || event === "dissolve") {
           setToast(event === "dissolve" ? "该群已被解散" : "你已被移出群聊");
@@ -3436,6 +3451,101 @@ export default function App() {
     } catch (e) { setToast(`解除失败：${(e as Error).message}`); }
   };
 
+  // ---- 二维码体系（QRCODE P0）----
+
+  // 扫到原文 → 服务端 resolve → 按 kind 展示分支；码失效（200110）走「已失效」分支。
+  const handleScanRaw = async (raw: string) => {
+    setQrScan(false);
+    try {
+      const data = await clientRef.current!.qrResolve(raw);
+      setQrResult({ data, raw });
+    } catch (e) {
+      if (errorCode(e) === 200110) setQrResult({ data: { kind: "expired" }, raw });
+      else setToast((e as Error).message);
+    }
+  };
+
+  const openMyCard = async () => {
+    try {
+      const card = await clientRef.current!.qrMyCard();
+      setQrCardModal({ title: "我的二维码", subtitle: "扫描二维码，加我为朋友",
+        name: myInfo?.nickname || uid, avatarUrl: myInfo?.avatar_url, card, canReset: true, kind: "me" });
+    } catch (e) { setToast(`获取名片码失败：${(e as Error).message}`); }
+  };
+
+  const openGroupCard = async (cid: string) => {
+    try {
+      const card = await clientRef.current!.groupQR(cid);
+      const gi = groupInfos[cid];
+      const canReset = gi?.my_role === "owner" || gi?.my_role === "admin";
+      setQrCardModal({ title: "群二维码", subtitle: "扫描二维码，加入群聊",
+        name: gi?.name || "群聊", avatarUrl: gi?.avatar_url, card, canReset, kind: "group", convId: cid });
+    } catch (e) { setToast(`获取群二维码失败：${(e as Error).message}`); }
+  };
+
+  // 名片码/群码重置：换新码（旧码立即失效），更新模态内展示。
+  const resetQRCard = async () => {
+    const m = qrCardModal;
+    if (!m) return;
+    const card = m.kind === "me"
+      ? await clientRef.current!.qrResetMyCard()
+      : await clientRef.current!.groupQRReset(m.convId!);
+    setQrCardModal({ ...m, card });
+    setToast("二维码已重置，旧码已失效");
+  };
+
+  // 扫码结果的动作集：加好友 / 发消息 / 看资料 / 加群 / 进群。
+  const qrResultActions = {
+    onAddFriend: async (peer: string) => {
+      const became = await clientRef.current!.requestFriend(peer);
+      setToast(became ? "已添加为好友" : "已发送好友申请");
+      void refreshFriends();
+    },
+    onMessage: (peer: string) => openChat(peer),
+    onViewProfile: (peer: string) => openPeerDetail(peer),
+    onEnterGroup: (cid: string) => openGroupChat(cid),
+    // 凭扫到的原始码入群：直连成功进群；需审批（300210）转"已提交"提示；已满/黑名单等透传文案。
+    onJoinGroup: async (hello: string) => {
+      const raw = qrResult?.raw ?? "";
+      try {
+        const info = await clientRef.current!.joinGroupByCode(raw, hello);
+        setToast(`已加入「${info.name}」`);
+        await refreshConversations();
+        openGroupChat(info.conv_id);
+      } catch (e) {
+        if (errorCode(e) === 300210) setToast("入群申请已提交，等待管理员审批");
+        else setToast((e as Error).message);
+      }
+    },
+  };
+
+  // ---- 入群审批（G3）----
+
+  const openJoinRequests = async (cid: string) => {
+    setJoinReqModal({ convId: cid, requests: [], loading: true });
+    try {
+      const requests = await clientRef.current!.fetchJoinRequests(cid);
+      setJoinReqModal({ convId: cid, requests, loading: false });
+    } catch (e) {
+      setJoinReqModal(null);
+      setToast(`加载入群申请失败：${(e as Error).message}`);
+    }
+  };
+  const reloadJoinRequests = async (cid: string) => {
+    try {
+      const requests = await clientRef.current!.fetchJoinRequests(cid);
+      setJoinReqModal((m) => (m && m.convId === cid ? { ...m, requests, loading: false } : m));
+    } catch { /* 列表已关或无权限，忽略 */ }
+  };
+  const decideJoin = async (cid: string, userId: string, accept: boolean) => {
+    try {
+      await clientRef.current!.decideJoinRequest(cid, userId, accept);
+      await reloadJoinRequests(cid);
+      void refreshGroupInfo(cid); // 更新 pending_count 角标
+      setToast(accept ? "已同意入群" : "已拒绝");
+    } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+  };
+
   // 我在本群的昵称（G1，任意成员）：走后端 → 刷新群资料（气泡回退名随之更新）。
   const doEditMyGroupNickname = async (gp: GroupInfo) => {
     const nick = await askPrompt("我在本群的昵称", gp.my_nickname ?? "", { placeholder: "群内可见（≤20 字，留空恢复默认）", okText: "保存", maxLength: 20 });
@@ -3539,6 +3649,7 @@ export default function App() {
   const settingsInfoRows: Row[] = [
     { id: "phone", label: myInfo?.phone || "未设置", icon: Phone, value: "手机号", onClick: () => void openProfile() },
     { id: "username", label: `@${uid}`, icon: AtSign, value: "用户名", onClick: () => void openProfile() },
+    { id: "qr", label: "我的二维码", icon: QrCode, value: "", chevron: true, onClick: () => void openMyCard() },
   ];
 
   // 通讯录顶部入口行（数据驱动）。
@@ -3628,6 +3739,7 @@ export default function App() {
               onChange={(e) => setSearchQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
             <button onClick={() => void doSearch()}>搜索</button>
+            <button className="newchat-qr" title="扫一扫 / 我的二维码" aria-label="扫一扫" onClick={() => setQrScan(true)}><QrCode size={18} /></button>
           </div>
           <div className="contact-entries">
             {contactEntries.map((r) => renderRow(r, "entry-row"))}
@@ -5182,6 +5294,10 @@ export default function App() {
                   </div>
                   <div className="detail-card-title">治理</div>
                   <div className="detail-card">
+                    <button className="detail-row" onClick={() => void openJoinRequests(gp.conv_id)}>
+                      <span className="detail-row-ic"><UserPlus size={18} /></span><span>待审入群申请</span>
+                      <span className="detail-row-val">{gp.pending_count ? `${gp.pending_count} 待处理` : "无"}</span><ChevronRight size={16} className="detail-row-chev" />
+                    </button>
                     <button className="detail-row" onClick={() => void openGroupBans(gp.conv_id)}>
                       <span className="detail-row-ic"><Ban size={18} /></span><span>黑名单</span>
                       <span className="detail-row-val">{groupBans ? `${groupBans.length} 人` : ""}</span><ChevronRight size={16} className="detail-row-chev" />
@@ -5258,6 +5374,12 @@ export default function App() {
                       <button className="detail-row" onClick={() => setManageOpen(true)}>
                         <span className="detail-row-ic"><Settings2 size={18} /></span><span>群管理</span>
                         <span className="detail-row-val muted">仅群主/管理员</span><ChevronRight size={16} className="detail-row-chev" />
+                      </button>
+                    )}
+                    {d.isGroup && (
+                      <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
+                        <span className="detail-row-ic"><QrCode size={18} /></span><span>群二维码</span>
+                        <ChevronRight size={16} className="detail-row-chev" />
                       </button>
                     )}
                   </div>
@@ -5538,6 +5660,48 @@ export default function App() {
             <button className="modal-close" onClick={() => setGroupBansModal(null)}>关闭</button>
           </div>
         </div>
+      )}
+
+      {/* 扫一扫（QRCODE P0）：摄像头 / 上传 / 拖拽 / 粘贴 → resolve。 */}
+      {qrScan && (
+        <QRScannerModal
+          onRaw={(raw) => void handleScanRaw(raw)}
+          onClose={() => setQrScan(false)}
+          onMyCard={() => { setQrScan(false); void openMyCard(); }}
+        />
+      )}
+
+      {/* 名片码 / 群码展示模态。 */}
+      {qrCardModal && (
+        <QRCardModal
+          title={qrCardModal.title}
+          subtitle={qrCardModal.subtitle}
+          name={qrCardModal.name}
+          avatarUrl={qrCardModal.avatarUrl}
+          card={qrCardModal.card}
+          canReset={qrCardModal.canReset}
+          onReset={resetQRCard}
+          onClose={() => setQrCardModal(null)}
+        />
+      )}
+
+      {/* 扫码结果分支（user / group / unknown / expired）。 */}
+      {qrResult && (
+        <QRResultModal
+          result={qrResult.data}
+          actions={qrResultActions}
+          onClose={() => setQrResult(null)}
+        />
+      )}
+
+      {/* 待审入群申请列表（G3，群主/管理员）。 */}
+      {joinReqModal && (
+        <JoinRequestsModal
+          requests={joinReqModal.requests}
+          loading={joinReqModal.loading}
+          onDecide={(uid2, accept) => decideJoin(joinReqModal.convId, uid2, accept)}
+          onClose={() => setJoinReqModal(null)}
+        />
       )}
 
       {/* 应用内确认框（替代 window.confirm，统一 .modal 风格）。点遮罩 = 取消。 */}

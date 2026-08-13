@@ -1164,3 +1164,66 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-card-title { font-size: 12px; color: var(--text-secondary); margin: 14px 4px 4px; text-transform: none; }
 .mute-durations { display: flex; flex-direction: column; gap: 8px; margin: 4px 0; }
 .mute-durations .mini-btn { width: 100%; }
+
+/* ===== 二维码体系（QRCODE P0）+ G3 入群 ===== */
+.modal-title { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 600; color: var(--text); margin: 0; }
+.qr-close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.qr-close:hover { background: var(--surface-hover); }
+.modal.qr-modal, .modal.qr-scan-modal, .modal.qr-result-modal, .modal.join-req-modal { position: relative; width: 340px; }
+
+/* 名片码 / 群码 */
+.qr-avatar { border-radius: 50%; object-fit: cover; display: inline-flex; }
+.qr-avatar-fallback { align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.qr-card-head { display: flex; align-items: center; gap: 10px; }
+.qr-card-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.qr-img-wrap { display: flex; justify-content: center; padding: 8px 0; }
+.qr-img { width: 240px; height: 240px; border-radius: 12px; background: #fff; padding: 8px; box-sizing: border-box; }
+.qr-img-loading { background: var(--surface); }
+.qr-card-sub { text-align: center; color: var(--text-secondary); font-size: 13px; }
+.qr-card-actions { justify-content: center; }
+.qr-card-actions .mini-btn, .qr-scan-actions .mini-btn { display: inline-flex; align-items: center; gap: 5px; }
+.qr-reset-link { display: inline-flex; align-items: center; gap: 5px; justify-content: center; background: transparent; border: 0; color: var(--text-secondary); font-size: 13px; cursor: pointer; padding: 4px; }
+.qr-reset-link:hover { color: var(--danger); }
+.qr-reset-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--surface); border-radius: 10px; }
+.qr-reset-warn { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+
+/* 扫一扫 */
+.qr-scan-stage { position: relative; width: 100%; aspect-ratio: 1; background: #000; border-radius: 12px; overflow: hidden; }
+.qr-scan-video { width: 100%; height: 100%; object-fit: cover; }
+.qr-scan-frame { position: absolute; inset: 18%; border: 2px solid rgba(255,255,255,0.9); border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0,0,0,0.25); }
+.qr-scan-tip { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; color: #fff; font-size: 12px; text-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+.qr-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 32px 16px; border: 2px dashed var(--separator); border-radius: 12px; color: var(--text-secondary); text-align: center; }
+.qr-drop.over { border-color: var(--accent); background: var(--surface); }
+.qr-drop-title { font-size: 14px; color: var(--text); }
+.qr-drop-sub { font-size: 12px; }
+.qr-scan-actions { justify-content: center; }
+.qr-scan-actions label.mini-btn { cursor: pointer; }
+.qr-scan-hint { text-align: center; font-size: 12px; color: var(--text-secondary); }
+.qr-scan-permhint { display: flex; align-items: center; gap: 4px; justify-content: center; }
+
+/* 扫码结果分支 */
+.qr-branch { display: flex; flex-direction: column; gap: 12px; }
+.qr-branch-center { align-items: center; text-align: center; }
+.qr-branch-icon { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface); color: var(--text-secondary); }
+.qr-branch-head { display: flex; align-items: center; gap: 12px; }
+.qr-branch-title { display: flex; align-items: center; gap: 5px; font-size: 16px; font-weight: 600; color: var(--text); }
+.qr-branch-meta { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.qr-branch-note { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.qr-branch-warn { font-size: 12px; color: var(--danger); line-height: 1.5; }
+.qr-branch-actions { flex-direction: column; gap: 8px; }
+.qr-branch-actions .mini-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.qr-unknown-text { font-size: 13px; word-break: break-all; padding: 10px; background: var(--surface); border-radius: 8px; color: var(--text); }
+.qr-hello-input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--separator); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; }
+
+/* G3 待审申请列表 */
+.join-req-empty { text-align: center; color: var(--text-secondary); font-size: 13px; padding: 20px 0; }
+.join-req-list { display: flex; flex-direction: column; gap: 4px; max-height: 60vh; overflow-y: auto; }
+.join-req-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; }
+.join-req-info { flex: 1; min-width: 0; }
+.join-req-name { font-size: 14px; color: var(--text); font-weight: 500; }
+.join-req-hello { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.join-req-btns { display: flex; gap: 6px; }
+
+/* 侧栏扫码入口 */
+.newchat-qr { display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; background: var(--surface); border: 1px solid var(--separator); border-radius: var(--radius-card); color: var(--text-secondary); cursor: pointer; }
+.newchat-qr:hover { color: var(--accent); }

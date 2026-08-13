@@ -2,7 +2,7 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -46,8 +46,9 @@ export interface IMClientHandlers {
   onTyping?: (convId: string, from: string) => void;
   /** 好友关系变更（申请/同意/拒绝/拉黑/删除）：提示刷新通讯录。 */
   onFriend?: (event: string, from: string) => void;
-  /** 群成员/资料变更（invite/leave/remove/role/transfer/profile）：提示刷新该群与会话列表。 */
-  onGroup?: (event: string, convId: string, from: string, target: string) => void;
+  /** 群成员/资料变更（invite/leave/remove/role/transfer/profile；G3 加 join_request/join_result）：提示刷新该群与会话列表。
+   *  result 仅 join_result 帧带（approved|rejected），其余为空。 */
+  onGroup?: (event: string, convId: string, from: string, target: string, result: string) => void;
   /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。 */
   onAuthError?: (msg: string) => void;
   /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。
@@ -167,7 +168,12 @@ export class IMClient {
       ...init,
       headers: { Authorization: `Bearer ${this.token}`, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...(init?.headers ?? {}) },
     });
-    if (body.code !== 0) throw new Error(friendlyMessage(body.code, body.message));
+    if (body.code !== 0) {
+      // 保留业务码：调用方需据码分支（如 300210 入群待审、200110 码失效），message 已本地化。
+      const err = new Error(friendlyMessage(body.code, body.message)) as Error & { code?: number };
+      err.code = body.code;
+      throw err;
+    }
     return body.data;
   }
 
@@ -372,6 +378,58 @@ export class IMClient {
   async transferGroup(convId: string, userId: string): Promise<void> {
     await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/transfer`, {
       method: "POST", body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
+  // ---- 二维码体系（QRCODE P0）----
+
+  /** 我的名片码（懒生成，长期有效）。 */
+  async qrMyCard(): Promise<QRCard> {
+    return (await this.api(`/api/v1/qr/me`)) as QRCard;
+  }
+
+  /** 重置名片码（旧码立即失效）。 */
+  async qrResetMyCard(): Promise<QRCard> {
+    return (await this.api(`/api/v1/qr/me/reset`, { method: "POST" })) as QRCard;
+  }
+
+  /** 群二维码（须成员；perm_invite=1 时仅群主/管理员；7 天内复用同一枚）。 */
+  async groupQR(convId: string): Promise<QRCard> {
+    return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/qr`)) as QRCard;
+  }
+
+  /** 重置群码（群主/管理员）。 */
+  async groupQRReset(convId: string): Promise<QRCard> {
+    return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/qr/reset`, { method: "POST" })) as QRCard;
+  }
+
+  /** 扫码解析管道：raw=扫到的原文（URL 或裸 token）→ {kind, data}。失效码抛 200110。 */
+  async qrResolve(raw: string): Promise<QRResolved> {
+    return (await this.api(`/api/v1/qr/resolve`, {
+      method: "POST", body: JSON.stringify({ raw }),
+    })) as QRResolved;
+  }
+
+  // ---- 入群路径（G3）----
+
+  /** 凭群码入群（token 可为完整 URL 或裸 token）。成功返回群资料；需审批时抛 300210。 */
+  async joinGroupByCode(token: string, hello = ""): Promise<GroupInfo> {
+    return (await this.api(`/api/v1/groups/join`, {
+      method: "POST", body: JSON.stringify({ token, hello }),
+    })) as GroupInfo;
+  }
+
+  /** 待审入群申请（群主/管理员）；status 空=全部。 */
+  async fetchJoinRequests(convId: string, status = "pending"): Promise<JoinRequest[]> {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    const data = await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/join-requests${q}`);
+    return (data?.requests ?? []) as JoinRequest[];
+  }
+
+  /** 审批一条入群申请（群主/管理员）：accept=true→approve，false→reject。 */
+  async decideJoinRequest(convId: string, userId: string, accept: boolean): Promise<void> {
+    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/join-requests/${encodeURIComponent(userId)}`, {
+      method: "POST", body: JSON.stringify({ action: accept ? "approve" : "reject" }),
     });
   }
 
@@ -871,7 +929,7 @@ export class IMClient {
         this.handlers.onFriend?.(d.event, d.from);
         break;
       case T.GROUP:
-        this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "");
+        this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "", d.result ?? "");
         break;
       case T.CAPS_UPDATE: // 账号级配置版本变更（M4-7）：另一端改了自动下载策略 → 本端重拉
         this.handlers.onCapabilitiesUpdate?.(Number(d.version) || 0);
@@ -1211,11 +1269,15 @@ export function friendlyMessage(code: number, fallback: string): string {
     200104: "不能添加自己为好友",
     200105: "申请已发出，等待对方同意",
     200106: "没有待处理的好友申请",
+    200110: "二维码已失效，请向对方索取新的",
     300201: "群不存在",
     300202: "群名不能为空且不超过 30 字",
     300203: "你不在该群中",
     // 300204 不映射：服务端会带具体原因（如"群主需先转让群主再退群"），透传更有用。
     300205: "群成员已达上限",
+    300207: "你已被移出该群，暂时或永久不可加入",
+    300208: "你已被管理员禁言",
+    // 300210 不映射：入群申请已提交，UI 走"待审批"提示分支而非错误 toast。
   };
   return map[code] || fallback || `请求失败(${code})`;
 }

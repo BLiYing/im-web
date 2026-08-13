@@ -1,0 +1,396 @@
+// 二维码体系（QRCODE P0）+ 群组 G3 入群的 Web UI 组件（展示型，语义判定全在服务端）。
+// 与 App.tsx 解耦：组件只收数据 + 回调，扫码只吐 raw 字符串，由 App 走 SDK resolve。
+import { useEffect, useRef, useState, useCallback } from "react";
+import * as QRCode from "qrcode";
+import {
+  QrCode, X, Camera, Image as ImageIcon, RefreshCw, Download, Copy, Check,
+  UserPlus, LogIn, Users, ExternalLink, ScanLine, Clock,
+} from "lucide-react";
+import type { QRCard, QRResolved, QRUserCard, QRGroupCard, JoinRequest } from "./sdk/protocol";
+import { decodeImageData, decodeImageFile, drawToImageData, userCardAction, groupCardAction, classifyUnknown, type GroupAction } from "./qr";
+
+/** 生成二维码图片 dataURL（容错级 M，中留白，端本地生成）。失败返回空串。 */
+async function toQRDataURL(text: string): Promise<string> {
+  try {
+    return await QRCode.toDataURL(text, { errorCorrectionLevel: "M", margin: 2, width: 240 });
+  } catch {
+    return "";
+  }
+}
+
+function Avatar({ url, name, size = 44 }: { url?: string; name: string; size?: number }) {
+  const initial = (name || "?").trim().slice(0, 1).toUpperCase();
+  const style = { width: size, height: size, fontSize: size * 0.42 } as const;
+  return url
+    ? <img className="qr-avatar" src={url} alt="" style={style} />
+    : <span className="qr-avatar qr-avatar-fallback" style={style}>{initial}</span>;
+}
+
+// ---- 名片码 / 群码 展示模态（复用：我的名片码 + 群二维码）----
+
+export function QRCardModal(props: {
+  title: string;
+  subtitle: string;          // 「扫描二维码，加我为朋友」/「扫描二维码，加入群聊」
+  name: string;
+  avatarUrl?: string;
+  card: QRCard;
+  canReset: boolean;         // 我的码恒 true；群码仅群主/管理员
+  onReset: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const { title, subtitle, name, avatarUrl, card, canReset, onReset, onClose } = props;
+  const [img, setImg] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  useEffect(() => { void toQRDataURL(card.url).then(setImg); }, [card.url]);
+
+  const copyLink = useCallback(() => {
+    void navigator.clipboard?.writeText(card.url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [card.url]);
+
+  const downloadPNG = useCallback(() => {
+    if (!img) return;
+    const a = document.createElement("a");
+    a.href = img;
+    a.download = `${title}.png`;
+    a.click();
+  }, [img, title]);
+
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal qr-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <h3 className="modal-title">{title}</h3>
+        <div className="qr-card-head">
+          <Avatar url={avatarUrl} name={name} />
+          <div className="qr-card-name">{name}</div>
+        </div>
+        <div className="qr-img-wrap">
+          {img ? <img className="qr-img" src={img} alt="二维码" /> : <div className="qr-img qr-img-loading" />}
+        </div>
+        <div className="qr-card-sub">{subtitle}</div>
+        <div className="modal-actions qr-card-actions">
+          <button className="mini-btn ghost" onClick={downloadPNG}><Download size={15} /> 下载 PNG</button>
+          <button className="mini-btn ghost" onClick={copyLink}>
+            {copied ? <><Check size={15} /> 已复制</> : <><Copy size={15} /> 复制链接</>}
+          </button>
+        </div>
+        {canReset && !confirmReset && (
+          <button className="qr-reset-link" onClick={() => setConfirmReset(true)}>
+            <RefreshCw size={14} /> 重置二维码
+          </button>
+        )}
+        {canReset && confirmReset && (
+          <div className="qr-reset-confirm">
+            <div className="qr-reset-warn">重置后旧二维码<b>立即失效</b>，已发出的码将无法再用于加入。</div>
+            <div className="modal-actions">
+              <button className="mini-btn ghost" disabled={resetting} onClick={() => setConfirmReset(false)}>取消</button>
+              <button className="mini-btn danger" disabled={resetting} onClick={async () => {
+                setResetting(true);
+                try { await onReset(); setConfirmReset(false); } finally { setResetting(false); }
+              }}>{resetting ? "重置中…" : "确认重置"}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- 扫一扫（摄像头 + 上传/拖拽/粘贴图片）----
+
+export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: () => void; onMyCard: () => void }) {
+  const { onRaw, onClose, onMyCard } = props;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const rafRef = useRef<number>(0);
+  const firedRef = useRef(false);
+  const [camState, setCamState] = useState<"idle" | "on" | "denied" | "unavailable">("idle");
+  const [hint, setHint] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+
+  const fire = useCallback((raw: string) => {
+    if (firedRef.current) return;
+    firedRef.current = true;
+    onRaw(raw);
+  }, [onRaw]);
+
+  // 摄像头生命周期：进页申请流（退页务必关掉，隐私 + 释放设备）。
+  // 注意只取流、不碰 <video>——此刻 camState 仍非 "on"，video 尚未挂载，videoRef 还是 null。
+  useEffect(() => {
+    let cancelled = false;
+    const secure = window.isSecureContext || location.hostname === "localhost";
+    if (!secure || !navigator.mediaDevices?.getUserMedia) {
+      setCamState("unavailable");
+      return;
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then((stream) => {
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        setCamState("on"); // 触发重渲染挂载 <video>，绑定交给下面 camState 依赖的 effect
+      })
+      .catch(() => { if (!cancelled) setCamState("denied"); });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(rafRef.current);
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // camState 变 "on" 后 <video> 已挂载，此时 videoRef 才有效——绑流 + 起识别循环。
+  useEffect(() => {
+    if (camState !== "on") return;
+    const v = videoRef.current;
+    const stream = streamRef.current;
+    if (!v || !stream) return;
+    v.srcObject = stream;
+    void v.play();
+    loop();
+    return () => cancelAnimationFrame(rafRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [camState]);
+
+  const loop = useCallback(() => {
+    const v = videoRef.current;
+    if (v && v.readyState >= 2) {
+      const img = drawToImageData(v, 640);
+      const raw = img && decodeImageData(img);
+      if (raw) { fire(raw); return; }
+    }
+    rafRef.current = requestAnimationFrame(loop);
+  }, [fire]);
+
+  const handleFile = useCallback(async (file: File | undefined | null) => {
+    if (!file) return;
+    setHint("");
+    const raw = await decodeImageFile(file);
+    if (raw) fire(raw);
+    else setHint("这张图片里没有识别到二维码，换一张试试");
+  }, [fire]);
+
+  // 桌面常见：直接 Cmd/Ctrl+V 粘贴截图。
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.type.startsWith("image/"));
+      if (item) void handleFile(item.getAsFile());
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [handleFile]);
+
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal qr-scan-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <h3 className="modal-title"><ScanLine size={18} /> 扫一扫</h3>
+
+        {camState === "on" && (
+          <div className="qr-scan-stage">
+            <video ref={videoRef} className="qr-scan-video" playsInline muted />
+            <div className="qr-scan-frame" />
+            <div className="qr-scan-tip">将二维码放入框内，自动识别</div>
+          </div>
+        )}
+        {camState !== "on" && (
+          <div
+            className={`qr-drop${dragOver ? " over" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0]); }}
+          >
+            <ImageIcon size={30} />
+            <div className="qr-drop-title">把带二维码的图片拖到这里</div>
+            <div className="qr-drop-sub">
+              {camState === "denied" ? "相机权限被拒——你仍可上传或粘贴图片识别"
+                : camState === "unavailable" ? "当前环境无摄像头（或非 HTTPS）——请上传或粘贴图片"
+                : "也支持 ⌘/Ctrl+V 直接粘贴截图"}
+            </div>
+          </div>
+        )}
+
+        {hint && <div className="qr-scan-hint">{hint}</div>}
+
+        <div className="modal-actions qr-scan-actions">
+          <label className="mini-btn ghost">
+            <ImageIcon size={15} /> 选择图片
+            <input type="file" accept="image/*" hidden onChange={(e) => void handleFile(e.target.files?.[0])} />
+          </label>
+          <button className="mini-btn ghost" onClick={onMyCard}><QrCode size={15} /> 我的二维码</button>
+        </div>
+        {camState === "denied" && (
+          <div className="qr-scan-hint qr-scan-permhint"><Camera size={13} /> 想用摄像头扫码，请在浏览器地址栏为本站开启相机权限后重试。</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- 扫码结果分支（user / group / unknown / expired）----
+
+export type QRResultActions = {
+  onAddFriend: (uid: string) => Promise<void>;
+  onMessage: (uid: string) => void;
+  onViewProfile: (uid: string) => void;
+  onJoinGroup: (hello: string) => Promise<void>; // 需审批的群带申请附言
+  onEnterGroup: (convId: string) => void;
+};
+
+export function QRResultModal(props: {
+  result: QRResolved | { kind: "expired" };
+  onClose: () => void;
+  actions: QRResultActions;
+}) {
+  const { result, onClose, actions } = props;
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal qr-result-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        {result.kind === "expired" && <ExpiredBranch onClose={onClose} />}
+        {result.kind === "user" && <UserBranch card={result.data as QRUserCard} actions={actions} onClose={onClose} />}
+        {result.kind === "group" && <GroupBranch card={result.data as QRGroupCard} actions={actions} onClose={onClose} />}
+        {result.kind === "unknown" && <UnknownBranch text={(result.data as { text: string }).text} />}
+      </div>
+    </div>
+  );
+}
+
+function ExpiredBranch({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="qr-branch qr-branch-center">
+      <div className="qr-branch-icon"><Clock size={30} /></div>
+      <h3 className="modal-title">二维码已失效</h3>
+      <div className="qr-branch-note">该二维码已过期或被重置，请向对方索取新的二维码。</div>
+      <button className="mini-btn wide" onClick={onClose}>我知道了</button>
+    </div>
+  );
+}
+
+function UserBranch({ card, actions, onClose }: { card: QRUserCard; actions: QRResultActions; onClose: () => void }) {
+  const a = userCardAction(card);
+  const [busy, setBusy] = useState(false);
+  const primary = async () => {
+    if (a.kind === "add") { setBusy(true); try { await actions.onAddFriend(card.user_id); onClose(); } finally { setBusy(false); } }
+    else if (a.kind === "message") { actions.onMessage(card.user_id); onClose(); }
+    else { actions.onViewProfile(card.user_id); onClose(); }
+  };
+  return (
+    <div className="qr-branch">
+      <div className="qr-branch-head">
+        <Avatar url={card.avatar_url} name={card.nickname} size={52} />
+        <div>
+          <div className="qr-branch-title">{card.nickname || card.user_id}</div>
+          <div className="qr-branch-meta">ID {card.user_id} · 通过扫一扫</div>
+        </div>
+      </div>
+      <div className="modal-actions qr-branch-actions">
+        <button className="mini-btn wide" disabled={busy} onClick={primary}>{busy ? "处理中…" : a.label}</button>
+        {a.kind !== "self" && <button className="mini-btn ghost wide" onClick={() => { actions.onViewProfile(card.user_id); onClose(); }}>查看资料</button>}
+      </div>
+    </div>
+  );
+}
+
+function GroupBranch({ card, actions, onClose }: { card: QRGroupCard; actions: QRResultActions; onClose: () => void }) {
+  const a: GroupAction = groupCardAction(card);
+  const [busy, setBusy] = useState(false);
+  const [hello, setHello] = useState("");
+  const primary = async () => {
+    if (a.kind === "enter") { actions.onEnterGroup(card.group_id); onClose(); return; }
+    if (a.kind === "disabled") return;
+    setBusy(true);
+    try { await actions.onJoinGroup(hello.trim()); onClose(); } finally { setBusy(false); }
+  };
+  return (
+    <div className="qr-branch">
+      <div className="qr-branch-head">
+        <Avatar url={card.avatar_url} name={card.name} size={52} />
+        <div>
+          <div className="qr-branch-title"><Users size={15} /> {card.name}</div>
+          <div className="qr-branch-meta">{card.member_count} 名成员{card.inviter_nickname ? ` · ${card.inviter_nickname} 邀请你加入` : ""}</div>
+        </div>
+      </div>
+      {a.note && <div className="qr-branch-note">{a.note}</div>}
+      {a.kind === "apply" && (
+        <input className="qr-hello-input" maxLength={50} value={hello}
+          placeholder="附言（选填，让管理员认识你）" onChange={(e) => setHello(e.target.value)} />
+      )}
+      <div className="modal-actions qr-branch-actions">
+        <button className="mini-btn wide" disabled={busy || a.kind === "disabled"}
+          onClick={primary}>
+          {busy ? "处理中…" : (a.kind === "join" || a.kind === "apply" ? <><LogIn size={15} /> {a.label}</> : a.label)}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function UnknownBranch({ text }: { text: string }) {
+  const { isUrl, domain } = classifyUnknown(text);
+  const copy = () => void navigator.clipboard?.writeText(text);
+  return (
+    <div className="qr-branch">
+      <h3 className="modal-title">扫描结果</h3>
+      <div className="qr-branch-note">这不是本应用的二维码，内容如下：</div>
+      <div className="qr-unknown-text">{text || "（空）"}</div>
+      {isUrl
+        ? <>
+            <div className="qr-branch-warn">链接来自二维码，可能是钓鱼站点。确认域名 <b>{domain}</b> 无误再打开。</div>
+            <div className="modal-actions">
+              <a className="mini-btn ghost" href={text} target="_blank" rel="noopener noreferrer nofollow"><ExternalLink size={15} /> 在浏览器中打开</a>
+              <button className="mini-btn ghost" onClick={copy}><Copy size={15} /> 复制内容</button>
+            </div>
+          </>
+        : <div className="modal-actions"><button className="mini-btn ghost" onClick={copy}><Copy size={15} /> 复制内容</button></div>}
+    </div>
+  );
+}
+
+// ---- G3 待审入群申请列表（群主/管理员）----
+
+export function JoinRequestsModal(props: {
+  requests: JoinRequest[];
+  loading: boolean;
+  onDecide: (uid: string, accept: boolean) => Promise<void>;
+  onClose: () => void;
+}) {
+  const { requests, loading, onDecide, onClose } = props;
+  const [busyUid, setBusyUid] = useState("");
+  const pending = requests.filter((r) => r.status === "pending");
+  const decide = async (uid: string, accept: boolean) => {
+    setBusyUid(uid);
+    try { await onDecide(uid, accept); } finally { setBusyUid(""); }
+  };
+  return (
+    <div className="modal-mask" onClick={onClose}>
+      <div className="modal join-req-modal" onClick={(e) => e.stopPropagation()}>
+        <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
+        <h3 className="modal-title"><UserPlus size={18} /> 待审入群申请</h3>
+        {loading && <div className="join-req-empty">加载中…</div>}
+        {!loading && pending.length === 0 && <div className="join-req-empty">暂无待审批的入群申请</div>}
+        <div className="join-req-list">
+          {pending.map((r) => (
+            <div className="join-req-row" key={r.user_id}>
+              <Avatar url={r.avatar_url} name={r.nickname} size={40} />
+              <div className="join-req-info">
+                <div className="join-req-name">{r.nickname || r.user_id}</div>
+                {r.hello && <div className="join-req-hello">{r.hello}</div>}
+              </div>
+              <div className="join-req-btns">
+                <button className="mini-btn" disabled={busyUid === r.user_id} onClick={() => decide(r.user_id, true)}>同意</button>
+                <button className="mini-btn ghost" disabled={busyUid === r.user_id} onClick={() => decide(r.user_id, false)}>拒绝</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
