@@ -165,6 +165,11 @@ export interface Conversation {
    * 读过那条 @ 后服务端自动转 false，无需额外清除接口。
    */
   mention_unread?: boolean;
+  /**
+   * 待审入群申请数（G3，仅群聊且本人为群主/管理员时后端才下发；否则省略）。
+   * 列表行「待审 N」红角标，供群管理者一眼看到有人等待审批。
+   */
+  pending_count?: number;
 }
 
 /** conv_update 帧负载（下行，M4.5-1）：会话级设置变更的完整状态，多端同步覆盖本地。 */
@@ -275,6 +280,7 @@ export interface QRGroupCard {
   avatar_url: string;
   member_count: number;
   inviter_nickname: string;
+  intro?: string; // 群简介（可空；未入群预览也可见，草图 §05）
   joined: boolean;
   joinable: boolean;
   reason: string; // "" 可直接入群 | approval 可申请需审批 | joined | full | banned

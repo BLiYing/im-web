@@ -2469,6 +2469,28 @@ export default function App() {
     setFullTextModal({ kind, convId: cid });
   }, []);
 
+  // 群公告自动弹窗（每版本一次）：进群且群资料回来后，若有非空公告且 announcement_at 比本地
+  // 已看过的版本更新，自动打开公告全文一次并记下版本；同版本再进群 / 重渲染都不再弹。
+  // 已看版本按 uid+cid 存 localStorage（换账号互不影响）；annPoppedRef 兜住 setItem 前的重入。
+  const annPoppedRef = useRef<Record<string, number>>({}); // cid -> 本会话已弹过的 announcement_at
+  useEffect(() => {
+    const cid = groupConvId;
+    if (!cid || !uid) return;
+    const gi = groupInfos[cid];
+    if (!gi) return; // 群资料还没回来（refreshGroupInfo 异步），下次 groupInfos 更新再判
+    const ann = (gi.announcement ?? "").trim();
+    const at = gi.announcement_at ?? 0;
+    if (!ann || at <= 0) return; // 无公告不弹
+    const key = `im.annseen.${uid}.${cid}`;
+    let seen = 0;
+    try { seen = Number(localStorage.getItem(key)) || 0; } catch { /* 忽略 */ }
+    if (at <= seen) return; // 该版本已看过
+    if (annPoppedRef.current[cid] === at) return; // 本会话本版本已弹过，防重入
+    annPoppedRef.current[cid] = at;
+    try { localStorage.setItem(key, String(at)); } catch { /* 配额满等，忽略 */ }
+    openGroupText("announcement", cid);
+  }, [groupConvId, groupInfos, uid, openGroupText]);
+
   // 为所有人删除（任务2）：Telegram 式，删除后对端也消失。走 WS msg_op op=delete，服务端广播回
   // onMessageRemoved 物理移除本地；被拒走 onMsgOpFailed → toast。**不再单独居中确认**——两档子菜单 B
   // 里选中「为所有人删除」这一动作本身即确认（对齐 iOS 子菜单、去掉居中弹窗）。
@@ -3762,6 +3784,10 @@ export default function App() {
                 <div className="convlast">
                   {/* 群「@我」红字前缀（M4-8）：未读区间内被 @（含 @所有人）。不另加右侧红 @ 角标——左侧红字已够醒目。 */}
                   {c.is_group && c.mention_unread ? <span className="conv-mention">[有人@我]</span> : null}
+                  {/* 待审入群角标（G3）：仅群主/管理员会收到 pending_count>0，一眼看到有人等待审批。 */}
+                  {c.is_group && (c.pending_count ?? 0) > 0
+                    ? <span className="conv-pending-badge">待审 {c.pending_count! > 99 ? "99+" : c.pending_count}</span>
+                    : null}
                   {convPreview(c)}
                 </div>
               </div>

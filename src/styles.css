@@ -538,6 +538,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .conv-mute { color: var(--text-secondary); vertical-align: -1px; margin-left: 4px; }
 /* 群「有人@我」红字前缀（M4-8）：只染前缀，正文保持次要色（对齐 iOS 会话行）。 */
 .conv-mention { color: var(--danger); font-weight: 600; margin-right: 4px; }
+/* 待审入群角标（G3，仅群主/管理员）：小号红色药丸，跟 .detail-badge 同色系但更贴合列表行 */
+.conv-pending-badge { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 8px; background: var(--danger);
+  color: #fff; font-size: 11px; font-weight: 600; line-height: 16px; vertical-align: middle; font-variant-numeric: tabular-nums; }
 .badge.muted { background: var(--text-secondary); }
 .badge.dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; }
 /* 未读分割线（Telegram 风格的"未读消息"）。 */
@@ -1226,6 +1229,8 @@ button.detail-row:hover { background: var(--surface-hover); }
 .qr-branch-title { display: flex; align-items: center; gap: 5px; font-size: 16px; font-weight: 600; color: var(--text); }
 .qr-branch-meta { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
 .qr-branch-note { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+/* 群预览简介（草图 §05「未入群也能看群名/人数/简介」）：次要文本，多行可换行 */
+.qr-branch-intro { font-size: 13px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .qr-branch-warn { font-size: 12px; color: var(--danger); line-height: 1.5; }
 .qr-branch-actions { flex-direction: column; gap: 8px; }
 .qr-branch-actions .mini-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }

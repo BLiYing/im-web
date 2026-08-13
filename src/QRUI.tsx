@@ -325,6 +325,7 @@ function GroupBranch({ card, actions, onClose }: { card: QRGroupCard; actions: Q
           <div className="qr-branch-meta">{card.member_count} 名成员{card.inviter_nickname ? ` · ${card.inviter_nickname} 邀请你加入` : ""}</div>
         </div>
       </div>
+      {card.intro && card.intro.trim() && <div className="qr-branch-intro">{card.intro}</div>}
       {a.note && <div className="qr-branch-note">{a.note}</div>}
       {a.kind === "apply" && (
         <input className="qr-hello-input" maxLength={50} value={hello}
