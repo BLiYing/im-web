@@ -1201,7 +1201,9 @@ button.detail-row:hover { background: var(--surface-hover); }
 .qr-img-loading { background: var(--surface); }
 .qr-card-sub { text-align: center; color: var(--text-secondary); font-size: 13px; }
 .qr-card-actions { justify-content: center; }
-.qr-card-actions .mini-btn, .qr-scan-actions .mini-btn { display: inline-flex; align-items: center; gap: 5px; }
+/* flex-direction:row 必显式写：「选择图片」是 <label>，会命中 .modal label 的 flex-direction:column
+   → 图标压到文字上方；这里覆盖回横排，与相邻 <button>「我的二维码」一致。 */
+.qr-card-actions .mini-btn, .qr-scan-actions .mini-btn { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; }
 .qr-reset-link { display: inline-flex; align-items: center; gap: 5px; justify-content: center; background: transparent; border: 0; color: var(--text-secondary); font-size: 13px; cursor: pointer; padding: 4px; }
 .qr-reset-link:hover { color: var(--danger); }
 .qr-reset-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--surface); border-radius: 10px; }
