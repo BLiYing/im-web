@@ -15,7 +15,7 @@
   ① `resetQRCard` 补 try/catch + 失败 toast——模态里的确认按钮只有 try/finally，重置失败会变成未处理的 rejection 且界面毫无反馈；
   ② `handleFile` 捕获 `decodeImageFile` 的 reject——拖拽/粘贴进非图片文件（PDF/压缩包）时 `accept="image/*"` 拦不住，
   原先静默无反应，现提示「这个文件读不出图片」。另三项在 IMServer（邀请入群原子上限）与 iOS（扫码会话竞态 / 名片码页签只显 uid）。
-- **已知限制**：① 图片识别用 jsqr **单码**（未做「一图多码候选点选」，设计的进阶项）；② 群码资料抽屉入口对普通成员也显示，`perm_invite=1` 时点了由后端 300204 拦（toast），未在前端预隐藏；③ 扫码登录 `q/l`（P1）未做，扫到走 unknown。**摄像头实扫需浏览器手测**（自动化环境无相机）。**后端需重启带 QR 路由的新二进制再测。**
+- **已知限制**：① ~~图片识别用 jsqr 单码~~ ✅ **一图多码候选点选已做（2026-08-14）**：BarcodeDetector 优先 + jsqr 兜底，仅 Chrome/Edge 生效（见「已知坑」）；② 群码资料抽屉入口对普通成员也显示，`perm_invite=1` 时点了由后端 300204 拦（toast），未在前端预隐藏；③ 扫码登录 `q/l`（P1）未做，扫到走 unknown。**摄像头实扫需浏览器手测**（自动化环境无相机）。**后端需重启带 QR 路由的新二进制再测。**
 
 **G2 群治理 ✅（2026-08-13，tsc+234 vitest+build 绿，待手测）** — 方案 `../IMServer/docs/GROUP_FEATURES_DESIGN.md` §G2、草图 §04/§07。
 群管理面板加三卡：加入与发言（进群确认/全员禁言开关）· 成员权限（仅管理员可邀请/改资料/置顶三开关 + 新成员可见历史）· 治理（黑名单入口）。黑名单弹窗（解除拉黑）。成员菜单加「禁言…(10min/1h/1d/永久时长选择弹窗)」「移出群聊(24h冷却)」「移出并不再允许加入(永久)」。聊天区 composer 禁言锁（`composerMuteReason`：成员级/全员禁言时禁用输入+占位）。SDK 加 setGroupSettings/muteGroupMember/removeGroupMemberWithBan/fetchGroupBans/unbanGroupMember。
@@ -137,6 +137,8 @@
 5. 消息列表虚拟化；测试债：Playwright E2E。
 
 ## 已知坑 / 限制
+- **扫自己名片码「查看我的资料」是死路（既有 QR P0 缺陷，未修）**：扫自己的名片码 → resolve 回 relation=self → 结果卡主按钮「查看我的资料」→ `onViewProfile(自己uid)` → `openPeerDetail(peer)`（App.tsx ~3477）因 `peer === uid` 直接 return，弹窗被 onClose 关掉却没打开任何资料页。修法：self 场景改为打开设置页顶部个人资料（`setShowSettings(true)` / `openProfile()`）而非走 peer 抽屉，约 5 行。与一图多码改动无关。
+- **一图多码消歧仅 Chrome/Edge 生效**：靠原生 BarcodeDetector；Safari/Firefox 无此 API，退回 jsqr 而 jsqr 对并排多码定位失败 → 多码图识别失败（单码仍可用）。属库固有限制，要跨浏览器多码需换 zxing-wasm。见 IMServer `docs/QRCODE_DESIGN.md §6` 第 6 条。
 - **File 句柄不能跨刷新持久化**：刷新后进行中的上传作废，无 iOS 式杀进程自动续传（Web 平台限制）。
 - **未读语义（非 bug）**：自己发送的消息在自己任何端永不计未读（服务端排除 sender==本人）。
 - 消息排序按 `timestamp`；ack 后换服务器时间戳。
