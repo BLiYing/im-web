@@ -335,8 +335,13 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 转发会话选择器。 */
 .fwd-picker { max-height: 70vh; }
 .fwd-list { overflow-y: auto; max-height: 46vh; display: flex; flex-direction: column; margin: 0 calc(-1 * var(--space-4)); }
-.fwd-item { text-align: left; padding: 10px var(--space-4); background: none; border: none; color: var(--text); cursor: pointer; font-size: 15px; }
+.fwd-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.fwd-item { display: flex; align-items: center; gap: var(--space-3); text-align: left; padding: 8px var(--space-4); background: none; border: none; color: var(--text); cursor: pointer; font-size: 15px; }
+.fwd-item .avatar { width: 36px; height: 36px; font-size: 13px; flex-shrink: 0; }
+.fwd-item .checkbox { flex-shrink: 0; }
+.fwd-item-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fwd-item:hover { background: var(--surface-hover); }
+.fwd-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .fwd-empty { padding: 16px; color: var(--text-secondary); text-align: center; }
 /* 收藏列表（M4-4）。 */
 .fav-list { overflow-y: auto; max-height: 50vh; display: flex; flex-direction: column; gap: 6px; }

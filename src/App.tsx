@@ -9,6 +9,7 @@ import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
+import { toggleCapped } from "./selection";
 import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
@@ -458,6 +459,8 @@ function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test
 // 建群时群主已占 1 席，故初始成员（好友）最多可选 MAX_GROUP_MEMBERS-1；超限由服务端 GroupMemberLimit 兜底拒绝。
 const MAX_GROUP_MEMBERS = 500;
 const MAX_INITIAL_MEMBERS = MAX_GROUP_MEMBERS - 1;
+// 转发目标会话上限：一次最多转给 9 个会话，与 iOS kIMForwardMaxSelection / 微信一致。
+const MAX_FORWARD_TARGETS = 9;
 
 // 图片/视频「已解门控」的持久化（方案 B）：opt-in 是内存 Set，刷新即失。存 localStorage（按 uid，末 500 条）→
 // 刷新后仍直显远端（浏览器 HTTP 缓存秒出），兑现「解门控后刷新仍在」。content URL 每条唯一、跨会话不冲突。
@@ -578,6 +581,8 @@ export default function App() {
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
+  const [forwardMulti, setForwardMulti] = useState(false); // 转发选择器：多选目标会话模式（对齐 iOS「多选」）
+  const [forwardTargets, setForwardTargets] = useState<string[]>([]); // 多选选中的目标 conv_id（有序，上限 MAX_FORWARD_TARGETS）
   // 合并转发详情弹窗：栈式，支持嵌套「套娃」下钻/返回（栈顶=当前展示层，空=关闭）。
   const [recordStack, setRecordStack] = useState<ChatRecord[]>([]);
   const recordView = recordStack.length > 0 ? recordStack[recordStack.length - 1] : null;
@@ -2168,8 +2173,17 @@ export default function App() {
   const toggleSelected = useCallback((seq: number) => {
     setSelected((prev) => { const n = new Set(prev); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
   }, []);
-  // 执行转发：逐条（保留各自类型）或合并（打包 chat_record 一条）发到 target 会话。
-  const doForwardTo = useCallback((target: Conversation) => {
+  // 关闭转发选择器并复位多选态（点蒙层 / 取消 / 发送完成统一走这里）。
+  const closeForwardPicker = useCallback(() => { setForwarding(null); setForwardMulti(false); setForwardTargets([]); }, []);
+  // 多选态切换某个目标会话（上限 MAX_FORWARD_TARGETS，超限吐司，对齐 iOS）。
+  // 副作用（吐司）在 updater 外算，避免 StrictMode 双调用致重复吐司。
+  const toggleForwardTarget = useCallback((cid: string) => {
+    const { next, overflow } = toggleCapped(forwardTargets, cid, MAX_FORWARD_TARGETS);
+    if (overflow) { setToast(`最多选择 ${MAX_FORWARD_TARGETS} 个会话`); return; }
+    setForwardTargets(next);
+  }, [forwardTargets]);
+  // 向单个 target 会话发出转发（逐条保留各自类型 / 合并打包 chat_record 一条）。不负责关闭弹窗/吐司。
+  const sendForwardToTarget = useCallback((target: Conversation) => {
     const client = clientRef.current;
     const msgs = forwarding;
     if (!client || !msgs) return;
@@ -2212,10 +2226,17 @@ export default function App() {
         pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb);
       }
     }
-    setForwarding(null);
+  }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);
+  // 执行转发到一个或多个目标：全部发出后关闭弹窗、退出多选、单条吐司汇总。
+  const doForwardToTargets = useCallback((targets: Conversation[]) => {
+    if (targets.length === 0) return;
+    targets.forEach(sendForwardToTarget);
+    closeForwardPicker();
     exitSelectMode();
-    setToast(`已转发到 ${target.is_group ? (target.name || "群聊") : (target.peer_remark || target.peer_nickname || target.peer)}`);
-  }, [forwarding, forwardMode, groupInfos, exitSelectMode, appendMsg, uid]);
+    setToast(targets.length === 1
+      ? `已转发到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
+      : `已转发到 ${targets.length} 个会话`);
+  }, [sendForwardToTarget, closeForwardPicker, exitSelectMode]);
   // 多选批量转发：收集选中的消息，打开选择器。
   const forwardSelected = useCallback(() => {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
@@ -5209,10 +5230,15 @@ export default function App() {
       )}
 
       {forwarding && (
-        // 转发会话选择器（M4-3）：从会话列表选目标，逐条转发。
-        <div className="modal-mask" onClick={() => setForwarding(null)}>
+        // 转发会话选择器（M4-3）：默认单选点一下即发；「多选」切换成勾选态，底部「发送(N)」批量转发（上限 9，对齐 iOS）。
+        <div className="modal-mask" onClick={closeForwardPicker}>
           <div className="modal fwd-picker" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">转发到（{forwarding.length} 条）</div>
+            <div className="modal-title fwd-title">
+              <span>转发到（{forwarding.length} 条）</span>
+              <button className="section-action" onClick={() => { setForwardMulti((v) => !v); setForwardTargets([]); }}>
+                {forwardMulti ? "取消多选" : "多选"}
+              </button>
+            </div>
             {forwarding.length > 1 && (
               <div className="fwd-mode">
                 <button className={forwardMode === "each" ? "on" : ""} onClick={() => setForwardMode("each")}>逐条转发</button>
@@ -5221,13 +5247,29 @@ export default function App() {
             )}
             <div className="fwd-list">
               {conversations.length === 0 && <div className="fwd-empty">暂无会话</div>}
-              {conversations.map((c) => (
-                <button key={c.conv_id} className="fwd-item" onClick={() => doForwardTo(c)}>
-                  {convDisplayLabel(c)}
-                </button>
-              ))}
+              {conversations.map((c) => {
+                const on = forwardTargets.includes(c.conv_id);
+                return (
+                  <button key={c.conv_id} className="fwd-item"
+                    onClick={() => forwardMulti ? toggleForwardTarget(c.conv_id) : doForwardToTargets([c])}>
+                    {forwardMulti && <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>}
+                    <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer} />
+                    <span className="fwd-item-label">{convDisplayLabel(c)}</span>
+                  </button>
+                );
+              })}
             </div>
-            <button className="modal-close" onClick={() => setForwarding(null)}>取消</button>
+            {forwardMulti ? (
+              <div className="fwd-actions">
+                <button className="link" onClick={closeForwardPicker}>取消</button>
+                <button className="mini-btn" disabled={forwardTargets.length === 0}
+                  onClick={() => doForwardToTargets(conversations.filter((c) => forwardTargets.includes(c.conv_id)))}>
+                  发送{forwardTargets.length > 0 ? `(${forwardTargets.length})` : ""}
+                </button>
+              </div>
+            ) : (
+              <button className="modal-close" onClick={closeForwardPicker}>取消</button>
+            )}
           </div>
         </div>
       )}
