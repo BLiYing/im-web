@@ -4,7 +4,7 @@ import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal, QRLoginTab } from "./QRUI";
-import { errorCode } from "./qr";
+import { errorCode, isOwnInviteLink } from "./qr";
 import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
@@ -366,8 +366,11 @@ function mediaBoxProps(m: ChatMessage): { className: string; style?: CSSProperti
   return { className: "msg-media", style: { width: `${box.width}px`, height: `${box.height}px` } };
 }
 
-/** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。 */
-function LinkCard({ url, fetchPreview, onMediaLoad }: { url: string; fetchPreview: (u: string) => Promise<LinkPreview>; onMediaLoad?: () => void }) {
+/** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。
+ *  层3：onOpenInvite 非空且 url 是本站邀请链接（/q/u、/q/g）→ 拦截点击走站内 resolve 流程（不开新标签页）。 */
+function LinkCard({ url, fetchPreview, onMediaLoad, onOpenInvite }: {
+  url: string; fetchPreview: (u: string) => Promise<LinkPreview>; onMediaLoad?: () => void; onOpenInvite?: (u: string) => void;
+}) {
   const [p, setP] = useState<LinkPreview | null | undefined>(linkPreviewCache.get(url));
   useEffect(() => {
     if (linkPreviewCache.has(url)) { setP(linkPreviewCache.get(url)); return; }
@@ -379,11 +382,14 @@ function LinkCard({ url, fetchPreview, onMediaLoad }: { url: string; fetchPrevie
   }, [url, fetchPreview]);
   let host = ""; try { host = new URL(url).hostname; } catch { /* */ }
   const hasCard = !!(p && (p.title || p.image));
+  const intercept = onOpenInvite && isOwnInviteLink(url, location.origin)
+    ? (e: React.MouseEvent) => { e.preventDefault(); onOpenInvite(url); }
+    : undefined;
   return (
     <span className="url-msg">
-      <a className="btext msg-link" href={url} target="_blank" rel="noreferrer">{url}</a>
+      <a className="btext msg-link" href={url} target="_blank" rel="noreferrer" onClick={intercept}>{url}</a>
       {hasCard && (
-        <a className="link-card" href={url} target="_blank" rel="noreferrer">
+        <a className="link-card" href={url} target="_blank" rel="noreferrer" onClick={intercept}>
           {p!.image && <img className="link-card-img" src={p!.image} alt="" onLoad={onMediaLoad} />}
           <div className="link-card-body">
             <div className="link-card-title">{p!.title || url}</div>
@@ -3272,6 +3278,28 @@ export default function App() {
     setJumpCount(0);
   }, [msgsByConv]);
 
+  // 层2：落地页「在网页版中打开」带 /?qr=<邀请链接> 进来——挂载时截获并从地址栏剥离（防刷新重放/泄露到历史），
+  // 登录进入主界面后按扫码同款流程处理（未登录先登录再续，与扫码登录的 pending 套路同理）。
+  // ⚠️ 必须放在下方 `if (phase === "login") return` 之前：hook 在提前 return 之后会随 phase 改变 hook 数量
+  // → "Rendered more hooks than during the previous render" 白屏（2026-08-14 踩过）。
+  // handleScanRaw 定义在提前 return 之后：仅在 phase==="app" 的渲染里才会被 effect 读到，届时已初始化，无 TDZ。
+  const bootQrRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const q = sp.get("qr");
+    if (!q) return;
+    bootQrRef.current = q;
+    sp.delete("qr");
+    history.replaceState(null, "", location.pathname + (sp.toString() ? `?${sp.toString()}` : "") + location.hash);
+  }, []);
+  useEffect(() => {
+    if (phase !== "app" || !bootQrRef.current) return;
+    const raw = bootQrRef.current;
+    bootQrRef.current = null;
+    void handleScanRaw(raw);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
+
   // ---- 登录 ----
   if (phase === "login") {
     if (restoring) {
@@ -4749,7 +4777,8 @@ export default function App() {
                         )
                       ) : isUrlText(m.content) ? (
                         // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
-                        <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad} />
+                        <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad}
+                                  onOpenInvite={(u) => void handleScanRaw(u)} />
                       ) : (
                         renderMessageText(m)
                       )}

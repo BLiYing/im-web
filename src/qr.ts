@@ -76,6 +76,21 @@ export function describeRaw(raw: string): { kind: RawKind; label: string } {
   return { kind: "text", label: s.length > 24 ? s.slice(0, 24) + "…" : s || "（空）" };
 }
 
+/** 层3（App 内拦截）：url 是否本站邀请链接（**同 hostname** + 路径 /q/u|g/）。
+ *  比对 hostname 而非完整 origin：dev 下页面在 vite :5173、邀请链接指后端 :8080（同机不同端口），
+ *  生产则同源内嵌——hostname 相等两者皆覆盖。端口被仿冒的后果只是把链接交给**自家** resolve
+ *  （等价扫了张外来码，token 不存在则统一「已失效」），不会打开对方站点。
+ *  登录码 /q/l 刻意返回 false——聊天里点出登录确认是 QRLjacking 钓鱼面，交给落地页提示。 */
+export function isOwnInviteLink(url: string, origin: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.hostname !== new URL(origin).hostname) return false;
+    return /^\/q\/[ug]\//.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 // ---- 本地解码（运行期，浏览器）----
 
 /** 从一帧 ImageData 解码二维码文本；无码返回 null。摄像头循环用（单帧只取一枚，省 mask 重扫开销）。 */

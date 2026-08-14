@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as QRCode from "qrcode";
-import { userCardAction, groupCardAction, classifyUnknown, errorCode, describeRaw, decodeAllImageData } from "./qr";
+import { userCardAction, groupCardAction, classifyUnknown, errorCode, describeRaw, decodeAllImageData, isOwnInviteLink } from "./qr";
 import type { QRUserCard, QRGroupCard } from "./sdk/protocol";
 
 const uc = (relation: QRUserCard["relation"]): QRUserCard => ({
@@ -151,5 +151,24 @@ describe("decodeAllImageData", () => {
   it("无原生检测 + 无码空白图 → 空数组", async () => {
     const blank = { data: new Uint8ClampedArray(80 * 80 * 4).fill(255), width: 80, height: 80 } as unknown as ImageData;
     expect(await decodeAllImageData(blank)).toEqual([]);
+  });
+});
+
+describe("isOwnInviteLink（层3 App 内拦截判定，按 hostname 比对）", () => {
+  const origin = "http://localhost:8080";
+  it("同源名片/群码链接 → true", () => {
+    expect(isOwnInviteLink(`${origin}/q/u/abc123`, origin)).toBe(true);
+    expect(isOwnInviteLink(`${origin}/q/g/abc123`, origin)).toBe(true);
+  });
+  it("同机不同端口（dev：页面 5173、链接 8080）→ true", () => {
+    expect(isOwnInviteLink(`${origin}/q/u/abc123`, "http://localhost:5173")).toBe(true);
+  });
+  it("登录码 /q/l 不拦截（QRLjacking 面）", () => {
+    expect(isOwnInviteLink(`${origin}/q/l/ticket1`, origin)).toBe(false);
+  });
+  it("外域仿冒 / 非 q 路径 / 非法 URL → false", () => {
+    expect(isOwnInviteLink("https://evil.example.org/q/u/abc", origin)).toBe(false);
+    expect(isOwnInviteLink(`${origin}/uploads/a.jpg`, origin)).toBe(false);
+    expect(isOwnInviteLink("not-a-url", origin)).toBe(false);
   });
 });
