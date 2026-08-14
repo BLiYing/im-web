@@ -7,7 +7,7 @@ import {
   UserPlus, LogIn, Users, ExternalLink, ScanLine, Clock,
 } from "lucide-react";
 import type { QRCard, QRResolved, QRUserCard, QRGroupCard, JoinRequest, QRLoginState, QRLoginTicket } from "./sdk/protocol";
-import { decodeImageData, decodeImageFile, drawToImageData, userCardAction, groupCardAction, classifyUnknown, errorCode, type GroupAction } from "./qr";
+import { decodeImageData, decodeAllImageFile, describeRaw, drawToImageData, userCardAction, groupCardAction, classifyUnknown, errorCode, type GroupAction, type RawKind } from "./qr";
 import { loginNew, loginPoll } from "./sdk/qrLogin";
 
 /** 生成二维码图片 dataURL（容错级 M，中留白，端本地生成）。失败返回空串。 */
@@ -105,6 +105,17 @@ export function QRCardModal(props: {
 
 // ---- 扫一扫（摄像头 + 上传/拖拽/粘贴图片）----
 
+/** 多码候选列表按类型选图标。 */
+function candidateIcon(kind: RawKind) {
+  switch (kind) {
+    case "user": return <UserPlus size={16} />;
+    case "group": return <Users size={16} />;
+    case "login": return <LogIn size={16} />;
+    case "url": return <ExternalLink size={16} />;
+    default: return <QrCode size={16} />;
+  }
+}
+
 export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: () => void; onMyCard: () => void }) {
   const { onRaw, onClose, onMyCard } = props;
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -114,6 +125,7 @@ export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: (
   const [camState, setCamState] = useState<"idle" | "on" | "denied" | "unavailable">("idle");
   const [hint, setHint] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [candidates, setCandidates] = useState<string[]>([]); // 一图多码时的候选，>1 才弹选择列表
 
   const fire = useCallback((raw: string) => {
     if (firedRef.current) return;
@@ -169,20 +181,23 @@ export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: (
     rafRef.current = requestAnimationFrame(loop);
   }, [fire]);
 
-  // 拖拽/粘贴进来的不一定是图片（PDF、压缩包…），decodeImageFile 会 reject；
+  // 拖拽/粘贴进来的不一定是图片（PDF、压缩包…），decodeAllImageFile 会 reject；
   // 不接住的话就是一条未处理的 rejection + 界面毫无反应（file input 的 accept 拦不住这两条路）。
   const handleFile = useCallback(async (file: File | undefined | null) => {
     if (!file) return;
-    setHint("");
-    let raw: string | null = null;
+    setHint(""); setCandidates([]);
+    let raws: string[];
     try {
-      raw = await decodeImageFile(file);
+      raws = await decodeAllImageFile(file);
     } catch {
       setHint("这个文件读不出图片，请换一张图片试试");
       return;
     }
-    if (raw) fire(raw);
-    else setHint("这张图片里没有识别到二维码，换一张试试");
+    if (raws.length === 0) { setHint("这张图片里没有识别到二维码，换一张试试"); return; }
+    if (raws.length === 1) { fire(raws[0]); return; }
+    // 一图多码：停掉摄像头识别循环（否则它会抢先 fire 一枚），列出候选让用户选。
+    cancelAnimationFrame(rafRef.current);
+    setCandidates(raws);
   }, [fire]);
 
   // 桌面常见：直接 Cmd/Ctrl+V 粘贴截图。
@@ -201,31 +216,51 @@ export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: (
         <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
         <h3 className="modal-title"><ScanLine size={18} /> 扫一扫</h3>
 
-        {camState === "on" && (
-          <div className="qr-scan-stage">
-            <video ref={videoRef} className="qr-scan-video" playsInline muted />
-            <div className="qr-scan-frame" />
-            <div className="qr-scan-tip">将二维码放入框内，自动识别</div>
-          </div>
-        )}
-        {camState !== "on" && (
-          <div
-            className={`qr-drop${dragOver ? " over" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0]); }}
-          >
-            <ImageIcon size={30} />
-            <div className="qr-drop-title">把带二维码的图片拖到这里</div>
-            <div className="qr-drop-sub">
-              {camState === "denied" ? "相机权限被拒——你仍可上传或粘贴图片识别"
-                : camState === "unavailable" ? "当前环境无摄像头（或非 HTTPS）——请上传或粘贴图片"
-                : "也支持 ⌘/Ctrl+V 直接粘贴截图"}
+        {candidates.length > 1 ? (
+          <div className="qr-multi">
+            <div className="qr-multi-title">这张图里有 {candidates.length} 个二维码，请选择要打开的一个：</div>
+            <div className="qr-multi-list">
+              {candidates.map((raw, i) => {
+                const d = describeRaw(raw);
+                return (
+                  <button className="qr-multi-item" key={`${raw}-${i}`} onClick={() => fire(raw)}>
+                    <span className={`qr-multi-ic ${d.kind}`}>{candidateIcon(d.kind)}</span>
+                    <span className="qr-multi-label">{d.label}</span>
+                  </button>
+                );
+              })}
             </div>
+            <button className="mini-btn ghost wide" onClick={() => { setCandidates([]); setHint(""); }}>取消，换一张图</button>
           </div>
-        )}
+        ) : (
+          <>
+            {camState === "on" && (
+              <div className="qr-scan-stage">
+                <video ref={videoRef} className="qr-scan-video" playsInline muted />
+                <div className="qr-scan-frame" />
+                <div className="qr-scan-tip">将二维码放入框内，自动识别</div>
+              </div>
+            )}
+            {camState !== "on" && (
+              <div
+                className={`qr-drop${dragOver ? " over" : ""}`}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => { e.preventDefault(); setDragOver(false); void handleFile(e.dataTransfer.files?.[0]); }}
+              >
+                <ImageIcon size={30} />
+                <div className="qr-drop-title">把带二维码的图片拖到这里</div>
+                <div className="qr-drop-sub">
+                  {camState === "denied" ? "相机权限被拒——你仍可上传或粘贴图片识别"
+                    : camState === "unavailable" ? "当前环境无摄像头（或非 HTTPS）——请上传或粘贴图片"
+                    : "也支持 ⌘/Ctrl+V 直接粘贴截图"}
+                </div>
+              </div>
+            )}
 
-        {hint && <div className="qr-scan-hint">{hint}</div>}
+            {hint && <div className="qr-scan-hint">{hint}</div>}
+          </>
+        )}
 
         <div className="modal-actions qr-scan-actions">
           <label className="mini-btn ghost">

@@ -1231,6 +1231,18 @@ button.detail-row:hover { background: var(--surface-hover); }
 .qr-scan-hint { text-align: center; font-size: 12px; color: var(--text-secondary); }
 .qr-scan-permhint { display: flex; align-items: center; gap: 4px; justify-content: center; }
 
+/* 一图多码消歧：候选选择列表 */
+.qr-multi { display: flex; flex-direction: column; gap: 12px; }
+.qr-multi-title { font-size: 13px; color: var(--text-secondary); line-height: 1.5; text-align: center; }
+.qr-multi-list { display: flex; flex-direction: column; gap: 8px; }
+.qr-multi-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 14px; border: 1px solid var(--separator); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 14px; cursor: pointer; text-align: left; }
+.qr-multi-item:hover { border-color: var(--accent); }
+.qr-multi-ic { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; background: var(--page-bg); color: var(--text-secondary); flex: none; }
+.qr-multi-ic.user { color: var(--accent); }
+.qr-multi-ic.group { color: #22a06b; }
+.qr-multi-ic.login { color: #d98a00; }
+.qr-multi-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 扫码结果分支 */
 .qr-branch { display: flex; flex-direction: column; gap: 12px; }
 .qr-branch-center { align-items: center; text-align: center; }

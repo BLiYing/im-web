@@ -59,21 +59,116 @@ export function errorCode(e: unknown): number {
   return 0;
 }
 
+/** 一枚扫码原文的本地粗判类型（不查库，仅供多码选择列表打标签；语义仍由服务端 resolve 定夺）。 */
+export type RawKind = "user" | "group" | "login" | "url" | "text";
+
+/** 本地判定扫码原文属于哪种码 + 给个人类可读标签（多枚候选选择列表用）。与后端 parseRaw 同规则识别 q/[ugl]。 */
+export function describeRaw(raw: string): { kind: RawKind; label: string } {
+  const s = (raw || "").trim();
+  const m = /\/q\/([ugl])\//.exec(s.startsWith("q/") ? "/" + s : s);
+  if (m) {
+    if (m[1] === "u") return { kind: "user", label: "名片码" };
+    if (m[1] === "g") return { kind: "group", label: "群二维码" };
+    return { kind: "login", label: "登录二维码" };
+  }
+  const u = classifyUnknown(s);
+  if (u.isUrl) return { kind: "url", label: u.domain || "网页链接" };
+  return { kind: "text", label: s.length > 24 ? s.slice(0, 24) + "…" : s || "（空）" };
+}
+
 // ---- 本地解码（运行期，浏览器）----
 
-/** 从一帧 ImageData 解码二维码文本；无码返回 null。摄像头循环与图片解码共用。 */
+/** 从一帧 ImageData 解码二维码文本；无码返回 null。摄像头循环用（单帧只取一枚，省 mask 重扫开销）。 */
 export function decodeImageData(img: ImageData): string | null {
   const res = jsQR(img.data, img.width, img.height, { inversionAttempts: "attemptBoth" });
   return res?.data ?? null;
 }
 
-/** 把一张图片文件解码为二维码文本（缩放到 ≤1024 边长再解，兼顾大截图与速度）；无码 null。 */
-export async function decodeImageFile(file: File): Promise<string | null> {
+type Pt = { x: number; y: number };
+
+/** 把一枚已解出的码所在矩形涂白，避免下一轮 jsQR 又解到同一枚。外扩一圈以盖住 finder pattern 边缘。 */
+function maskRegion(data: Uint8ClampedArray, w: number, h: number, loc: Record<string, Pt | undefined>): void {
+  const pts = Object.values(loc).filter((p): p is Pt => !!p);
+  if (!pts.length) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of pts) {
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y);
+    x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+  }
+  const pad = Math.max(8, (x1 - x0 + y1 - y0) * 0.04);
+  x0 = Math.max(0, Math.floor(x0 - pad)); y0 = Math.max(0, Math.floor(y0 - pad));
+  x1 = Math.min(w - 1, Math.ceil(x1 + pad)); y1 = Math.min(h - 1, Math.ceil(y1 + pad));
+  for (let y = y0; y <= y1; y++) {
+    let idx = (y * w + x0) * 4;
+    for (let x = x0; x <= x1; x++, idx += 4) {
+      data[idx] = 255; data[idx + 1] = 255; data[idx + 2] = 255; data[idx + 3] = 255;
+    }
+  }
+}
+
+// jsQR 一次只定位一枚码，且一张图有多个码时 finder pattern 会互相干扰、常常直接定位失败。
+// 真正可靠的「一图多码」解码要靠浏览器原生 BarcodeDetector（Chrome/Edge 桌面支持）。
+// 策略：优先 BarcodeDetector 取全部；不支持/失败时退回 jsQR（单码可靠，多码尽力）。
+type DetectedBarcode = { rawValue: string };
+interface BarcodeDetectorLike { detect(src: ImageData): Promise<DetectedBarcode[]>; }
+interface BarcodeDetectorCtor {
+  new (opts?: { formats?: string[] }): BarcodeDetectorLike;
+  getSupportedFormats?: () => Promise<string[]>;
+}
+
+async function makeBarcodeDetector(): Promise<BarcodeDetectorLike | null> {
+  const Ctor = (globalThis as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
+  if (!Ctor) return null;
+  try {
+    if (Ctor.getSupportedFormats) {
+      const fmts = await Ctor.getSupportedFormats();
+      if (!fmts.includes("qr_code")) return null;
+    }
+    return new Ctor({ formats: ["qr_code"] });
+  } catch {
+    return null;
+  }
+}
+
+/** jsQR 兜底：mask-and-repeat 尽力多解，主要保证单码可靠（多码定位常失败，属库的固有局限）。 */
+function decodeAllViaJsQR(img: ImageData, max: number, seen: Set<string>): string[] {
+  const data = new Uint8ClampedArray(img.data); // 复制：mask 会改像素，不能污染调用方的帧（摄像头共用 scratch）
+  const out: string[] = [...seen];
+  for (let i = 0; i < max && out.length < max; i++) {
+    const res = jsQR(data, img.width, img.height, { inversionAttempts: "attemptBoth" });
+    if (!res) break;
+    if (res.data && !seen.has(res.data)) { seen.add(res.data); out.push(res.data); }
+    maskRegion(data, img.width, img.height, res.location); // 无论是否新码都 mask 推进，否则死循环靠 max 兜底
+  }
+  return out.slice(0, max);
+}
+
+/** 解出一帧 ImageData 里的所有二维码文本（去重、最多 max 枚）。单枚/无码也走这里。 */
+export async function decodeAllImageData(img: ImageData, max = 8): Promise<string[]> {
+  const seen = new Set<string>();
+  const det = await makeBarcodeDetector();
+  if (det) {
+    try {
+      for (const b of await det.detect(img)) {
+        if (b.rawValue && !seen.has(b.rawValue)) seen.add(b.rawValue);
+        if (seen.size >= max) break;
+      }
+      if (seen.size) return [...seen].slice(0, max);
+      // detect 成功但空（个别实现对小图漏检）→ 落 jsQR 再试
+    } catch {
+      /* BarcodeDetector 抛错 → 落 jsQR */
+    }
+  }
+  return decodeAllViaJsQR(img, max, seen);
+}
+
+/** 把一张图片文件解码为其中所有二维码文本（缩放到 ≤1024 边长再解）；无码返回空数组。 */
+export async function decodeAllImageFile(file: File, max = 8): Promise<string[]> {
   const url = URL.createObjectURL(file);
   try {
     const imgEl = await loadImage(url);
     const img = drawToImageData(imgEl, 1024);
-    return img ? decodeImageData(img) : null;
+    return img ? await decodeAllImageData(img, max) : [];
   } finally {
     URL.revokeObjectURL(url);
   }
