@@ -615,6 +615,7 @@ export default function App() {
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
   const contactsScrollRef = useRef<HTMLDivElement>(null); // 通讯录滚动容器（好友列表虚拟化的滚动父，见 VirtualList）
+  const [contactFilter, setContactFilter] = useState(""); // 通讯录本地过滤（按备注/昵称/uid 即时筛已有好友；桌面端替代 iOS 的 A–Z 索引尺）
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
   const [searchQ, setSearchQ] = useState(""); // 找人搜索框
   const [searchResults, setSearchResults] = useState<UserCard[] | null>(null); // null=未搜索；[]=搜过无结果
@@ -3383,6 +3384,14 @@ export default function App() {
   const blockedSet = new Set(friends.filter((f) => f.blocked).map((f) => f.user_id));
   const incoming = friends.filter((f) => f.status === "pending"); // 别人申请我，待我同意/拒绝
   const accepted = friends.filter((f) => f.status === "accepted").sort((a, b) => b.updated_at - a.updated_at);
+  // 本地过滤好友：命中备注 / 昵称 / uid 任一（子串，大小写不敏感）。空串=不过滤。
+  const contactFilterQ = contactFilter.trim().toLowerCase();
+  const filteredAccepted = contactFilterQ
+    ? accepted.filter((f) =>
+        (f.remark || "").toLowerCase().includes(contactFilterQ) ||
+        (f.nickname || "").toLowerCase().includes(contactFilterQ) ||
+        f.user_id.toLowerCase().includes(contactFilterQ))
+    : accepted;
   const incomingCount = incoming.length;
   const labelOf = (id: string, nick: string) => (nick && nick.trim()) || id; // 有昵称显昵称，否则显 uid
   // 好友显示名优先级：备注名 > 昵称 > uid（§头像/显示名规则）。
@@ -4057,12 +4066,19 @@ export default function App() {
               </>
             )}
 
-            <div className="section-label">好友（{accepted.length}）</div>
+            <div className="section-label with-action">
+              <span>好友（{contactFilterQ ? `${filteredAccepted.length}/${accepted.length}` : accepted.length}）</span>
+              {accepted.length > 0 && (
+                <input className="contact-filter-input" value={contactFilter} placeholder="搜索好友"
+                  onChange={(e) => setContactFilter(e.target.value)} />
+              )}
+            </div>
             {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
+            {accepted.length > 0 && filteredAccepted.length === 0 && <div className="empty">没有匹配的好友</div>}
             {/* 好友列表虚拟化：只渲染视口内可见行，2000 好友首屏渲染从 ≈530ms 降到 <100ms
                 （LOAD_TESTING 场景⑥）。共用 .convlist 滚动，上方搜索/新朋友/标签同处一个滚动条。 */}
             <VirtualList
-              items={accepted}
+              items={filteredAccepted}
               scrollElRef={contactsScrollRef}
               getKey={(f) => f.user_id}
               renderRow={(f) => (
