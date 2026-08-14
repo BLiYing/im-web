@@ -393,7 +393,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .viewer-nav:hover { background: var(--overlay-strong); }
 .viewer-nav.prev { left: 24px; }
 .viewer-nav.next { right: 24px; }
-.viewer-count { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); padding: 4px 12px; border-radius: 12px; background: var(--overlay); color: var(--on-media); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* 顶部标题栏（对齐 iOS）：会话名 + 「第 i 张 / 共 N 张」。渐变底带预留高度，取代原先浮在图上、与图片重叠的孤立计数。
+   pointer-events:none —— 纯展示层，点击穿透到蒙层关闭查看器（顶部条不再吞掉点击关闭）。 */
+.viewer-top { position: fixed; top: 0; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 14px 64px 22px; background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0)); color: var(--on-media); text-align: center; z-index: 2; pointer-events: none; }
+.viewer-top-title { font-size: 16px; font-weight: 600; max-width: 70vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-top-count { font-size: 13px; opacity: 0.8; font-variant-numeric: tabular-nums; }
 
 /* 任务3 · 视频封面待点：封面图 + 居中 ▶（点了才挂 <video>，翻页流畅、无原生控件黑条） */
 .viewer-video-cover { cursor: pointer; }

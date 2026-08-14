@@ -5020,8 +5020,16 @@ export default function App() {
             <button className="viewer-nav next" title="下一张（→）"
                     onClick={(e) => { e.stopPropagation(); goViewer(1); }}><ChevronRight size={28} /></button>
           )}
-          {viewerIdx >= 0 && viewerList.length > 1 && (
-            <div className="viewer-count" onClick={(e) => e.stopPropagation()}>{viewerIdx + 1} / {viewerList.length}</div>
+          {/* 顶部标题栏（对齐 iOS）：主标题=会话名，副标题=「第 i 张 / 共 N 张」。带渐变底、预留高度，
+              取代原先浮在图上的孤立计数（与图片重叠）。仅会话媒体上下文（viewerIdx>=0）显示。 */}
+          {viewerIdx >= 0 && (
+            // pointer-events:none（见 .viewer-top）——点击穿透到蒙层关闭，无需 stopPropagation。
+            <div className="viewer-top">
+              <span className="viewer-top-title">{chatTitle}</span>
+              {viewerList.length > 1 && (
+                <span className="viewer-top-count">第 {viewerIdx + 1} 张 / 共 {viewerList.length} 张</span>
+              )}
+            </div>
           )}
           <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
             <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>
@@ -5093,26 +5101,29 @@ export default function App() {
               {messages.filter(isViewableMedia).length === 0 && (
                 <div className="fwd-empty">暂无图片或视频</div>
               )}
-              {/* 与资料卡片「媒体」页签一致：最新的排在最前（messages 为 convSeq 升序，故 reverse 取降序）。 */}
+              {/* 与资料卡片「媒体」页签**完全一致**（门控 + 右键菜单）：最新的排在最前（messages 升序 → reverse 降序）。
+                  未下载格显磨砂 + ↓ + 尺寸，点=就地下载（不打开）；就绪格才进查看器（fromGallery=不再显示「媒体库」按钮，避免死循环）。
+                  右键 = 转发/定位/取消下载/删除（同资料 tab 的 fileMenu）。 */}
               {[...messages]
                 .filter(isViewableMedia)
                 .reverse()
                 .map((mm) => {
-                  // 会话媒体库 = 档 B·被动预览：未下载**只显 thumb 磨砂、绝不联网拉原图/远端抽帧**（打开这一动作不该拉几十条原件）；
-                  // 点某格才 setViewer→用户主动看原图，此时才联网（对齐 iOS 媒体库宫格）。
-                  const src = passivePreviewSource(!mediaGate(mm), !!mm.thumb);
+                  const gate = mediaGate(mm);
+                  const sizeText = formatFileSize(mm.fileSize);
                   return (
-                  <div key={mediaIdentity(mm)} className="gallery-item" onClick={() => { setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}>
-                    {src === "thumb"
-                      ? <img className="gate-blur" src={mm.thumb} alt="" />
-                      : src === "icon"
-                        ? <span className="gate-empty" />
-                        : mm.contentType === "video"
+                  <div key={mediaIdentity(mm)} className="gallery-item"
+                       onClick={() => { if (gate) { onGateTap(mm); return; } setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}
+                       onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m: mm }); }}
+                       title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
+                    {gate
+                      ? (mm.thumb ? <img className="gate-blur" src={mm.thumb} alt="未下载" /> : <span className="gate-empty" />)
+                      : (mm.contentType === "video"
                           ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" onError={() => void onPassiveMediaError(mm)} /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted onError={() => void onPassiveMediaError(mm)} />)
-                          : <img src={mm.content} alt="" onError={() => void onPassiveMediaError(mm)} />}
-                    {mediaGate(mm)?.phase === "expired"
-                      ? <span className="play-badge expired" title="已失效">⊘</span>
+                          : <img src={mm.content} alt="" onError={() => void onPassiveMediaError(mm)} />)}
+                    {gate
+                      ? (gate.phase === "expired" ? <span className="play-badge expired" title="已失效">⊘</span> : <span className="detail-media-dl">↓</span>)
                       : mm.contentType === "video" && <span className="play-badge">▶</span>}
+                    {gate && gate.phase !== "expired" && sizeText && <span className="detail-media-size">{sizeText}</span>}
                   </div>
                   );
                 })}
@@ -5735,7 +5746,7 @@ export default function App() {
                             const sizeText = formatFileSize(m.fileSize);
                             return (
                             <button key={m.serverMsgId || m.convSeq} className="detail-media-tile"
-                                    onClick={() => (gate ? onGateTap(m) : setViewer({ m }))}
+                                    onClick={() => (gate ? onGateTap(m) : setViewer({ m, fromGallery: true }))}
                                     onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}
                                     title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
                               {gate
