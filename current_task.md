@@ -12,6 +12,15 @@
 
 ## 当前焦点
 
+**弹窗视觉打磨 ✅（2026-08-14，tsc+build 绿，用户自测通过）** — 纯 CSS（`src/styles.css`）+ 文档同步（`docs/UI_COLOR.md`）：
+- 转发弹窗：`.modal-close`（7 处「取消/关闭」底部按钮共用，原本无 CSS＝无圆角）补成整幅次要按钮（圆角 `--radius-card`+`--surface` 承托底色+hover）；`.fwd-title .section-action`「多选」字号 12→15px 对齐标题「转发…」。
+- 模态圆角统一：`.viewer-unplayable`/`.gallery-panel`(12px)、`.avatar-cropper`(18px) → 一律 `var(--radius-card)`。
+- 磨砂玻璃复用：合并规则 `.ctx-menu,.menu-card,.viewer-more-pop,.mention-panel` 复用 `--glass-menu-*`（与 `.attach-popover` 同一套）+ `backdrop-filter: blur(24px) saturate(165%)`，删掉各自不透明 `--surface-elevated`/`--separator` 底。命中：长按/右键消息·会话·文件/媒体·删除子·好友·成员菜单(`.ctx-menu`)、账号·聊天标题·资料卡「更多」(`.menu-card`)、查看器「更多」(`.viewer-more-pop`)、@提及面板(`.mention-panel`)。
+- **圆角/阴影抽令牌统一**（以长按菜单 8px 为基准）：新增 `--radius-menu:8px` + `--shadow-menu:0 4px 16px var(--shadow-strong)`，进合并规则、从各自规则删重复值（`.menu-card` 阴影 `0 8px 32px`→统一、`.mention-panel` 圆角 10→8px）。`.attach-popover` 大快捷面板保留 28px/大阴影（另一类，未并入）。
+- **兜底**：`@supports not (backdrop-filter…)` 时上述菜单（含 `.attach-popover`）退回不透明 `--surface-elevated`+`--separator`，避免半透明无模糊透字。
+- **规范同步**：`UI_COLOR.md §5` 改为「悬浮菜单/Popover 统一玻璃 + 必须带 @supports 兜底；Modal 仍 `--surface-elevated` + `--radius-card`；玻璃令牌不下放卡片/模态」。
+
+
 **QRCODE P0 + 群组 G3 入群 ✅（2026-08-13，tsc + build + 249 vitest 绿 + HTTP E2E 全通，待浏览器手测）** — 方案 `../IMServer/docs/QRCODE_DESIGN.md` / `GROUP_FEATURES_DESIGN.md` §4-G3、草图 `QRCODE_UX_SKETCH.html`。
 - **依赖**：新增 `qrcode`（出码，本地生成 PNG）+ `jsqr`（图片/摄像头解码）+ `@types/qrcode`。**bundle 因此 398→572KB**（超 500KB 告警，非错误；后续可 `React.lazy` 拆 `QRUI`）。
 - **SDK**（`sdk/protocol.ts` 加 QR/G3 类型；`sdk/imSdk.ts`）：`qrMyCard`/`qrResetMyCard`/`groupQR`/`groupQRReset`/`qrResolve`/`joinGroupByCode`/`fetchJoinRequests`/`decideJoinRequest`；`api()` 把 errcode **挂到 `Error.code`**（join 300210/码失效 200110 要按码分支）；`onGroup` 回调加第 5 参 `result`（join_result 用）；`friendlyMessage` 加 200110/300207/300208。

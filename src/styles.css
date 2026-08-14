@@ -48,6 +48,9 @@
   --radius-bubble: 18px;
   --radius-card: 14px;
   --app-card-radius: 24px;
+  /* 悬浮菜单/浮层（玻璃质感那套）统一圆角与阴影，抽成令牌供所有菜单共用，深浅色一致。 */
+  --radius-menu: 8px;
+  --shadow-menu: 0 4px 16px var(--shadow-strong);
   --app-gap: 16px;
   /* 左栏（会话列表 + 设置面板共用同一列）宽度：随窗口比例伸缩，带上下限，对齐 Telegram Web。 */
   --sidebar-w: clamp(340px, 27vw, 480px);
@@ -219,6 +222,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .modal label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
 .modal input { padding: var(--space-2) var(--space-3); border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--page-bg); color: var(--text); font-size: 15px; }
 .modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
+/* 模态底部单个「取消/关闭」按钮：整幅次要按钮，带圆角与承托底色（复用者见 modal-close 的 7 处调用）。 */
+.modal-close { width: 100%; padding: 9px 12px; border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--surface); color: var(--text); font-size: 15px; cursor: pointer; }
+.modal-close:hover { background: var(--surface-hover); }
 /* 确认框：窄一点、消息文案居中留白，按钮右对齐（复用 .modal / .modal-actions）。 */
 .confirm-modal { width: 300px; gap: var(--space-2); }
 .confirm-msg { font-size: 15px; line-height: 1.5; color: var(--text); padding: var(--space-1) 0; white-space: pre-line; }
@@ -338,6 +344,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fwd-picker { max-height: 70vh; }
 .fwd-list { overflow-y: auto; max-height: 46vh; display: flex; flex-direction: column; margin: 0 calc(-1 * var(--space-4)); }
 .fwd-title { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+/* 「多选/取消多选」切换与标题「转发…」同字号（15px），不用列表里 12px 的小号 section-action。 */
+.fwd-title .section-action { font-size: 15px; }
 .fwd-item { display: flex; align-items: center; gap: var(--space-3); text-align: left; padding: 8px var(--space-4); background: none; border: none; color: var(--text); cursor: pointer; font-size: 15px; }
 .fwd-item .avatar { width: 36px; height: 36px; font-size: 13px; flex-shrink: 0; }
 .fwd-item .checkbox { flex-shrink: 0; }
@@ -389,6 +397,26 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   animation: attachPopoverIn .16s cubic-bezier(.2,.8,.2,1);
 }
 .attach-popover::after { content: ""; position: absolute; left: 18px; bottom: -7px; width: 18px; height: 18px; border-right: 1px solid var(--glass-menu-border); border-bottom: 1px solid var(--glass-menu-border); background: var(--glass-menu-bg); transform: rotate(45deg); border-radius: 0 0 5px 0; }
+/* 悬浮菜单/弹层统一磨砂玻璃质感：复用 --glass-menu-* 令牌（与 .attach-popover 同一套），
+   覆盖各自原本的不透明 --surface-elevated 底 + --separator 边。各弹层仍各保留自己的圆角/阴影/定位。
+   命中：右键/长按消息菜单、会话菜单、文件·媒体菜单、删除子菜单、好友菜单(.ctx-menu)、
+   账号菜单·聊天标题菜单·资料卡「更多」(.menu-card/.detail-more)、查看器「更多」(.viewer-more-pop)。 */
+.ctx-menu, .menu-card, .viewer-more-pop, .mention-panel {
+  background: var(--glass-menu-bg);
+  border: 1px solid var(--glass-menu-border);
+  border-radius: var(--radius-menu);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+}
+/* 兜底：浏览器不支持（或用户禁用）backdrop-filter 时，半透明底＝无模糊会透出背后内容、字看不清。
+   退回不透明 --surface-elevated + --separator 边，保证可读（.attach-popover 一并兜底）。 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .attach-popover, .ctx-menu, .menu-card, .viewer-more-pop, .mention-panel {
+    background: var(--surface-elevated);
+    border-color: var(--separator);
+  }
+}
 .chat footer .attach-item { position: relative; z-index: 1; width: 100%; min-height: 58px; display: flex; align-items: center; gap: 22px; padding: 0 22px; border: 0; border-radius: 16px; background: transparent; color: var(--text); font-size: 17px; font-weight: 500; text-align: left; cursor: pointer; }
 .chat footer .attach-item svg { flex: 0 0 auto; color: var(--text-secondary); }
 .chat footer .attach-item:hover { background: var(--surface-hover); }
@@ -419,7 +447,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .viewer-btn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .viewer-btn:hover { background: var(--overlay-strong); }
 .viewer-more-wrap { position: relative; }
-.viewer-more-pop { position: absolute; right: 0; bottom: 48px; min-width: 160px; background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow-strong); padding: 4px; display: flex; flex-direction: column; }
+.viewer-more-pop { position: absolute; right: 0; bottom: 48px; min-width: 160px; padding: 4px; display: flex; flex-direction: column; }
 .viewer-more-pop button, .viewer-more-pop a { display: block; width: 100%; padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; text-decoration: none; }
 .viewer-more-pop button:hover, .viewer-more-pop a:hover { background: var(--surface-hover); }
 .viewer-more-pop .danger { color: var(--danger); }
@@ -459,7 +487,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 视频解不了码时的降级卡片（HEVC 等）：给出原因 + 下载入口，不留一个黑框让人猜。 */
 /* 用定宽而非 max-width：作为 .modal-mask 的 flex item，内部 img 的 max-width:100% 会与
    shrink-to-fit 形成循环约束，卡片会被压成一条竖线。 */
-.viewer-unplayable { width: min(560px, 86vw); padding: 24px; border-radius: 12px; background: var(--surface-elevated);
+.viewer-unplayable { width: min(560px, 86vw); padding: 24px; border-radius: var(--radius-card); background: var(--surface-elevated);
   color: var(--text); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .viewer-unplayable img { max-width: 100%; max-height: 40vh; border-radius: 8px; }
 .viewer-unplayable p { color: var(--text-secondary); font-size: 14px; margin: 0; }
@@ -467,7 +495,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   text-decoration: none; font-size: 14px; }
 
 /* 会话媒体库（蒙层网格） */
-.gallery-panel { width: min(640px, 92vw); max-height: 80vh; overflow-y: auto; background: var(--surface-elevated); border-radius: 12px; padding: 16px; }
+.gallery-panel { width: min(640px, 92vw); max-height: 80vh; overflow-y: auto; background: var(--surface-elevated); border-radius: var(--radius-card); padding: 16px; }
 .gallery-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .gallery-item { position: relative; aspect-ratio: 1; cursor: pointer; overflow: hidden; border-radius: 6px; background: var(--surface); }
 .gallery-item img, .gallery-item video { width: 100%; height: 100%; object-fit: cover; }
@@ -572,7 +600,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .jump-badge { position: absolute; top: -6px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--unread-badge); color: var(--on-accent); font-size: 11px; line-height: 18px; text-align: center; }
 
 /* 长按/右键消息菜单（复制 / 删除），与 iOS UIContextMenu 对齐。 */
-.ctx-menu { position: fixed; z-index: 50; background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: 8px; box-shadow: 0 4px 16px var(--shadow-strong); padding: 4px; min-width: 128px; }
+.ctx-menu { position: fixed; z-index: 50; padding: 4px; min-width: 128px; }
 .ctx-menu button { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
 .ctx-menu button:hover { background: var(--surface-hover); }
 .ctx-menu button.danger { color: var(--danger); }
@@ -590,7 +618,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .account-meta { font-size: 13px; color: var(--text-secondary); font-weight: 400; }
 
 /* 账号气泡卡片 / 通用卡片菜单（比 ctx-menu 宽）。 */
-.menu-card { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; width: 220px; background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: 8px; box-shadow: 0 8px 32px var(--shadow-strong); padding: 4px; }
+.menu-card { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; width: 220px; padding: 4px; }
 .chat-head-right { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
 .chat-anchor { position: relative; }
 .chat-menu { left: auto; right: 0; }
@@ -1068,7 +1096,7 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* ---- 头像圆形裁切弹窗（方案 C，规格见 docs/UX_SKETCH.html §Web） ---- */
 .avatar-cropper-mask { background: rgba(0,0,0,0.55); }
 .avatar-cropper { width: 360px; max-width: calc(100vw - 32px); background: var(--surface-elevated);
-  border-radius: 18px; overflow: hidden; box-shadow: 0 24px 60px var(--shadow-strong);
+  border-radius: var(--radius-card); overflow: hidden; box-shadow: 0 24px 60px var(--shadow-strong);
   display: flex; flex-direction: column; }
 .avatar-cropper .ac-head { height: 52px; display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px; border-bottom: 1px solid var(--separator); font-weight: 600; font-size: 14px; color: var(--text); }
@@ -1089,15 +1117,14 @@ button.detail-row:hover { background: var(--surface-hover); }
 .avatar-cropper .ac-save-err { margin-right: auto; color: var(--danger, #dc2626); font-size: 12px; align-self: center; }
 
 /* ── @提及面板（M4-8）：贴输入框上方的内联下拉，桌面端替代 iOS 的半屏卡 ────────── */
-/* 面板配色沿用右键菜单 .ctx-menu 那套变量（--surface-elevated/--separator/--text）：明暗都验证过。
+/* 面板底色与 .ctx-menu 等悬浮菜单共用磨砂玻璃（--glass-menu-*，见上方合并规则 + @supports 兜底）。
    ⚠️ 行选择器**必须带 .mention-panel 前缀**：.mention-row 是 <button> 且落在 .chat footer 里，
    而发送按钮那条 `.chat footer button{background:var(--accent);color:var(--on-accent)}`（特异性 0,1,2）
    会盖过裸 .mention-row（0,1,0）——否则每行都被染成绿底白字（这正是方案 A 一度没生效的原因）。 */
 .mention-panel {
   position: absolute; left: var(--space-4); right: var(--space-4); bottom: 100%;
   margin-bottom: 6px; max-height: 260px; overflow-y: auto; z-index: 50;
-  background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: 10px;
-  box-shadow: 0 4px 16px var(--shadow-strong); padding: 4px;
+  padding: 4px;
 }
 /* 顶部搜索框：圆角字段（与全站输入框同款 border + radius + page-bg），sticky 悬顶不随行滚走。
    上下留白，与列表分开。仅在此框主动打字才过滤；消息框里 @后打字不回填此框。 */

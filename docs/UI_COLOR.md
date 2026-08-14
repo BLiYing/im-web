@@ -62,9 +62,13 @@
 - 分组标题与对应卡片左边缘对齐。
 - 卡片圆角使用 `--radius-card`，不得在相同层级混用多个任意圆角。
 - 输入区使用 `--surface`，输入框使用 `--page-bg`，边框使用 `--separator`。
-- 菜单、Popover、Modal 使用 `--surface-elevated`，不可与页面卡片共用同一层级色。
-- 浮在聊天壁纸上的附件菜单允许使用 `--glass-menu-bg` + `backdrop-filter` 毛玻璃层，但文字、
-  图标、边框和 Hover 仍必须使用语义令牌，且深浅色分别提供玻璃底色。
+- Modal（模态对话框、确认框、选择器等 `.modal` 层）使用 `--surface-elevated`，不可与页面卡片共用同一层级色；
+  圆角统一走 `--radius-card`，不在模态层混用多个任意圆角。
+- **悬浮菜单 / Popover 统一使用 `--glass-menu-bg` + `--glass-menu-border` + `backdrop-filter` 毛玻璃层**
+  （附件加号菜单、右键/长按消息菜单、会话/成员/文件·媒体菜单、账号菜单、资料卡「更多」、查看器「更多」、
+  @提及面板等一切浮层菜单同一套观感），但文字、图标、边框和 Hover 仍必须使用语义令牌，且深浅色分别提供玻璃底色。
+  必须提供 `@supports not (backdrop-filter…)` 兜底：不支持时退回不透明 `--surface-elevated` + `--separator`，
+  避免半透明无模糊导致背后内容透出、文字不可读。玻璃令牌只用于这些浮层菜单，不得下放到页面卡片或模态。
 - 空状态居中，正文使用 `--text-secondary`，主操作使用 `--accent`。
 
 ## 6. 聊天个性化
