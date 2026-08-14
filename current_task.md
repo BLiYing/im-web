@@ -12,6 +12,12 @@
 
 ## 当前焦点
 
+**壁纸改版（深色默认）+ 色板脱节修复（2026-08-15，tsc + 291 vitest + build 绿，待浏览器手测）** — 纯前端（`src/App.tsx` + `src/styles.css` + `appearance.test.ts`）：
+- **壁纸目录重做**：`WALLPAPER_PRESETS` 换成 14 张分层柔和渐变（6 浅：dawn/mint/blossom/sky/sand/meadow；8 深：midnight/aurora/nebula/abyss/ember/twilight/forest-night/graphite），每张多层 radial 光晕 + linear 底、低对比保证气泡可读；加 `tone` 字段。
+- **深/浅默认随主题**：新增 `WallpaperChoice` 第 4 种 `{kind:"auto"}`（新默认）；`DEFAULT_WALLPAPER_LIGHT="dawn"` / `DEFAULT_WALLPAPER_DARK="midnight"`；抽 `resolveWallpaper(choice,isDark)`，`wallpaperCSS(choice,isDark?)` 按明暗解析 auto。`isDark = theme==="dark" || (theme==="system" && systemDark)`，`systemDark` 听 `matchMedia(prefers-color-scheme)`；壁纸 effect 依赖 `[wallpaper, isDark]` → 明暗切换自动换默认壁纸。壁纸格高亮用 `resolveWallpaper` 后的选择；壁纸面板加 `.wallpaper-hint` 说明「默认跟随明暗，点恢复默认切回跟随」。**注意**：老用户 localStorage 里已存了具体 preset（旧 effect 每次挂载都持久化），需点一次「恢复默认」才切到 auto。
+- **色板脱节修复**（用户报 bug）：根因 `styles.css .color-spectrum{--picker-hue:156}` 就地重声明遮蔽了父卡片 JSX 写入的动态 `--picker-hue` → 色板底色永远卡在 156 绿、与色相滑块/预设脱节。改：删掉 `.color-spectrum` 的重声明，兜底默认移到 `.color-editor-card`。滑块/预设/HEX 早就联动（同一 `colorHSV` 态），只是色板背景没跟着变。
+- **测试**：`appearance.test.ts` +2 例（auto 解析浅/深默认、两默认 id 存在于目录、非 auto 透传）。
+
 **弹窗视觉打磨 ✅（2026-08-14，tsc+build 绿，用户自测通过）** — 纯 CSS（`src/styles.css`）+ 文档同步（`docs/UI_COLOR.md`）：
 - 转发弹窗：`.modal-close`（7 处「取消/关闭」底部按钮共用，原本无 CSS＝无圆角）补成整幅次要按钮（圆角 `--radius-card`+`--surface` 承托底色+hover）；`.fwd-title .section-action`「多选」字号 12→15px 对齐标题「转发…」。
 - 模态圆角统一：`.viewer-unplayable`/`.gallery-panel`(12px)、`.avatar-cropper`(18px) → 一律 `var(--radius-card)`。

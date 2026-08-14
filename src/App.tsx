@@ -47,36 +47,54 @@ type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
 export type WallpaperChoice =
   | { kind: "preset"; value: string }
   | { kind: "image"; value: string }
-  | { kind: "color"; value: string };
+  | { kind: "color"; value: string }
+  | { kind: "auto" }; // 跟随深/浅色模式，使用内置默认壁纸（浅色 DEFAULT_WALLPAPER_LIGHT / 深色 DEFAULT_WALLPAPER_DARK）
 
-export const DEFAULT_WALLPAPER: WallpaperChoice = { kind: "preset", value: "meadow" };
+// 未显式选择时的内置默认：浅色一张、深色一张，随外观模式自动切换（对齐 UI_COLOR.md「壁纸须同时提供浅深值」）。
+export const DEFAULT_WALLPAPER_LIGHT = "dawn";
+export const DEFAULT_WALLPAPER_DARK = "midnight";
+export const DEFAULT_WALLPAPER: WallpaperChoice = { kind: "auto" };
+// 壁纸目录：柔和分层渐变（多层 radial 光晕 + 一层 linear 底），低对比以保证气泡可读。
+// tone 仅供设置页分组展示；浅色 6 张、深色 8 张。改 css 不影响已存偏好（按 id 解析）。
 export const WALLPAPER_PRESETS = [
-  { id: "meadow", label: "青绿涂鸦", css: "radial-gradient(circle at 18% 20%, #d8eba9 0 2%, transparent 3%), radial-gradient(circle at 75% 68%, #b8d98a 0 3%, transparent 4%), linear-gradient(145deg, #dceca8, #83c9a8)" },
-  { id: "lagoon", label: "蓝色海湾", css: "radial-gradient(circle at 70% 18%, #d8ffff 0 8%, transparent 30%), linear-gradient(145deg, #0aa4c4, #7be6dc 48%, #087db7)" },
-  { id: "leaf", label: "翡翠叶脉", css: "repeating-linear-gradient(18deg, transparent 0 16px, rgba(255,255,255,.16) 17px 19px), linear-gradient(135deg, #0c6f3d, #95db35)" },
-  { id: "violet", label: "紫色流光", css: "radial-gradient(circle at 20% 20%, #ff9fdc, transparent 34%), radial-gradient(circle at 78% 70%, #7357ff, transparent 38%), linear-gradient(145deg, #28275d, #b664d8)" },
-  { id: "lighthouse", label: "深海灯塔", css: "linear-gradient(170deg, #0a5583 0 42%, #e7c174 43% 48%, #23465c 49% 100%)" },
-  { id: "desert", label: "日落沙丘", css: "radial-gradient(circle at 75% 15%, #ffd59d 0 8%, transparent 9%), linear-gradient(155deg, #ffb066 0 44%, #d8673d 45% 65%, #7d3c5b)" },
-  { id: "islands", label: "珊瑚群岛", css: "radial-gradient(ellipse at 22% 35%, #fff0c4 0 7%, transparent 8%), radial-gradient(ellipse at 68% 63%, #d7fff5 0 9%, transparent 10%), linear-gradient(135deg, #30b9c1, #9df1dd)" },
-  { id: "water", label: "清澈水面", css: "repeating-radial-gradient(ellipse at 20% 20%, rgba(255,255,255,.25) 0 2px, transparent 3px 16px), linear-gradient(145deg, #00a8c5, #8eeadf)" },
-  { id: "forest", label: "森林光斑", css: "radial-gradient(circle at 25% 18%, rgba(255,255,210,.85) 0 3%, transparent 18%), radial-gradient(circle at 70% 62%, rgba(190,255,180,.55) 0 5%, transparent 24%), linear-gradient(145deg, #174d39, #87b968)" },
-  { id: "paper", label: "暖色纸张", css: "repeating-linear-gradient(8deg, rgba(130,90,30,.05) 0 1px, transparent 1px 9px), linear-gradient(145deg, #fff7db, #e7c481)" },
-  { id: "shore", label: "安静海滩", css: "linear-gradient(168deg, #8ed8d1 0 48%, #e6d7ac 49% 68%, #6cb6aa 69%)" },
-  { id: "mountain", label: "雪山蓝天", css: "linear-gradient(165deg, #55aee8 0 55%, #f4d9c2 56% 64%, #715d83 65% 78%, #38465d 79%)" },
+  // —— 浅色 ——
+  { id: "dawn", tone: "light", label: "晨曦微光", css: "radial-gradient(circle at 22% 18%, #ffe6cf 0%, transparent 46%), radial-gradient(circle at 82% 80%, #d3e2ff 0%, transparent 52%), linear-gradient(160deg, #fdf4ec 0%, #eef2fb 100%)" },
+  { id: "mint", tone: "light", label: "薄荷晨雾", css: "radial-gradient(circle at 78% 20%, #d8f3e5 0%, transparent 48%), radial-gradient(circle at 16% 82%, #e8f6da 0%, transparent 52%), linear-gradient(160deg, #f4fbf7 0%, #e9f5ee 100%)" },
+  { id: "blossom", tone: "light", label: "樱粉", css: "radial-gradient(circle at 24% 20%, #ffdbe7 0%, transparent 46%), radial-gradient(circle at 82% 78%, #e7dcff 0%, transparent 52%), linear-gradient(160deg, #fff1f5 0%, #f2ecff 100%)" },
+  { id: "sky", tone: "light", label: "晴空", css: "radial-gradient(circle at 80% 14%, #dcefff 0%, transparent 50%), radial-gradient(circle at 20% 86%, #eaf6ff 0%, transparent 54%), linear-gradient(165deg, #ecf6ff 0%, #d9ecfb 100%)" },
+  { id: "sand", tone: "light", label: "暖沙", css: "radial-gradient(circle at 78% 20%, #ffeccb 0%, transparent 48%), radial-gradient(circle at 18% 84%, #fbf0dd 0%, transparent 52%), linear-gradient(160deg, #fdf4e6 0%, #f2e3cd 100%)" },
+  { id: "meadow", tone: "light", label: "青草", css: "radial-gradient(circle at 24% 18%, #e4f3c9 0%, transparent 46%), radial-gradient(circle at 80% 80%, #c7e8cf 0%, transparent 52%), linear-gradient(160deg, #eef7dc 0%, #d3ebd6 100%)" },
+  // —— 深色 ——
+  { id: "midnight", tone: "dark", label: "午夜蓝", css: "radial-gradient(circle at 18% 14%, rgba(58,104,180,0.42) 0%, transparent 46%), radial-gradient(circle at 84% 82%, rgba(92,74,172,0.40) 0%, transparent 50%), linear-gradient(160deg, #0f1830 0%, #0a1120 58%, #131a34 100%)" },
+  { id: "aurora", tone: "dark", label: "极光", css: "radial-gradient(circle at 22% 20%, rgba(46,196,150,0.40) 0%, transparent 44%), radial-gradient(circle at 78% 28%, rgba(58,122,212,0.38) 0%, transparent 48%), radial-gradient(circle at 60% 86%, rgba(122,92,202,0.32) 0%, transparent 52%), linear-gradient(165deg, #081018 0%, #0a1622 55%, #0d1120 100%)" },
+  { id: "nebula", tone: "dark", label: "星云", css: "radial-gradient(circle at 26% 22%, rgba(168,74,196,0.42) 0%, transparent 44%), radial-gradient(circle at 78% 74%, rgba(74,86,204,0.40) 0%, transparent 48%), linear-gradient(160deg, #150b24 0%, #0e0a1c 58%, #1a1030 100%)" },
+  { id: "abyss", tone: "dark", label: "深海", css: "radial-gradient(circle at 24% 82%, rgba(30,154,174,0.38) 0%, transparent 46%), radial-gradient(circle at 82% 20%, rgba(42,94,164,0.40) 0%, transparent 48%), linear-gradient(165deg, #071319 0%, #05141c 55%, #0a1a24 100%)" },
+  { id: "ember", tone: "dark", label: "暖夜余烬", css: "radial-gradient(circle at 80% 16%, rgba(232,124,72,0.38) 0%, transparent 44%), radial-gradient(circle at 18% 82%, rgba(196,62,94,0.34) 0%, transparent 48%), linear-gradient(160deg, #1c1114 0%, #150d12 58%, #241318 100%)" },
+  { id: "twilight", tone: "dark", label: "暮色", css: "radial-gradient(circle at 72% 78%, rgba(126,88,196,0.40) 0%, transparent 50%), radial-gradient(circle at 20% 18%, rgba(58,96,168,0.34) 0%, transparent 48%), linear-gradient(170deg, #101a30 0%, #17203b 45%, #211a38 100%)" },
+  { id: "forest-night", tone: "dark", label: "林夜", css: "radial-gradient(circle at 20% 22%, rgba(62,152,112,0.34) 0%, transparent 46%), radial-gradient(circle at 84% 80%, rgba(40,112,122,0.32) 0%, transparent 48%), linear-gradient(160deg, #0b1712 0%, #08130f 58%, #0e1a15 100%)" },
+  { id: "graphite", tone: "dark", label: "石墨", css: "radial-gradient(circle at 30% 20%, rgba(124,134,156,0.16) 0%, transparent 52%), radial-gradient(circle at 82% 84%, rgba(90,100,120,0.14) 0%, transparent 52%), linear-gradient(160deg, #1a1c22 0%, #141519 60%, #202329 100%)" },
 ] as const;
 
 function loadWallpaper(): WallpaperChoice {
   try {
     const value = JSON.parse(localStorage.getItem("im.wallpaper") || "null") as WallpaperChoice | null;
-    if (value && ["preset", "image", "color"].includes(value.kind) && typeof value.value === "string") return value;
+    if (value?.kind === "auto") return { kind: "auto" };
+    if (value && ["preset", "image", "color"].includes(value.kind) && typeof (value as { value?: unknown }).value === "string") return value;
   } catch { /* 非法偏好回退默认值 */ }
   return DEFAULT_WALLPAPER;
 }
 
-export function wallpaperCSS(choice: WallpaperChoice): string {
-  if (choice.kind === "image") return `url("${choice.value}") center / cover no-repeat`;
-  if (choice.kind === "color") return choice.value;
-  return WALLPAPER_PRESETS.find((item) => item.id === choice.value)?.css ?? WALLPAPER_PRESETS[0].css;
+// 把 auto 解析成当前外观下的具体默认预设；其余原样返回。分离出来便于单测与在渲染层按 isDark 求值。
+export function resolveWallpaper(choice: WallpaperChoice, isDark: boolean): Exclude<WallpaperChoice, { kind: "auto" }> {
+  if (choice.kind === "auto") return { kind: "preset", value: isDark ? DEFAULT_WALLPAPER_DARK : DEFAULT_WALLPAPER_LIGHT };
+  return choice;
+}
+
+export function wallpaperCSS(choice: WallpaperChoice, isDark = false): string {
+  const resolved = resolveWallpaper(choice, isDark);
+  if (resolved.kind === "image") return `url("${resolved.value}") center / cover no-repeat`;
+  if (resolved.kind === "color") return resolved.value;
+  return WALLPAPER_PRESETS.find((item) => item.id === resolved.value)?.css ?? WALLPAPER_PRESETS[0].css;
 }
 
 type HSVColor = { h: number; s: number; v: number };
@@ -737,6 +755,8 @@ export default function App() {
   const memberMenuRef = useRef<HTMLDivElement | null>(null); // 菜单本体：捕获阶段关闭时用来排除菜单内点击
   const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
   const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
+  // 系统深色偏好（仅在 theme==="system" 时决定实际明暗）：跟随 prefers-color-scheme 实时变化，供默认壁纸随主题切换。
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false);
   const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
   const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
   const [sendKey, setSendKey] = useState<"enter" | "cmd">(() => (localStorage.getItem("im.sendKey") as "enter" | "cmd") || "enter");
@@ -2893,6 +2913,16 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("im.theme", theme);
   }, [theme]);
+  // 监听系统深色偏好变化（仅影响 theme==="system"）；用于自动壁纸随明暗切换。
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mq) return;
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  // 当前实际是否深色：显式 dark，或跟随系统且系统为深色。
+  const isDark = theme === "dark" || (theme === "system" && systemDark);
   // 消息字体大小：真功能——写 CSS 变量 --msg-font 驱动消息气泡文本字号 + 持久化。
   useEffect(() => {
     localStorage.setItem("im.fontSize", String(fontSize));
@@ -2901,13 +2931,14 @@ export default function App() {
   useEffect(() => { localStorage.setItem("im.timeFormat", timeFormat); }, [timeFormat]);
   useEffect(() => { localStorage.setItem("im.sendKey", sendKey); }, [sendKey]);
   useEffect(() => {
-    document.documentElement.style.setProperty("--chat-wallpaper", wallpaperCSS(wallpaper));
+    // 依赖 isDark：auto 壁纸在明暗切换时需重新解析（深色默认 midnight / 浅色默认 dawn）。
+    document.documentElement.style.setProperty("--chat-wallpaper", wallpaperCSS(wallpaper, isDark));
     try {
       localStorage.setItem("im.wallpaper", JSON.stringify(wallpaper));
     } catch {
       setToast("图片较大，壁纸仅在本次页面有效");
     }
-  }, [wallpaper]);
+  }, [wallpaper, isDark]);
   useEffect(() => {
     document.documentElement.style.setProperty("--wallpaper-blur", wallpaperBlur ? "10px" : "0px");
     document.documentElement.style.setProperty("--wallpaper-scale", wallpaperBlur ? "1.06" : "1");
@@ -4409,9 +4440,16 @@ export default function App() {
                   pickWallpaperImage(event.target.files?.[0]);
                   event.target.value = "";
                 }} />
+              <p className="wallpaper-hint">
+                {wallpaper.kind === "auto"
+                  ? "默认壁纸会跟随浅色/深色模式自动切换，当前高亮为正在使用的一张。"
+                  : "已固定壁纸，浅深模式都用它。点「恢复默认」可切回跟随模式。"}
+              </p>
               <div className="wallpaper-grid">
                 {WALLPAPER_PRESETS.map((item) => {
-                  const selected = wallpaper.kind === "preset" && wallpaper.value === item.id;
+                  // 用解析后的选择比对：auto 时高亮当前明暗下正在生效的那张预设。
+                  const active = resolveWallpaper(wallpaper, isDark);
+                  const selected = active.kind === "preset" && active.value === item.id;
                   return (
                     <button key={item.id} className={`wallpaper-tile${selected ? " selected" : ""}`}
                       title={item.label} aria-label={`使用${item.label}壁纸`}

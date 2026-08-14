@@ -732,6 +732,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   color: var(--on-accent);
 }
 .wallpaper-check.on { border-color: var(--unread-badge); background: var(--unread-badge); }
+.wallpaper-hint { margin: 0 2px 14px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
 .wallpaper-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -781,6 +782,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .wallpaper-color-panel { z-index: 60; }
 .wallpaper-color-body { padding: 24px 16px 16px; }
 .color-editor-card {
+  /* --picker-hue 的真实值由 JSX 就地写在本卡片上（style={{"--picker-hue": colorHSV.h}}）；
+     这里只给个兜底默认，供子元素（色板/滑块拇指）继承。切勿在 .color-spectrum 上重声明，
+     否则会遮蔽这条继承值，导致色板底色永远卡在某个色相、与滑块/预设脱节。 */
+  --picker-hue: 156;
   padding: 20px;
   margin-bottom: 20px;
   border: 1px solid var(--separator);
@@ -789,7 +794,6 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   box-shadow: 0 3px 12px var(--shadow-soft);
 }
 .color-spectrum {
-  --picker-hue: 156;
   position: relative;
   height: clamp(220px, 34vh, 360px);
   border-radius: 20px;
