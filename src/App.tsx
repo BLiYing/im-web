@@ -8,6 +8,7 @@ import { errorCode, isOwnInviteLink } from "./qr";
 import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
+import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
 import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
@@ -3367,9 +3368,14 @@ export default function App() {
   const friendLabel = (f: FriendEntry) => (f.remark && f.remark.trim()) || (f.nickname && f.nickname.trim()) || f.user_id;
   // 会话对端显示名优先级：备注 > 昵称 > uid。
   const convLabel = (c: Conversation) => (c.peer_remark && c.peer_remark.trim()) || (c.peer_nickname && c.peer_nickname.trim()) || c.peer;
+  // 对端头像/昵称多来源兜底（会话 > 好友 > 任一群成员表 > 搜索结果）：从没聊过的群成员点开单聊/资料卡时
+  // 没有会话行，头像/名字需从其它内存来源回退，否则只显示首字母圈/uid（群里气泡却正常）。
+  const peerSources = () => ({ conversations, friends, groups: Object.values(groupInfos), search: searchResults });
+  const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
+  const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
   const peerConv = conversations.find((c) => c.peer === peer);
-  const peerLabel = peerConv ? convLabel(peerConv) : peer;
+  const peerLabel = peerConv ? convLabel(peerConv) : (peerNick(peer) || peer);
   const groupConv = conversations.find((c) => c.conv_id === groupConvId); // 当前群会话（供头部菜单静音/删除，M4.5）
 
   // ---- 群聊派生 + 动作（早退 return 之后：全部普通函数，禁用 Hook）----
@@ -3406,7 +3412,7 @@ export default function App() {
   const chatMemberCount = activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
-    : peerConv?.peer_avatar_url;
+    : (peerConv?.peer_avatar_url || peerAvatar(peer));
   const chatSubtitle = isGroupChat
     ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员` : "群聊")
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
@@ -5539,9 +5545,12 @@ export default function App() {
         const canManage = !!gp && gp.my_role !== "member";
         const isOwner = !!gp && gp.my_role === "owner";
         const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || "群聊")
-          : (conv?.peer_remark || conv?.peer_nickname || d.peer || "");
+          : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || d.peer || "");
         void groupRemarkTick; // 群备注变更后重渲染标题
-        const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url) : conv?.peer_avatar_url;
+        // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
+        // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
+        const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url)
+          : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
         const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (d.peer ?? "");
         const pinned = (conv?.pinned_at ?? 0) > 0;
         const muted = !!conv?.muted;
