@@ -5027,7 +5027,7 @@ export default function App() {
             <div className="viewer-top">
               <span className="viewer-top-title">{chatTitle}</span>
               {viewerList.length > 1 && (
-                <span className="viewer-top-count">第 {viewerIdx + 1} 张 / 共 {viewerList.length} 张</span>
+                <span className="viewer-top-count">{viewerIdx + 1} / {viewerList.length}</span>
               )}
             </div>
           )}

@@ -3,6 +3,13 @@
 > **活快照**：只记当前状态，**就地覆盖、不追加**。逐功能×端状态以 `../IMServer/docs/CLIENT_PARITY.md` 为唯一来源；
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
+## 技术债 / 下次
+- **`src/App.tsx` 已 6000+ 行单体组件，迟早要重构**（2026-08-14 记）。症状：改一个小格子就得动这个巨文件、抽组件发怵、
+  重渲染面巨大、代码里已出现「须在使用前定义避免 TDZ」这类顺序耦合。**建议单独立项、分批做**：先抽叶子组件
+  （`MessageBubble` / `MediaViewer` / `MediaTile` / `DetailPanel` / `Gallery`）+ 自定义 hook，每步跑 vitest（现 271 例是安全网），
+  **不要**塞进业务需求里顺手做（那最容易引回归）。近例：会话媒体库 `gallery-item` 与详情 `detail-media-tile` 现有 ~15 行重复渲染，
+  可优先抽一个共享 `<MediaTile>`。
+
 ## 当前焦点
 
 **QRCODE P0 + 群组 G3 入群 ✅（2026-08-13，tsc + build + 249 vitest 绿 + HTTP E2E 全通，待浏览器手测）** — 方案 `../IMServer/docs/QRCODE_DESIGN.md` / `GROUP_FEATURES_DESIGN.md` §4-G3、草图 `QRCODE_UX_SKETCH.html`。
