@@ -12,6 +12,13 @@
 
 ## 当前焦点
 
+**设置页优化四项（2026-08-15，tsc + build 绿，待浏览器手测）** — 纯前端（`src/App.tsx` + `src/styles.css`）：
+- **① 卡片字号等比放大**：`.settings-row/.menu-card-row/.entry-row` 14→15.5px、gap 8→12、padding 11；`.row-value` 13→14；`.section-label` 12→13；`.settings-name` 18→20、`.settings-status` 13→14；`.settings-logout` 15→16；`.switch-row/.media-card-title` →15.5；`.tier-btn` →15。
+- **② iOS 风格图标色块**：`Row` 加 `iconTint?`，`renderRow` 有 tint 时渲染 `.row-icon-tile`（29×29 圆角7 + 白 glyph，`size=17`），否则裸图标（账号气泡卡不变）。色块色抽成 `--ic-{gray,red,orange,yellow,green,teal,blue,indigo,purple,pink}` 令牌（三套主题分支都加，深色略提亮）。分色对齐 iOS `IMSettingsViewController`：通用gray/动画orange/通知red/数据green/隐私indigo/文件夹blue/设备teal/语言purple/表情pink；资料卡 手机green·用户名blue·二维码gray；通讯录 群聊blue·公众号orange·服务号teal。退出登录仍无图标（对齐 iOS 红字无 tile）。
+- **③ 数据与存储可读性**：`.settings-foot` 12→13px + 行高 1.45→1.55 + 上下留白；`.range-scale` 11→12；`.media-card-hint` 12→13；开关 checkbox 18→20。
+- **④ 返回/编辑按钮加大**：所有设置返回 `ChevronLeft` 24→27、设置页编辑铅笔 `SquarePen` 20→24；`.settings-head .icon-btn` 32→38（**仅设置头**，聊天头不受影响）、`.icon-btn-spacer` 32→38。
+- 预览：静态 settings-preview.html（浅/深）已发用户核对。
+
 **壁纸改版（深色默认）+ 色板脱节修复（2026-08-15，tsc + 291 vitest + build 绿，待浏览器手测）** — 纯前端（`src/App.tsx` + `src/styles.css` + `appearance.test.ts`）：
 - **壁纸目录重做**：`WALLPAPER_PRESETS` 换成 14 张分层柔和渐变（6 浅：dawn/mint/blossom/sky/sand/meadow；8 深：midnight/aurora/nebula/abyss/ember/twilight/forest-night/graphite），每张多层 radial 光晕 + linear 底、低对比保证气泡可读；加 `tone` 字段。
 - **深/浅默认随主题**：新增 `WallpaperChoice` 第 4 种 `{kind:"auto"}`（新默认）；`DEFAULT_WALLPAPER_LIGHT="dawn"` / `DEFAULT_WALLPAPER_DARK="midnight"`；抽 `resolveWallpaper(choice,isDark)`，`wallpaperCSS(choice,isDark?)` 按明暗解析 auto。`isDark = theme==="dark" || (theme==="system" && systemDark)`，`systemDark` 听 `matchMedia(prefers-color-scheme)`；壁纸 effect 依赖 `[wallpaper, isDark]` → 明暗切换自动换默认壁纸。壁纸格高亮用 `resolveWallpaper` 后的选择；壁纸面板加 `.wallpaper-hint` 说明「默认跟随明暗，点恢复默认切回跟随」。**注意**：老用户 localStorage 里已存了具体 preset（旧 effect 每次挂载都持久化），需点一次「恢复默认」才切到 auto。

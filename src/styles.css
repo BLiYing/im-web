@@ -58,6 +58,10 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
+  /* iOS 设置图标色块（对齐 IMSettingsViewController 的 systemColor 分色）；白字形压其上。深色分支略提亮。 */
+  --ic-gray: #8e8e93; --ic-red: #ff3b30; --ic-orange: #ff9500; --ic-yellow: #f0a92b;
+  --ic-green: #34c759; --ic-teal: #30b0c7; --ic-blue: #007aff; --ic-indigo: #5856d6;
+  --ic-purple: #af52de; --ic-pink: #ff2d55;
 }
 /* 深色取值：手动选 Dark 直接命中；System 由下方 media 在系统深色时命中。改一处两处同步。 */
 :root[data-theme="dark"] {
@@ -74,6 +78,9 @@
   --avatar-ring: rgba(255, 255, 255, 0.32);
   --glass-menu-bg: rgba(35, 39, 46, 0.76);
   --glass-menu-border: rgba(255, 255, 255, 0.14);
+  --ic-gray: #98989d; --ic-red: #ff453a; --ic-orange: #ff9f0a; --ic-yellow: #ffb020;
+  --ic-green: #30d158; --ic-teal: #40cbe0; --ic-blue: #0a84ff; --ic-indigo: #5e5ce6;
+  --ic-purple: #bf5af2; --ic-pink: #ff375f;
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
@@ -90,6 +97,9 @@
     --avatar-ring: rgba(255, 255, 255, 0.32);
     --glass-menu-bg: rgba(35, 39, 46, 0.76);
     --glass-menu-border: rgba(255, 255, 255, 0.14);
+    --ic-gray: #98989d; --ic-red: #ff453a; --ic-orange: #ff9f0a; --ic-yellow: #ffb020;
+    --ic-green: #30d158; --ic-teal: #40cbe0; --ic-blue: #0a84ff; --ic-indigo: #5e5ce6;
+    --ic-purple: #bf5af2; --ic-pink: #ff375f;
   }
 }
 
@@ -201,7 +211,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 /* 通讯录 */
 .contacts { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.section-label { padding: var(--space-2) var(--space-4) var(--space-1); font-size: 12px; color: var(--text-secondary); }
+.section-label { padding: var(--space-2) var(--space-4) var(--space-1); font-size: 13px; color: var(--text-secondary); }
 .section-label.with-action { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .section-action { border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; padding: 0; }
 .contact-filter-input { width: 140px; padding: 3px 8px; border: 1px solid var(--separator); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 12px; }
@@ -629,13 +639,25 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .chat-title { max-width: min(42vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; font-weight: 650; }
 .chat-subtitle { color: var(--text-secondary); font-size: 12px; font-weight: 400; }
 .modal-hint { color: var(--text-secondary); font-size: 12px; margin: 4px 0 0; }
-.menu-card-row, .settings-row, .entry-row { display: flex; width: 100%; align-items: center; gap: var(--space-2); padding: 10px 14px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
+.menu-card-row, .settings-row, .entry-row { display: flex; width: 100%; align-items: center; gap: var(--space-3); padding: 11px 14px; border: 0; background: none; color: var(--text); font-size: 15.5px; text-align: left; cursor: pointer; border-radius: 6px; }
 .menu-card-row:hover, .settings-row:hover, .entry-row:hover { background: var(--surface-hover); }
 .menu-card-row.danger, .settings-row.danger { color: var(--danger); }
 .row-label { flex: 1; }
-.row-value { color: var(--text-secondary); font-size: 13px; }
+.row-value { color: var(--text-secondary); font-size: 14px; }
 .row-chevron { color: var(--text-secondary); flex-shrink: 0; }
 .row-icon { color: var(--text-secondary); flex-shrink: 0; }
+/* iOS 设置图标：圆角色块 + 白字形（对齐 IMSettingsViewController 30×30 / 圆角7 / 白 glyph）。 */
+.row-icon-tile { width: 29px; height: 29px; flex-shrink: 0; border-radius: 7px; display: grid; place-items: center; color: var(--on-media); }
+.row-icon-tile.gray { background: var(--ic-gray); }
+.row-icon-tile.red { background: var(--ic-red); }
+.row-icon-tile.orange { background: var(--ic-orange); }
+.row-icon-tile.yellow { background: var(--ic-yellow); }
+.row-icon-tile.green { background: var(--ic-green); }
+.row-icon-tile.teal { background: var(--ic-teal); }
+.row-icon-tile.blue { background: var(--ic-blue); }
+.row-icon-tile.indigo { background: var(--ic-indigo); }
+.row-icon-tile.purple { background: var(--ic-purple); }
+.row-icon-tile.pink { background: var(--ic-pink); }
 .menu-icon { color: var(--text-secondary); flex-shrink: 0; }
 .avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
 
@@ -653,12 +675,14 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .icon-btn:hover { background: var(--surface-hover); }
 .icon-btn.save { color: var(--accent); font-size: 18px; }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
+/* 设置页头部的返回/编辑按钮更大更好点（用户反馈箭头、铅笔太小）；仅作用于设置头，聊天头不受影响。 */
+.settings-head .icon-btn { width: 38px; height: 38px; }
 .settings-body { flex: 1; overflow-y: auto; padding: var(--space-4); }
 .settings-group { background: var(--card-bg); border: 1px solid var(--separator); border-radius: var(--radius-card); margin-bottom: var(--space-3); overflow: hidden; }
 .settings-group .settings-row { border-radius: 0; }
 /* 通用设置子面板（叠在设置之上） */
 .general-panel { z-index: 40; }
-.icon-btn-spacer { width: 32px; flex-shrink: 0; }
+.icon-btn-spacer { width: 38px; flex-shrink: 0; }
 .range-row { padding: 12px 14px; }
 .range-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .range-row input[type="range"] { width: 100%; accent-color: var(--accent); }
@@ -671,13 +695,13 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .row-sub { font-size: 12px; color: var(--text-secondary); }
 .settings-row.info { cursor: default; }
 .settings-row.info .row-label { color: var(--text); }
-.settings-row.info .row-value { margin-left: auto; color: var(--text-secondary); font-size: 12px; }
+.settings-row.info .row-value { margin-left: auto; color: var(--text-secondary); font-size: 13px; }
 /* 顶部名片 */
 .settings-profile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-4) 0 var(--space-3); }
 .settings-avatar { width: 84px; height: 84px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 30px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-.settings-name { font-size: 18px; font-weight: 600; color: var(--text); }
-.settings-status { font-size: 13px; color: var(--accent); }
-.settings-logout { display: block; width: 100%; margin-top: var(--space-2); padding: 12px; border: 0; background: var(--card-bg); border-radius: var(--radius-card); color: var(--danger); font-size: 15px; cursor: pointer; }
+.settings-name { font-size: 20px; font-weight: 600; color: var(--text); }
+.settings-status { font-size: 14px; color: var(--accent); }
+.settings-logout { display: block; width: 100%; margin-top: var(--space-2); padding: 13px; border: 0; background: var(--card-bg); border-radius: var(--radius-card); color: var(--danger); font-size: 16px; cursor: pointer; }
 .settings-logout:hover { background: var(--surface-hover); }
 /* 编辑资料 */
 .edit-avatar { position: relative; display: block; width: 96px; height: 96px; margin: var(--space-3) auto var(--space-4); padding: 0; border: 0; background: none; cursor: pointer; }
@@ -1070,22 +1094,23 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* ===== 数据与存储面板（M4-7）===== */
 .data-panel { z-index: 40; }
 .settings-row.static { cursor: default; }
-.settings-foot { padding: 6px 14px 2px; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+/* 说明文字：加大字号 + 行高 + 上下留白，别再挤成一行灰糊（用户反馈「看不太清」）。 */
+.settings-foot { padding: 8px 14px 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
 .switch-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);
-  padding: 10px 14px; font-size: 14px; cursor: pointer; }
+  padding: 12px 14px; font-size: 15.5px; cursor: pointer; }
 .switch-row:hover { background: var(--surface-hover); }
-.switch-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.switch-row input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent); cursor: pointer; }
 .settings-subrows { display: flex; flex-direction: column; }
-.range-scale { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
+.range-scale { display: flex; justify-content: space-between; color: var(--text-secondary); font-size: 12px; margin-top: 3px; }
 /* 媒体类型卡片（图片/视频/文件各一张，带标题头） */
-.media-card-head { display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--separator); }
+.media-card-head { display: flex; align-items: center; gap: 9px; padding: 12px 14px; border-bottom: 1px solid var(--separator); }
 .media-card-icon { color: var(--accent); flex-shrink: 0; }
-.media-card-title { font-size: 14px; font-weight: 600; color: var(--text); }
-.media-card-hint { margin-left: auto; font-size: 12px; color: var(--text-secondary); }
+.media-card-title { font-size: 15.5px; font-weight: 600; color: var(--text); }
+.media-card-hint { margin-left: auto; font-size: 13px; color: var(--text-secondary); }
 .media-card .range-row + .media-card-toggles { border-top: 1px solid var(--separator); }
 .tier-row { display: flex; align-items: center; gap: 8px; padding: 12px 14px; }
-.tier-btn { flex: 1; padding: 7px 0; border: 1px solid var(--separator); border-radius: 8px; background: none;
-  color: var(--text); font-size: 14px; cursor: pointer; }
+.tier-btn { flex: 1; padding: 8px 0; border: 1px solid var(--separator); border-radius: 8px; background: none;
+  color: var(--text); font-size: 15px; cursor: pointer; }
 .tier-btn:hover { background: var(--surface-hover); }
 .tier-btn.on { background: var(--accent); border-color: var(--accent); color: var(--on-media, #fff); }
 .tier-btn:disabled { cursor: default; }

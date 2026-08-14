@@ -3913,7 +3913,8 @@ export default function App() {
   const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
 
   // 通用菜单行：图标可选、右侧值/箭头可选、danger 红色。account card / settings / contacts entries 共用。
-  type Row = { id: string; label: string; icon?: LucideIcon; value?: string; danger?: boolean; chevron?: boolean; onClick: () => void };
+  // iconTint：设置 iOS 风格圆角色块（对齐 IMSettingsViewController 的 systemColor 分色）；不给则渲染裸图标（账号气泡卡沿用旧样式）。
+  type Row = { id: string; label: string; icon?: LucideIcon; iconTint?: string; value?: string; danger?: boolean; chevron?: boolean; onClick: () => void };
 
   // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动：加一项 = append 一条）。
   // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
@@ -3926,36 +3927,38 @@ export default function App() {
   // Web 版条目与 iOS 版不同——各自镜像对应平台的 Telegram 客户端。
   const settingsGroups: Row[][] = [
     [
-      { id: "general", label: "通用设置", icon: Settings2, chevron: true, onClick: () => setGeneralOpen(true) },
-      { id: "animations", label: "动画与性能", icon: Gauge, chevron: true, onClick: () => comingSoon("动画与性能") },
-      { id: "notifications", label: "通知", icon: Bell, chevron: true, onClick: () => comingSoon("通知") },
-      { id: "data", label: "数据与存储", icon: Database, chevron: true, onClick: () => setDataStorageOpen(true) },
-      { id: "privacy", label: "隐私与安全", icon: Lock, chevron: true, onClick: () => void openBlacklist() },
-      { id: "folders", label: "聊天文件夹", icon: Folder, chevron: true, onClick: () => comingSoon("聊天文件夹") },
-      { id: "devices", label: "已登录设备", icon: MonitorSmartphone, chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
-      { id: "language", label: "语言", icon: Languages, value: "简体中文", chevron: true, onClick: () => comingSoon("语言") },
-      { id: "stickers", label: "贴纸与表情", icon: Smile, chevron: true, onClick: () => comingSoon("贴纸与表情") },
+      { id: "general", label: "通用设置", icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
+      { id: "animations", label: "动画与性能", icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon("动画与性能") },
+      { id: "notifications", label: "通知", icon: Bell, iconTint: "red", chevron: true, onClick: () => comingSoon("通知") },
+      { id: "data", label: "数据与存储", icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
+      { id: "privacy", label: "隐私与安全", icon: Lock, iconTint: "indigo", chevron: true, onClick: () => void openBlacklist() },
+      { id: "folders", label: "聊天文件夹", icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon("聊天文件夹") },
+      { id: "devices", label: "已登录设备", icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
+      { id: "language", label: "语言", icon: Languages, iconTint: "purple", value: "简体中文", chevron: true, onClick: () => comingSoon("语言") },
+      { id: "stickers", label: "贴纸与表情", icon: Smile, iconTint: "pink", chevron: true, onClick: () => comingSoon("贴纸与表情") },
     ],
   ];
 
   // 设置页顶部名片下的资料卡（手机号/用户名）。
   const settingsInfoRows: Row[] = [
-    { id: "phone", label: myInfo?.phone || "未设置", icon: Phone, value: "手机号", onClick: () => void openProfile() },
-    { id: "username", label: `@${uid}`, icon: AtSign, value: "用户名", onClick: () => void openProfile() },
-    { id: "qr", label: "我的二维码", icon: QrCode, value: "", chevron: true, onClick: () => void openMyCard() },
+    { id: "phone", label: myInfo?.phone || "未设置", icon: Phone, iconTint: "green", value: "手机号", onClick: () => void openProfile() },
+    { id: "username", label: `@${uid}`, icon: AtSign, iconTint: "blue", value: "用户名", onClick: () => void openProfile() },
+    { id: "qr", label: "我的二维码", icon: QrCode, iconTint: "gray", value: "", chevron: true, onClick: () => void openMyCard() },
   ];
 
   // 通讯录顶部入口行（数据驱动）。
   const contactEntries: Row[] = [
-    { id: "groups", label: "群聊", icon: Users, chevron: true, onClick: () => void openGroupsModal() },
-    { id: "official", label: "公众号", icon: Megaphone, chevron: true, onClick: () => comingSoon("公众号") },
-    { id: "service", label: "服务号", icon: Headphones, chevron: true, onClick: () => comingSoon("服务号") },
+    { id: "groups", label: "群聊", icon: Users, iconTint: "blue", chevron: true, onClick: () => void openGroupsModal() },
+    { id: "official", label: "公众号", icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon("公众号") },
+    { id: "service", label: "服务号", icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon("服务号") },
   ];
 
   // 通用行渲染（cls 区分容器样式）。
   const renderRow = (r: Row, cls: string) => (
     <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}`} onClick={r.onClick}>
-      {r.icon && <r.icon size={20} className="row-icon" />}
+      {r.icon && (r.iconTint
+        ? <span className={`row-icon-tile ${r.iconTint}`}><r.icon size={17} /></span>
+        : <r.icon size={20} className="row-icon" />)}
       <span className="row-label">{r.label}</span>
       {r.value && <span className="row-value">{r.value}</span>}
       {r.chevron && <ChevronRight size={18} className="row-chevron" />}
@@ -4136,9 +4139,9 @@ export default function App() {
         {showSettings && (
           <div className="settings-panel">
             <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setShowSettings(false)}><ChevronLeft size={24} /></button>
+              <button className="icon-btn" title="返回" onClick={() => setShowSettings(false)}><ChevronLeft size={27} /></button>
               <span className="settings-title">设置</span>
-              <button className="icon-btn" title="编辑资料" onClick={() => void openProfile()}><SquarePen size={20} /></button>
+              <button className="icon-btn" title="编辑资料" onClick={() => void openProfile()}><SquarePen size={24} /></button>
             </header>
             <div className="settings-body">
               <div className="settings-profile">
@@ -4205,7 +4208,7 @@ export default function App() {
           return (
             <div className="settings-panel data-panel">
               <header className="settings-head">
-                <button className="icon-btn" title="返回" onClick={() => setDataStorageOpen(false)}><ChevronLeft size={24} /></button>
+                <button className="icon-btn" title="返回" onClick={() => setDataStorageOpen(false)}><ChevronLeft size={27} /></button>
                 <span className="settings-title">数据与存储</span>
                 <span className="icon-btn-spacer" />
               </header>
@@ -4285,7 +4288,7 @@ export default function App() {
         {profileDraft && (
           <div className="settings-panel edit-panel">
             <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setProfileDraft(null)}><ChevronLeft size={24} /></button>
+              <button className="icon-btn" title="返回" onClick={() => setProfileDraft(null)}><ChevronLeft size={27} /></button>
               <span className="settings-title">编辑资料</span>
               <button className="icon-btn save" title="保存" disabled={profileBusy} onClick={() => void saveProfile()}><Check size={22} /></button>
             </header>
@@ -4317,7 +4320,7 @@ export default function App() {
         {devicesOpen && (
           <div className="settings-panel devices-panel">
             <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setDevicesOpen(false)}><ChevronLeft size={24} /></button>
+              <button className="icon-btn" title="返回" onClick={() => setDevicesOpen(false)}><ChevronLeft size={27} /></button>
               <span className="settings-title">已登录设备</span>
               <button className="icon-btn" title="刷新" disabled={devices === null} onClick={() => void loadDevices()}><RefreshCw size={20} /></button>
             </header>
@@ -4365,7 +4368,7 @@ export default function App() {
         {generalOpen && (
           <div className="settings-panel general-panel">
             <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setGeneralOpen(false)}><ChevronLeft size={24} /></button>
+              <button className="icon-btn" title="返回" onClick={() => setGeneralOpen(false)}><ChevronLeft size={27} /></button>
               <span className="settings-title">通用设置</span>
               <span className="icon-btn-spacer" />
             </header>
@@ -4415,7 +4418,7 @@ export default function App() {
         {wallpaperOpen && (
           <div className="settings-panel wallpaper-panel">
             <header className="settings-head wallpaper-head">
-              <button className="icon-btn" title="返回" onClick={() => setWallpaperOpen(false)}><ChevronLeft size={24} /></button>
+              <button className="icon-btn" title="返回" onClick={() => setWallpaperOpen(false)}><ChevronLeft size={27} /></button>
               <span className="settings-title">聊天壁纸</span>
               <span className="icon-btn-spacer" />
             </header>
@@ -4467,7 +4470,7 @@ export default function App() {
         {wallpaperColorOpen && (
           <div className="settings-panel wallpaper-color-panel">
             <header className="settings-head wallpaper-head">
-              <button className="icon-btn" title="返回" onClick={() => setWallpaperColorOpen(false)}><ChevronLeft size={24} /></button>
+              <button className="icon-btn" title="返回" onClick={() => setWallpaperColorOpen(false)}><ChevronLeft size={27} /></button>
               <span className="settings-title">设置颜色</span>
               <span className="icon-btn-spacer" />
             </header>
