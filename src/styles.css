@@ -199,6 +199,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 通讯录 */
 .contacts { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .section-label { padding: var(--space-2) var(--space-4) var(--space-1); font-size: 12px; color: var(--text-secondary); }
+.section-label.with-action { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.section-action { border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; padding: 0; }
 .convitem.static { cursor: default; }
 .convitem.static:hover { background: none; }
 .row-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }

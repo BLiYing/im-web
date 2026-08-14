@@ -453,6 +453,11 @@ function FileGateIcon({ state }: { state: DownloadState }) {
 const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac|txt|md|log|json|csv|xml)$/i;
 function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test(name); }
 
+// 群成员上限（含群主），与后端 group.MaxGroupMembers=500 对齐（该值不由接口下发，两端各自硬编码）。
+// 建群时群主已占 1 席，故初始成员（好友）最多可选 MAX_GROUP_MEMBERS-1；超限由服务端 GroupMemberLimit 兜底拒绝。
+const MAX_GROUP_MEMBERS = 500;
+const MAX_INITIAL_MEMBERS = MAX_GROUP_MEMBERS - 1;
+
 // 图片/视频「已解门控」的持久化（方案 B）：opt-in 是内存 Set，刷新即失。存 localStorage（按 uid，末 500 条）→
 // 刷新后仍直显远端（浏览器 HTTP 缓存秒出），兑现「解门控后刷新仍在」。content URL 每条唯一、跨会话不冲突。
 const optedInKey = (uid: string) => `im.optedIn.${uid}`;
@@ -5487,7 +5492,20 @@ export default function App() {
             <h3>创建群聊</h3>
             <label>群名<input value={createDraft.name} maxLength={30} placeholder="1~30 字" autoFocus
               onChange={(e) => setCreateDraft({ ...createDraft, name: e.target.value })} /></label>
-            <div className="section-label">选择好友（已选 {createDraft.selected.length}）</div>
+            <div className="section-label with-action">
+              <span>选择好友（已选 {createDraft.selected.length}）</span>
+              {accepted.length > 0 && (() => {
+                // 可选好友上限 = MAX_INITIAL_MEMBERS（群主占 1 席）；全选时截断到上限。
+                const selectable = accepted.slice(0, MAX_INITIAL_MEMBERS).map((f) => f.user_id);
+                const allOn = selectable.length > 0 && selectable.every((id) => createDraft.selected.includes(id));
+                return (
+                  <button type="button" className="section-action"
+                    onClick={() => setCreateDraft({ ...createDraft, selected: allOn ? [] : selectable })}>
+                    {allOn ? "取消全选" : "全选"}
+                  </button>
+                );
+              })()}
+            </div>
             {accepted.length === 0 && <div className="empty">还没有好友，先去通讯录添加吧</div>}
             <div className="modal-list">
               {accepted.map((f) => {
