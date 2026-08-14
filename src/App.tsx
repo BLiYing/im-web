@@ -5041,7 +5041,7 @@ export default function App() {
               <button className="viewer-btn" title="更多" onClick={(e) => { e.stopPropagation(); setViewerMore((v) => !v); }}><MoreHorizontal size={18} /></button>
               {viewerMore && (
                 <div className="viewer-more-pop">
-                  <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}>定位到聊天位置</button>
+                  <button onClick={() => { const mm = viewer.m; setViewer(null); setViewerMore(false); setGalleryOpen(false); setDetail(null); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}>定位到聊天位置</button>
                   <button onClick={() => favoriteMessage(viewer.m)}>收藏</button>
                   <a href={viewer.m.content} download>下载</a>
                   {/* 视频不提供复制：无"复制字节"语义，产品上禁止复制视频消息（与 iOS 对齐）。图片才有复制。 */}
@@ -5344,7 +5344,8 @@ export default function App() {
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
             <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
               <Forward size={16} className="menu-icon" />转发</button>
-            <button onClick={() => { setFileMenu(null); setDetail(null); locateInChat(m.convId, m.convSeq); }}>
+            {/* 定位=回到聊天：关掉所有可能盖住聊天区的宿主（详情面板 / 会话媒体库蒙层 / 查看器），否则定位发生在蒙层背后。 */}
+            <button onClick={() => { setFileMenu(null); setDetail(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
               <MessageCircle size={16} className="menu-icon" />定位到聊天</button>
             {downloading && (
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
