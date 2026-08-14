@@ -1656,7 +1656,8 @@ export default function App() {
         const clientMsgId = client.sendMedia(url, contentType, peer, cid, {
           groupId, poster, thumb, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size,
         });
-        patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl });
+        // thumb 也写回本地行：否则转发「自己发的」图片/视频时源消息无 thumb，收端只剩空占位（详见 forward 修复）。
+        patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl, thumb });
         clearUploadProgress(l.localId); // 传完：左上角进度胶囊消失，切回时长角标
         mainOrphaned = true;      // 主体已切服务器 URL → 本地 blob 可回收
         posterOrphaned = !!poster; // 仅当封面也上到服务器才回收本地封面 blob（回退时还在显）
@@ -1720,7 +1721,8 @@ export default function App() {
       if (takeCancelled()) return; // poster 窗口内被取消 → 不发消息
       const options = contentType === "file" ? { fileName: file.name, fileSize: size } : ((poster || thumb) ? { poster, thumb } : undefined);
       const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
-      patchMsg(cid, localId, { clientMsgId, content: url, contentType, posterUrl: poster });
+      // thumb 也写回本地行：否则转发「自己发的」图片/视频时源消息无 thumb，收端只剩空占位（详见 forward 修复）。
+      patchMsg(cid, localId, { clientMsgId, content: url, contentType, posterUrl: poster, thumb });
       clearUploadProgress(localId);
       pendingFilesRef.current.delete(localId);
     } catch (e) {

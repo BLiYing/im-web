@@ -92,7 +92,7 @@ export class IMClient {
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -633,7 +633,7 @@ export class IMClient {
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
       fileName: opts?.fileName, fileSize: opts?.fileSize, replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, replyToFrom: opts?.replyTo?.from, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster,
-      mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration });
+      mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration, thumb: opts?.thumb });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
@@ -944,7 +944,7 @@ export class IMClient {
             fileName: pend.fileName, fileSize: pend.fileSize,
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
             groupId: pend.groupId, posterUrl: pend.poster,
-            mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration,
+            mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb,
           });
           this.pendingSends.delete(d.client_msg_id);
         }
@@ -1065,7 +1065,7 @@ export class IMClient {
               replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot,
               replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
               groupId: pend.groupId, posterUrl: pend.poster,
-              mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration,
+              mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb,
             });
           }
           this.pendingSends.delete(cmid);
