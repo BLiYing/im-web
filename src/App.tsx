@@ -59,6 +59,9 @@ import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
 import { PinnedListModal } from "./components/modals/PinnedListModal";
 import { GroupsModal } from "./components/modals/GroupsModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
+import { InviteMembersModal } from "./components/modals/InviteMembersModal";
+import { MuteDurationModal } from "./components/modals/MuteDurationModal";
+import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -5012,39 +5015,22 @@ export default function App() {
         );
       })()}
 
-      {/* 邀请成员弹窗：不在群内的好友多选。 */}
+      {/* 邀请成员弹窗：见 components/modals/InviteMembersModal（候选=非群内好友）。 */}
       {inviteDraft && (() => {
         const inGroup = new Set((groupInfos[inviteDraft.convId]?.members ?? []).map((m) => m.user_id));
         const candidates = accepted.filter((f) => !inGroup.has(f.user_id));
         return (
-          <div className="modal-mask" onClick={() => setInviteDraft(null)}>
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <h3>邀请成员</h3>
-              {candidates.length === 0 && <div className="empty">好友都已在群里了</div>}
-              <div className="modal-list">
-                {candidates.map((f) => {
-                  const on = inviteDraft.selected.includes(f.user_id);
-                  return (
-                    <button key={f.user_id} className="check-row"
-                      onClick={() => setInviteDraft({
-                        ...inviteDraft,
-                        selected: on ? inviteDraft.selected.filter((x) => x !== f.user_id) : [...inviteDraft.selected, f.user_id],
-                      })}>
-                      <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
-                      <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
-                      <span className="row-label">{friendLabel(f)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="modal-actions">
-                <button className="link" onClick={() => setInviteDraft(null)}>取消</button>
-                <button className="mini-btn" disabled={inviteDraft.selected.length === 0} onClick={() => void doInvite()}>
-                  邀请{inviteDraft.selected.length > 0 ? `（${inviteDraft.selected.length}）` : ""}
-                </button>
-              </div>
-            </div>
-          </div>
+          <InviteMembersModal
+            selected={inviteDraft.selected} candidates={candidates} friendLabel={friendLabel}
+            onToggle={(userId) => setInviteDraft({
+              ...inviteDraft,
+              selected: inviteDraft.selected.includes(userId)
+                ? inviteDraft.selected.filter((x) => x !== userId)
+                : [...inviteDraft.selected, userId],
+            })}
+            onInvite={() => void doInvite()}
+            onCancel={() => setInviteDraft(null)}
+          />
         );
       })()}
 
@@ -5107,47 +5093,26 @@ export default function App() {
         );
       })()}
 
-      {/* 禁言时长选择（G2）：10 分钟 / 1 小时 / 1 天 / 永久。 */}
+      {/* 禁言时长选择（G2）：见 components/modals/MuteDurationModal（until 时间戳在此算）。 */}
       {muteDurationFor && (
-        <div className="modal-mask" onClick={() => setMuteDurationFor(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">禁言时长</div>
-            <div className="mute-durations">
-              {([["10 分钟", 10 * 60_000], ["1 小时", 60 * 60_000], ["1 天", 24 * 60 * 60_000], ["永久", -1]] as [string, number][]).map(([label, ms]) => (
-                <button key={label} className="mini-btn" onClick={() => {
-                  const { convId, m } = muteDurationFor;
-                  const until = ms < 0 ? -1 : Date.now() + ms;
-                  setMuteDurationFor(null);
-                  void doGroupAction(convId, () => clientRef.current!.muteGroupMember(convId, m.user_id, until));
-                }}>{label}</button>
-              ))}
-            </div>
-            <button className="modal-close" onClick={() => setMuteDurationFor(null)}>取消</button>
-          </div>
-        </div>
+        <MuteDurationModal
+          onPick={(ms) => {
+            const { convId, m } = muteDurationFor;
+            const until = ms < 0 ? -1 : Date.now() + ms;
+            setMuteDurationFor(null);
+            void doGroupAction(convId, () => clientRef.current!.muteGroupMember(convId, m.user_id, until));
+          }}
+          onCancel={() => setMuteDurationFor(null)}
+        />
       )}
 
-      {/* 群黑名单弹窗（G2）：解除拉黑。 */}
+      {/* 群黑名单弹窗（G2）：见 components/modals/GroupBansModal。 */}
       {groupBansModal && (
-        <div className="modal-mask" onClick={() => setGroupBansModal(null)}>
-          <div className="modal pinned-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">黑名单（{groupBansModal.bans.length}）</div>
-            <div className="pinned-list">
-              {groupBansModal.bans.length === 0 ? (
-                <div className="detail-empty">暂无被拉黑成员</div>
-              ) : groupBansModal.bans.map((b) => (
-                <div className="pinned-row" key={b.user_id}>
-                  <div className="pinned-row-main" style={{ cursor: "default" }}>
-                    <span className="pinned-row-from">{b.user_id}</span>
-                    <span className="pinned-row-text">{b.expires_at === 0 ? "永久" : "冷却中"}</span>
-                  </div>
-                  <button className="mini-btn danger" onClick={() => void doUnban(groupBansModal.convId, b.user_id)}>解除</button>
-                </div>
-              ))}
-            </div>
-            <button className="modal-close" onClick={() => setGroupBansModal(null)}>关闭</button>
-          </div>
-        </div>
+        <GroupBansModal
+          bans={groupBansModal.bans}
+          onUnban={(userId) => void doUnban(groupBansModal.convId, userId)}
+          onClose={() => setGroupBansModal(null)}
+        />
       )}
 
       {/* 扫一扫（QRCODE P0）：摄像头 / 上传 / 拖拽 / 粘贴 → resolve。 */}
