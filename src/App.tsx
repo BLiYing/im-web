@@ -67,6 +67,7 @@ import { GroupTextModal } from "./components/modals/GroupTextModal";
 import { FavoritesModal } from "./components/modals/FavoritesModal";
 import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { RecordModal } from "./components/modals/RecordModal";
+import { TextReader } from "./components/TextReader";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -76,7 +77,7 @@ import {
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
   Download, LayoutGrid, MoreHorizontal, Play,
   Search, Camera, FileText, Link2, MessageCircle, X, Forward, Eye,
-  ChevronDown, ChevronUp, Copy, QrCode,
+  ChevronDown, ChevronUp, QrCode,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -4300,26 +4301,16 @@ export default function App() {
         </div>
       )}
 
+      {/* 超长文本全屏阅读器：见 components/TextReader。 */}
       {textReader && (
-        // 超长文本全屏阅读器：可滚动 / 选中复制 / 字号调节。点蒙层或 ✕ 关闭。
-        <div className="modal-mask" onClick={() => setTextReader(null)}>
-          <div className="text-reader" onClick={(e) => e.stopPropagation()}>
-            <div className="tr-bar">
-              <button className="tr-btn" title="关闭" onClick={() => setTextReader(null)}><X size={18} /></button>
-              <span className="tr-title">全文 · {charCountLabel(textReader.content)}</span>
-              <span className="tr-actions">
-                <button className="tr-btn" title="缩小字号" disabled={readerFontStep <= -1}
-                        onClick={() => setReaderFontStep((s) => Math.max(-1, s - 1))}>A−</button>
-                <button className="tr-btn" title="放大字号" disabled={readerFontStep >= 3}
-                        onClick={() => setReaderFontStep((s) => Math.min(3, s + 1))}>A+</button>
-                <button className="tr-btn" title="复制全文"
-                        onClick={() => { void navigator.clipboard?.writeText(textReader.content); setToast("已复制全文"); }}><Copy size={16} /></button>
-              </span>
-            </div>
-            {/* 基准跟随用户设置的聊天正文字号 --msg-font（14~22px），再叠加档位偏移——否则读长文的界面反而无视字号偏好。 */}
-            <div className="tr-body" style={{ fontSize: `calc(var(--msg-font) + ${readerFontStep}px)` }}>{renderMentionText(textReader, textReader.content)}</div>
-          </div>
-        </div>
+        <TextReader
+          message={textReader}
+          fontStep={readerFontStep}
+          renderBody={renderMentionText}
+          onFontStep={setReaderFontStep}
+          onCopy={() => { void navigator.clipboard?.writeText(textReader.content); setToast("已复制全文"); }}
+          onClose={() => setTextReader(null)}
+        />
       )}
 
       {galleryOpen && (
