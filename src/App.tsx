@@ -62,6 +62,8 @@ import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { InviteMembersModal } from "./components/modals/InviteMembersModal";
 import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
+import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
+import { GroupTextModal } from "./components/modals/GroupTextModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -4489,43 +4491,14 @@ export default function App() {
         </div>
       )}
 
+      {/* 已读名单（M4-8）：见 components/modals/ReadReceiptsModal。 */}
       {readReceipts && (
-        // 已读名单（M4-8）：已读/未读两栏切换，**不显读取时刻**（位点语义给不出可靠单条时间）。
-        <div className="modal-mask" onClick={() => setReadReceipts(null)}>
-          <div className="modal readby-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">已读详情</div>
-            <div className="readby-tabs">
-              <button className={readReceipts.tab === "read" ? "on" : ""}
-                onClick={() => setReadReceipts((r) => (r ? { ...r, tab: "read" } : r))}>
-                已读 {readReceipts.read.length}
-              </button>
-              <button className={readReceipts.tab === "unread" ? "on" : ""}
-                onClick={() => setReadReceipts((r) => (r ? { ...r, tab: "unread" } : r))}>
-                未读 {readReceipts.unread.length}
-              </button>
-            </div>
-            <div className="readby-list">
-              {(readReceipts.tab === "read" ? readReceipts.read : readReceipts.unread).map((memberId) => {
-                const gm = groupConvId ? groupInfos[groupConvId]?.members.find((x) => x.user_id === memberId) : undefined;
-                const label = gm?.nickname || memberId;
-                return (
-                  <div key={memberId} className="readby-row">
-                    <Avatar label={label} seed={memberId} url={gm?.avatar_url} cls="avatar mention-avatar" />
-                    <span className="mention-name">{label}</span>
-                    {gm?.role === "owner" && <span className="role-badge owner">群主</span>}
-                    {gm?.role === "admin" && <span className="role-badge">管理员</span>}
-                  </div>
-                );
-              })}
-              {(readReceipts.tab === "read" ? readReceipts.read : readReceipts.unread).length === 0 && (
-                <div className="readby-empty">
-                  {readReceipts.tab === "read" ? "还没有人读过这条消息" : "所有人都已读"}
-                </div>
-              )}
-            </div>
-            <button className="modal-close" onClick={() => setReadReceipts(null)}>关闭</button>
-          </div>
-        </div>
+        <ReadReceiptsModal
+          data={readReceipts}
+          lookupMember={(id) => groupConvId ? groupInfos[groupConvId]?.members.find((x) => x.user_id === id) : undefined}
+          onTab={(tab) => setReadReceipts((r) => (r ? { ...r, tab } : r))}
+          onClose={() => setReadReceipts(null)}
+        />
       )}
 
       {/* 全部置顶消息（G0）：见 components/modals/PinnedListModal。 */}
@@ -5157,36 +5130,28 @@ export default function App() {
         />
       )}
 
-      {/* 群公告 / 群简介全文视图（决策 16/17）：三入口共用；只读全文 + 复制 +（管理员，仅公告）编辑。 */}
+      {/* 群公告 / 群简介全文视图（决策 16/17）：见 components/modals/GroupTextModal。 */}
       {fullTextModal && (() => {
         const gp = groupInfos[fullTextModal.convId];
         if (!gp) return null;
         const isAnn = fullTextModal.kind === "announcement";
         const text = (isAnn ? gp.announcement : gp.intro) ?? "";
-        const canEdit = isAnn && gp.my_role !== "member";
         const byName = isAnn && gp.announcement_by ? (memberNick(gp.conv_id, gp.announcement_by) || gp.announcement_by) : "";
         const at = isAnn ? (gp.announcement_at ?? 0) : 0;
+        const meta = isAnn && (byName || at > 0)
+          ? `${byName}${byName && at > 0 ? " · " : ""}${at > 0 ? `${fmtDateTime(at)} 发布` : ""}`
+          : undefined;
         const close = () => setFullTextModal(null);
-        const copy = () => {
-          navigator.clipboard?.writeText(text).then(() => setToast("已复制"), () => setToast("复制失败"));
-        };
         return (
-          <div className="modal-mask" onClick={close}>
-            <div className="modal grouptext-modal" onClick={(e) => e.stopPropagation()}>
-              <button className="qr-close" onClick={close} aria-label="关闭"><X size={18} /></button>
-              <h3 className="modal-title">{isAnn ? <Megaphone size={18} /> : <Info size={18} />} {isAnn ? "群公告" : "群简介"}</h3>
-              {isAnn && (byName || at > 0) && (
-                <div className="grouptext-meta">{byName}{byName && at > 0 ? " · " : ""}{at > 0 ? `${fmtDateTime(at)} 发布` : ""}</div>
-              )}
-              <div className="grouptext-body">{text || (isAnn ? "暂无公告" : "暂无简介")}</div>
-              <div className="modal-actions">
-                <button className="mini-btn ghost" onClick={copy}><Copy size={15} /> 复制</button>
-                {canEdit && (
-                  <button className="mini-btn" onClick={() => { close(); void doEditAnnouncement(gp); }}><SquarePen size={15} /> 编辑</button>
-                )}
-              </div>
-            </div>
-          </div>
+          <GroupTextModal
+            isAnnouncement={isAnn}
+            text={text}
+            meta={meta}
+            canEdit={isAnn && gp.my_role !== "member"}
+            onCopy={() => navigator.clipboard?.writeText(text).then(() => setToast("已复制"), () => setToast("复制失败"))}
+            onEdit={() => { close(); void doEditAnnouncement(gp); }}
+            onClose={close}
+          />
         );
       })()}
 
