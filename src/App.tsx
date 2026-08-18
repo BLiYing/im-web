@@ -3419,8 +3419,12 @@ export default function App() {
                   {convPreview(c)}
                 </div>
               </div>
-              {/* 免打扰置灰未读数，但**被 @ 时破例回到高亮**——免打扰只压普通消息，不压 @我（M4-8）。 */}
-              {c.unread > 0
+              {/* 免打扰置灰未读数，但**被 @ 时破例回到高亮**——免打扰只压普通消息，不压 @我（M4-8）。
+                  正在查看的会话未读一律按 0 渲染（c.conv_id === convId）：收到本会话新消息时，列表刷新(150ms)会
+                  先拿到服务端 unread=1，而清未读靠可见即读(300ms 防抖 + markRead 往返)才落地，不屏蔽就会闪一下「1」。
+                  屏蔽后与 read 往返彻底解耦，任何时序都不闪。 */}
+              {c.conv_id === convId ? null
+                : c.unread > 0
                 ? <span className={`badge ${c.muted && !c.mention_unread ? "muted" : ""}`}>{c.unread > 99 ? "99+" : c.unread}</span>
                 : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label="未读" /> : null}
             </div>
