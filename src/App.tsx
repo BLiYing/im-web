@@ -69,6 +69,7 @@ import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
 import { MediaViewer } from "./components/MediaViewer";
+import { GalleryModal } from "./components/modals/GalleryModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -4252,44 +4253,17 @@ export default function App() {
         />
       )}
 
+      {/* 会话媒体库：见 components/modals/GalleryModal（items 为倒序可视媒体，最新在前）。 */}
       {galleryOpen && (
-        // 会话媒体库：蒙层 + 时间序网格；点击复用查看器（fromGallery=不再显示媒体库按钮）。
-        <div className="modal-mask" onClick={() => setGalleryOpen(false)}>
-          <div className="gallery-panel" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">图片与视频</div>
-            <div className="gallery-grid">
-              {messages.filter(isViewableMedia).length === 0 && (
-                <div className="fwd-empty">暂无图片或视频</div>
-              )}
-              {/* 与资料卡片「媒体」页签**完全一致**（门控 + 右键菜单）：最新的排在最前（messages 升序 → reverse 降序）。
-                  未下载格显磨砂 + ↓ + 尺寸，点=就地下载（不打开）；就绪格才进查看器（fromGallery=不再显示「媒体库」按钮，避免死循环）。
-                  右键 = 转发/定位/取消下载/删除（同资料 tab 的 fileMenu）。 */}
-              {[...messages]
-                .filter(isViewableMedia)
-                .reverse()
-                .map((mm) => {
-                  const gate = mediaGate(mm);
-                  const sizeText = formatFileSize(mm.fileSize);
-                  return (
-                  <div key={mediaIdentity(mm)} className="gallery-item"
-                       onClick={() => { if (gate) { onGateTap(mm); return; } setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}
-                       onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m: mm }); }}
-                       title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
-                    {gate
-                      ? (mm.thumb ? <img className="gate-blur" src={mm.thumb} alt="未下载" /> : <span className="gate-empty" />)
-                      : (mm.contentType === "video"
-                          ? (mm.posterUrl ? <img src={mm.posterUrl} alt="" onError={() => void onPassiveMediaError(mm)} /> : <video src={videoFrameSrc(mm.content)} preload="metadata" muted onError={() => void onPassiveMediaError(mm)} />)
-                          : <img src={mm.content} alt="" onError={() => void onPassiveMediaError(mm)} />)}
-                    {gate
-                      ? (gate.phase === "expired" ? <span className="play-badge expired" title="已失效">⊘</span> : <span className="detail-media-dl">↓</span>)
-                      : mm.contentType === "video" && <span className="play-badge">▶</span>}
-                    {gate && gate.phase !== "expired" && sizeText && <span className="detail-media-size">{sizeText}</span>}
-                  </div>
-                  );
-                })}
-            </div>
-          </div>
-        </div>
+        <GalleryModal
+          items={[...messages].filter(isViewableMedia).reverse()}
+          gateOf={mediaGate}
+          onGate={onGateTap}
+          onOpen={(mm) => { setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}
+          onMenu={(e, mm) => setFileMenu({ x: e.clientX, y: e.clientY, m: mm })}
+          onMediaError={(mm) => void onPassiveMediaError(mm)}
+          onClose={() => setGalleryOpen(false)}
+        />
       )}
 
       {/* 收藏列表（M4-4）：见 components/modals/FavoritesModal（合成消息在 App 构造后进查看器）。 */}
