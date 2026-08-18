@@ -66,6 +66,7 @@ import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
 import { GroupTextModal } from "./components/modals/GroupTextModal";
 import { FavoritesModal } from "./components/modals/FavoritesModal";
 import { ForwardPicker } from "./components/modals/ForwardPicker";
+import { RecordModal } from "./components/modals/RecordModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -4392,55 +4393,20 @@ export default function App() {
         />
       )}
 
+      {/* 合并转发详情（镜像 iOS）：见 components/modals/RecordModal（栈式下钻，合成消息在 App 构造）。 */}
       {recordView && (
-        // 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器；
-        // 嵌套合并转发条目 → 套娃 mini 卡片，点击入栈下钻（栈深 >1 时显返回）。
-        <div className="modal-mask" onClick={() => setRecordStack([])}>
-          <div className="modal record-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title record-head">
-              {recordStack.length > 1 && (
-                <button className="icon-btn" title="返回" onClick={() => setRecordStack((s) => s.slice(0, -1))}>
-                  <ChevronLeft size={22} />
-                </button>
-              )}
-              <span className="record-head-title">{recordView.t}</span>
-            </div>
-            <div className="record-list">
-              {recordView.items.map((it, i) => (
-                <div key={i} className="record-item">
-                  <div className="record-item-name">{it.n}</div>
-                  {it.ct === "image" ? (
-                    <img className="record-item-media" src={it.c} alt="图片" onClick={() => { setRecordStack([]); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
-                  ) : it.ct === "video" ? (
-                    <span className="fav-thumb-wrap" onClick={() => { setRecordStack([]); setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content: it.c, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
-                      <video className="record-item-media" src={videoFrameSrc(it.c)} preload="metadata" muted /><span className="play-badge">▶</span>
-                    </span>
-                  ) : it.ct === "file" ? (
-                    <a className="msg-file" href={it.c} download={it.fn || fileNameFromContent(it.c)} target="_blank" rel="noreferrer">
-                      <FileTypeIcon name={it.fn || it.c} size={30} />
-                      <span>{it.fn || fileNameFromContent(it.c)}</span>
-                      {it.fs ? <span className="msg-file-size">{formatFileSize(it.fs)}</span> : null}
-                    </a>
-                  ) : it.ct === "chat_record" ? (
-                    // 套娃 mini 卡片：标题 + 前 2 行预览 + 脚注；点击入栈进子记录（任意深度）。sub 走 recordNested 缓存。
-                    (() => { const sub = recordNested.get(i) ?? parseChatRecord(it.c); return (
-                      <div className="record-card record-card-nested" onClick={() => setRecordStack((s) => [...s, sub])}>
-                        <div className="record-title">{sub.t}</div>
-                        <div className="record-preview">{sub.items.slice(0, 2).map((si, k) => (
-                          <div key={k} className="record-line">{si.n}: {recordItemPreview(si)}</div>
-                        ))}</div>
-                        <div className="record-foot">聊天记录 ›</div>
-                      </div>
-                    ); })()
-                  ) : (
-                    <div className="record-item-text">{it.c}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <button className="modal-close" onClick={() => setRecordStack([])}>关闭</button>
-          </div>
-        </div>
+        <RecordModal
+          view={recordView}
+          canGoBack={recordStack.length > 1}
+          nestedAt={(i) => recordNested.get(i)}
+          onBack={() => setRecordStack((s) => s.slice(0, -1))}
+          onDrill={(sub) => setRecordStack((s) => [...s, sub])}
+          onOpenMedia={(i, content, kind) => {
+            setRecordStack([]);
+            setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true });
+          }}
+          onClose={() => setRecordStack([])}
+        />
       )}
 
       {/* 已读名单（M4-8）：见 components/modals/ReadReceiptsModal。 */}
