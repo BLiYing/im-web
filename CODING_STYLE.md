@@ -62,10 +62,13 @@
 超标的正确处理是**拆分**（按上面三档），**不是放宽阈值**。历史欠账（`App.tsx`、`sdk/imSdk.ts`）在脚本里登记
 「只准降不准升」，逐步拆到 600 以下后从表里删。
 
-**prop-drilling 墙（何时上 Context）**：当一个待拆组件需要 **~20+ 个 props**（多为 `clientRef`/`setToast`/`askConfirm`/
-`refresh*` 这类公共服务）时，别硬传——先建 `AppServicesContext` 收拢这批稳定依赖，组件从 `useAppServices()` 取，
-props 降到个位数（方案与触发点见 `current_task.md`）。**注意 Context 只放稳定的服务，不放高频变化的 state**
-（如 `input`/`msgsByConv`——放进去会让所有消费组件跟着重渲染）。
+**prop-drilling 墙（何时上 Context）**：props 数是**软信号，不是硬上限**——当一个待拆组件的 props 逼近 **~20 个、且其中多数是
+`clientRef`/`setToast`/`askConfirm`/`refresh*` 这类公共服务**时，就该停下来考虑：别硬传，先建 `AppServicesContext` 收拢这批
+稳定依赖，组件从 `useAppServices()` 取，props 降到个位数（方案与触发点见 `current_task.md`）。**注意 Context 只放稳定的服务，
+不放高频变化的 state**（如 `input`/`msgsByConv`——放进去会让所有消费组件跟着重渲染）。
+- **已登记例外**：`MediaViewer`（~24 props）在 Context 落地前先按纯 props 拆出——它的多是**一次性动作回调**（onLocate/
+  onFavorite/onCopy/onForward/onDelete…），不是跨组件共享的服务，硬传成本可接受。**Context 落地时应把这些公共服务类回调一并收编**。
+- 会话详情抽屉（~50 props）**不走硬传**：已触墙，等 `AppServicesContext` 就位再拆（见 `current_task.md`「prop-drilling 墙」）。
 
 ## 八、测试
 - **每加一个功能配 `*.test.ts(x)`**，`npm test`（vitest）自动纳入回归。
