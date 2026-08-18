@@ -256,7 +256,6 @@ export default function App() {
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
   const [deleteMenu, setDeleteMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 删除两档子菜单 B（为所有人删除/仅删除自己）——由菜单 A 的「删除」展开，对齐 iOS 子菜单
   const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/简介/公告/禁言）
-  const [groupRemarkTick, setGroupRemarkTick] = useState(0); // 群备注（本地）变更计数，触发标题/列表重渲染
   const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null); // 当前群黑名单（管理面板显示计数）
   const [groupBansModal, setGroupBansModal] = useState<{ convId: string; bans: GroupBan[] } | null>(null); // 黑名单弹窗
   // 二维码体系（QRCODE P0）+ G3 入群 UI 状态。
@@ -2873,13 +2872,13 @@ export default function App() {
   })();
 
   const activeGroupConv = groupConvId ? conversations.find((c) => c.conv_id === groupConvId) : undefined;
-  // 群备注（G1，仅本人可见，本地存储）——定义在 chatTitle/详情用它之前，避免 TDZ。
-  const groupRemarkKey = (cid: string) => `im.grpremark.${uid}.${cid}`;
-  const groupRemark = (cid: string): string => localStorage.getItem(groupRemarkKey(cid)) ?? "";
+  // 群备注（G1，仅本人可见）——**服务端多端同步**：从会话列表状态读该会话的 remark（随 /conversations 拉取，
+  // conv_update 后自动刷新）。定义在 chatTitle/详情用它之前，避免 TDZ。
+  const groupRemark = (cid: string): string =>
+    (conversations.find((c) => c.conv_id === cid)?.remark || "").trim();
   const chatTitle = isGroupChat
     ? (groupRemark(groupConvId) || activeGroupInfo?.name || activeGroupConv?.name || "群聊")
     : peerLabel;
-  void groupRemarkTick; // 群备注（本地）变更后重渲染聊天标题
   const chatMemberCount = activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
@@ -2927,7 +2926,8 @@ export default function App() {
     return undefined;
   };
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）。
-  const convDisplayLabel = (c: Conversation) => (c.is_group ? (c.name || "群聊") : convLabel(c));
+  // 群项：群备注（G1，仅本人可见、多端同步）非空即替代群名；否则真实群名。
+  const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
   const mediaPreview = (ct: string): string | null =>
     ct === "image" ? "[图片]" : ct === "video" ? "[视频]" : ct === "file" ? "[文件]" : ct === "chat_record" ? "[聊天记录]" : null;
@@ -3253,15 +3253,19 @@ export default function App() {
     await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMyNickname(gp.conv_id, nick.trim()));
   };
 
-  // 群备注（G1，仅本人可见）：改我看到的群名，本地存储（localStorage keyed by uid+convId）。
-  // 说明：后端已有会话级 remark 字段（多端同步），Web 现用本地存储与 iOS 对齐，多端同步为后续项。
+  // 群备注（G1，仅本人可见）：改我看到的群名，**服务端多端同步**（PUT …/remark）。
+  // 成功后重拉会话列表；conv_update 也会把变更同步到本人其它端与本机列表/标题。
   const doEditGroupRemark = async (gp: GroupInfo) => {
     const cur = groupRemark(gp.conv_id);
     const v = await askPrompt("群备注", cur, { placeholder: `${gp.name}（仅自己可见）`, okText: "保存", maxLength: 30 });
     if (v === null || v.trim() === cur) return;
-    if (v.trim()) localStorage.setItem(groupRemarkKey(gp.conv_id), v.trim());
-    else localStorage.removeItem(groupRemarkKey(gp.conv_id));
-    setGroupRemarkTick((n) => n + 1); // 触发标题/会话列表重渲染
+    try {
+      await clientRef.current?.setConvRemark(gp.conv_id, v.trim());
+      logger.info(LOG_TAG.app, "group_remark_updated", { conv: gp.conv_id, len: v.trim().length });
+      await refreshConversations(); // 列表状态更新 → chatTitle/列表项/详情行随 remark 重渲染
+    } catch (e) {
+      setToast(`保存备注失败：${(e as Error).message}`);
+    }
   };
 
   // 设置群头像（仅群主/管理员，方案 C）：选图 → 圆形裁切 → 头像专用上传 → updateGroup 带新 URL。
@@ -4489,7 +4493,6 @@ export default function App() {
         const isOwner = !!gp && gp.my_role === "owner";
         const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || "群聊")
           : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || d.peer || "");
-        void groupRemarkTick; // 群备注变更后重渲染标题
         // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
         // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
         const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url)

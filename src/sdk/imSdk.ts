@@ -286,9 +286,16 @@ export class IMClient {
 
   // ---- 会话管理（M4.5）----
 
-  /** 更新会话级设置（置顶/免打扰/标未读，整体替换）：PUT /api/v1/conversations/{id}/settings。 */
+  /** 更新会话级设置（置顶/免打扰/标未读，整体替换）：PUT /api/v1/conversations/{id}/settings。
+   *  注：remark 已从 settings 拆出走 setConvRemark；本端点服务端会保留现有 remark 不清空。 */
   async updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> {
     await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/settings`, { method: "PUT", body: JSON.stringify(s) });
+  }
+
+  /** 设置会话备注（G1，仅本人可见、多端同步）：PUT /api/v1/conversations/{id}/remark。留空即清除。
+   *  与设置三开关解耦（各走各端点，互不覆盖）；变更经 conv_update 同步全端。 */
+  async setConvRemark(convId: string, remark: string): Promise<void> {
+    await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/remark`, { method: "PUT", body: JSON.stringify({ remark }) });
   }
 
   /** 删除会话（仅本人，记 cleared_at 不删消息）：DELETE /api/v1/conversations/{id}。 */

@@ -167,6 +167,7 @@ export interface Conversation {
   pinned_at?: number;      // 置顶时间（0/缺省=未置顶；已置顶排在列表顶，越大越靠上）
   muted?: boolean;         // 免打扰（弱提示不响铃）
   marked_unread?: boolean; // 手动标为未读（红点，不计数）
+  remark?: string;         // 会话备注（G1，仅本人可见、多端同步）：非空替代 name/群名显示
   /**
    * 未读区间内有人 @我（含 @所有人），仅群聊（M4-8）。
    * 列表显「[有人@我]」红字前缀，且**穿透免打扰**：命中时未读数仍高亮、不置灰。
