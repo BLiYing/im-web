@@ -4,13 +4,16 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 技术债 / 下次
-- **`src/App.tsx` 已 6000+ 行单体组件，迟早要重构**（2026-08-14 记）。症状：改一个小格子就得动这个巨文件、抽组件发怵、
-  重渲染面巨大、代码里已出现「须在使用前定义避免 TDZ」这类顺序耦合。**建议单独立项、分批做**：先抽叶子组件
-  （`MessageBubble` / `MediaViewer` / `MediaTile` / `DetailPanel` / `Gallery`）+ 自定义 hook，每步跑 vitest（现 271 例是安全网），
-  **不要**塞进业务需求里顺手做（那最容易引回归）。近例：会话媒体库 `gallery-item` 与详情 `detail-media-tile` 现有 ~15 行重复渲染，
-  可优先抽一个共享 `<MediaTile>`。
+- **`src/App.tsx` 拆分进行中（2026-08-18 首轮完成，6302 → 5719 行，8 个绿提交）**。每步 `tsc + 294 vitest (+ build)` 全绿、单独 commit。已抽出：
+  - **纯逻辑模块**：`wallpaper.ts`（壁纸目录/解析）、`color.ts`（HSV↔HEX/clamp）、`messageContent.ts`（快照本地化/引用预览/聊天记录解析/文件名·URL/媒体定框）、`session.ts`、`optedIn.ts`、`videoPoster.ts`。测试导入已改指向新模块（appearance/chatRecord.test.ts）。
+  - **叶子展示组件** `src/components/`：`Avatar`、`AlbumGrid`、`QuoteThumb`(+`QuoteSnapshotIcon`)、`AnchoredMenu`、`FileGateIcon`、`LinkCard`（`avatarColor`/`linkPreviewCache`/`LinkPreview` 随组件走）。
+  - **自定义 Hook**：`useDevices`（设备管理四态+操作，依赖 clientRef/askConfirm/setToast 注入；logout 复位走 `resetDevices` 封装）、`useDialogs`（confirmDlg/promptDlg + askConfirm/askPrompt）、`useToast`（toast+comingSoon+自动消失）。三个 hook 都须在**用到其返回值的回调之前**调用（组件体最靠前），呼应既有「须在使用前定义避免 TDZ」的顺序耦合。
+  - **未做/下次（风险升高，留给 code review 后再推进）**：剩下 5719 行是**紧耦合核心**——聊天消息流、滚动/已读/分页那堆互咬的 ref（`wasNearBottomRef`/`histAnchorRef`/`prevMinSeqRef`… 见「已知坑」的 scroll/jump 雷区）、消息 CRUD、上传/下载、设置面板 JSX。这些**单元测试覆盖不到**（现 294 例测的是纯模块，非组件行为），继续抽 hook/组件只能靠浏览器手测兜底，**易引回归**——按原则不在此轮硬推。候选：`MessageBubble`/`MediaViewer`/共享 `<MediaTile>`（`gallery-item` 与 `detail-media-tile` ~15 行重复）、`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`。
+  - **注意**：无 `@testing-library`，hook 无法直接单测；本轮均为**行为保持型**抽取，靠 tsc + build + 现有 294 例回归兜底。**待用户浏览器手测**冒烟（登录/发消息/设备管理/确认弹窗/吐司）。
 
 ## 当前焦点
+
+**App.tsx 单体组件拆分（首轮）✅（2026-08-18，8 提交，每步 tsc+294 vitest(+build) 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→5719 行；纯逻辑/叶子组件/3 个自定义 hook 已抽出，紧耦合的聊天核心留待 code review 后再评估。
 
 **「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，待浏览器手测）** — 纯前端（`src/fileTypes.ts` + `src/App.tsx` + `fileTypes.test.ts`）：
 - **根因**：入口 `accept="image/*,video/*"` 是通配，`image/*` 把 HEIC 也列为可选，系统文件对话框里 HEIC 不置灰；旧的只有选完后 JS 黑名单（`webCanRenderMedia`）toast 忽略，属事后拦。
