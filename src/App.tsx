@@ -32,7 +32,7 @@ import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
 import {
   isUrlText, localizeSnippet, replyPreviewOf, selectableInMultiSelect,
   parseChatRecord, recordItemPreview, fileNameFromContent, copyImageToClipboard,
-  mediaBoxProps, isPreviewableFile, videoFrameSrc, type RecordItem, type ChatRecord,
+  mediaBoxProps, isPreviewableFile, videoFrameSrc, syntheticViewerMessage, type RecordItem, type ChatRecord,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { AlbumGrid } from "./components/AlbumGrid";
@@ -4200,7 +4200,7 @@ export default function App() {
           videoUnplayable={videoUnplayable}
           videoStarted={videoStarted}
           isExpired={expiredSet.has(viewer.m.content)}
-          unsupported={mediaGate(viewer.m)?.phase === "unsupported"}
+          unsupported={viewer.m.contentType !== "video" && mediaGate(viewer.m)?.phase === "unsupported"}
           mediaKey={mediaIdentity(viewer.m)}
           viewerIdx={viewerIdx}
           viewerCount={viewerList.length}
@@ -4272,7 +4272,7 @@ export default function App() {
           favorites={favorites}
           onOpenMedia={(f, kind) => {
             setFavorites(null);
-            setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true });
+            setViewer({ m: syntheticViewerMessage(`fav-${f.id}`, f.content, kind), fromGallery: true });
           }}
           onRemove={removeFavorite}
           onClose={() => setFavorites(null)}
@@ -4307,7 +4307,7 @@ export default function App() {
           onDrill={(sub) => setRecordStack((s) => [...s, sub])}
           onOpenMedia={(i, content, kind) => {
             setRecordStack([]);
-            setViewer({ m: { clientMsgId: `rec-${i}`, convId: "", from: "", content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true });
+            setViewer({ m: syntheticViewerMessage(`rec-${i}`, content, kind), fromGallery: true });
           }}
           onClose={() => setRecordStack([])}
         />
