@@ -24,6 +24,7 @@
 ## 三、类型与空值安全（TS strict）
 - **避免 `any`**；确实要逃逸用 `unknown` + 收窄。第三方无类型处就近写最小 `type`。
 - 可选值用 `?.` / `??` / `if (!x) return`，不用非空断言 `!` 图省事（除非上文已保证）。
+  - **例外——可选 render slot 的兜底用 `||` 不用 `??`**：`{right ?? <Spacer/>}` 只在 null/undefined 时兜底；调用方若传 `right={cond && <btn/>}`，`cond` 为 false 时 `right` 是 `false`（非空值），`??` 不兜底→占位丢失。JSX 渲染槽的默认值一律 `{right || <Spacer/>}`（本次 `SubPanel` 踩过）。
 - 数据结构优先 `type`（本项目惯例）；props 就地写 inline 类型或紧邻 `type XxxProps`。
 - 新协议字段：先 `sdk/protocol.ts` 加类型，再在 SDK/UI 使用。
 
@@ -56,6 +57,19 @@
 - **② 一整块 UI（面板 / 弹窗 / 查看器 / 卡片）→ 独立展示组件**（`components/**`）。纯展示：数据与动作全经 props 注入，
   组件不持业务状态。参考 `SettingsPanel` / `MediaViewer` / `modals/ForwardPicker`。
 - **③ 纯逻辑（无 React、无 self）→ `*.ts` 纯函数模块 + 单测**。参考 `messageContent`/`wallpaper`/`color`（各配 `*.test.ts`）。
+
+**拆完之后还有第二步：跨叶子的「共享外壳」上提**（拆巨组件只做①②③是不够的）。
+把 App.tsx 拆成「一功能一文件」会催生**第二种重复**——同一套**外壳/骨架**被逐字复制进 N 个叶子文件：弹窗的
+`modal-mask`+面板+`stopPropagation`、设置面板的「返回+标题+右槽」头部、多选行的「勾选框+头像+名」……散在各文件时
+「看起来每个文件都不长」，但改一处跨切面行为要动 N 处。判据与做法：
+- 同一段**结构性外壳/单元**在 **≥3 个文件**里逐字重复 → 抽成共享**包裹组件**，叶子只写差异（内容 + 少量 `className`/slot）。
+  本次落地：`Modal`（14 处弹窗外壳）、`settings/SubPanel`（7 个面板头部）、`rows.tsx#CheckRow`（多选行）、`VideoThumb`（视频快照格）。
+- 收益不止省行数：**跨切面行为**（点遮罩关闭、Esc 关闭、焦点陷阱、`role=dialog`、a11y）从「改 N 处」变「改 1 处」——
+  外壳分散时这些根本没法统一加。差异用 **prop/slot 兜住**（容器类走 `className` prop、头部按钮走 `right` slot），别为差异复制整壳。
+
+**纯结构重构要「行为等价」**：外壳上提这类清理，DOM 结构 / className / 事件时序须逐字不变（本次每个 `Modal`/`SubPanel`
+转换后 DOM 完全一致，`tsc` + `App.smoke` + 全量 vitest 全绿即等价证据）。**顺手加功能**（如借机给所有弹窗补 Esc 关闭）
+诱惑大，但那是**另一个改动**——混进重构会让「等价性」无从核对、review 变难；要加单独开一个 commit。
 
 **红线（机械护栏，别靠自觉）**：`./scripts/check-file-size.sh`——单文件 > **600 行**（`.ts`/`.tsx`，不含 `*.test.*`）即非零退出。
 **建议装 pre-commit 钩子自动跑**：`./scripts/install-hooks.sh`（每个 clone 一次，超预算即拦提交；应急 `git commit --no-verify`）。
