@@ -46,6 +46,7 @@ import { SESSION_KEY, loadSession } from "./session";
 import { optedInKey, loadOptedIn, saveOptedIn } from "./optedIn";
 import { captureVideoPoster } from "./videoPoster";
 import { useDevices } from "./useDevices";
+import { useDialogs } from "./useDialogs";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -149,13 +150,9 @@ export default function App() {
   const [chatMenu, setChatMenu] = useState(false); // 聊天页右上 ⋮ 下拉菜单
   const [contactDraft, setContactDraft] = useState<{ peer: string; remark: string } | null>(null); // 编辑联系人（备注名）弹窗
   const [toast, setToast] = useState<string | null>(null); // 轻量浮层提示（如"xx（开发中）"）
-  // 应用内确认/输入弹窗（替代原生 window.confirm/prompt，统一 .modal 风格）。
-  const [confirmDlg, setConfirmDlg] = useState<
-    { message: string; okText: string; cancelText: string; danger: boolean; resolve: (ok: boolean) => void } | null>(null);
-  const [promptDlg, setPromptDlg] = useState<
-    { title: string; value: string; placeholder: string; okText: string; maxLength?: number;
-      multiline?: boolean; extraAction?: { label: string; value: string; danger?: boolean };
-      resolve: (v: string | null) => void } | null>(null);
+  // 应用内确认/输入弹窗（替代原生 window.confirm/prompt）：状态与 askConfirm/askPrompt 抽到 useDialogs；
+  // 弹窗本体 JSX 仍在下方渲染。须在使用 askConfirm/askPrompt 的回调之前调用（此处即最靠前）。
+  const { confirmDlg, setConfirmDlg, promptDlg, setPromptDlg, askConfirm, askPrompt } = useDialogs();
   // 群公告/群简介全文视图（决策 16/17）：只读全文 + 复制 +（管理员）编辑；简介无发布者/时间/编辑。
   const [fullTextModal, setFullTextModal] = useState<{ kind: "announcement" | "intro"; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
@@ -2046,39 +2043,10 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // 应用内确认框：返回 Promise<boolean>，替代 window.confirm。danger=true 时确认按钮为危险色。
-  const askConfirm = useCallback(
-    (message: string, opts?: { okText?: string; cancelText?: string; danger?: boolean }) =>
-      new Promise<boolean>((resolve) => setConfirmDlg({
-        message,
-        okText: opts?.okText ?? "确定",
-        cancelText: opts?.cancelText ?? "取消",
-        danger: opts?.danger ?? false,
-        resolve,
-      })),
-    []);
-
   // ---- 已登录设备（P2）：状态 + 加载/踢下线操作 ----
   const { devices, devicesOpen, setDevicesOpen, devicesErr, revokingSid, loadDevices, revokeDevice, revokeOtherDevices, resetDevices } =
     useDevices({ clientRef, askConfirm, setToast });
 
-  // 应用内输入框：返回 Promise<string | null>（取消为 null），替代 window.prompt。
-  const askPrompt = useCallback(
-    (title: string, defaultValue = "", opts?: {
-      placeholder?: string; okText?: string; maxLength?: number;
-      multiline?: boolean; extraAction?: { label: string; value: string; danger?: boolean };
-    }) =>
-      new Promise<string | null>((resolve) => setPromptDlg({
-        title,
-        value: defaultValue,
-        placeholder: opts?.placeholder ?? "",
-        okText: opts?.okText ?? "确定",
-        maxLength: opts?.maxLength,
-        multiline: opts?.multiline,
-        extraAction: opts?.extraAction,
-        resolve,
-      })),
-    []);
   // 打开群公告/简介全文视图（三入口共用：横幅点击 / 详情页卡点击）。
   const openGroupText = useCallback((kind: "announcement" | "intro", cid: string) => {
     setFullTextModal({ kind, convId: cid });
