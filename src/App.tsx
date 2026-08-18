@@ -1560,17 +1560,18 @@ export default function App() {
 
   // 粘贴图片（Web #2）：Ctrl/Cmd+V 粘贴剪贴板中的图片 → 输入区上方预览 → 发送时作为图片上传。
   // 粘贴攒批（对齐 iOS 预览条）：图片与**任意文件**都先进预览条，发送键统一发出。
-  const [pastedImages, setPastedImages] = useState<{ file: File; url: string; kind: "image" | "file" }[]>([]);
+  const [pastedImages, setPastedImages] = useState<{ file: File; url: string; kind: "image" | "video" | "file" }[]>([]);
   const addPastedFiles = useCallback((files: File[]) => {
-    // 走与文件选择器同一个类型闸：可发送的图片/视频进"媒体批量"通道（kind=image），
+    // 走与文件选择器同一个类型闸：可发送的图片/视频进"媒体批量"通道（image/video），
     // 其余（含 svg——MIME 是 image/svg+xml，旧代码会误判成 image 送进批量→服务端拒传坏气泡）走文件通道。
     // 网页端解不了码的媒体（HEIC 等）直接丢弃：发出去自己看不了。（非媒体文件仍按文件发，行为不变。）
-    const keep: { file: File; url: string; kind: "image" | "file" }[] = [];
+    // 视频保留 video 种类而非并入 image：否则预览条会拿视频 blob 塞进 <img> → 破图（见预览渲染）。
+    const keep: { file: File; url: string; kind: "image" | "video" | "file" }[] = [];
     let dropped = 0;
     for (const f of files) {
       const k = mediaKindForFile(f);
       if (k !== null && !webCanRenderMedia(k, f.name)) { dropped++; continue; }
-      keep.push({ file: f, url: URL.createObjectURL(f), kind: k !== null ? "image" : "file" });
+      keep.push({ file: f, url: URL.createObjectURL(f), kind: k ?? "file" });
     }
     if (dropped) setToast("为保证各端可见，已忽略 HEIC 等格式");
     if (keep.length) setPastedImages((prev) => [...prev, ...keep]);
@@ -1746,7 +1747,7 @@ export default function App() {
     if (pastedImages.length) {
       const items = pastedImages;
       setPastedImages([]);
-      const imgs = items.filter((pi) => pi.kind === "image");
+      const imgs = items.filter((pi) => pi.kind === "image" || pi.kind === "video");
       if (imgs.length) void sendMediaBatch(imgs.map((pi) => pi.file));
       for (const pi of items) {
         if (pi.kind === "file") void uploadAndSend(pi.file, "file");
@@ -4987,6 +4988,13 @@ export default function App() {
                     pi.kind === "image" ? (
                       <div key={pi.url} className="paste-thumb">
                         <img src={pi.url} alt="待发送图片" />
+                        <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                      </div>
+                    ) : pi.kind === "video" ? (
+                      // 视频：用 <video> 显首帧（muted+metadata），角标示意可播放；发送仍与图片同批走 sendMediaBatch。
+                      <div key={pi.url} className="paste-thumb paste-video">
+                        <video src={pi.url} muted preload="metadata" playsInline />
+                        <span className="paste-video-badge" aria-hidden>▶</span>
                         <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
                       </div>
                     ) : (

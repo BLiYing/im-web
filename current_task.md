@@ -12,6 +12,11 @@
 
 ## 当前焦点
 
+**粘贴视频预览异常修复 ✅（2026-08-18，tsc+build 绿，待浏览器手测）** — 纯前端（`src/App.tsx` + `src/styles.css`）：
+- **根因**：`addPastedFiles` 把可发送视频与图片一并压成 `kind:"image"`，预览条对 image 一律 `<img src={blobUrl}>` 渲染 → 视频 blob 塞进 `<img>` 破图（显 alt「待发送图片」）。
+- **修复**：`pastedImages` 项 `kind` 扩为 `"image"|"video"|"file"`（`k ?? "file"`，保留 video）；预览条 video 分支用 `<video src muted preload=metadata playsInline>` 显首帧 + 中心 `▶` 角标；发送 filter 改 `kind==="image"||"video"` 仍与图片同批走 `sendMediaBatch`（poster/thumb/落库不变）。CSS 加 `.paste-thumb.paste-video video` + `.paste-video-badge`。
+- **顺带核对**：粘贴图片/视频的 `thumb` 磨砂占位 web 端**无缺失**（统一走 `sendMediaBatch`，image/video 均 `makeTinyThumbFromImage` 生成 thumb + 回填本地行，见 commit 238917c）；iOS 那条 bug 是相机/粘贴绕过 `IMMediaSendService` 所致，与 web 架构不同。
+
 **设置页优化四项（2026-08-15，tsc + build 绿，待浏览器手测）** — 纯前端（`src/App.tsx` + `src/styles.css`）：
 - **① 卡片字号等比放大**：`.settings-row/.menu-card-row/.entry-row` 14→15.5px、gap 8→12、padding 11；`.row-value` 13→14；`.section-label` 12→13；`.settings-name` 18→20、`.settings-status` 13→14；`.settings-logout` 15→16；`.switch-row/.media-card-title` →15.5；`.tier-btn` →15。
 - **② iOS 风格图标色块**：`Row` 加 `iconTint?`，`renderRow` 有 tint 时渲染 `.row-icon-tile`（29×29 圆角7 + 白 glyph，`size=17`），否则裸图标（账号气泡卡不变）。色块色抽成 `--ic-{gray,red,orange,yellow,green,teal,blue,indigo,purple,pink}` 令牌（三套主题分支都加，深色略提亮）。分色对齐 iOS `IMSettingsViewController`：通用gray/动画orange/通知red/数据green/隐私indigo/文件夹blue/设备teal/语言purple/表情pink；资料卡 手机green·用户名blue·二维码gray；通讯录 群聊blue·公众号orange·服务号teal。退出登录仍无图标（对齐 iOS 红字无 tile）。

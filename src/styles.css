@@ -516,6 +516,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .paste-preview { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
 .paste-thumb { position: relative; }
 .paste-thumb img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: block; border: 1px solid var(--separator); }
+/* 粘贴的视频 chip：<video> 显首帧（同图片尺寸），中心 ▶ 角标示意可播放 */
+.paste-thumb.paste-video video { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; display: block; border: 1px solid var(--separator); background: var(--surface-elevated); }
+.paste-video-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--on-media); text-shadow: 0 1px 3px var(--overlay-strong); pointer-events: none; }
 .paste-remove { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; border-radius: 50%; border: none; background: var(--overlay-strong); color: var(--on-media); font-size: 11px; line-height: 18px; padding: 0; cursor: pointer; }
 /* 粘贴的文件 chip：类型图标 + 文件名（与图片 chip 同高同圆角，名字超长省略；深浅色随主题面色） */
 .paste-thumb.paste-file { display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 12px; max-width: 220px; box-sizing: border-box; border-radius: 8px; border: 1px solid var(--separator); background: var(--surface-elevated); }
