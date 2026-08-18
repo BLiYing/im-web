@@ -3,7 +3,7 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
-import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal, QRLoginTab } from "./QRUI";
+import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
@@ -42,6 +42,7 @@ import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
 import { FileGateIcon } from "./components/FileGateIcon";
 import { LinkCard, type LinkPreview } from "./components/LinkCard";
+import { LoginView } from "./components/LoginView";
 import { SESSION_KEY, loadSession } from "./session";
 import { optedInKey, loadOptedIn, saveOptedIn } from "./optedIn";
 import { captureVideoPoster } from "./videoPoster";
@@ -2781,47 +2782,17 @@ export default function App() {
 
   // ---- 登录 ----
   if (phase === "login") {
-    if (restoring) {
-      // 恢复登录过渡态（Web #4）：有已存会话时不闪登录表单，静默重登成功直达主界面。
-      return (
-        <div className="login">
-          <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
-          <h1>IM Web</h1>
-          <p className="hint">正在恢复登录（{uid}）…</p>
-        </div>
-      );
-    }
     return (
-      <div className="login">
-        <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
-        <h1>IM Web 登录</h1>
-        <div className="login-tabs">
-          <button className={`login-tab${loginTab === "password" ? " on" : ""}`} onClick={() => setLoginTab("password")}>密码登录</button>
-          <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => setLoginTab("qr")}>扫码登录</button>
-        </div>
-        {/* 鉴权失效原因（如被踢下线）在两个页签下都要可见——被踢时可能正停在扫码页。 */}
-        {authErr && <p className="auth-err">{authErr}</p>}
-        {loginTab === "password" ? (
-          <>
-            <label>用户名<input value={uid} autoFocus onChange={(e) => setUid(e.target.value.trim())} /></label>
-            <label>密码<input type="password" value={password} placeholder="≥ 6 位"
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void enterApp(password); }} /></label>
-            <button disabled={authBusy} onClick={() => void enterApp(password)}>登录</button>
-            <button className="secondary" disabled={authBusy} onClick={() => void doRegister()}>注册并登录</button>
-            <p className="hint">
-              真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
-              仅调试：<button className="link-inline" disabled={authBusy} onClick={() => void enterApp("")}>免密登录</button>（需后端开启 dev-login）。
-            </p>
-          </>
-        ) : (
-          <QRLoginTab onLogin={(loginUid, token) => {
-            pendingQrRef.current = { uid: loginUid, token };
-            setUid(loginUid);
-            setQrTrigger((n) => n + 1); // uid 不变时也强制触发入场 effect
-          }} />
-        )}
-      </div>
+      <LoginView
+        restoring={restoring} uid={uid} password={password} authErr={authErr} authBusy={authBusy} loginTab={loginTab}
+        onUid={setUid} onPassword={setPassword} onLoginTab={setLoginTab}
+        onLogin={(pwd) => void enterApp(pwd)} onRegister={() => void doRegister()}
+        onQRLogin={(loginUid, token) => {
+          pendingQrRef.current = { uid: loginUid, token };
+          setUid(loginUid);
+          setQrTrigger((n) => n + 1); // uid 不变时也强制触发入场 effect
+        }}
+      />
     );
   }
 
