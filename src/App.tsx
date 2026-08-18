@@ -4,7 +4,7 @@ import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal, QRLoginTab } from "./QRUI";
-import { errorCode, isOwnInviteLink } from "./qr";
+import { errorCode } from "./qr";
 import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
@@ -15,7 +15,7 @@ import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
-import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity, resolveJumpTarget } from "./album";
+import { albumMembers, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
@@ -24,8 +24,8 @@ import { textTier, charCountLabel } from "./longtext";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, probeMediaMetadata } from "./media";
 import {
-  applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, isDefaultDownloadSettings, parseDownloadSettings,
-  passivePreviewSource, shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
+  applyTier, defaultDownloadSettings, downloadGlyph, downloadText, isDefaultDownloadSettings, parseDownloadSettings,
+  shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
   type DownloadSettings, type DownloadState, type SpeedTier, type MediaKind,
 } from "./download";
 import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
@@ -36,6 +36,12 @@ import {
   parseChatRecord, recordItemPreview, fileNameFromContent, copyImageToClipboard,
   mediaBoxProps, isPreviewableFile, videoFrameSrc, type RecordItem, type ChatRecord,
 } from "./messageContent";
+import { Avatar } from "./components/Avatar";
+import { AlbumGrid } from "./components/AlbumGrid";
+import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
+import { AnchoredMenu } from "./components/AnchoredMenu";
+import { FileGateIcon } from "./components/FileGateIcon";
+import { LinkCard, type LinkPreview } from "./components/LinkCard";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -51,232 +57,6 @@ import {
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
-
-// cls 决定尺寸（avatar / settings-avatar / edit-avatar）；children 作为叠加层（如在线点、相机角标）。
-/** 首字母头像的底色板（与 iOS IMTheme avatarColorForSeed 同一组 6 色：蓝/绿/橙/红/紫/青）。 */
-const AVATAR_COLORS = ["#3399F5", "#4FC778", "#F59E33", "#E65C6B", "#9473E6", "#2EB8BD"];
-/** 按种子（uid / 群 conv_id）稳定取底色，与 iOS 同算法：h = h*31 + UTF-16 码元、64 位无符号回绕、% 6。
- *  同一 uid 两端同色。用 BigInt 精确复刻 NSUInteger 的 2^64 回绕（短 uid 无溢出，长种子也不偏差）。 */
-function avatarColor(seed: string): string {
-  if (!seed) return AVATAR_COLORS[0];
-  const MASK = (1n << 64n) - 1n;
-  let h = 0n;
-  for (let i = 0; i < seed.length; i++) h = (h * 31n + BigInt(seed.charCodeAt(i))) & MASK;
-  return AVATAR_COLORS[Number(h % 6n)];
-}
-
-// 可复用头像：有 avatar_url → 渲染 <img>；否则回退首字母圈，底色按 seed（uid/群 conv_id）播种（与 iOS 同色）。
-// seed 缺省回落 label——但 label 是昵称、会变且与 iOS 的 uid 种子不一致，故用户头像务必显式传 uid。
-function Avatar({ url, label, seed, cls = "avatar", children, onClick }: {
-  url?: string; label: string; seed?: string; cls?: string; children?: React.ReactNode; onClick?: () => void;
-}) {
-  // 头像 <img> 加载失败（多为 avatar_url 指向的 /uploads 文件已被服务端清理/删除 → 404）时，
-  // 回退首字母色圈，与 iOS 一致；否则浏览器会画自带的「破图问号」。url 变更（换头像/切账号）后重试。
-  const [failed, setFailed] = useState(false);
-  useEffect(() => { setFailed(false); }, [url]);
-  const showImg = !!url && !failed;
-  const bg = showImg ? undefined : avatarColor(seed ?? label);
-  return (
-    <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
-         style={{ ...(onClick ? { cursor: "pointer" } : null), ...(bg ? { background: bg } : null) }}>
-      {showImg ? <img className="avatar-img" src={url} alt="" onError={() => setFailed(true)} /> : (label || "").slice(-2)}
-      {children}
-    </div>
-  );
-}
-
-/** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
- *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
-function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, onOpen, onMenu, onMediaError }: {
-  members: ChatMessage[];
-  timeLabel: string;
-  progress: Record<string, { sent: number; total: number }>;
-  gateFor: (m: ChatMessage) => boolean; // 该格是否门控（收到的未下载图/视频）：档 A，逐格独立判定
-  expiredFor?: (m: ChatMessage) => boolean; // 该格是否已失效（服务端已清理）：失效则不给 ↓、只留磨砂 dim
-  onOpen: (m: ChatMessage) => void;
-  onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
-  onMediaError?: (m: ChatMessage) => void; // 原件 <img>/<video> 加载失败 → 复验 404 落失效标记（首屏即显失效）
-}) {
-  const W = 240, GAP = 2;
-  const pattern = albumRowPattern(members.length);
-  let idx = 0;
-  const rows = pattern.map((cols) => members.slice(idx, (idx += cols)));
-  return (
-    <div className="album-grid" style={{ width: W }}>
-      {rows.map((row, ri) => {
-        const tileW = (W - (row.length - 1) * GAP) / row.length;
-        const tileH = row.length === 1 ? 150 : tileW;
-        return (
-          <div className="album-row" key={ri} style={{ gap: GAP, marginTop: ri === 0 ? 0 : GAP }}>
-            {row.map((m) => {
-              const up = progress[m.clientMsgId ?? ""];
-              const task = chunkedTaskFor(m.clientMsgId ?? "");
-              const durText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
-              // 逐格门控（档 A，对齐 iOS IMAlbumCell）：未下载格**只显内嵌 thumb 磨砂 + 中心 ↓ + 尺寸角标，绝不拉原图/原视频**；
-              // 点门控格=就地下载（解门控），非进查看器（铁律③手动优先）。
-              const gated = gateFor(m);
-              const sizeText = formatFileSize(m.fileSize);
-              return (
-              <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className="album-tile"
-                data-album-seq={m.convSeq || undefined}
-                style={{ width: row.length === 1 ? W : tileW, height: tileH }}
-                onClick={() => onOpen(m)}
-                onContextMenu={(e) => onMenu(e, m)}>
-                {gated
-                  ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
-                  : m.contentType === "video"
-                    ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError?.(m)} /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => onMediaError?.(m)} />)
-                    : <img src={m.content} alt="" onError={() => onMediaError?.(m)} />}
-                {gated
-                  ? (expiredFor?.(m) ? null : <span className="album-dl">↓</span>) // 失效格不给 ↓（无从重下），只留磨砂 dim
-                  : m.contentType === "video" && !(m.status === "sending" && m.convSeq === 0) && <span className="play-badge">▶</span>}
-                {/* 角标：门控显「尺寸(·时长)」；否则仅时长（上传中也显示——宫格进度在中心，左上角是空的，与 iOS 一致）。 */}
-                {gated
-                  ? ((sizeText || durText) && <span className="album-duration">{[sizeText, durText].filter(Boolean).join(" · ")}</span>)
-                  : (durText && <span className="album-duration">{durText}</span>)}
-                {m.status === "sending" && m.convSeq === 0 && (
-                  <span className="album-tile-dim">
-                    {/* 分片任务：中心 ⏸/↑（点格子暂停/继续）；小文件（不可暂停）保留转圈。 */}
-                    {up && task ? <span className="album-pause">{task.paused ? "↑" : "⏸"}</span> : <span className="album-spinner" />}
-                  </span>
-                )}
-                {/* 格内 ❗ 只表达「这一格上传/发送失败」。**被服务端拒收（有 note）时不显示**——
-                    那是整条消息的事，已由宫格左侧红❗+下方系统行表达，逐格再标一遍是噪声。
-                    与 iOS 同语义：iOS 格内 ❗ 由 IMUploadProgress.failed 驱动，拒收时上传早已成功故不显示。 */}
-                {m.status === "failed" && !m.note && <span className="album-tile-dim"><span className="album-fail">!</span></span>}
-              </div>
-              );
-            })}
-          </div>
-        );
-      })}
-      <span className="album-meta">{timeLabel}</span>
-    </div>
-  );
-}
-
-/**
- * 引用条内的媒体小缩略图（**档 B·被动预览**，对齐 iOS `previewForURL:`）：
- * `gated=true`（被引用者未解门控/本机无原件）→ **只用内嵌 thumb 磨砂、绝不联网拉原件/远端抽帧**，无 thumb 退图标；
- * `gated=false`（已解门控/本机已有）→ 真帧（图片原图 / 视频 poster 或首帧）。文件恒图标。无媒体返回 null。
- */
-function QuoteThumb({ m, gated }: { m?: ChatMessage; gated?: boolean }) {
-  if (!m || m.recalledAt) return null;
-  if (m.contentType === "image" || m.contentType === "video") {
-    const src = passivePreviewSource(!gated, !!m.thumb);
-    if (src === "thumb") return <img className="quote-thumb gate-blur" src={m.thumb} alt="" />;
-    // 占位图标：用 lucide 矢量（跟随文字色、跨系统一致），与 iOS 引用占位 video.fill/photo.fill 观感对齐——
-    // 取代旧 emoji ▶/🖼（依赖各平台 emoji 字体、彩色样式不可控）。
-    if (src === "icon") return <span className="quote-thumb quote-thumb-ph">{m.contentType === "video" ? <Video size={18} aria-label="视频" /> : <ImageIcon size={18} aria-label="图片" />}</span>;
-    // original：已解门控才联网取真帧。
-    if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
-    return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
-  }
-  if (m.contentType === "file") return <FileTypeIcon name={m.fileName || m.content} size={32} className="quote-thumb" />;
-  return null;
-}
-
-/**
- * 引用兜底图标：被引用原消息**不在本地 messages**（未同步到/已清）时 QuoteThumb 拿不到 `m` 会返回 null，
- * 此时从 `reply_snapshot` 文本推媒体类型显图标——与 iOS「从 reply_snapshot 推 glyph」一致（iOS `IMMediaGlyphForSnippet`）。
- * 快照可能是 wire 形 `[video]`/`[file] 名` 或本端本地化形 `[视频]`/`[文件] 名`，两形都认。文本/聊天记录 → 无图标（返回 null）。
- */
-function QuoteSnapshotIcon({ snapshot }: { snapshot?: string }) {
-  const s = snapshot || "";
-  if (s === "[video]" || s === "[视频]") return <span className="quote-thumb quote-thumb-ph"><Video size={18} aria-label="视频" /></span>;
-  if (s === "[image]" || s === "[图片]") return <span className="quote-thumb quote-thumb-ph"><ImageIcon size={18} aria-label="图片" /></span>;
-  if (s === "[file]" || s === "[文件]" || s.startsWith("[file] ") || s.startsWith("[文件] ")) {
-    const name = s.startsWith("[file] ") ? s.slice(7) : s.startsWith("[文件] ") ? s.slice(4) : "";
-    return <FileTypeIcon name={name || "file"} size={32} className="quote-thumb" />;
-  }
-  return null;
-}
-
-type LinkPreview = { url: string; title?: string; description?: string; image?: string; site_name?: string };
-const linkPreviewCache = new Map<string, LinkPreview | null>(); // 进程内缓存（含负缓存 null=抓取失败）
-
-/** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。
- *  层3：onOpenInvite 非空且 url 是本站邀请链接（/q/u、/q/g）→ 拦截点击走站内 resolve 流程（不开新标签页）。 */
-function LinkCard({ url, fetchPreview, onMediaLoad, onOpenInvite }: {
-  url: string; fetchPreview: (u: string) => Promise<LinkPreview>; onMediaLoad?: () => void; onOpenInvite?: (u: string) => void;
-}) {
-  const [p, setP] = useState<LinkPreview | null | undefined>(linkPreviewCache.get(url));
-  useEffect(() => {
-    if (linkPreviewCache.has(url)) { setP(linkPreviewCache.get(url)); return; }
-    let alive = true;
-    fetchPreview(url)
-      .then((res) => { linkPreviewCache.set(url, res); if (alive) setP(res); })
-      .catch(() => { linkPreviewCache.set(url, null); if (alive) setP(null); });
-    return () => { alive = false; };
-  }, [url, fetchPreview]);
-  let host = ""; try { host = new URL(url).hostname; } catch { /* */ }
-  const hasCard = !!(p && (p.title || p.image));
-  const intercept = onOpenInvite && isOwnInviteLink(url, location.origin)
-    ? (e: React.MouseEvent) => { e.preventDefault(); onOpenInvite(url); }
-    : undefined;
-  return (
-    <span className="url-msg">
-      <a className="btext msg-link" href={url} target="_blank" rel="noreferrer" onClick={intercept}>{url}</a>
-      {hasCard && (
-        <a className="link-card" href={url} target="_blank" rel="noreferrer" onClick={intercept}>
-          {p!.image && <img className="link-card-img" src={p!.image} alt="" onLoad={onMediaLoad} />}
-          <div className="link-card-body">
-            <div className="link-card-title">{p!.title || url}</div>
-            {p!.description && <div className="link-card-desc">{p!.description}</div>}
-            <div className="link-card-site">{p!.site_name || host}</div>
-          </div>
-        </a>
-      )}
-    </span>
-  );
-}
-
-/** 可复用的锚定弹出菜单：以 (x,y) 为锚点，若超出视口右/下边界则自动向左/上翻转（右键消息/会话菜单共用）。 */
-function AnchoredMenu({ x, y, className, children }: { x: number; y: number; className?: string; children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ left: x, top: y });
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const margin = 8;
-    let left = x, top = y;
-    if (left + r.width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - r.width - margin);
-    if (top + r.height > window.innerHeight - margin) top = Math.max(margin, y - r.height); // 下方放不下 → 上翻
-    setPos({ left, top });
-  }, [x, y]);
-  return (
-    <div ref={ref} className={className} style={{ left: pos.left, top: pos.top }} onClick={(e) => e.stopPropagation()}>
-      {children}
-    </div>
-  );
-}
-
-/**
- * 文件门控圆形图标（对齐 iOS IMChatDetailViewController 的 `_disc`/`_ring`）：固定 36px 圆底 + 白色字形，
- * 聊天气泡与详情文件列表共用。**下载中叠加环形进度**——去掉了原来的底部线性进度条，图标槽位恒定，
- * 状态切换（↓→✕）不再撑高卡片 / 下移图标（修下载抖动）。
- * 未下载=accent 圆底 ↓ / 下载中=中性圆底 + accent 进度环 + ✕ / 失败=danger 圆底 ↻ / 已失效=中性圆底 ⊘。
- */
-function FileGateIcon({ state }: { state: DownloadState }) {
-  const glyph = downloadGlyph(state) ?? "⊘";
-  const cls = state.phase === "downloading" ? "downloading"
-            : state.phase === "failed" ? "failed"
-            : state.phase === "expired" ? "expired" : "";
-  const R = 16, C = 2 * Math.PI * R; // 半径 16 → 周长，驱动 stroke-dashoffset
-  return (
-    <span className={`msg-file-dl ${cls}`.trim()}>
-      {state.phase === "downloading" && (
-        <svg className="dl-ring" viewBox="0 0 36 36" aria-hidden="true">
-          <circle className="dl-ring-track" cx="18" cy="18" r={R} />
-          <circle className="dl-ring-bar" cx="18" cy="18" r={R}
-                  style={{ strokeDasharray: C, strokeDashoffset: C * (1 - downloadFraction(state)) }} />
-        </svg>
-      )}
-      <span className="dl-glyph">{glyph}</span>
-    </span>
-  );
-}
 
 // 群成员上限（含群主），与后端 group.MaxGroupMembers=500 对齐（该值不由接口下发，两端各自硬编码）。
 // 建群时群主已占 1 席，故初始成员（好友）最多可选 MAX_GROUP_MEMBERS-1；超限由服务端 GroupMemberLimit 兜底拒绝。
