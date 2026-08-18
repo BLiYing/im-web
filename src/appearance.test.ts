@@ -4,11 +4,10 @@ import {
   DEFAULT_WALLPAPER_DARK,
   DEFAULT_WALLPAPER_LIGHT,
   WALLPAPER_PRESETS,
-  hexToHSV,
-  hsvToHex,
   resolveWallpaper,
   wallpaperCSS,
-} from "./App";
+} from "./wallpaper";
+import { hexToHSV, hsvToHex } from "./App";
 
 describe("chat wallpaper appearance", () => {
   it("resolves every bundled preset to a CSS background", () => {
