@@ -49,6 +49,8 @@ import { captureVideoPoster } from "./videoPoster";
 import { useDevices } from "./useDevices";
 import { useDialogs } from "./useDialogs";
 import { useToast } from "./useToast";
+import { renderRow, type Row } from "./components/rows";
+import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -3303,10 +3305,6 @@ export default function App() {
   };
   const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
 
-  // 通用菜单行：图标可选、右侧值/箭头可选、danger 红色。account card / settings / contacts entries 共用。
-  // iconTint：设置 iOS 风格圆角色块（对齐 IMSettingsViewController 的 systemColor 分色）；不给则渲染裸图标（账号气泡卡沿用旧样式）。
-  type Row = { id: string; label: string; icon?: LucideIcon; iconTint?: string; value?: string; danger?: boolean; chevron?: boolean; onClick: () => void };
-
   // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动：加一项 = append 一条）。
   // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
   const accountRows: Row[] = [
@@ -3343,18 +3341,6 @@ export default function App() {
     { id: "official", label: "公众号", icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon("公众号") },
     { id: "service", label: "服务号", icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon("服务号") },
   ];
-
-  // 通用行渲染（cls 区分容器样式）。
-  const renderRow = (r: Row, cls: string) => (
-    <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}`} onClick={r.onClick}>
-      {r.icon && (r.iconTint
-        ? <span className={`row-icon-tile ${r.iconTint}`}><r.icon size={17} /></span>
-        : <r.icon size={20} className="row-icon" />)}
-      <span className="row-label">{r.label}</span>
-      {r.value && <span className="row-value">{r.value}</span>}
-      {r.chevron && <ChevronRight size={18} className="row-chevron" />}
-    </button>
-  );
 
   return (
     <div className={`app ${peer || groupConvId ? "has-sel" : "no-sel"}`}>
@@ -3526,31 +3512,19 @@ export default function App() {
         </div>
         )}
 
-        {/* 设置面板：占据侧栏列（绝对定位），右侧聊天 .main 保持不动、可继续聊（对齐 Telegram Web）。 */}
+        {/* 设置面板：见 components/settings/SettingsPanel（行数据与动作在上方组装）。 */}
         {showSettings && (
-          <div className="settings-panel">
-            <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setShowSettings(false)}><ChevronLeft size={27} /></button>
-              <span className="settings-title">设置</span>
-              <button className="icon-btn" title="编辑资料" onClick={() => void openProfile()}><SquarePen size={24} /></button>
-            </header>
-            <div className="settings-body">
-              <div className="settings-profile">
-                <Avatar url={myInfo?.avatar_url} label={myInfo?.nickname || uid} seed={uid} cls="settings-avatar" />
-                <div className="settings-name">{myInfo?.nickname || uid}</div>
-                <div className="settings-status">{stateText}</div>
-              </div>
-              <div className="settings-group">
-                {settingsInfoRows.map((r) => renderRow(r, "settings-row info"))}
-              </div>
-              {settingsGroups.map((group, gi) => (
-                <div key={gi} className="settings-group">
-                  {group.map((r) => renderRow(r, "settings-row"))}
-                </div>
-              ))}
-              <button className="settings-logout" onClick={logout}>退出登录</button>
-            </div>
-          </div>
+          <SettingsPanel
+            avatarUrl={myInfo?.avatar_url}
+            name={myInfo?.nickname || uid}
+            seed={uid}
+            stateText={stateText}
+            infoRows={settingsInfoRows}
+            groups={settingsGroups}
+            onBack={() => setShowSettings(false)}
+            onEditProfile={() => void openProfile()}
+            onLogout={logout}
+          />
         )}
 
         {/* 数据与存储（M4-7，草图 §05/§06/§09）：Web 只呈现 **Wi-Fi / 不限流量** 这一档——
