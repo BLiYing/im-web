@@ -47,6 +47,7 @@ import { optedInKey, loadOptedIn, saveOptedIn } from "./optedIn";
 import { captureVideoPoster } from "./videoPoster";
 import { useDevices } from "./useDevices";
 import { useDialogs } from "./useDialogs";
+import { useToast } from "./useToast";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -149,7 +150,8 @@ export default function App() {
   const [convMenu, setConvMenu] = useState<{ x: number; y: number; c: Conversation } | null>(null); // 会话行右键菜单
   const [chatMenu, setChatMenu] = useState(false); // 聊天页右上 ⋮ 下拉菜单
   const [contactDraft, setContactDraft] = useState<{ peer: string; remark: string } | null>(null); // 编辑联系人（备注名）弹窗
-  const [toast, setToast] = useState<string | null>(null); // 轻量浮层提示（如"xx（开发中）"）
+  // 轻量浮层提示（如"xx（开发中）"）：状态 + 自动消失 + comingSoon 抽到 useToast（须先于用到它们的回调）。
+  const { toast, setToast, comingSoon } = useToast();
   // 应用内确认/输入弹窗（替代原生 window.confirm/prompt）：状态与 askConfirm/askPrompt 抽到 useDialogs；
   // 弹窗本体 JSX 仍在下方渲染。须在使用 askConfirm/askPrompt 的回调之前调用（此处即最靠前）。
   const { confirmDlg, setConfirmDlg, promptDlg, setPromptDlg, askConfirm, askPrompt } = useDialogs();
@@ -2034,14 +2036,6 @@ export default function App() {
       setToast(`举报失败：${(e as Error).message}`);
     }
   }, []);
-
-  // 轻量浮层提示：约 1.8s 自动消失。未接后端的功能统一用它提示"开发中"。
-  const comingSoon = useCallback((label: string) => setToast(`${label}（开发中）`), []);
-  useEffect(() => {
-    if (!toast) return;
-    const t = window.setTimeout(() => setToast(null), 1800);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   // ---- 已登录设备（P2）：状态 + 加载/踢下线操作 ----
   const { devices, devicesOpen, setDevicesOpen, devicesErr, revokingSid, loadDevices, revokeDevice, revokeOtherDevices, resetDevices } =
