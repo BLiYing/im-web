@@ -4,7 +4,9 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 技术债 / 下次
-- **`src/App.tsx` 拆分进行中（2026-08-18 首轮完成，6302 → 5719 行，8 个绿提交）**。每步 `tsc + 294 vitest (+ build)` 全绿、单独 commit。已抽出：
+- **`src/App.tsx` 拆分进行中（2026-08-18 第二轮：测试安全网落地 + 批量拆启动，6302 → 5690 行，11 个绿提交）**。每步 `tsc + vitest (+ build)` 全绿、单独 commit。已抽出：
+  - **✅ 测试安全网（第二轮新增，共 319 例）**：devDeps 加 `jsdom + @testing-library/*`；vitest include 扩 `.test.tsx`（默认仍 node 环境，组件测试逐文件 `// @vitest-environment jsdom`；jest-dom 须走 `/vitest` 入口）。**`App.smoke.test.tsx` 5 例是拆分护栏**——mock `./sdk/imSdk`（FakeIMClient：显式实现启动/聊天链路方法，Proxy 兜底其余 40+ 方法），渲染真实 `<App/>` 走通 登录→会话列表→进会话→发消息(sendText/乐观回显/ACK 不重复)→收消息(同 seq 去重)→收发顺序。**今后任何拆分必须保持它绿**。另有 Avatar 6 例 + useDialogs 4 + useToast 3 + useDevices 7（mock IMClient 注入）。
+  - **✅ 批量拆 JSX 第 1 块**：`components/LoginView.tsx`（登录页恢复态+密码/扫码页签，冒烟直接覆盖）。**下一批**：`SettingsPanel`（最大块）、`GroupDetailDrawer`、`ForwardPicker`、`MediaViewer`、`QRModals`、共享 `<MediaTile>`；Hook：`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`。建议每拆一块先照 App.smoke 套路补 1-2 条该块的交互例（驱动 FakeIMClient handlers）。聊天滚动/已读/分页核心（雷区 ref 簇）仍最后动；jsdom 撑不住真滚动布局（scrollTo 已桩掉），滚动定位类回归仍需浏览器手测。
   - **纯逻辑模块**：`wallpaper.ts`（壁纸目录/解析）、`color.ts`（HSV↔HEX/clamp）、`messageContent.ts`（快照本地化/引用预览/聊天记录解析/文件名·URL/媒体定框）、`session.ts`、`optedIn.ts`、`videoPoster.ts`。测试导入已改指向新模块（appearance/chatRecord.test.ts）。
   - **叶子展示组件** `src/components/`：`Avatar`、`AlbumGrid`、`QuoteThumb`(+`QuoteSnapshotIcon`)、`AnchoredMenu`、`FileGateIcon`、`LinkCard`（`avatarColor`/`linkPreviewCache`/`LinkPreview` 随组件走）。
   - **自定义 Hook**：`useDevices`（设备管理四态+操作，依赖 clientRef/askConfirm/setToast 注入；logout 复位走 `resetDevices` 封装）、`useDialogs`（confirmDlg/promptDlg + askConfirm/askPrompt）、`useToast`（toast+comingSoon+自动消失）。三个 hook 都须在**用到其返回值的回调之前**调用（组件体最靠前），呼应既有「须在使用前定义避免 TDZ」的顺序耦合。
@@ -13,7 +15,7 @@
 
 ## 当前焦点
 
-**App.tsx 单体组件拆分（首轮）✅（2026-08-18，8 提交，每步 tsc+294 vitest(+build) 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→5719 行；纯逻辑/叶子组件/3 个自定义 hook 已抽出，紧耦合的聊天核心留待 code review 后再评估。
+**App.tsx 拆分第二轮：测试安全网 + 批量拆启动 ✅（2026-08-18，11 提交累计，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→5690 行；首轮抽纯逻辑/叶子组件/3 hook，第二轮落地 jsdom+testing-library 基建与 **App 级冒烟 5 例护栏**（mock IMClient 渲染真实 App 走通登录→聊天主链路），并以 `LoginView` 开启 JSX 面板批量拆。
 
 **「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，待浏览器手测）** — 纯前端（`src/fileTypes.ts` + `src/App.tsx` + `fileTypes.test.ts`）：
 - **根因**：入口 `accept="image/*,video/*"` 是通配，`image/*` 把 HEIC 也列为可选，系统文件对话框里 HEIC 不置灰；旧的只有选完后 JS 黑名单（`webCanRenderMedia`）toast 忽略，属事后拦。
