@@ -36,6 +36,8 @@ src/
   语义令牌，审计记录见 `docs/UI_COLOR_AUDIT.md`。
 - **今后新增的业务/技术 Markdown 文档一律放入 `docs/`**。根目录仅保留 README、CLAUDE、`current_task.md` 及既有工程入口文件；不为整理目录而移动这些入口文件。
 - 类型先行：新协议字段先加到 `sdk/protocol.ts`，再在 UI/SDK 用；避免 `any`。
+- **编码风格 + 防巨组件规范见 [CODING_STYLE.md](CODING_STYLE.md)**（命名/文件组织/类型/防巨组件决策树/测试约定）。
+  **新功能默认进新文件**（`components/**` 或 `use*.ts`），别往 `App.tsx` 堆；机械护栏 `./scripts/check-file-size.sh`（单文件 > 600 行即拦），装钩子 `./scripts/install-hooks.sh`（每个 clone 一次）。
 - 提交信息格式：`类型(模块): 描述`（如 `feat(web): …` / `fix(web): …`）。
 
 ## 工作流程与「完成的定义」（每次自动遵循，无需用户重复提醒）
