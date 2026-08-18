@@ -68,6 +68,7 @@ import { FavoritesModal } from "./components/modals/FavoritesModal";
 import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
+import { MediaViewer } from "./components/MediaViewer";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -75,7 +76,7 @@ import {
   Headphones, ChevronLeft, ChevronRight, SquarePen,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
-  Download, LayoutGrid, MoreHorizontal, Play,
+  MoreHorizontal,
   Search, Camera, FileText, Link2, MessageCircle, X, Forward, Eye,
   ChevronDown, ChevronUp, QrCode,
 } from "lucide-react";
@@ -4190,115 +4191,53 @@ export default function App() {
         />
       )}
 
+      {/* 媒体查看器（镜像 iOS）：见 components/MediaViewer（派生态与动作在 App 组装）。 */}
       {viewer && (
-        // 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（hover 浮层 6 功能）。点击遮罩关闭。
-        <div className="modal-mask viewer-mask" onClick={() => { setViewer(null); setViewerMore(false); }}>
-          {viewer.m.contentType === "video" ? (
-            // 浏览器解不了码（对端发来的 HEVC 等）时 <video> 只会黑屏 → 降级成明确提示 + 下载入口，
-            // 而不是让用户对着黑框以为坏了。封面仍能显示（poster 是 JPEG，与视频编码无关）。
-            videoUnplayable ? (
-              <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>
-                {viewer.m.posterUrl && <img src={viewer.m.posterUrl} alt="" />}
-                {expiredSet.has(viewer.m.content) ? (
-                  // 404=服务端已清理：显失效、不给"下载后本地播放"（那个链接也会 404），别误导成编码问题（对齐 iOS 查看器）。
-                  <p>视频已失效（已被服务端清理）。</p>
-                ) : (
-                  <>
-                    <p>当前浏览器不支持该视频的编码格式（如 HEVC）。</p>
-                    <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地播放器打开</a>
-                  </>
-                )}
-              </div>
-            ) : !videoStarted ? (
-              // 封面待点：只显封面图 + 居中 ▶，点了才挂 <video>。翻页到视频＝翻到图片一样轻，无黑色控件条/无 metadata 预拉。
-              <>
-                <img className="image-viewer viewer-video-cover" src={viewer.m.posterUrl || viewer.m.thumb || undefined} alt="视频封面"
-                     onClick={(e) => { e.stopPropagation(); setViewerMore(false); setVideoStarted(true); }} />
-                <button className="viewer-play-btn" title="播放" onClick={(e) => { e.stopPropagation(); setVideoStarted(true); }}>
-                  <Play size={30} fill="currentColor" />
-                </button>
-              </>
-            ) : (
-              <video key={mediaIdentity(viewer.m) /* 翻页换视频时重挂元素，避免上一段播放状态残留 */}
-                     className="image-viewer" src={viewer.m.content} controls autoPlay
-                     poster={viewer.m.posterUrl}
-                     onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
-                     onError={() => {
-                       logger.warn(LOG_TAG.media, "video_playback_unsupported", {
-                         conv_id: viewer.m.convId, conv_seq: viewer.m.convSeq, has_poster: Boolean(viewer.m.posterUrl),
-                       });
-                       setVideoUnplayable(true);
-                       void markExpiredIfGone(viewer.m); // 404=源已清理（非编码问题）→ 落持久失效标记
-                     }} />
-            )
-          ) : mediaGate(viewer.m)?.phase === "unsupported" ? (
-            // 网页端无法渲染的图片格式（HEIC 等）：不塞进 <img> 变破图，显缩略(若有)+提示+下载入口（与视频降级卡同版式）。
-            <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>
-              {viewer.m.thumb && <img src={viewer.m.thumb} alt="" />}
-              <p>当前浏览器无法预览该图片格式（如 HEIC）。</p>
-              <a className="viewer-unplayable-btn" href={viewer.m.content} download>下载后用本地程序打开</a>
-            </div>
-          ) : (
-            <img key={mediaIdentity(viewer.m)} className="image-viewer" src={viewer.m.content} alt="大图" onClick={(e) => { e.stopPropagation(); setViewerMore(false); }}
-                 onError={() => void onPassiveMediaError(viewer.m)} />
-          )}
-          {/* 任务3 · 左右翻页箭头：仅当前查看项在会话媒体时间线内（viewerIdx>=0）且有相邻项时显示。翻到头即停。 */}
-          {viewerIdx > 0 && (
-            <button className="viewer-nav prev" title="上一张（←）"
-                    onClick={(e) => { e.stopPropagation(); goViewer(-1); }}><ChevronLeft size={28} /></button>
-          )}
-          {viewerIdx >= 0 && viewerIdx < viewerList.length - 1 && (
-            <button className="viewer-nav next" title="下一张（→）"
-                    onClick={(e) => { e.stopPropagation(); goViewer(1); }}><ChevronRight size={28} /></button>
-          )}
-          {/* 顶部标题栏（对齐 iOS）：主标题=会话名，副标题=「第 i 张 / 共 N 张」。带渐变底、预留高度，
-              取代原先浮在图上的孤立计数（与图片重叠）。仅会话媒体上下文（viewerIdx>=0）显示。 */}
-          {viewerIdx >= 0 && (
-            // pointer-events:none（见 .viewer-top）——点击穿透到蒙层关闭，无需 stopPropagation。
-            <div className="viewer-top">
-              <span className="viewer-top-title">{chatTitle}</span>
-              {viewerList.length > 1 && (
-                <span className="viewer-top-count">{viewerIdx + 1} / {viewerList.length}</span>
-              )}
-            </div>
-          )}
-          <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
-            <a className="viewer-btn" href={viewer.m.content} download title="下载"><Download size={18} /></a>
-            {!viewer.fromGallery && (
-              <button className="viewer-btn" title="媒体库" onClick={() => setGalleryOpen(true)}><LayoutGrid size={18} /></button>
-            )}
-            <div className="viewer-more-wrap">
-              {/* 点击切换（原 hover：鼠标从按钮移向弹窗时穿过间隙触发 onMouseLeave 即消失，够不到菜单项）。 */}
-              <button className="viewer-btn" title="更多" onClick={(e) => { e.stopPropagation(); setViewerMore((v) => !v); }}><MoreHorizontal size={18} /></button>
-              {viewerMore && (
-                <div className="viewer-more-pop">
-                  <button onClick={() => { const mm = viewer.m; setViewer(null); setViewerMore(false); setGalleryOpen(false); setDetail(null); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}>定位到聊天位置</button>
-                  <button onClick={() => favoriteMessage(viewer.m)}>收藏</button>
-                  <a href={viewer.m.content} download>下载</a>
-                  {/* 视频不提供复制：无"复制字节"语义，产品上禁止复制视频消息（与 iOS 对齐）。图片才有复制。 */}
-                  {viewer.m.contentType !== "video" && (
-                    <button onClick={() => {
-                      // 图片：复制图片字节（可粘贴回输入框直接发图）；其余非视频：复制链接。
-                      if (viewer.m.contentType === "image") {
-                        copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))
-                          .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接"); });
-                      } else {
-                        void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
-                      }
-                    }}>复制</button>
-                  )}
-                  <button onClick={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); setForwarding([mm]); }}>转发</button>
-                  <button className="danger" onClick={(e) => {
-                    // 统一走两档路由（对齐详情/聊天）：可为所有人删则弹子菜单 B，否则仅删自己；删成功后查看器由 onMessageRemoved 关闭。
-                    const m = viewer.m;
-                    if (m.convSeq <= 0) { deleteMessage(m); setViewer(null); return; }
-                    requestDelete(m, e.clientX, e.clientY);
-                  }}>删除</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <MediaViewer
+          m={viewer.m}
+          fromGallery={viewer.fromGallery}
+          videoUnplayable={videoUnplayable}
+          videoStarted={videoStarted}
+          isExpired={expiredSet.has(viewer.m.content)}
+          unsupported={mediaGate(viewer.m)?.phase === "unsupported"}
+          mediaKey={mediaIdentity(viewer.m)}
+          viewerIdx={viewerIdx}
+          viewerCount={viewerList.length}
+          chatTitle={chatTitle}
+          more={viewerMore}
+          onClose={() => { setViewer(null); setViewerMore(false); }}
+          onDismissMore={() => setViewerMore(false)}
+          onStartVideo={() => setVideoStarted(true)}
+          onVideoError={() => {
+            logger.warn(LOG_TAG.media, "video_playback_unsupported", {
+              conv_id: viewer.m.convId, conv_seq: viewer.m.convSeq, has_poster: Boolean(viewer.m.posterUrl),
+            });
+            setVideoUnplayable(true);
+            void markExpiredIfGone(viewer.m); // 404=源已清理（非编码问题）→ 落持久失效标记
+          }}
+          onImageError={() => void onPassiveMediaError(viewer.m)}
+          onNav={goViewer}
+          onToggleMore={() => setViewerMore((v) => !v)}
+          onOpenGallery={() => setGalleryOpen(true)}
+          onLocate={() => { const mm = viewer.m; setViewer(null); setViewerMore(false); setGalleryOpen(false); setDetail(null); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}
+          onFavorite={() => favoriteMessage(viewer.m)}
+          onCopy={() => {
+            // 图片：复制图片字节（可粘贴回输入框直接发图）；其余非视频：复制链接。
+            if (viewer.m.contentType === "image") {
+              copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))
+                .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接"); });
+            } else {
+              void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
+            }
+          }}
+          onForward={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); setForwarding([mm]); }}
+          onDelete={(x, y) => {
+            // 统一走两档路由（对齐详情/聊天）：可为所有人删则弹子菜单 B，否则仅删自己；删成功后查看器由 onMessageRemoved 关闭。
+            const m = viewer.m;
+            if (m.convSeq <= 0) { deleteMessage(m); setViewer(null); return; }
+            requestDelete(m, x, y);
+          }}
+        />
       )}
 
       {/* 超长文本全屏阅读器：见 components/TextReader。 */}
