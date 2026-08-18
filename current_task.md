@@ -4,18 +4,19 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 技术债 / 下次
-- **`src/App.tsx` 拆分进行中（2026-08-18 第二轮：测试安全网落地 + 批量拆启动，6302 → 5690 行，11 个绿提交）**。每步 `tsc + vitest (+ build)` 全绿、单独 commit。已抽出：
-  - **✅ 测试安全网（第二轮新增，共 319 例）**：devDeps 加 `jsdom + @testing-library/*`；vitest include 扩 `.test.tsx`（默认仍 node 环境，组件测试逐文件 `// @vitest-environment jsdom`；jest-dom 须走 `/vitest` 入口）。**`App.smoke.test.tsx` 5 例是拆分护栏**——mock `./sdk/imSdk`（FakeIMClient：显式实现启动/聊天链路方法，Proxy 兜底其余 40+ 方法），渲染真实 `<App/>` 走通 登录→会话列表→进会话→发消息(sendText/乐观回显/ACK 不重复)→收消息(同 seq 去重)→收发顺序。**今后任何拆分必须保持它绿**。另有 Avatar 6 例 + useDialogs 4 + useToast 3 + useDevices 7（mock IMClient 注入）。
-  - **✅ 批量拆 JSX 第 1 块**：`components/LoginView.tsx`（登录页恢复态+密码/扫码页签，冒烟直接覆盖）。**下一批**：`SettingsPanel`（最大块）、`GroupDetailDrawer`、`ForwardPicker`、`MediaViewer`、`QRModals`、共享 `<MediaTile>`；Hook：`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`。建议每拆一块先照 App.smoke 套路补 1-2 条该块的交互例（驱动 FakeIMClient handlers）。聊天滚动/已读/分页核心（雷区 ref 簇）仍最后动；jsdom 撑不住真滚动布局（scrollTo 已桩掉），滚动定位类回归仍需浏览器手测。
-  - **纯逻辑模块**：`wallpaper.ts`（壁纸目录/解析）、`color.ts`（HSV↔HEX/clamp）、`messageContent.ts`（快照本地化/引用预览/聊天记录解析/文件名·URL/媒体定框）、`session.ts`、`optedIn.ts`、`videoPoster.ts`。测试导入已改指向新模块（appearance/chatRecord.test.ts）。
-  - **叶子展示组件** `src/components/`：`Avatar`、`AlbumGrid`、`QuoteThumb`(+`QuoteSnapshotIcon`)、`AnchoredMenu`、`FileGateIcon`、`LinkCard`（`avatarColor`/`linkPreviewCache`/`LinkPreview` 随组件走）。
-  - **自定义 Hook**：`useDevices`（设备管理四态+操作，依赖 clientRef/askConfirm/setToast 注入；logout 复位走 `resetDevices` 封装）、`useDialogs`（confirmDlg/promptDlg + askConfirm/askPrompt）、`useToast`（toast+comingSoon+自动消失）。三个 hook 都须在**用到其返回值的回调之前**调用（组件体最靠前），呼应既有「须在使用前定义避免 TDZ」的顺序耦合。
-  - **未做/下次（风险升高，留给 code review 后再推进）**：剩下 5719 行是**紧耦合核心**——聊天消息流、滚动/已读/分页那堆互咬的 ref（`wasNearBottomRef`/`histAnchorRef`/`prevMinSeqRef`… 见「已知坑」的 scroll/jump 雷区）、消息 CRUD、上传/下载、设置面板 JSX。这些**单元测试覆盖不到**（现 294 例测的是纯模块，非组件行为），继续抽 hook/组件只能靠浏览器手测兜底，**易引回归**——按原则不在此轮硬推。候选：`MessageBubble`/`MediaViewer`/共享 `<MediaTile>`（`gallery-item` 与 `detail-media-tile` ~15 行重复）、`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`。
-  - **注意**：无 `@testing-library`，hook 无法直接单测；本轮均为**行为保持型**抽取，靠 tsc + build + 现有 294 例回归兜底。**待用户浏览器手测**冒烟（登录/发消息/设备管理/确认弹窗/吐司）。
+- **`src/App.tsx` 拆分进行中（2026-08-18，三轮累计 6302 → 5125 行，~25 个绿提交）**。每步 `tsc + vitest (+ build)` 全绿、单独 commit。已抽出：
+  - **✅ 测试安全网（共 319 例，拆分护栏）**：devDeps 加 `jsdom + @testing-library/*`；vitest include 扩 `.test.tsx`（默认仍 node 环境，组件测试逐文件 `// @vitest-environment jsdom`；jest-dom 走 `/vitest` 入口）。**`App.smoke.test.tsx` 5 例**——mock `./sdk/imSdk`（FakeIMClient，Proxy 兜底 40+ 方法），渲染真实 `<App/>` 走通 登录→会话列表→进会话→发消息(乐观回显/ACK 不重复)→收消息(同 seq 去重)→顺序。**今后任何拆分必须保持它绿**。另 Avatar 6 + useDialogs 4 + useToast 3 + useDevices 7。
+  - **✅ 纯逻辑模块**：`wallpaper.ts` / `color.ts` / `messageContent.ts`（快照本地化/引用预览/聊天记录解析/文件名·URL/媒体定框）/ `session.ts` / `optedIn.ts` / `videoPoster.ts`。测试导入已改指向新模块。
+  - **✅ 叶子展示组件** `src/components/`：`Avatar`、`AlbumGrid`、`QuoteThumb`(+`QuoteSnapshotIcon`)、`AnchoredMenu`、`FileGateIcon`、`LinkCard`、`LoginView`、共享 `rows.tsx`（Row 类型 + renderRow）。
+  - **✅ 设置面板栈** `components/settings/`：`SettingsPanel`、`DataStoragePanel`、`EditProfilePanel`（avatarFileRef 私有化）、`DevicesPanel`、`GeneralPanel`、`WallpaperPanel`（wallpaperFileRef 私有化）、`WallpaperColorPanel`。全部纯展示，行数据/动作经 props 注入。
+  - **✅ 弹窗栈** `components/`（含 `modals/`）：`Dialogs`（Confirm/Prompt，配对 useDialogs）、`PinnedListModal`、`GroupsModal`、`CreateGroupModal`、`InviteMembersModal`、`MuteDurationModal`、`GroupBansModal`、`ReadReceiptsModal`、`GroupTextModal`、`FavoritesModal`、`ForwardPicker`、`RecordModal`。合成消息（收藏/记录进查看器）在 App 侧构造后经回调传入，保持组件纯展示。
+  - **✅ 自定义 Hook**：`useDevices`（logout 复位走 `resetDevices` 封装）、`useDialogs`、`useToast`。三者须在**用到其返回值的回调之前**调用（组件体最靠前），呼应既有「须在使用前定义避免 TDZ」的顺序耦合。
+  - **未做/下次（风险升高，留给 code review 后再推进）**：剩 5125 行的**大块**——① 会话详情抽屉 `detail`（~340 行，单聊/群聊+群管理二级视图，耦合最多）② 媒体查看器 `viewer`（~130 行，翻页/门控/合成消息）③ 会话媒体库 `galleryOpen`（耦合 mediaGate/onGateTap）④ 成员 ⋯ 菜单（深耦合 doGroupAction/askConfirm）⑤ QR 三个模态（已是 QRUI 薄包装）。以及**紧耦合核心**：聊天消息流、滚动/已读/分页那堆互咬的 ref（`wasNearBottomRef`/`histAnchorRef`/`prevMinSeqRef`… 见「已知坑」scroll/jump 雷区）、消息 CRUD、composer。**jsdom 撑不住真滚动布局（scrollTo 已桩掉），滚动定位类回归仍需浏览器手测**。候选 Hook：`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`；共享 `<MediaTile>`（`gallery-item` 与 `detail-media-tile` ~15 行重复，viewer/gallery/detail 拆时一并合）。
+  - **注意**：全程**行为保持型**抽取，靠 App 冒烟 + tsc + build + 319 例回归兜底。**待用户浏览器手测**冒烟（登录/发消息/设置各子面板/各弹窗/转发/收藏）。
 
 ## 当前焦点
 
-**App.tsx 拆分第二轮：测试安全网 + 批量拆启动 ✅（2026-08-18，11 提交累计，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→5690 行；首轮抽纯逻辑/叶子组件/3 hook，第二轮落地 jsdom+testing-library 基建与 **App 级冒烟 5 例护栏**（mock IMClient 渲染真实 App 走通登录→聊天主链路），并以 `LoginView` 开启 JSX 面板批量拆。
+**App.tsx 拆分（三轮累计）✅（2026-08-18，~25 提交，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→5125 行：纯逻辑模块 + 叶子组件 + **设置面板栈 7 个** + **弹窗栈 12 个** + 3 个 hook 全部抽出，App 级冒烟 5 例护栏守住登录→聊天主链路。剩会话详情抽屉/媒体查看器/媒体库/成员菜单及聊天滚动核心留待 code review 后再推进。
 
 **「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，待浏览器手测）** — 纯前端（`src/fileTypes.ts` + `src/App.tsx` + `fileTypes.test.ts`）：
 - **根因**：入口 `accept="image/*,video/*"` 是通配，`image/*` 把 HEIC 也列为可选，系统文件对话框里 HEIC 不置灰；旧的只有选完后 JS 黑名单（`webCanRenderMedia`）toast 忽略，属事后拦。
