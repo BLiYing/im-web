@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal, QRLoginTab } from "./QRUI";
 import { errorCode } from "./qr";
 import { platformIcon, deviceName, deviceSubtitle } from "./devices";
@@ -45,6 +45,7 @@ import { LinkCard, type LinkPreview } from "./components/LinkCard";
 import { SESSION_KEY, loadSession } from "./session";
 import { optedInKey, loadOptedIn, saveOptedIn } from "./optedIn";
 import { captureVideoPoster } from "./videoPoster";
+import { useDevices } from "./useDevices";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -161,11 +162,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
-  // ---- 已登录设备 / 多设备管理（P2）子面板 ----
-  const [devicesOpen, setDevicesOpen] = useState(false);
-  const [devices, setDevices] = useState<DeviceView[] | null>(null); // null=加载中；[]=空
-  const [devicesErr, setDevicesErr] = useState("");
-  const [revokingSid, setRevokingSid] = useState(""); // 正在踢下线的 sid（禁用该行按钮）；"__others__"=退出其他
+  // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
   // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
   // Web 只吃 Wi-Fi 档（浏览器分不清移动/Wi-Fi），且**始终提供手动下载**；策略本身仍随账号多端同步。
   const [dataStorageOpen, setDataStorageOpen] = useState(false);        // 设置 ▸ 数据与存储 子面板
@@ -969,8 +966,7 @@ export default function App() {
     setShowSettings(false);
     setProfileDraft(null);
     setGeneralOpen(false);
-    setDevicesOpen(false);
-    setDevices(null);
+    resetDevices();
     setWallpaperOpen(false);
     setWallpaperColorOpen(false);
     setMyInfo(null);
@@ -2062,50 +2058,9 @@ export default function App() {
       })),
     []);
 
-  // ---- 已登录设备（P2）----
-  const loadDevices = useCallback(async () => {
-    setDevices(null); setDevicesErr("");
-    try {
-      const list = await clientRef.current?.listDevices();
-      setDevices(list ?? []);
-    } catch (e) {
-      setDevices([]); setDevicesErr((e as Error).message || "加载失败");
-    }
-  }, []);
-
-  // 踢下线某设备。本机不走此路径（UI 已禁用，想退走「退出登录」）。
-  const revokeDevice = useCallback(async (d: DeviceView) => {
-    if (d.current) return;
-    const ok = await askConfirm(`退出「${deviceName(d)}」？该设备将立即下线并需重新登录。若非你本人设备，建议退出后修改密码。`,
-      { okText: "退出登录", danger: true });
-    if (!ok) return;
-    setRevokingSid(d.session_id);
-    try {
-      await clientRef.current?.revokeDevice(d.session_id);
-      setToast("已退出该设备");
-      await loadDevices();
-    } catch (e) {
-      setToast(`操作失败：${(e as Error).message}`);
-    } finally {
-      setRevokingSid("");
-    }
-  }, [askConfirm, loadDevices]);
-
-  const revokeOtherDevices = useCallback(async () => {
-    const ok = await askConfirm("退出其他所有设备？除这台设备外的全部登录都将立即下线。换密码后建议这样做。",
-      { okText: "全部退出", danger: true });
-    if (!ok) return;
-    setRevokingSid("__others__");
-    try {
-      await clientRef.current?.revokeOtherDevices();
-      setToast("已退出其他所有设备");
-      await loadDevices();
-    } catch (e) {
-      setToast(`操作失败：${(e as Error).message}`);
-    } finally {
-      setRevokingSid("");
-    }
-  }, [askConfirm, loadDevices]);
+  // ---- 已登录设备（P2）：状态 + 加载/踢下线操作 ----
+  const { devices, devicesOpen, setDevicesOpen, devicesErr, revokingSid, loadDevices, revokeDevice, revokeOtherDevices, resetDevices } =
+    useDevices({ clientRef, askConfirm, setToast });
 
   // 应用内输入框：返回 Promise<string | null>（取消为 null），替代 window.prompt。
   const askPrompt = useCallback(
