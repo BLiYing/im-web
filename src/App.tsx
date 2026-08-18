@@ -5,7 +5,6 @@ import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/local
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
-import { platformIcon, deviceName, deviceSubtitle } from "./devices";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
@@ -51,6 +50,8 @@ import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
 import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { DataStoragePanel } from "./components/settings/DataStoragePanel";
+import { EditProfilePanel } from "./components/settings/EditProfilePanel";
+import { DevicesPanel } from "./components/settings/DevicesPanel";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -60,7 +61,7 @@ import {
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, PinOff, List,
   Download, LayoutGrid, MoreHorizontal, Play,
   Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward, Eye,
-  ChevronDown, ChevronUp, Copy, QrCode, RefreshCw,
+  ChevronDown, ChevronUp, Copy, QrCode,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -274,7 +275,6 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem("im_dismissed_banners", JSON.stringify(dismissedBanners)); } catch { /* 隐私模式写失败可忽略 */ }
   }, [dismissedBanners]);
-  const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const seenByConv = useRef<Record<string, Set<number>>>({});
@@ -3547,84 +3547,30 @@ export default function App() {
           />
         )}
 
-        {/* 编辑资料面板：经设置页铅笔进入，叠在设置面板之上（对齐 Telegram Web「Edit profile」）。 */}
+        {/* 编辑资料面板：见 components/settings/EditProfilePanel。 */}
         {profileDraft && (
-          <div className="settings-panel edit-panel">
-            <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setProfileDraft(null)}><ChevronLeft size={27} /></button>
-              <span className="settings-title">编辑资料</span>
-              <button className="icon-btn save" title="保存" disabled={profileBusy} onClick={() => void saveProfile()}><Check size={22} /></button>
-            </header>
-            <div className="settings-body">
-              {/* 点头像 → 选本机图片（隐藏的 file input，浏览器自动用系统原生文件框，跨平台无需检测系统）。 */}
-              <button className="edit-avatar" title="更换头像" onClick={() => avatarFileRef.current?.click()}>
-                <Avatar url={profileDraft.avatar_url} label={profileDraft.nickname || uid} seed={uid} cls="edit-avatar-inner" />
-                <span className="edit-cam"><SquarePen size={15} /></span>
-              </button>
-              <input ref={avatarFileRef} type="file" accept="image/*" hidden
-                onChange={(e) => { onPickAvatar(e.target.files?.[0]); e.target.value = ""; }} />
-              <div className="settings-group edit-fields">
-                <label className="edit-field"><span>昵称</span>
-                  <input value={profileDraft.nickname} maxLength={32}
-                    onChange={(e) => setProfileDraft({ ...profileDraft, nickname: e.target.value })} /></label>
-                <label className="edit-field"><span>手机号</span>
-                  <input value={profileDraft.phone}
-                    onChange={(e) => setProfileDraft({ ...profileDraft, phone: e.target.value })} /></label>
-                <label className="edit-field"><span>标签</span>
-                  <input value={profileDraft.tags} placeholder="空格或逗号分隔"
-                    onChange={(e) => setProfileDraft({ ...profileDraft, tags: e.target.value })} /></label>
-              </div>
-            </div>
-          </div>
+          <EditProfilePanel
+            draft={profileDraft}
+            uid={uid}
+            busy={profileBusy}
+            onChange={setProfileDraft}
+            onSave={() => void saveProfile()}
+            onPickAvatar={onPickAvatar}
+            onBack={() => setProfileDraft(null)}
+          />
         )}
 
-        {/* 已登录设备子面板（多设备管理 P2，草图 DEVICE_MANAGEMENT_UX_SKETCH §3）：
-            以登录设备(session)为行，本机置顶标灰不可退（想退＝退出登录），底部一键退出其他所有设备。 */}
+        {/* 已登录设备子面板：见 components/settings/DevicesPanel（状态与操作来自 useDevices）。 */}
         {devicesOpen && (
-          <div className="settings-panel devices-panel">
-            <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setDevicesOpen(false)}><ChevronLeft size={27} /></button>
-              <span className="settings-title">已登录设备</span>
-              <button className="icon-btn" title="刷新" disabled={devices === null} onClick={() => void loadDevices()}><RefreshCw size={20} /></button>
-            </header>
-            <div className="settings-body">
-              {devices === null && <div className="devices-empty">加载中…</div>}
-              {devices !== null && devicesErr && <div className="devices-empty devices-err">{devicesErr}</div>}
-              {devices !== null && !devicesErr && devices.length === 0 && <div className="devices-empty">没有其他登录设备</div>}
-              {devices !== null && devices.length > 0 && (
-                <>
-                  <div className="section-label">这些设备当前登录了你的账号</div>
-                  <div className="settings-group devices-list">
-                    {devices.map((d) => (
-                      <div key={d.session_id} className="device-row">
-                        <span className="device-ic">{platformIcon(d.platform)}</span>
-                        <div className="device-meta">
-                          <div className="device-name">
-                            <span>{deviceName(d)}</span>
-                            {d.current && <span className="device-cur-pill">这台设备</span>}
-                          </div>
-                          <div className="device-sub">
-                            <span className={d.online ? "device-dot on" : "device-dot off"} />
-                            {deviceSubtitle(d, Date.now())}
-                          </div>
-                        </div>
-                        {d.current
-                          ? <span className="device-btn cur">当前</span>
-                          : <button className="device-btn" disabled={!!revokingSid} onClick={() => void revokeDevice(d)}>
-                              {revokingSid === d.session_id ? "退出中…" : "退出"}
-                            </button>}
-                      </div>
-                    ))}
-                  </div>
-                  {devices.some((d) => !d.current) && (
-                    <button className="devices-revoke-all" disabled={!!revokingSid} onClick={() => void revokeOtherDevices()}>
-                      {revokingSid === "__others__" ? "退出中…" : "退出其他所有设备"}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
+          <DevicesPanel
+            devices={devices}
+            err={devicesErr}
+            revokingSid={revokingSid}
+            onRefresh={() => void loadDevices()}
+            onRevoke={(d) => void revokeDevice(d)}
+            onRevokeOthers={() => void revokeOtherDevices()}
+            onBack={() => setDevicesOpen(false)}
+          />
         )}
 
         {/* 通用设置子面板：设置 ▸ 通用设置进入，叠在设置之上。主题已接通真功能，其余先 UI。 */}
