@@ -7,7 +7,7 @@ import {
   resolveWallpaper,
   wallpaperCSS,
 } from "./wallpaper";
-import { hexToHSV, hsvToHex } from "./App";
+import { hexToHSV, hsvToHex } from "./color";
 
 describe("chat wallpaper appearance", () => {
   it("resolves every bundled preset to a CSS background", () => {

@@ -30,6 +30,7 @@ import {
 } from "./download";
 import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
 import { WALLPAPER_PRESETS, DEFAULT_WALLPAPER, loadWallpaper, resolveWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
+import { COLOR_PRESETS, clamp, hsvToHex, hexToHSV, hexToRGB, type HSVColor } from "./color";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -45,59 +46,6 @@ import {
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
-
-type HSVColor = { h: number; s: number; v: number };
-
-const COLOR_PRESETS = [
-  "#e8edf1", "#acc8dc", "#1493cd",
-  "#c7e5ca", "#c5e5a4", "#65b46d",
-  "#d0d3af", "#aaad9d", "#898183",
-  "#f7d2a5", "#f7b269", "#df8750",
-  "#cad7e8", "#c8acd3", "#168f9a",
-] as const;
-
-const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
-
-export function hsvToHex({ h, s, v }: HSVColor): string {
-  const hue = ((h % 360) + 360) % 360;
-  const sat = clamp(s) / 100;
-  const val = clamp(v) / 100;
-  const chroma = val * sat;
-  const x = chroma * (1 - Math.abs((hue / 60) % 2 - 1));
-  const m = val - chroma;
-  const [r, g, b] = hue < 60 ? [chroma, x, 0]
-    : hue < 120 ? [x, chroma, 0]
-    : hue < 180 ? [0, chroma, x]
-    : hue < 240 ? [0, x, chroma]
-    : hue < 300 ? [x, 0, chroma]
-    : [chroma, 0, x];
-  return `#${[r, g, b].map((part) => Math.round((part + m) * 255).toString(16).padStart(2, "0")).join("")}`;
-}
-
-export function hexToHSV(value: string): HSVColor {
-  const match = /^#?([0-9a-f]{6})$/i.exec(value.trim());
-  if (!match) return { h: 156, s: 32, v: 49 };
-  const [r, g, b] = [0, 2, 4].map((offset) => parseInt(match[1].slice(offset, offset + 2), 16) / 255);
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const delta = max - min;
-  let h = 0;
-  if (delta) {
-    if (max === r) h = 60 * (((g - b) / delta) % 6);
-    else if (max === g) h = 60 * ((b - r) / delta + 2);
-    else h = 60 * ((r - g) / delta + 4);
-  }
-  return {
-    h: (h + 360) % 360,
-    s: max ? (delta / max) * 100 : 0,
-    v: max * 100,
-  };
-}
-
-function hexToRGB(value: string): string {
-  const normalized = hsvToHex(hexToHSV(value)).slice(1);
-  return [0, 2, 4].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16)).join(", ");
-}
 
 // cls 决定尺寸（avatar / settings-avatar / edit-avatar）；children 作为叠加层（如在线点、相机角标）。
 /** 首字母头像的底色板（与 iOS IMTheme avatarColorForSeed 同一组 6 色：蓝/绿/橙/红/紫/青）。 */
