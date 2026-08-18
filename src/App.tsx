@@ -55,6 +55,7 @@ import { DevicesPanel } from "./components/settings/DevicesPanel";
 import { GeneralPanel } from "./components/settings/GeneralPanel";
 import { WallpaperPanel } from "./components/settings/WallpaperPanel";
 import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
+import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -5290,59 +5291,9 @@ export default function App() {
         );
       })()}
 
-      {/* 应用内确认框（替代 window.confirm，统一 .modal 风格）。点遮罩 = 取消。 */}
-      {confirmDlg && (
-        <div className="modal-mask" onClick={() => { confirmDlg.resolve(false); setConfirmDlg(null); }}>
-          <div className="modal confirm-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="confirm-msg">{confirmDlg.message}</div>
-            <div className="modal-actions">
-              <button className="link" onClick={() => { confirmDlg.resolve(false); setConfirmDlg(null); }}>
-                {confirmDlg.cancelText}
-              </button>
-              <button className={`mini-btn${confirmDlg.danger ? " danger" : ""}`} autoFocus
-                      onClick={() => { confirmDlg.resolve(true); setConfirmDlg(null); }}>
-                {confirmDlg.okText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 应用内输入框（替代 window.prompt）。单行=回车确定；多行=textarea + 字数计数（决策 18）。Esc/遮罩取消。 */}
-      {promptDlg && (
-        <div className="modal-mask" onClick={() => { promptDlg.resolve(null); setPromptDlg(null); }}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{promptDlg.title}</h3>
-            {promptDlg.multiline ? (
-              <textarea autoFocus className="modal-textarea" value={promptDlg.value} placeholder={promptDlg.placeholder} maxLength={promptDlg.maxLength}
-                        onChange={(e) => setPromptDlg({ ...promptDlg, value: e.target.value })}
-                        onKeyDown={(e) => { if (e.key === "Escape") { promptDlg.resolve(null); setPromptDlg(null); } }} />
-            ) : (
-              <input autoFocus value={promptDlg.value} placeholder={promptDlg.placeholder} maxLength={promptDlg.maxLength}
-                     onChange={(e) => setPromptDlg({ ...promptDlg, value: e.target.value })}
-                     onKeyDown={(e) => {
-                       if (e.key === "Enter") { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }
-                       else if (e.key === "Escape") { promptDlg.resolve(null); setPromptDlg(null); }
-                     }} />
-            )}
-            {promptDlg.maxLength && (
-              <div className="modal-counter">{promptDlg.value.length}/{promptDlg.maxLength}</div>
-            )}
-            <div className="modal-actions">
-              <button className="link" onClick={() => { promptDlg.resolve(null); setPromptDlg(null); }}>取消</button>
-              {promptDlg.extraAction && (
-                <button className={`mini-btn${promptDlg.extraAction.danger ? " danger" : " ghost"}`}
-                        onClick={() => { promptDlg.resolve(promptDlg.extraAction!.value); setPromptDlg(null); }}>
-                  {promptDlg.extraAction.label}
-                </button>
-              )}
-              <button className="mini-btn" onClick={() => { promptDlg.resolve(promptDlg.value); setPromptDlg(null); }}>
-                {promptDlg.okText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 应用内确认/输入弹窗：见 components/Dialogs（状态在 useDialogs）。 */}
+      {confirmDlg && <ConfirmDialog dlg={confirmDlg} set={setConfirmDlg} />}
+      {promptDlg && <PromptDialog dlg={promptDlg} set={setPromptDlg} />}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
