@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
@@ -27,8 +27,8 @@ import {
   type DownloadSettings, type DownloadState, type MediaKind,
 } from "./download";
 import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
-import { WALLPAPER_PRESETS, DEFAULT_WALLPAPER, loadWallpaper, resolveWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
-import { COLOR_PRESETS, clamp, hsvToHex, hexToHSV, hexToRGB, type HSVColor } from "./color";
+import { DEFAULT_WALLPAPER, loadWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
+import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
 import {
   isUrlText, localizeSnippet, replyPreviewOf, selectableInMultiSelect,
   parseChatRecord, recordItemPreview, fileNameFromContent, copyImageToClipboard,
@@ -52,6 +52,9 @@ import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { DataStoragePanel } from "./components/settings/DataStoragePanel";
 import { EditProfilePanel } from "./components/settings/EditProfilePanel";
 import { DevicesPanel } from "./components/settings/DevicesPanel";
+import { GeneralPanel } from "./components/settings/GeneralPanel";
+import { WallpaperPanel } from "./components/settings/WallpaperPanel";
+import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -60,7 +63,7 @@ import {
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, PinOff, List,
   Download, LayoutGrid, MoreHorizontal, Play,
-  Search, Camera, FileText, Link2, MessageCircle, X, Pipette, Star, Forward, Eye,
+  Search, Camera, FileText, Link2, MessageCircle, X, Forward, Eye,
   ChevronDown, ChevronUp, Copy, QrCode,
 } from "lucide-react";
 
@@ -275,7 +278,6 @@ export default function App() {
   useEffect(() => {
     try { localStorage.setItem("im_dismissed_banners", JSON.stringify(dismissedBanners)); } catch { /* 隐私模式写失败可忽略 */ }
   }, [dismissedBanners]);
-  const wallpaperFileRef = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const seenByConv = useRef<Record<string, Set<number>>>({});
   // 内存删除墓碑（convId → 被本地删的 conv_seq）：登录时从 IndexedDB 载入，onMessage 据此拦住服务端重同步的复现。
@@ -3573,154 +3575,36 @@ export default function App() {
           />
         )}
 
-        {/* 通用设置子面板：设置 ▸ 通用设置进入，叠在设置之上。主题已接通真功能，其余先 UI。 */}
+        {/* 通用设置子面板：见 components/settings/GeneralPanel。 */}
         {generalOpen && (
-          <div className="settings-panel general-panel">
-            <header className="settings-head">
-              <button className="icon-btn" title="返回" onClick={() => setGeneralOpen(false)}><ChevronLeft size={27} /></button>
-              <span className="settings-title">通用设置</span>
-              <span className="icon-btn-spacer" />
-            </header>
-            <div className="settings-body">
-              <div className="section-label">设置</div>
-              <div className="settings-group">
-                <div className="range-row">
-                  <div className="range-top"><span className="row-label">消息字体大小</span><span className="row-value">{fontSize}</span></div>
-                  <input type="range" min={12} max={24} value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} />
-                </div>
-                <button className="settings-row" onClick={() => setWallpaperOpen(true)}>
-                  <ImageIcon size={20} className="row-icon" /><span className="row-label">聊天壁纸</span><ChevronRight size={18} className="row-chevron" />
-                </button>
-              </div>
-
-              <div className="section-label">主题</div>
-              <div className="settings-group">
-                {([{ v: "light", t: "浅色" }, { v: "dark", t: "深色" }, { v: "system", t: "跟随系统" }] as const).map((o) => (
-                  <button key={o.v} className="radio-row" onClick={() => setTheme(o.v)}>
-                    <span className={`radio-dot${theme === o.v ? " on" : ""}`} /><span className="row-label">{o.t}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="section-label">时间格式</div>
-              <div className="settings-group">
-                {([{ v: "12", t: "12 小时制" }, { v: "24", t: "24 小时制" }] as const).map((o) => (
-                  <button key={o.v} className="radio-row" onClick={() => setTimeFormat(o.v)}>
-                    <span className={`radio-dot${timeFormat === o.v ? " on" : ""}`} /><span className="row-label">{o.t}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="section-label">键盘</div>
-              <div className="settings-group">
-                {([{ v: "enter", t: "按 Enter 发送", s: "Shift + Enter 换行" }, { v: "cmd", t: "按 Cmd + Enter 发送", s: "Enter 换行" }] as const).map((o) => (
-                  <button key={o.v} className="radio-row" onClick={() => setSendKey(o.v)}>
-                    <span className={`radio-dot${sendKey === o.v ? " on" : ""}`} />
-                    <span className="radio-text"><span className="row-label">{o.t}</span><span className="row-sub">{o.s}</span></span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          <GeneralPanel
+            fontSize={fontSize} theme={theme} timeFormat={timeFormat} sendKey={sendKey}
+            onFontSize={setFontSize} onTheme={setTheme} onTimeFormat={setTimeFormat} onSendKey={setSendKey}
+            onOpenWallpaper={() => setWallpaperOpen(true)}
+            onBack={() => setGeneralOpen(false)}
+          />
         )}
 
+        {/* 聊天壁纸 / 纯色编辑：见 components/settings/WallpaperPanel · WallpaperColorPanel。 */}
         {wallpaperOpen && (
-          <div className="settings-panel wallpaper-panel">
-            <header className="settings-head wallpaper-head">
-              <button className="icon-btn" title="返回" onClick={() => setWallpaperOpen(false)}><ChevronLeft size={27} /></button>
-              <span className="settings-title">聊天壁纸</span>
-              <span className="icon-btn-spacer" />
-            </header>
-            <div className="settings-body wallpaper-body">
-              <div className="wallpaper-actions">
-                <button className="wallpaper-action" onClick={() => wallpaperFileRef.current?.click()}>
-                  <Camera size={24} /><span>上传图片</span>
-                </button>
-                <button className="wallpaper-action" onClick={openWallpaperColor}>
-                  <Pipette size={24} /><span>设置颜色</span>
-                </button>
-                <button className="wallpaper-action" onClick={resetWallpaper}>
-                  <Star size={24} /><span>恢复默认</span>
-                </button>
-                <button className="wallpaper-action" onClick={() => setWallpaperBlur((value) => !value)}>
-                  <span className={`wallpaper-check${wallpaperBlur ? " on" : ""}`}>{wallpaperBlur && <Check size={17} />}</span>
-                  <span>模糊</span>
-                </button>
-              </div>
-              <input ref={wallpaperFileRef} type="file" accept="image/*" hidden
-                onChange={(event) => {
-                  pickWallpaperImage(event.target.files?.[0]);
-                  event.target.value = "";
-                }} />
-              <p className="wallpaper-hint">
-                {wallpaper.kind === "auto"
-                  ? "默认壁纸会跟随浅色/深色模式自动切换，当前高亮为正在使用的一张。"
-                  : "已固定壁纸，浅深模式都用它。点「恢复默认」可切回跟随模式。"}
-              </p>
-              <div className="wallpaper-grid">
-                {WALLPAPER_PRESETS.map((item) => {
-                  // 用解析后的选择比对：auto 时高亮当前明暗下正在生效的那张预设。
-                  const active = resolveWallpaper(wallpaper, isDark);
-                  const selected = active.kind === "preset" && active.value === item.id;
-                  return (
-                    <button key={item.id} className={`wallpaper-tile${selected ? " selected" : ""}`}
-                      title={item.label} aria-label={`使用${item.label}壁纸`}
-                      style={{ background: item.css } as CSSProperties}
-                      onClick={() => setWallpaper({ kind: "preset", value: item.id })}>
-                      {selected && <span className="wallpaper-selected"><Check size={18} /></span>}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <WallpaperPanel
+            wallpaper={wallpaper} isDark={isDark} blur={wallpaperBlur}
+            onSelectPreset={(id) => setWallpaper({ kind: "preset", value: id })}
+            onPickImage={pickWallpaperImage}
+            onOpenColor={openWallpaperColor}
+            onReset={resetWallpaper}
+            onToggleBlur={() => setWallpaperBlur((value) => !value)}
+            onBack={() => setWallpaperOpen(false)}
+          />
         )}
 
         {wallpaperColorOpen && (
-          <div className="settings-panel wallpaper-color-panel">
-            <header className="settings-head wallpaper-head">
-              <button className="icon-btn" title="返回" onClick={() => setWallpaperColorOpen(false)}><ChevronLeft size={27} /></button>
-              <span className="settings-title">设置颜色</span>
-              <span className="icon-btn-spacer" />
-            </header>
-            <div className="settings-body wallpaper-color-body">
-              <div className="color-editor-card" style={{ "--picker-hue": `${colorHSV.h}` } as CSSProperties}>
-                <div className="color-spectrum"
-                  role="slider" aria-label="调整颜色饱和度和亮度" aria-valuenow={Math.round(colorHSV.v)}
-                  onPointerDown={updateColorFromSpectrum}
-                  onPointerMove={(event) => { if (event.buttons === 1) updateColorFromSpectrum(event); }}>
-                  <span className="color-cursor"
-                    style={{ left: `${colorHSV.s}%`, top: `${100 - colorHSV.v}%` }} />
-                </div>
-                <input className="hue-slider" type="range" min="0" max="360" value={colorHSV.h}
-                  aria-label="调整色相"
-                  onChange={(event) => applyWallpaperColor({ ...colorHSV, h: Number(event.target.value) })} />
-                <div className="color-values">
-                  <label>
-                    <span>HEX</span>
-                    <input value={hsvToHex(colorHSV)} readOnly />
-                  </label>
-                  <label>
-                    <span>RGB</span>
-                    <input value={hexToRGB(hsvToHex(colorHSV))} readOnly />
-                  </label>
-                </div>
-              </div>
-              <div className="color-preset-grid">
-                {COLOR_PRESETS.map((color) => {
-                  const selected = hsvToHex(colorHSV).toLowerCase() === color;
-                  return (
-                    <button key={color} className={`color-preset${selected ? " selected" : ""}`}
-                      title={color} aria-label={`使用颜色 ${color}`}
-                      style={{ background: color }}
-                      onClick={() => applyWallpaperColor(hexToHSV(color))}>
-                      {selected && <Check size={20} />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+          <WallpaperColorPanel
+            colorHSV={colorHSV}
+            onApply={applyWallpaperColor}
+            onSpectrum={updateColorFromSpectrum}
+            onBack={() => setWallpaperColorOpen(false)}
+          />
         )}
       </aside>
 
