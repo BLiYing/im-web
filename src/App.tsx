@@ -22,7 +22,7 @@ import { VirtualList } from "./VirtualList";
 import { mediaKindForFile, webCanRenderMedia, MEDIA_PICKER_ACCEPT } from "./fileTypes";
 import { textTier, charCountLabel } from "./longtext";
 import { formatFileSize } from "./fileMetadata";
-import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
+import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, probeMediaMetadata } from "./media";
 import {
   applyTier, defaultDownloadSettings, downloadFraction, downloadGlyph, downloadText, isDefaultDownloadSettings, parseDownloadSettings,
   passivePreviewSource, shouldAutoDownload, tierOfPolicy, MAX_AUTO_BYTES,
@@ -31,6 +31,11 @@ import {
 import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
 import { WALLPAPER_PRESETS, DEFAULT_WALLPAPER, loadWallpaper, resolveWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
 import { COLOR_PRESETS, clamp, hsvToHex, hexToHSV, hexToRGB, type HSVColor } from "./color";
+import {
+  isUrlText, localizeSnippet, replyPreviewOf, selectableInMultiSelect,
+  parseChatRecord, recordItemPreview, fileNameFromContent, copyImageToClipboard,
+  mediaBoxProps, isPreviewableFile, videoFrameSrc, type RecordItem, type ChatRecord,
+} from "./messageContent";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -79,42 +84,6 @@ function Avatar({ url, label, seed, cls = "avatar", children, onClick }: {
     </div>
   );
 }
-
-/** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
-const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
-
-/** 服务端冻结的英文媒体快照（[image]/[video]/[file]）本地化为中文（与 iOS IMLocalizeSnippet 对齐）。 */
-/** 合并转发卡片的引用快照：`[聊天记录] 标题`。兼容存量截断快照（旧引用把 JSON 截 60 字入库，
- *  解析不出时正则抠 "t":"…" 标题）；全失败回落 `[聊天记录]`。与 iOS IMChatRecordSnippet 同语义。 */
-function chatRecordSnippet(json: string): string {
-  let title = "";
-  try {
-    const o = JSON.parse(json);
-    if (o && typeof o.t === "string") title = o.t;
-  } catch {
-    title = /"t":"([^"]*)"/.exec(json)?.[1] ?? "";
-  }
-  return title ? `[聊天记录] ${title}` : "[聊天记录]";
-}
-const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.includes('"items"') || s.includes('"t":'));
-
-const localizeSnippet = (s: string) =>
-  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]"
-  : s === "[file]" ? "[文件]" : s.startsWith("[file] ") ? "[文件] " + s.slice(7) // 文件带原名（M4-x）
-  : s === "[chat_record]" ? "[聊天记录]" // 旧服务端 token（无标题）兜底
-  // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
-  : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
-
-/** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。 */
-const replyPreviewOf = (m: ChatMessage): string =>
-  m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
-  : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
-  : m.contentType === "chat_record" ? chatRecordSnippet(m.content) : (m.content || "").slice(0, 60);
-
-/** 多选态该消息是否可勾选：系统提示/撤回墓碑/发送中·失败的本地件（无服务端内容，转出去是空的）不可选。
- *  与 iOS isSelectableMessage: 同语义。 */
-const selectableInMultiSelect = (m: ChatMessage): boolean =>
-  m.convSeq > 0 && !m.recalledAt && m.contentType !== "system";
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
@@ -223,65 +192,8 @@ function QuoteSnapshotIcon({ snapshot }: { snapshot?: string }) {
   return null;
 }
 
-/** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
- *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
-export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number };
-export type ChatRecord = { t: string; items: RecordItem[] };
-export function parseChatRecord(content: string): ChatRecord {
-  try {
-    const o = JSON.parse(content);
-    if (o && typeof o === "object") return { t: typeof o.t === "string" ? o.t : "聊天记录", items: Array.isArray(o.items) ? o.items : [] };
-  } catch { /* 非法 JSON */ }
-  return { t: "聊天记录", items: [] };
-}
-export const recordItemPreview = (it: RecordItem): string => {
-  if (it.ct === "image") return "[图片]";
-  if (it.ct === "video") return "[视频]";
-  if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();
-  // 嵌套合并转发：预览显「[聊天记录] 子标题」，不铺子卡片 JSON 原文（套娃卡片）；
-  // 子 JSON 非法时 parseChatRecord 回落标题「聊天记录」，此时不再叠加以免「[聊天记录] 聊天记录」。
-  if (it.ct === "chat_record") {
-    const t = parseChatRecord(it.c).t;
-    return t && t !== "聊天记录" ? `[聊天记录] ${t}` : "[聊天记录]";
-  }
-  return it.c;
-};
-
-/** 从文件消息 URL 取原始显示名：存储名 <随机>__<原名>.<ext> → 取 "__" 之后并解码（与后端/iOS 对齐）。 */
-function fileNameFromContent(content: string): string {
-  const last = (content.split("/").pop() || content).split(/[?#]/, 1)[0];
-  let decoded = last;
-  try { decoded = decodeURIComponent(last); } catch { /* 保留原串 */ }
-  const i = decoded.indexOf("__");
-  return i >= 0 && i + 2 < decoded.length ? decoded.slice(i + 2) : decoded;
-}
-
-/** 把图片写入系统剪贴板（浏览器剪贴板图片仅稳定支持 image/png → 用 canvas 转 PNG）。失败抛错由调用方回退复制链接。 */
-async function copyImageToClipboard(url: string): Promise<void> {
-  const blob = await (await fetch(url)).blob();
-  const bmp = await createImageBitmap(blob);
-  const canvas = document.createElement("canvas");
-  canvas.width = bmp.width; canvas.height = bmp.height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("no 2d context");
-  ctx.drawImage(bmp, 0, 0);
-  const png: Blob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
-  await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
-}
-
 type LinkPreview = { url: string; title?: string; description?: string; image?: string; site_name?: string };
 const linkPreviewCache = new Map<string, LinkPreview | null>(); // 进程内缓存（含负缓存 null=抓取失败）
-
-/**
- * 媒体气泡定框：拿到协议下发的原始像素时按比例算出 CSS 尺寸（与 iOS 同算法）；
- * **尺寸未知**（老消息 / 老客户端 / 转发件）则不锁死方框，交给 `.auto` 让图片按自身比例显示，
- * 否则 object-fit:cover 会把老图永久裁成正方形（Web 没有 iOS 那样的加载后重排）。
- */
-function mediaBoxProps(m: ChatMessage): { className: string; style?: CSSProperties } {
-  if (!m.mediaW || !m.mediaH) return { className: "msg-media auto" };
-  const box = mediaDisplaySize(m.mediaW, m.mediaH);
-  return { className: "msg-media", style: { width: `${box.width}px`, height: `${box.height}px` } };
-}
 
 /** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。
  *  层3：onOpenInvite 非空且 url 是本站邀请链接（/q/u、/q/g）→ 拦截点击走站内 resolve 流程（不开新标签页）。 */
@@ -365,10 +277,6 @@ function FileGateIcon({ state }: { state: DownloadState }) {
     </span>
   );
 }
-
-/** 就绪文件点击时能否在浏览器内直接预览（对齐 iOS QuickLook 的 Web 诚实映射）。其余类型 → 另存。 */
-const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac|txt|md|log|json|csv|xml)$/i;
-function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test(name); }
 
 // 群成员上限（含群主），与后端 group.MaxGroupMembers=500 对齐（该值不由接口下发，两端各自硬编码）。
 // 建群时群主已占 1 席，故初始成员（好友）最多可选 MAX_GROUP_MEMBERS-1；超限由服务端 GroupMemberLimit 兜底拒绝。
@@ -460,10 +368,6 @@ function captureVideoPoster(file: File): Promise<File | null> {
   });
 }
 
-/** 视频回退 <video> 的 src：非 blob 时追加 #t=0.1，促使浏览器画出首帧（无 poster 封面时的兜底）。 */
-function videoFrameSrc(url: string): string {
-  return url && !url.startsWith("blob:") ? url + "#t=0.1" : url;
-}
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");

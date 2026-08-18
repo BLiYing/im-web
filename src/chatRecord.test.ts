@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseChatRecord, recordItemPreview } from "./App";
+import { parseChatRecord, recordItemPreview } from "./messageContent";
 
 // 合并转发「聊天记录」纯函数：解析 + 单条预览 token（含嵌套「套娃」→[聊天记录] 子标题）。
 // 与 iOS IMMediaUtil 的 IMSummarizeRecord/IMRecordItemPreview 逐条对齐。
