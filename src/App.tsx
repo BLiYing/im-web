@@ -70,6 +70,7 @@ import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
 import { MediaViewer } from "./components/MediaViewer";
 import { GalleryModal } from "./components/modals/GalleryModal";
+import { MediaTile } from "./components/MediaTile";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -4728,30 +4729,15 @@ export default function App() {
                     {activeTab === "media" && (
                       media.length === 0 ? <div className="detail-empty">暂无媒体</div> : (
                         <div className="detail-media-grid">
+                          {/* 门控格子与会话媒体库共用 <MediaTile>（variant=detail：失效格无 ↓ 徽标、仍显尺寸）。
+                              点门控格=就地解门控（不进查看器），就绪格才打开查看器（对齐 iOS 详情宫格 档 A，autoPrefetch=NO）。 */}
                           {media.map((m) => {
-                            // 与聊天气泡共用门控（对齐 iOS 详情宫格 = 档 A，但 autoPrefetch=NO：浏览历史不顺手全拉）：
-                            // 未下载格**只显 thumb 磨砂 + ↓ + 尺寸，不拉原件**；点门控格=就地解门控（不进查看器），就绪格才打开。
                             const gate = mediaGate(m);
-                            const sizeText = formatFileSize(m.fileSize);
                             return (
-                            <button key={m.serverMsgId || m.convSeq} className="detail-media-tile"
-                                    onClick={() => (gate ? onGateTap(m) : setViewer({ m, fromGallery: true }))}
-                                    onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}
-                                    title={gate ? (sizeText ? `${sizeText} · 点击下载` : "点击下载") : undefined}>
-                              {gate
-                                ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
-                                : (m.contentType === "video"
-                                    // 无 poster 的视频**不能**把视频 URL 塞进 <img>（渲染成裂图封面）；
-                                    // 回退 <video> 抓首帧当封面（对齐气泡/引用/合并转发详情的统一兜底）。
-                                    ? (m.posterUrl
-                                        ? <img src={m.posterUrl} alt="" onError={() => void onPassiveMediaError(m)} />
-                                        : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => void onPassiveMediaError(m)} />)
-                                    : <img src={m.content} alt="" onError={() => void onPassiveMediaError(m)} />)}
-                              {gate
-                                ? (gate.phase === "expired" ? null : <span className="detail-media-dl">↓</span>) // 失效格不给 ↓，只留磨砂 dim
-                                : m.contentType === "video" && <span className="detail-media-play">▶</span>}
-                              {gate && sizeText && <span className="detail-media-size">{sizeText}</span>}
-                            </button>
+                              <MediaTile key={m.serverMsgId || m.convSeq} variant="detail" m={m} gate={gate}
+                                onClick={(mm) => (gate ? onGateTap(mm) : setViewer({ m: mm, fromGallery: true }))}
+                                onMenu={(e, mm) => setFileMenu({ x: e.clientX, y: e.clientY, m: mm })}
+                                onMediaError={(mm) => void onPassiveMediaError(mm)} />
                             );
                           })}
                         </div>
