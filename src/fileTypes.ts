@@ -91,3 +91,16 @@ export function webCanRenderMedia(kind: "image" | "video", nameOrUrl: string): b
   if (kind === "video") return !WEB_UNRENDERABLE_VIDEO_EXT.has(ext);
   return true;
 }
+
+/**
+ * 「图片或视频」入口的文件对话框 accept：显式扩展名白名单，让系统选择器从源头灰掉 HEIC 等网页端解不了的格式
+ * （用通配 `image/*` 会把 HEIC 一起列为可选）。白名单 = RULES 里的 image/video 扩展名 − 不可渲染黑名单 − svg
+ * （svg 服务端拒收、mediaKindForFile 也判为非媒体），故与发送闸 `webCanRenderMedia` 口径天然一致、不会漂移。
+ * accept 仅 UI 层过滤、可被"所有文件"/拖拽/粘贴绕过，安全边界仍在 `mediaKindForFile` + 服务端。
+ */
+const rulesExtSet = (k: FileTypeKind): ReadonlySet<string> =>
+  RULES.find(([kind]) => kind === k)?.[1] ?? new Set<string>();
+export const MEDIA_PICKER_ACCEPT: string = [
+  ...[...rulesExtSet("image")].filter((e) => !WEB_UNRENDERABLE_IMAGE_EXT.has(e) && e !== "svg"),
+  ...[...rulesExtSet("video")].filter((e) => !WEB_UNRENDERABLE_VIDEO_EXT.has(e)),
+].map((e) => "." + e).join(",");

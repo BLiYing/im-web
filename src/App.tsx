@@ -19,7 +19,7 @@ import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewable
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
-import { mediaKindForFile, webCanRenderMedia } from "./fileTypes";
+import { mediaKindForFile, webCanRenderMedia, MEDIA_PICKER_ACCEPT } from "./fileTypes";
 import { textTier, charCountLabel } from "./longtext";
 import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, mediaDisplaySize, probeMediaMetadata } from "./media";
@@ -2119,7 +2119,7 @@ export default function App() {
 
   // 附件面板项（数据驱动，M4-6）：加入口 = 数组加一行。Web 只图片或视频 / 文件。
   const attachItems = useMemo(() => [
-    { id: "media", label: "图片或视频", accept: "image/*,video/*", icon: ImageIcon },
+    { id: "media", label: "图片或视频", accept: MEDIA_PICKER_ACCEPT, icon: ImageIcon }, // 显式扩展名白名单：系统选择器从源头灰掉 HEIC 等（详见 fileTypes.MEDIA_PICKER_ACCEPT）
     { id: "file", label: "文件", accept: "*/*", icon: FileText },
   ], []);
   const pickFile = useCallback((mode: AttachmentPickMode, accept: string) => {

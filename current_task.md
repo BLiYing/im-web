@@ -12,6 +12,11 @@
 
 ## 当前焦点
 
+**「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，待浏览器手测）** — 纯前端（`src/fileTypes.ts` + `src/App.tsx` + `fileTypes.test.ts`）：
+- **根因**：入口 `accept="image/*,video/*"` 是通配，`image/*` 把 HEIC 也列为可选，系统文件对话框里 HEIC 不置灰；旧的只有选完后 JS 黑名单（`webCanRenderMedia`）toast 忽略，属事后拦。
+- **实现**：`accept` 改**显式扩展名白名单** `MEDIA_PICKER_ACCEPT`（`.jpg,.jpeg,.png,.gif,.webp,.bmp,.ico,.mp4,.mov,.m4v,.webm,.3gp`），系统选择器从源头灰掉 HEIC 等。白名单**从 `RULES` 的 image/video 集合派生**（减去 `WEB_UNRENDERABLE_*` 黑名单 + svg），与发送闸 `webCanRenderMedia` 口径天然一致、不漂移。
+- **保留兜底**：`accept` 仅 UI 层、可被「所有文件」/拖拽/粘贴绕过，第二道 JS 闸（`mediaKindForFile` + `webCanRenderMedia`）不动；安全边界仍在服务端。`fileTypes.test.ts` +3 例（不含 heic 等 / 含常见格式且无 svg / 每项带点无通配）。
+
 **粘贴视频预览异常修复 ✅（2026-08-18，tsc+build 绿，待浏览器手测）** — 纯前端（`src/App.tsx` + `src/styles.css`）：
 - **根因**：`addPastedFiles` 把可发送视频与图片一并压成 `kind:"image"`，预览条对 image 一律 `<img src={blobUrl}>` 渲染 → 视频 blob 塞进 `<img>` 破图（显 alt「待发送图片」）。
 - **修复**：`pastedImages` 项 `kind` 扩为 `"image"|"video"|"file"`（`k ?? "file"`，保留 video）；预览条 video 分支用 `<video src muted preload=metadata playsInline>` 显首帧 + 中心 `▶` 角标；发送 filter 改 `kind==="image"||"video"` 仍与图片同批走 `sendMediaBatch`（poster/thumb/落库不变）。CSS 加 `.paste-thumb.paste-video video` + `.paste-video-badge`。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileTypeForName, mediaKindForFile, webCanRenderMedia } from "./fileTypes";
+import { fileTypeForName, mediaKindForFile, webCanRenderMedia, MEDIA_PICKER_ACCEPT } from "./fileTypes";
 
 describe("fileTypeForName", () => {
   it("maps mainstream Windows, macOS and media formats", () => {
@@ -69,5 +69,24 @@ describe("webCanRenderMedia", () => {
     expect(webCanRenderMedia("image", "blob:http://localhost:5173/abcd-uuid")).toBe(true);
     expect(webCanRenderMedia("image", "data:image/png;base64,AAAA")).toBe(true);
     expect(webCanRenderMedia("video", "mystery")).toBe(true);
+  });
+});
+
+describe("MEDIA_PICKER_ACCEPT", () => {
+  const exts = new Set(MEDIA_PICKER_ACCEPT.split(",").map((e) => e.replace(/^\./, "")));
+  it("从源头排除 HEIC 等网页端不可渲染格式（系统文件对话框灰掉）", () => {
+    for (const bad of ["heic", "heif", "tif", "tiff", "raw", "dng", "psd", "mkv", "avi", "wmv", "flv", "mpg", "mpeg"]) {
+      expect(exts.has(bad)).toBe(false);
+    }
+  });
+  it("放行常见图片/视频格式，且不含 svg（服务端拒收/非媒体）", () => {
+    for (const ok of ["jpg", "jpeg", "png", "gif", "webp", "mp4", "mov", "webm"]) {
+      expect(exts.has(ok)).toBe(true);
+    }
+    expect(exts.has("svg")).toBe(false);
+  });
+  it("每项都是带点扩展名、不含通配（否则 image/* 会把 HEIC 带回来）", () => {
+    expect(MEDIA_PICKER_ACCEPT).not.toContain("*");
+    expect(MEDIA_PICKER_ACCEPT.split(",").every((e) => e.startsWith("."))).toBe(true);
   });
 });
