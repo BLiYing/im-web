@@ -11,12 +11,14 @@
   - **✅ 设置面板栈** `components/settings/`：`SettingsPanel`、`DataStoragePanel`、`EditProfilePanel`（avatarFileRef 私有化）、`DevicesPanel`、`GeneralPanel`、`WallpaperPanel`（wallpaperFileRef 私有化）、`WallpaperColorPanel`。全部纯展示，行数据/动作经 props 注入。
   - **✅ 弹窗栈** `components/`（含 `modals/`）：`Dialogs`（Confirm/Prompt，配对 useDialogs）、`PinnedListModal`、`GroupsModal`、`CreateGroupModal`、`InviteMembersModal`、`MuteDurationModal`、`GroupBansModal`、`ReadReceiptsModal`、`GroupTextModal`、`FavoritesModal`、`ForwardPicker`、`RecordModal`。合成消息（收藏/记录进查看器）在 App 侧构造后经回调传入，保持组件纯展示。
   - **✅ 自定义 Hook**：`useDevices`（logout 复位走 `resetDevices` 封装）、`useDialogs`、`useToast`。三者须在**用到其返回值的回调之前**调用（组件体最靠前），呼应既有「须在使用前定义避免 TDZ」的顺序耦合。
-  - **未做/下次（风险升高，留给 code review 后再推进）**：剩 5125 行的**大块**——① 会话详情抽屉 `detail`（~340 行，单聊/群聊+群管理二级视图，耦合最多）② 媒体查看器 `viewer`（~130 行，翻页/门控/合成消息）③ 会话媒体库 `galleryOpen`（耦合 mediaGate/onGateTap）④ 成员 ⋯ 菜单（深耦合 doGroupAction/askConfirm）⑤ QR 三个模态（已是 QRUI 薄包装）。以及**紧耦合核心**：聊天消息流、滚动/已读/分页那堆互咬的 ref（`wasNearBottomRef`/`histAnchorRef`/`prevMinSeqRef`… 见「已知坑」scroll/jump 雷区）、消息 CRUD、composer。**jsdom 撑不住真滚动布局（scrollTo 已桩掉），滚动定位类回归仍需浏览器手测**。候选 Hook：`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`；共享 `<MediaTile>`（`gallery-item` 与 `detail-media-tile` ~15 行重复，viewer/gallery/detail 拆时一并合）。
-  - **注意**：全程**行为保持型**抽取，靠 App 冒烟 + tsc + build + 319 例回归兜底。**待用户浏览器手测**冒烟（登录/发消息/设置各子面板/各弹窗/转发/收藏）。
+  - **✅ 媒体/文本浮层**：`components/`：`MediaViewer`（图片/视频查看器，派生态+复合动作经回调注入）、`TextReader`（超长文本阅读器，正文渲染 renderBody 注入）、`modals/GalleryModal`（会话媒体库门控网格）。
+  - **⛔ 触到「prop-drilling 墙」——会话详情抽屉暂不硬拆**：`detail` 抽屉（~340 行，含群管理二级视图）朴素外提需 **~50 个 props**（conversations/groupInfos/friends/detailMsgs + ~15 个 resolver/gate 函数 + ~30 个动作回调）。50-prop 缝不是改善、是坏味道——它是**设计信号**：要么先上 `AppServicesContext`（收拢 clientRef/toast/dialogs/refresh*/group 动作簇）消除 prop-drilling，再拆 `DetailHeader`/`DetailTabs`/`GroupManageView` 子件；要么维持现状。**属架构决策，留给 code review 定方向**，不做 50-prop 机械搬迁。
+  - **未做/下次**：① 会话详情抽屉（见上，等 Context 方案）② 成员 ⋯ 菜单（深耦合 doGroupAction/askConfirm）③ QR 三个模态（已是 QRUI 薄包装，收益小）④ **紧耦合核心**：聊天消息流、滚动/已读/分页那堆互咬 ref（`wasNearBottomRef`/`histAnchorRef`/`prevMinSeqRef`… 见「已知坑」scroll/jump 雷区）、消息 CRUD、composer。**jsdom 撑不住真滚动布局（scrollTo 已桩掉），滚动定位类回归仍需浏览器手测**。候选 Hook：`useForward`/`useFavorites`/`useBlacklist`/`useLinkPreview`；共享 `<MediaTile>`（`gallery-item` 与 `detail-media-tile` 差异在 expired 徽标/size 可见性/容器元素，属**行为合并非纯移动**，需专门评审）。
+  - **注意**：全程**行为保持型**抽取，靠 App 冒烟 + tsc + build + 319 例回归兜底。**待用户浏览器手测**冒烟（登录/发消息/设置各子面板/各弹窗/转发/收藏/查看器翻页/媒体库）。
 
 ## 当前焦点
 
-**App.tsx 拆分（三轮累计）✅（2026-08-18，~25 提交，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→5125 行：纯逻辑模块 + 叶子组件 + **设置面板栈 7 个** + **弹窗栈 12 个** + 3 个 hook 全部抽出，App 级冒烟 5 例护栏守住登录→聊天主链路。剩会话详情抽屉/媒体查看器/媒体库/成员菜单及聊天滚动核心留待 code review 后再推进。
+**App.tsx 拆分（累计）✅（2026-08-18，~32 提交，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→~5029 行、抽出 ~30 个组件文件：纯逻辑模块 + 叶子组件 + **设置面板栈 7** + **弹窗栈 13** + **媒体查看器/文本阅读器/媒体库** + 3 个 hook。App 级冒烟 5 例护栏守住登录→聊天主链路。**已拆到「prop-drilling 墙」**：会话详情抽屉（~50 props）、成员菜单、聊天滚动核心留待 code review 定架构方向（Context vs 子件拆分）后再推进。
 
 **「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，待浏览器手测）** — 纯前端（`src/fileTypes.ts` + `src/App.tsx` + `fileTypes.test.ts`）：
 - **根因**：入口 `accept="image/*,video/*"` 是通配，`image/*` 把 HEIC 也列为可选，系统文件对话框里 HEIC 不置灰；旧的只有选完后 JS 黑名单（`webCanRenderMedia`）toast 忽略，属事后拦。
