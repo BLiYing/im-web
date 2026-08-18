@@ -2,6 +2,7 @@ import type { ChatMessage } from "../../sdk/protocol";
 import type { DownloadState } from "../../download";
 import { mediaIdentity } from "../../album";
 import { MediaTile } from "../MediaTile";
+import { Modal } from "../Modal";
 
 /** 会话媒体库：蒙层 + 时间序网格；点击复用查看器（fromGallery=不再显示媒体库按钮）。
  *  与资料卡片「媒体」页签同款门控（未下载磨砂 + ↓ + 尺寸，点=就地下载；就绪进查看器；右键=文件菜单）。
@@ -16,8 +17,7 @@ export function GalleryModal({ items, gateOf, onGate, onOpen, onMenu, onMediaErr
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="gallery-panel" onClick={(e) => e.stopPropagation()}>
+    <Modal className="gallery-panel" onClose={onClose}>
         <div className="modal-title">图片与视频</div>
         <div className="gallery-grid">
           {items.length === 0 && (
@@ -32,7 +32,6 @@ export function GalleryModal({ items, gateOf, onGate, onOpen, onMenu, onMediaErr
             );
           })}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

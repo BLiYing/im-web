@@ -2,6 +2,7 @@ import { PinOff } from "lucide-react";
 import type { PinnedMessage } from "../../sdk/protocol";
 import { pinnedPreview, pinnedSenderLabel } from "../../pinned";
 import { formatTime } from "../../time";
+import { Modal } from "../Modal";
 
 /** 全部置顶消息（G0）：横幅右侧 ☰ 打开。点行跳转；有权限者可就地取消置顶。 */
 export function PinnedListModal({ pinned, isGroupChat, timeFormat, canPin, onJump, onUnpin, onClose }: {
@@ -14,8 +15,7 @@ export function PinnedListModal({ pinned, isGroupChat, timeFormat, canPin, onJum
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal pinned-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal pinned-modal" onClose={onClose}>
         <div className="modal-title">置顶消息（{pinned.length}）</div>
         <div className="pinned-list">
           {pinned.map((pm) => (
@@ -33,7 +33,6 @@ export function PinnedListModal({ pinned, isGroupChat, timeFormat, canPin, onJum
           ))}
         </div>
         <button className="modal-close" onClick={onClose}>关闭</button>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
-import { ChevronLeft, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { COLOR_PRESETS, hsvToHex, hexToHSV, hexToRGB, type HSVColor } from "../../color";
+import { SubPanel } from "./SubPanel";
 
 /** 壁纸纯色编辑面板：色板（饱和/亮度）+ 色相滑杆 + HEX/RGB 只读值 + 预设色网格。
  *  纯展示：colorHSV 状态与取色动作由 App 注入。 */
@@ -11,13 +12,8 @@ export function WallpaperColorPanel({ colorHSV, onApply, onSpectrum, onBack }: {
   onBack: () => void;
 }) {
   return (
-    <div className="settings-panel wallpaper-color-panel">
-      <header className="settings-head wallpaper-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">设置颜色</span>
-        <span className="icon-btn-spacer" />
-      </header>
-      <div className="settings-body wallpaper-color-body">
+    <SubPanel className="wallpaper-color-panel" headClassName="wallpaper-head" bodyClassName="wallpaper-color-body"
+      title="设置颜色" onBack={onBack}>
         <div className="color-editor-card" style={{ "--picker-hue": `${colorHSV.h}` } as CSSProperties}>
           <div className="color-spectrum"
             role="slider" aria-label="调整颜色饱和度和亮度" aria-valuenow={Math.round(colorHSV.v)}
@@ -53,7 +49,6 @@ export function WallpaperColorPanel({ colorHSV, onApply, onSpectrum, onBack }: {
             );
           })}
         </div>
-      </div>
-    </div>
+    </SubPanel>
   );
 }

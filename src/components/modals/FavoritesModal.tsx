@@ -1,6 +1,8 @@
 import type { Favorite } from "../../sdk/protocol";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, isUrlText, videoFrameSrc } from "../../messageContent";
+import { fileNameFromContent, isUrlText } from "../../messageContent";
+import { Modal } from "../Modal";
+import { VideoThumb } from "../VideoThumb";
 
 /** 收藏列表（M4-4）：内容快照 + 删除；原消息撤回/删除后仍在。
  *  纯展示：打开查看器（图/视频）经 onOpenMedia 注入，合成消息由 App 构造。 */
@@ -11,8 +13,7 @@ export function FavoritesModal({ favorites, onOpenMedia, onRemove, onClose }: {
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal fav-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal fav-modal" onClose={onClose}>
         <div className="modal-title">我的收藏（{favorites.length}）</div>
         <div className="fav-list">
           {favorites.length === 0 && <div className="fwd-empty">还没有收藏</div>}
@@ -22,9 +23,7 @@ export function FavoritesModal({ favorites, onOpenMedia, onRemove, onClose }: {
                 {f.content_type === "image" ? (
                   <img className="fav-thumb" src={f.content} alt="图片" onClick={() => onOpenMedia(f, "image")} />
                 ) : f.content_type === "video" ? (
-                  <span className="fav-thumb-wrap" onClick={() => onOpenMedia(f, "video")}>
-                    <video className="fav-thumb" src={videoFrameSrc(f.content)} preload="metadata" muted /><span className="play-badge">▶</span>
-                  </span>
+                  <VideoThumb content={f.content} videoClass="fav-thumb" onClick={() => onOpenMedia(f, "video")} />
                 ) : f.content_type === "file" ? (
                   <a className="msg-file" href={f.content} download={fileNameFromContent(f.content)} target="_blank" rel="noreferrer">
                     <FileTypeIcon name={f.content} size={30} />
@@ -41,7 +40,6 @@ export function FavoritesModal({ favorites, onOpenMedia, onRemove, onClose }: {
           ))}
         </div>
         <button className="modal-close" onClick={onClose}>关闭</button>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,4 +1,5 @@
 import { X, Megaphone, Info, Copy, SquarePen } from "lucide-react";
+import { Modal } from "../Modal";
 
 /** 群公告 / 群简介全文视图（决策 16/17）：三入口共用；只读全文 + 复制 +（管理员，仅公告）编辑。
  *  纯展示：文本/发布者元信息/权限与动作由 App 注入（meta 已在 App 侧格式化，避免依赖内部时间函数）。 */
@@ -12,8 +13,7 @@ export function GroupTextModal({ isAnnouncement, text, meta, canEdit, onCopy, on
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal grouptext-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal grouptext-modal" onClose={onClose}>
         <button className="qr-close" onClick={onClose} aria-label="关闭"><X size={18} /></button>
         <h3 className="modal-title">{isAnnouncement ? <Megaphone size={18} /> : <Info size={18} />} {isAnnouncement ? "群公告" : "群简介"}</h3>
         {isAnnouncement && meta && (
@@ -26,7 +26,6 @@ export function GroupTextModal({ isAnnouncement, text, meta, canEdit, onCopy, on
             <button className="mini-btn" onClick={onEdit}><SquarePen size={15} /> 编辑</button>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

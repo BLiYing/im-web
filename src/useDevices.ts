@@ -5,6 +5,9 @@ import { deviceName } from "./devices";
 
 type AskConfirm = (message: string, opts?: { okText?: string; cancelText?: string; danger?: boolean }) => Promise<boolean>;
 
+/** revokingSid 的哨兵值：表示「退出其他所有设备」进行中（非单个 session_id）。 */
+export const REVOKE_ALL_SID = "__others__";
+
 /**
  * 已登录设备管理（P2）：设备列表加载、单设备踢下线、退出其他所有设备。
  * 自持 devices/devicesOpen/devicesErr/revokingSid 四态；副作用依赖（IM 客户端、确认框、吐司）由 App 注入，
@@ -19,7 +22,7 @@ export function useDevices(deps: {
   const [devices, setDevices] = useState<DeviceView[] | null>(null); // null=加载中；[]=空
   const [devicesOpen, setDevicesOpen] = useState(false);
   const [devicesErr, setDevicesErr] = useState("");
-  const [revokingSid, setRevokingSid] = useState(""); // 正在踢下线的 sid（禁用该行按钮）；"__others__"=退出其他
+  const [revokingSid, setRevokingSid] = useState(""); // 正在踢下线的 sid（禁用该行按钮）；REVOKE_ALL_SID=退出其他
 
   const loadDevices = useCallback(async () => {
     setDevices(null); setDevicesErr("");
@@ -53,7 +56,7 @@ export function useDevices(deps: {
     const ok = await askConfirm("退出其他所有设备？除这台设备外的全部登录都将立即下线。换密码后建议这样做。",
       { okText: "全部退出", danger: true });
     if (!ok) return;
-    setRevokingSid("__others__");
+    setRevokingSid(REVOKE_ALL_SID);
     try {
       await clientRef.current?.revokeOtherDevices();
       setToast("已退出其他所有设备");

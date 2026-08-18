@@ -1,6 +1,7 @@
 import { useRef, type CSSProperties } from "react";
-import { ChevronLeft, Camera, Pipette, Star, Check } from "lucide-react";
+import { Camera, Pipette, Star, Check } from "lucide-react";
 import { WALLPAPER_PRESETS, resolveWallpaper, type WallpaperChoice } from "../../wallpaper";
+import { SubPanel } from "./SubPanel";
 
 /** 聊天壁纸面板：预设网格 + 上传图片/设置颜色/恢复默认/模糊开关。
  *  纯展示：壁纸选择状态与动作由 App 注入；隐藏 file input 的 ref 归本组件私有。 */
@@ -17,13 +18,8 @@ export function WallpaperPanel({ wallpaper, isDark, blur, onSelectPreset, onPick
 }) {
   const wallpaperFileRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="settings-panel wallpaper-panel">
-      <header className="settings-head wallpaper-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">聊天壁纸</span>
-        <span className="icon-btn-spacer" />
-      </header>
-      <div className="settings-body wallpaper-body">
+    <SubPanel className="wallpaper-panel" headClassName="wallpaper-head" bodyClassName="wallpaper-body"
+      title="聊天壁纸" onBack={onBack}>
         <div className="wallpaper-actions">
           <button className="wallpaper-action" onClick={() => wallpaperFileRef.current?.click()}>
             <Camera size={24} /><span>上传图片</span>
@@ -64,7 +60,6 @@ export function WallpaperPanel({ wallpaper, isDark, blur, onSelectPreset, onPick
             );
           })}
         </div>
-      </div>
-    </div>
+    </SubPanel>
   );
 }

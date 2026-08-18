@@ -1,6 +1,6 @@
-import { Check } from "lucide-react";
 import type { FriendEntry } from "../../sdk/protocol";
-import { Avatar } from "../Avatar";
+import { Modal } from "../Modal";
+import { CheckRow } from "../rows";
 
 export type CreateGroupDraft = { name: string; selected: string[] };
 
@@ -16,8 +16,7 @@ export function CreateGroupModal({ draft, accepted, friendLabel, busy, maxInitia
   onCancel: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onCancel}>
         <h3>创建群聊</h3>
         <label>群名<input value={draft.name} maxLength={30} placeholder="1~30 字" autoFocus
           onChange={(e) => onChange({ ...draft, name: e.target.value })} /></label>
@@ -40,15 +39,11 @@ export function CreateGroupModal({ draft, accepted, friendLabel, busy, maxInitia
           {accepted.map((f) => {
             const on = draft.selected.includes(f.user_id);
             return (
-              <button key={f.user_id} className="check-row"
+              <CheckRow key={f.user_id} selected={on} url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}
                 onClick={() => onChange({
                   ...draft,
                   selected: on ? draft.selected.filter((x) => x !== f.user_id) : [...draft.selected, f.user_id],
-                })}>
-                <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
-                <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
-                <span className="row-label">{friendLabel(f)}</span>
-              </button>
+                })} />
             );
           })}
         </div>
@@ -56,7 +51,6 @@ export function CreateGroupModal({ draft, accepted, friendLabel, busy, maxInitia
           <button className="link" onClick={onCancel}>取消</button>
           <button className="mini-btn" disabled={busy} onClick={onCreate}>创建</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

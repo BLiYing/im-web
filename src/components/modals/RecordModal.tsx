@@ -1,7 +1,9 @@
 import { ChevronLeft } from "lucide-react";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, parseChatRecord, recordItemPreview, videoFrameSrc, type ChatRecord } from "../../messageContent";
+import { fileNameFromContent, parseChatRecord, recordItemPreview, type ChatRecord } from "../../messageContent";
 import { formatFileSize } from "../../fileMetadata";
+import { Modal } from "../Modal";
+import { VideoThumb } from "../VideoThumb";
 
 /** 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器；
  *  嵌套合并转发条目 → 套娃 mini 卡片，点击入栈下钻（栈深 >1 时显返回）。
@@ -16,8 +18,7 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal record-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal record-modal" onClose={onClose}>
         <div className="modal-title record-head">
           {canGoBack && (
             <button className="icon-btn" title="返回" onClick={onBack}>
@@ -33,9 +34,7 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
               {it.ct === "image" ? (
                 <img className="record-item-media" src={it.c} alt="图片" onClick={() => onOpenMedia(i, it.c, "image")} />
               ) : it.ct === "video" ? (
-                <span className="fav-thumb-wrap" onClick={() => onOpenMedia(i, it.c, "video")}>
-                  <video className="record-item-media" src={videoFrameSrc(it.c)} preload="metadata" muted /><span className="play-badge">▶</span>
-                </span>
+                <VideoThumb content={it.c} videoClass="record-item-media" onClick={() => onOpenMedia(i, it.c, "video")} />
               ) : it.ct === "file" ? (
                 <a className="msg-file" href={it.c} download={it.fn || fileNameFromContent(it.c)} target="_blank" rel="noreferrer">
                   <FileTypeIcon name={it.fn || it.c} size={30} />
@@ -60,7 +59,6 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
           ))}
         </div>
         <button className="modal-close" onClick={onClose}>关闭</button>
-      </div>
-    </div>
+    </Modal>
   );
 }

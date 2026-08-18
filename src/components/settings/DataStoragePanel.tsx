@@ -1,5 +1,6 @@
-import { ChevronLeft, Trash2, Image as ImageIcon, Video, FileText } from "lucide-react";
+import { Trash2, Image as ImageIcon, Video, FileText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { SubPanel } from "./SubPanel";
 import {
   applyTier, defaultDownloadSettings, isDefaultDownloadSettings, tierOfPolicy, MAX_AUTO_BYTES,
   type DownloadSettings, type SpeedTier,
@@ -56,13 +57,7 @@ export function DataStoragePanel({ settings, cachedCount, onSave, onClearCache, 
     </div>
   );
   return (
-    <div className="settings-panel data-panel">
-      <header className="settings-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">数据与存储</span>
-        <span className="icon-btn-spacer" />
-      </header>
-      <div className="settings-body">
+    <SubPanel className="data-panel" title="数据与存储" onBack={onBack}>
         <div className="section-label">存储用量</div>
         <div className="settings-group">
           <div className="settings-row static">
@@ -120,7 +115,6 @@ export function DataStoragePanel({ settings, cachedCount, onSave, onClearCache, 
             <span className="row-label">重置自动下载设置</span>
           </button>
         </div>
-      </div>
-    </div>
+    </SubPanel>
   );
 }

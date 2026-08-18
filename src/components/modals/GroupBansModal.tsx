@@ -1,4 +1,5 @@
 import type { GroupBan } from "../../sdk/protocol";
+import { Modal } from "../Modal";
 
 /** 群黑名单弹窗（G2）：解除拉黑。 */
 export function GroupBansModal({ bans, onUnban, onClose }: {
@@ -7,8 +8,7 @@ export function GroupBansModal({ bans, onUnban, onClose }: {
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal pinned-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal pinned-modal" onClose={onClose}>
         <div className="modal-title">黑名单（{bans.length}）</div>
         <div className="pinned-list">
           {bans.length === 0 ? (
@@ -24,7 +24,6 @@ export function GroupBansModal({ bans, onUnban, onClose }: {
           ))}
         </div>
         <button className="modal-close" onClick={onClose}>关闭</button>
-      </div>
-    </div>
+    </Modal>
   );
 }

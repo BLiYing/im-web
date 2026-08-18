@@ -1,4 +1,5 @@
-import { ChevronLeft, ChevronRight, Image as ImageIcon } from "lucide-react";
+import { ChevronRight, Image as ImageIcon } from "lucide-react";
+import { SubPanel } from "./SubPanel";
 
 /** 通用设置子面板：设置 ▸ 通用设置进入，叠在设置之上。主题已接通真功能，其余先 UI。
  *  纯展示：全部偏好状态与 setter 由 App 注入。 */
@@ -15,13 +16,7 @@ export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, onFontSize,
   onBack: () => void;
 }) {
   return (
-    <div className="settings-panel general-panel">
-      <header className="settings-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">通用设置</span>
-        <span className="icon-btn-spacer" />
-      </header>
-      <div className="settings-body">
+    <SubPanel className="general-panel" title="通用设置" onBack={onBack}>
         <div className="section-label">设置</div>
         <div className="settings-group">
           <div className="range-row">
@@ -60,7 +55,6 @@ export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, onFontSize,
             </button>
           ))}
         </div>
-      </div>
-    </div>
+    </SubPanel>
   );
 }

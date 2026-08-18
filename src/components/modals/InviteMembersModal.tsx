@@ -1,6 +1,6 @@
-import { Check } from "lucide-react";
 import type { FriendEntry } from "../../sdk/protocol";
-import { Avatar } from "../Avatar";
+import { Modal } from "../Modal";
+import { CheckRow } from "../rows";
 
 /** 邀请成员弹窗：不在群内的好友多选。 */
 export function InviteMembersModal({ selected, candidates, friendLabel, onToggle, onInvite, onCancel }: {
@@ -12,21 +12,14 @@ export function InviteMembersModal({ selected, candidates, friendLabel, onToggle
   onCancel: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onCancel}>
         <h3>邀请成员</h3>
         {candidates.length === 0 && <div className="empty">好友都已在群里了</div>}
         <div className="modal-list">
-          {candidates.map((f) => {
-            const on = selected.includes(f.user_id);
-            return (
-              <button key={f.user_id} className="check-row" onClick={() => onToggle(f.user_id)}>
-                <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
-                <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
-                <span className="row-label">{friendLabel(f)}</span>
-              </button>
-            );
-          })}
+          {candidates.map((f) => (
+            <CheckRow key={f.user_id} selected={selected.includes(f.user_id)} url={f.avatar_url}
+              label={friendLabel(f)} seed={f.user_id} onClick={() => onToggle(f.user_id)} />
+          ))}
         </div>
         <div className="modal-actions">
           <button className="link" onClick={onCancel}>取消</button>
@@ -34,7 +27,6 @@ export function InviteMembersModal({ selected, candidates, friendLabel, onToggle
             邀请{selected.length > 0 ? `（${selected.length}）` : ""}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

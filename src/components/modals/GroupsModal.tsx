@@ -1,6 +1,7 @@
 import { UserPlus } from "lucide-react";
 import type { GroupSummary } from "../../sdk/protocol";
 import { Avatar } from "../Avatar";
+import { Modal } from "../Modal";
 
 /** 「群聊」列表弹窗（通讯录入口）：我的群 + 创建群聊。 */
 export function GroupsModal({ groups, uid, onCreate, onOpen, onClose }: {
@@ -11,8 +12,7 @@ export function GroupsModal({ groups, uid, onCreate, onOpen, onClose }: {
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={onClose}>
         <h3>群聊（{groups.length}）</h3>
         <button className="mini-btn wide" onClick={onCreate}>
           <UserPlus size={16} className="menu-icon" />创建群聊
@@ -32,7 +32,6 @@ export function GroupsModal({ groups, uid, onCreate, onOpen, onClose }: {
         <div className="modal-actions">
           <button className="link" onClick={onClose}>关闭</button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

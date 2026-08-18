@@ -1,6 +1,7 @@
 import { useRef } from "react";
-import { ChevronLeft, Check, SquarePen } from "lucide-react";
+import { Check, SquarePen } from "lucide-react";
 import { Avatar } from "../Avatar";
+import { SubPanel } from "./SubPanel";
 
 export type ProfileDraft = { nickname: string; avatar_url: string; phone: string; tags: string };
 
@@ -17,13 +18,8 @@ export function EditProfilePanel({ draft, uid, busy, onChange, onSave, onPickAva
 }) {
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
   return (
-    <div className="settings-panel edit-panel">
-      <header className="settings-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">编辑资料</span>
-        <button className="icon-btn save" title="保存" disabled={busy} onClick={onSave}><Check size={22} /></button>
-      </header>
-      <div className="settings-body">
+    <SubPanel className="edit-panel" title="编辑资料" onBack={onBack}
+      right={<button className="icon-btn save" title="保存" disabled={busy} onClick={onSave}><Check size={22} /></button>}>
         {/* 点头像 → 选本机图片（隐藏的 file input，浏览器自动用系统原生文件框，跨平台无需检测系统）。 */}
         <button className="edit-avatar" title="更换头像" onClick={() => avatarFileRef.current?.click()}>
           <Avatar url={draft.avatar_url} label={draft.nickname || uid} seed={uid} cls="edit-avatar-inner" />
@@ -42,7 +38,6 @@ export function EditProfilePanel({ draft, uid, busy, onChange, onSave, onPickAva
             <input value={draft.tags} placeholder="空格或逗号分隔"
               onChange={(e) => onChange({ ...draft, tags: e.target.value })} /></label>
         </div>
-      </div>
-    </div>
+    </SubPanel>
   );
 }

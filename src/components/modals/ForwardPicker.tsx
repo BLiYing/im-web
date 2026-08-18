@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import type { Conversation } from "../../sdk/protocol";
 import { Avatar } from "../Avatar";
+import { Modal } from "../Modal";
 
 /** 转发会话选择器（M4-3）：默认单选点一下即发；「多选」切换成勾选态，底部「发送(N)」批量转发（上限 9，对齐 iOS）。
  *  纯展示：会话列表与显示名/头像解析、动作全部由 App 注入。 */
@@ -22,8 +23,7 @@ export function ForwardPicker({
   onClose: () => void;
 }) {
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal fwd-picker" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal fwd-picker" onClose={onClose}>
         <div className="modal-title fwd-title">
           <span>转发到（{count} 条）</span>
           <button className="section-action" onClick={onToggleMulti}>
@@ -61,7 +61,6 @@ export function ForwardPicker({
         ) : (
           <button className="modal-close" onClick={onClose}>取消</button>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

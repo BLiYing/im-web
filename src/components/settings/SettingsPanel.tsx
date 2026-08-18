@@ -1,6 +1,7 @@
-import { ChevronLeft, SquarePen } from "lucide-react";
+import { SquarePen } from "lucide-react";
 import { Avatar } from "../Avatar";
 import { renderRow, type Row } from "../rows";
+import { SubPanel } from "./SubPanel";
 
 /** 设置面板主页：占据侧栏列（绝对定位），右侧聊天 .main 保持不动、可继续聊（对齐 Telegram Web）。
  *  纯展示：行数据（infoRows/groups）与全部动作由 App 组装传入。 */
@@ -16,13 +17,8 @@ export function SettingsPanel({ avatarUrl, name, seed, stateText, infoRows, grou
   onLogout: () => void;
 }) {
   return (
-    <div className="settings-panel">
-      <header className="settings-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">设置</span>
-        <button className="icon-btn" title="编辑资料" onClick={onEditProfile}><SquarePen size={24} /></button>
-      </header>
-      <div className="settings-body">
+    <SubPanel title="设置" onBack={onBack}
+      right={<button className="icon-btn" title="编辑资料" onClick={onEditProfile}><SquarePen size={24} /></button>}>
         <div className="settings-profile">
           <Avatar url={avatarUrl} label={name} seed={seed} cls="settings-avatar" />
           <div className="settings-name">{name}</div>
@@ -37,7 +33,6 @@ export function SettingsPanel({ avatarUrl, name, seed, stateText, infoRows, grou
           </div>
         ))}
         <button className="settings-logout" onClick={onLogout}>退出登录</button>
-      </div>
-    </div>
+    </SubPanel>
   );
 }

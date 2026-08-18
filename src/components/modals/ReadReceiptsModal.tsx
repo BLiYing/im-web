@@ -1,5 +1,6 @@
 import type { GroupMember } from "../../sdk/protocol";
 import { Avatar } from "../Avatar";
+import { Modal } from "../Modal";
 
 export type ReadReceipts = { read: string[]; unread: string[]; tab: "read" | "unread" };
 
@@ -12,8 +13,7 @@ export function ReadReceiptsModal({ data, lookupMember, onTab, onClose }: {
 }) {
   const ids = data.tab === "read" ? data.read : data.unread;
   return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal readby-modal" onClick={(e) => e.stopPropagation()}>
+    <Modal className="modal readby-modal" onClose={onClose}>
         <div className="modal-title">已读详情</div>
         <div className="readby-tabs">
           <button className={data.tab === "read" ? "on" : ""} onClick={() => onTab("read")}>
@@ -43,7 +43,6 @@ export function ReadReceiptsModal({ data, lookupMember, onTab, onClose }: {
           )}
         </div>
         <button className="modal-close" onClick={onClose}>关闭</button>
-      </div>
-    </div>
+    </Modal>
   );
 }

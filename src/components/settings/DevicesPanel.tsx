@@ -1,6 +1,8 @@
-import { ChevronLeft, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { DeviceView } from "../../sdk/protocol";
 import { platformIcon, deviceName, deviceSubtitle } from "../../devices";
+import { REVOKE_ALL_SID } from "../../useDevices";
+import { SubPanel } from "./SubPanel";
 
 /** 已登录设备子面板（多设备管理 P2，草图 DEVICE_MANAGEMENT_UX_SKETCH §3）：
  *  以登录设备(session)为行，本机置顶标灰不可退（想退＝退出登录），底部一键退出其他所有设备。
@@ -8,20 +10,15 @@ import { platformIcon, deviceName, deviceSubtitle } from "../../devices";
 export function DevicesPanel({ devices, err, revokingSid, onRefresh, onRevoke, onRevokeOthers, onBack }: {
   devices: DeviceView[] | null; // null=加载中；[]=空
   err: string;
-  revokingSid: string; // 正在踢下线的 sid；"__others__"=退出其他
+  revokingSid: string; // 正在踢下线的 sid；REVOKE_ALL_SID=退出其他
   onRefresh: () => void;
   onRevoke: (d: DeviceView) => void;
   onRevokeOthers: () => void;
   onBack: () => void;
 }) {
   return (
-    <div className="settings-panel devices-panel">
-      <header className="settings-head">
-        <button className="icon-btn" title="返回" onClick={onBack}><ChevronLeft size={27} /></button>
-        <span className="settings-title">已登录设备</span>
-        <button className="icon-btn" title="刷新" disabled={devices === null} onClick={onRefresh}><RefreshCw size={20} /></button>
-      </header>
-      <div className="settings-body">
+    <SubPanel className="devices-panel" title="已登录设备" onBack={onBack}
+      right={<button className="icon-btn" title="刷新" disabled={devices === null} onClick={onRefresh}><RefreshCw size={20} /></button>}>
         {devices === null && <div className="devices-empty">加载中…</div>}
         {devices !== null && err && <div className="devices-empty devices-err">{err}</div>}
         {devices !== null && !err && devices.length === 0 && <div className="devices-empty">没有其他登录设备</div>}
@@ -52,12 +49,11 @@ export function DevicesPanel({ devices, err, revokingSid, onRefresh, onRevoke, o
             </div>
             {devices.some((d) => !d.current) && (
               <button className="devices-revoke-all" disabled={!!revokingSid} onClick={onRevokeOthers}>
-                {revokingSid === "__others__" ? "退出中…" : "退出其他所有设备"}
+                {revokingSid === REVOKE_ALL_SID ? "退出中…" : "退出其他所有设备"}
               </button>
             )}
           </>
         )}
-      </div>
-    </div>
+    </SubPanel>
   );
 }
