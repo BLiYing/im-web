@@ -4058,21 +4058,27 @@ export default function App() {
           )}
           {editingMsg && (
             // 编辑态条（M4-5）：输入框上方显示"编辑消息" + 取消（恢复普通发送）。
+            // 点预览区 → 定位到正在编辑的原消息（与引用条一致）；✕ 独立在点击区外。
             <div className="reply-compose">
-              <div className="reply-compose-text">
-                <span className="reply-who">编辑消息</span>
-                <span className="reply-snippet">{(editingMsg.content || "").slice(0, 80)}</span>
+              <div className="reply-compose-hit" onClick={() => locateInChat(editingMsg.convId, editingMsg.convSeq)} title="跳到原消息">
+                <div className="reply-compose-text">
+                  <span className="reply-who">编辑消息</span>
+                  <span className="reply-snippet">{(editingMsg.content || "").slice(0, 80)}</span>
+                </div>
               </div>
               <button className="reply-cancel" onClick={() => { setEditingMsg(null); setInput(""); }} title="取消编辑">✕</button>
             </div>
           )}
           {replyTo && (
             // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消；图片/视频显示小缩略图。
+            // 点预览区（缩略图+文字，不含 ✕）→ 定位到被引用的原消息（与 iOS 一致）；✕ 独立在点击区外。
             <div className="reply-compose">
-              <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />
-              <div className="reply-compose-text">
-                <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
-                <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>
+              <div className="reply-compose-hit" onClick={() => locateInChat(replyTo.convId, replyTo.convSeq)} title="跳到原消息">
+                <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />
+                <div className="reply-compose-text">
+                  <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
+                  <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>
+                </div>
               </div>
               <button className="reply-cancel" onClick={() => setReplyTo(null)} title="取消引用">✕</button>
             </div>
