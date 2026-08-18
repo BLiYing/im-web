@@ -56,13 +56,16 @@ import { GeneralPanel } from "./components/settings/GeneralPanel";
 import { WallpaperPanel } from "./components/settings/WallpaperPanel";
 import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
+import { PinnedListModal } from "./components/modals/PinnedListModal";
+import { GroupsModal } from "./components/modals/GroupsModal";
+import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
-  Image as ImageIcon, UserPlus, LogOut, Info, Pin, PinOff, List,
+  Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
   Download, LayoutGrid, MoreHorizontal, Play,
   Search, Camera, FileText, Link2, MessageCircle, X, Forward, Eye,
   ChevronDown, ChevronUp, Copy, QrCode,
@@ -4522,29 +4525,14 @@ export default function App() {
         </div>
       )}
 
-      {/* 全部置顶消息（G0）：横幅右侧 ☰ 打开。点行跳转；有权限者可就地取消置顶。 */}
+      {/* 全部置顶消息（G0）：见 components/modals/PinnedListModal。 */}
       {pinnedListOpen && (
-        <div className="modal-mask" onClick={() => setPinnedListOpen(false)}>
-          <div className="modal pinned-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">置顶消息（{activePinned.length}）</div>
-            <div className="pinned-list">
-              {activePinned.map((pm) => (
-                <div className="pinned-row" key={pm.convSeq}>
-                  <button className="pinned-row-main"
-                    onClick={() => { setPinnedListOpen(false); jumpToSeq(pm.convSeq); }}>
-                    <span className="pinned-row-from">{pinnedSenderLabel(pm, isGroupChat) || formatTime(pm.timestamp, timeFormat)}</span>
-                    <span className="pinned-row-text">{pinnedPreview(pm)}</span>
-                  </button>
-                  {canPinHere && (
-                    <button className="icon-btn" title="取消置顶"
-                      onClick={() => clientRef.current?.pinMessage(convId, pm.convSeq, false)}><PinOff size={16} /></button>
-                  )}
-                </div>
-              ))}
-            </div>
-            <button className="modal-close" onClick={() => setPinnedListOpen(false)}>关闭</button>
-          </div>
-        </div>
+        <PinnedListModal
+          pinned={activePinned} isGroupChat={isGroupChat} timeFormat={timeFormat} canPin={canPinHere}
+          onJump={jumpToSeq}
+          onUnpin={(seq) => clientRef.current?.pinMessage(convId, seq, false)}
+          onClose={() => setPinnedListOpen(false)}
+        />
       )}
 
       {menu && (
@@ -4663,78 +4651,24 @@ export default function App() {
         </div>
       )}
 
-      {/* 「群聊」列表弹窗（通讯录入口）：我的群 + 创建群聊。 */}
+      {/* 「群聊」列表 / 建群弹窗：见 components/modals/GroupsModal · CreateGroupModal。 */}
       {groupsModal !== null && (
-        <div className="modal-mask" onClick={() => setGroupsModal(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>群聊（{groupsModal.length}）</h3>
-            <button className="mini-btn wide" onClick={() => setCreateDraft({ name: "", selected: [] })}>
-              <UserPlus size={16} className="menu-icon" />创建群聊
-            </button>
-            {groupsModal.length === 0 && <div className="empty">还没有加入任何群聊</div>}
-            <div className="modal-list">
-              {groupsModal.map((g) => (
-                <div key={g.conv_id} className="convitem"
-                  onClick={() => { setGroupsModal(null); setTab("chats"); openGroupChat(g.conv_id); }}>
-                  <Avatar url={g.avatar_url} label={g.name} seed={g.conv_id} />
-                  <div className="convbody">
-                    <div className="convpeer">{g.name}</div>
-                    <div className="convlast">{g.owner === uid ? "我是群主" : `群主 ${g.owner}`}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="modal-actions">
-              <button className="link" onClick={() => setGroupsModal(null)}>关闭</button>
-            </div>
-          </div>
-        </div>
+        <GroupsModal
+          groups={groupsModal} uid={uid}
+          onCreate={() => setCreateDraft({ name: "", selected: [] })}
+          onOpen={(cid) => { setGroupsModal(null); setTab("chats"); openGroupChat(cid); }}
+          onClose={() => setGroupsModal(null)}
+        />
       )}
 
-      {/* 建群弹窗：群名 + 好友多选。 */}
       {createDraft && (
-        <div className="modal-mask" onClick={() => setCreateDraft(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>创建群聊</h3>
-            <label>群名<input value={createDraft.name} maxLength={30} placeholder="1~30 字" autoFocus
-              onChange={(e) => setCreateDraft({ ...createDraft, name: e.target.value })} /></label>
-            <div className="section-label with-action">
-              <span>选择好友（已选 {createDraft.selected.length}）</span>
-              {accepted.length > 0 && (() => {
-                // 可选好友上限 = MAX_INITIAL_MEMBERS（群主占 1 席）；全选时截断到上限。
-                const selectable = accepted.slice(0, MAX_INITIAL_MEMBERS).map((f) => f.user_id);
-                const allOn = selectable.length > 0 && selectable.every((id) => createDraft.selected.includes(id));
-                return (
-                  <button type="button" className="section-action"
-                    onClick={() => setCreateDraft({ ...createDraft, selected: allOn ? [] : selectable })}>
-                    {allOn ? "取消全选" : "全选"}
-                  </button>
-                );
-              })()}
-            </div>
-            {accepted.length === 0 && <div className="empty">还没有好友，先去通讯录添加吧</div>}
-            <div className="modal-list">
-              {accepted.map((f) => {
-                const on = createDraft.selected.includes(f.user_id);
-                return (
-                  <button key={f.user_id} className="check-row"
-                    onClick={() => setCreateDraft({
-                      ...createDraft,
-                      selected: on ? createDraft.selected.filter((x) => x !== f.user_id) : [...createDraft.selected, f.user_id],
-                    })}>
-                    <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>
-                    <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
-                    <span className="row-label">{friendLabel(f)}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="modal-actions">
-              <button className="link" onClick={() => setCreateDraft(null)}>取消</button>
-              <button className="mini-btn" disabled={createBusy} onClick={() => void doCreateGroup()}>创建</button>
-            </div>
-          </div>
-        </div>
+        <CreateGroupModal
+          draft={createDraft} accepted={accepted} friendLabel={friendLabel}
+          busy={createBusy} maxInitialMembers={MAX_INITIAL_MEMBERS}
+          onChange={setCreateDraft}
+          onCreate={() => void doCreateGroup()}
+          onCancel={() => setCreateDraft(null)}
+        />
       )}
 
       {/* 会话详情抽屉（对齐 iOS IMChatDetailViewController）：单聊/群聊共用——头部 + 操作排 + 设置 + 页签。 */}
