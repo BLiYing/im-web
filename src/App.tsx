@@ -64,11 +64,13 @@ import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
 import { GroupTextModal } from "./components/modals/GroupTextModal";
+import { FavoritesModal } from "./components/modals/FavoritesModal";
+import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
-  Headphones, ChevronLeft, ChevronRight, SquarePen, Check,
+  Headphones, ChevronLeft, ChevronRight, SquarePen,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
   Download, LayoutGrid, MoreHorizontal, Play,
@@ -4359,85 +4361,35 @@ export default function App() {
         </div>
       )}
 
+      {/* 收藏列表（M4-4）：见 components/modals/FavoritesModal（合成消息在 App 构造后进查看器）。 */}
       {favorites && (
-        // 收藏列表（M4-4）：内容快照 + 删除；原消息撤回/删除后仍在。
-        <div className="modal-mask" onClick={() => setFavorites(null)}>
-          <div className="modal fav-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title">我的收藏（{favorites.length}）</div>
-            <div className="fav-list">
-              {favorites.length === 0 && <div className="fwd-empty">还没有收藏</div>}
-              {favorites.map((f) => (
-                <div key={f.id} className="fav-item">
-                  <div className="fav-content">
-                    {f.content_type === "image" ? (
-                      <img className="fav-thumb" src={f.content} alt="图片" onClick={() => { setFavorites(null); setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: "image", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }} />
-                    ) : f.content_type === "video" ? (
-                      <span className="fav-thumb-wrap" onClick={() => { setFavorites(null); setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: "video", convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true }); }}>
-                        <video className="fav-thumb" src={videoFrameSrc(f.content)} preload="metadata" muted /><span className="play-badge">▶</span>
-                      </span>
-                    ) : f.content_type === "file" ? (
-                      <a className="msg-file" href={f.content} download={fileNameFromContent(f.content)} target="_blank" rel="noreferrer">
-                        <FileTypeIcon name={f.content} size={30} />
-                        <span>{fileNameFromContent(f.content)}</span>
-                      </a>
-                    ) : isUrlText(f.content) ? (
-                      <a className="msg-link" href={f.content} target="_blank" rel="noreferrer">{f.content}</a>
-                    ) : (
-                      f.content
-                    )}
-                  </div>
-                  <button className="fav-del" title="删除收藏" onClick={() => removeFavorite(f.id)}>✕</button>
-                </div>
-              ))}
-            </div>
-            <button className="modal-close" onClick={() => setFavorites(null)}>关闭</button>
-          </div>
-        </div>
+        <FavoritesModal
+          favorites={favorites}
+          onOpenMedia={(f, kind) => {
+            setFavorites(null);
+            setViewer({ m: { clientMsgId: `fav-${f.id}`, convId: "", from: "", content: f.content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" }, fromGallery: true });
+          }}
+          onRemove={removeFavorite}
+          onClose={() => setFavorites(null)}
+        />
       )}
 
+      {/* 转发会话选择器（M4-3）：见 components/modals/ForwardPicker。 */}
       {forwarding && (
-        // 转发会话选择器（M4-3）：默认单选点一下即发；「多选」切换成勾选态，底部「发送(N)」批量转发（上限 9，对齐 iOS）。
-        <div className="modal-mask" onClick={closeForwardPicker}>
-          <div className="modal fwd-picker" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-title fwd-title">
-              <span>转发到（{forwarding.length} 条）</span>
-              <button className="section-action" onClick={() => { setForwardMulti((v) => !v); setForwardTargets([]); }}>
-                {forwardMulti ? "取消多选" : "多选"}
-              </button>
-            </div>
-            {forwarding.length > 1 && (
-              <div className="fwd-mode">
-                <button className={forwardMode === "each" ? "on" : ""} onClick={() => setForwardMode("each")}>逐条转发</button>
-                <button className={forwardMode === "merged" ? "on" : ""} onClick={() => setForwardMode("merged")}>合并转发</button>
-              </div>
-            )}
-            <div className="fwd-list">
-              {conversations.length === 0 && <div className="fwd-empty">暂无会话</div>}
-              {conversations.map((c) => {
-                const on = forwardTargets.includes(c.conv_id);
-                return (
-                  <button key={c.conv_id} className="fwd-item"
-                    onClick={() => forwardMulti ? toggleForwardTarget(c.conv_id) : doForwardToTargets([c])}>
-                    {forwardMulti && <span className={`checkbox${on ? " on" : ""}`}>{on && <Check size={13} />}</span>}
-                    <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer} />
-                    <span className="fwd-item-label">{convDisplayLabel(c)}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {forwardMulti ? (
-              <div className="fwd-actions">
-                <button className="link" onClick={closeForwardPicker}>取消</button>
-                <button className="mini-btn" disabled={forwardTargets.length === 0}
-                  onClick={() => doForwardToTargets(conversations.filter((c) => forwardTargets.includes(c.conv_id)))}>
-                  发送{forwardTargets.length > 0 ? `(${forwardTargets.length})` : ""}
-                </button>
-              </div>
-            ) : (
-              <button className="modal-close" onClick={closeForwardPicker}>取消</button>
-            )}
-          </div>
-        </div>
+        <ForwardPicker
+          count={forwarding.length}
+          conversations={conversations}
+          multi={forwardMulti}
+          mode={forwardMode}
+          targets={forwardTargets}
+          convAvatarUrl={convAvatarUrl}
+          convDisplayLabel={convDisplayLabel}
+          onToggleMulti={() => { setForwardMulti((v) => !v); setForwardTargets([]); }}
+          onSetMode={setForwardMode}
+          onToggleTarget={toggleForwardTarget}
+          onForward={doForwardToTargets}
+          onClose={closeForwardPicker}
+        />
       )}
 
       {recordView && (
