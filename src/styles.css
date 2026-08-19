@@ -202,6 +202,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .convpeer { font-weight: 600; }
 .convtime { font-size: 12px; color: var(--text-secondary); }
 .convlast { color: var(--text-secondary); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 副标题（末条预览）与右下未读角标同处底行、角标又是 absolute 脱离文档流，长文本会滑到角标下方重叠。
+   仅在该行有角标时给副标题留出右侧让位（够放 "99+"），无角标的会话不浪费省略宽度。 */
+.convitem:has(> .badge) .convlast { padding-right: 34px; }
 
 /* 左栏 Tab：会话 / 通讯录 */
 .tabs { display: flex; border-bottom: 1px solid var(--separator); }
