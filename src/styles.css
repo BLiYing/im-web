@@ -109,7 +109,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 .login { max-width: 360px; margin: 0 auto; padding: 48px var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
 .login-logo { width: 88px; height: 88px; align-self: center; border-radius: 22px; box-shadow: 0 12px 32px var(--shadow-soft); }
-.login h1 { font-size: 20px; margin: 0 0 var(--space-2); }
+.login h1 { font-size: 20px; margin: 0 0 var(--space-2); text-align: center; }
 .login label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 .login input { padding: 10px; border: 1px solid var(--separator); border-radius: var(--radius-card); font-size: 15px; background: var(--page-bg); color: var(--text); }
 .login button { padding: 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); font-size: 15px; cursor: pointer; }
