@@ -116,6 +116,7 @@ export interface PinnedMessage {
   fromNickname?: string; // 仅群聊带（空则回退 uid）
   contentType: string;
   content: string;
+  caption?: string; // 图说随附文本：置顶横幅/列表「有字显字」（媒体带 caption 时显文字而非 [图片]）
   timestamp: number;
   pinnedAt: number;
 }

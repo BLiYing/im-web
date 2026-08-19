@@ -577,6 +577,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .record-item-name { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
 .record-item-media { max-width: 200px; max-height: 200px; border-radius: 6px; cursor: pointer; display: block; }
 .record-item-text { white-space: pre-wrap; word-break: break-word; }
+.record-item-cap { margin-top: 4px; white-space: pre-wrap; word-break: break-word; } /* 图说条目随附文本 */
 /* 套娃：详情页里的嵌套合并转发条目 = mini 卡片；标题栏用统一 icon-btn 返回，按钮与标题中线对齐 */
 .record-card-nested { margin-top: 2px; }
 .record-head { display: flex; align-items: center; gap: 4px; }

@@ -1779,6 +1779,8 @@ export default function App() {
           ...(m.contentType === "file"
             ? { fn: m.fileName || fileNameFromContent(m.content), ...(m.fileSize ? { fs: m.fileSize } : {}) }
             : {}),
+          // 图说条目携带 caption（cap，与 iOS 同 key）——收端记录卡「有字显字」，不再只显 [图片]。
+          ...(m.caption ? { cap: m.caption } : {}),
         }));
       const names = new Set(items.map((i) => i.n));
       const title = names.size <= 1 ? `${[...names][0] || "聊天"} 的聊天记录` : "群聊的聊天记录";

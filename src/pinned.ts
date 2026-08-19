@@ -4,7 +4,11 @@ import type { PinnedMessage } from "./sdk/protocol";
 
 /** 横幅/列表里一条置顶消息的单行预览文案。
  *  非文本消息没有可读 content（是 URL），直接显类型词——横幅只有一行高，塞 URL 既难读又会撑破。 */
-export function pinnedPreview(p: Pick<PinnedMessage, "contentType" | "content">): string {
+export function pinnedPreview(p: Pick<PinnedMessage, "contentType" | "content" | "caption">): string {
+  // 图说「有字显字」：媒体/文件带 caption 时置顶横幅显 caption 文字，否则回退 [图片]/[视频]/[文件]。
+  if (p.caption && (p.contentType === "image" || p.contentType === "video" || p.contentType === "file")) {
+    return oneLine(p.caption);
+  }
   switch (p.contentType) {
     case "text":
       return oneLine(p.content) || "（空消息）";

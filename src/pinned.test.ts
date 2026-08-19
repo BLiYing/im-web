@@ -16,6 +16,12 @@ describe("pinnedPreview", () => {
     expect(pinnedPreview({ contentType: "file", content: "https://x/a.zip" })).toBe("[文件]");
   });
 
+  it("图说置顶「有字显字」：带 caption 显文字，否则回退类型词", () => {
+    expect(pinnedPreview({ contentType: "image", content: "https://x/a.png", caption: "周末爬山拍的" })).toBe("周末爬山拍的");
+    expect(pinnedPreview({ contentType: "file", content: "https://x/a.zip", caption: "季度财报" })).toBe("季度财报");
+    expect(pinnedPreview({ contentType: "image", content: "https://x/a.png" })).toBe("[图片]");
+  });
+
   it("空文本与未知类型都有兜底，不返回空串", () => {
     expect(pinnedPreview({ contentType: "text", content: "   " })).toBe("（空消息）");
     expect(pinnedPreview({ contentType: "sticker", content: "" })).toBe("[sticker]");

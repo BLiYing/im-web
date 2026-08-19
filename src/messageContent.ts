@@ -44,7 +44,7 @@ export const selectableInMultiSelect = (m: ChatMessage): boolean =>
 
 /** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
  *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
-export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number };
+export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number; cap?: string };
 export type ChatRecord = { t: string; items: RecordItem[] };
 export function parseChatRecord(content: string): ChatRecord {
   try {
@@ -54,6 +54,8 @@ export function parseChatRecord(content: string): ChatRecord {
   return { t: "聊天记录", items: [] };
 }
 export const recordItemPreview = (it: RecordItem): string => {
+  // 图说合并转发「有字显字」：媒体/文件条目带 cap（caption）时优先显文字，否则回退 [图片]/[视频]/[文件名]。
+  if (it.cap && (it.ct === "image" || it.ct === "video" || it.ct === "file")) return it.cap.slice(0, 60);
   if (it.ct === "image") return "[图片]";
   if (it.ct === "video") return "[视频]";
   if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();

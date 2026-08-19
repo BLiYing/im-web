@@ -724,6 +724,7 @@ export class IMClient {
       fromNickname: it.from_nickname || undefined,
       contentType: it.content_type ?? "text",
       content: it.content ?? "",
+      caption: it.caption || undefined, // 图说：置顶横幅「有字显字」
       timestamp: it.timestamp ?? 0,
       pinnedAt: it.pinned_at ?? 0,
     }));

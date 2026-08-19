@@ -55,6 +55,10 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
               ) : (
                 <div className="record-item-text">{it.c}</div>
               )}
+              {/* 图说条目「有字显字」：媒体/文件下方随附文本。 */}
+              {it.cap && (it.ct === "image" || it.ct === "video" || it.ct === "file") ? (
+                <div className="record-item-cap">{it.cap}</div>
+              ) : null}
             </div>
           ))}
         </div>

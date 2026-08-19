@@ -12,6 +12,13 @@ describe("chat_record 合并转发解析与预览", () => {
     expect(r.items[0].c).toBe("你好");
   });
 
+  it("图说条目「有字显字」：带 cap 显 caption 文字，否则回退 token", () => {
+    expect(recordItemPreview({ n: "1002", ct: "image", c: "/a.jpg", cap: "周末爬山拍的" })).toBe("周末爬山拍的");
+    expect(recordItemPreview({ n: "1002", ct: "video", c: "/a.mp4", cap: "现场录像" })).toBe("现场录像");
+    expect(recordItemPreview({ n: "1002", ct: "file", c: "/x__r.pdf", fn: "r.pdf", cap: "看第3页" })).toBe("看第3页");
+    expect(recordItemPreview({ n: "1002", ct: "image", c: "/a.jpg" })).toBe("[图片]");
+  });
+
   it("parseChatRecord 非法 JSON 回落默认标题、空条目", () => {
     const r = parseChatRecord("not-json");
     expect(r.t).toBe("聊天记录");
