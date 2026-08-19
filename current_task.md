@@ -37,7 +37,10 @@
   - App.tsx **5087 → 4858 行**（-229）。
   - **`/code-review` 已过**（2026-08-19）：4 findings，唯一动手项=补 `components/DetailPanelParts.test.tsx`（5 例，Provider 包裹渲染三组件 + 接线断言，抽屉从 0 覆盖→有测；suite 358→363）。其余 3 项 skip：menuActive 在 msg 发送中被右键→ACK 时高亮会闪失（cosmetic 极罕见，修它要重引第二套身份、违背 msgKey 收敛）；useGroupActions 三处实例化（自足组件模式，硬传回退 prop-drilling）；groupInfos 双查（省它要重引 IIFE）。
 - **⏳ 剩下的硬骨头：详情头部/操作排/设置卡（DetailHeader）** 仍内联在 `App.tsx` 抽屉 IIFE。它是**耦合残渣**：IIFE 顶部算的 ~18 个派生值（title/avatarUrl/pinned/muted/peerBlocked/detailPeerIsFriend/showDetailBody…）+ ~15 个群/好友/会话动作（doFriendAction/openChat/comingSoon/doClearHistory/doToggleBlock/doLeaveGroup/doDissolveGroup/setConvPinned/setConvMuted/openGroupCard/openGroupText/setContactDraft/doEditMyGroupNickname/doEditGroupRemark/groupRemark…）。朴素抽 DetailHeader 需 **~30 props**——**是把 30-prop 接口搬个地方，不减耦合**。要么整块 `DetailPanel`（连 IIFE 派生一起搬，App 再 -250 行但组件 ~35 props），要么维持现状。**留待评审定**（与 iOS/Web 一贯「50-prop 缝是设计信号、不硬搬」一致）。
-- **⏸ 更远：拆 `useIMConnection/useMessageStore/useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，待抽屉这条线收尾后再评估。
+**Phase A 逻辑 hook 收口 ✅（2026-08-19，tsc build + 375 vitest 绿）**
+- **✅ useMessageStore**（`messageStore.ts` 纯变换 + `useMessageStore.ts` 有状态外壳 + 两个 `.test`）：把去重/合并/patch/append/删除那套原散在 SDK handlers 里的逻辑收口。纯函数（appendTo/patchByClientMsgId/mapMatchingClientMsgId/mergeMetaBySeq/applyOpBySeq/removeBySeq/removeByClientMsgId）+ 编排（ingestInbound/applyAck/markRejected）现在**可单测**（+12 例，覆盖「同 seq 合并不新增/已删丢弃/ack 落 seq+登记去重集」等重灾区）。onMessage/onAck/onMsgRejected/onMsgOp/onMessageRemoved 从内联更新器收成一行方法调用。App.tsx **4858 → 4778**（本步 −80；全会话 5087→4778=−309）。
+- **⏹ useIMConnection 评估后不做**：量化发现 handlers 块引用 ~25 个 App 符号（setToast/refreshXxx/scheduleXxx/setDetail/setPresence/setViewer…），抽出要注入 20+ 依赖=**搬走 tangle、非解耦**，且测不动（要 mock 20 依赖+SDK）。与「不做负 ROI 搬迁」一致，Phase A 到 useMessageStore 为止。
+- **⏸ 更远：拆 `useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，风险/性价比最差，缓做或不做。
 
 **App.tsx 拆分（累计）✅（2026-08-18，~32 提交，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→~5029 行、抽出 ~30 个组件文件：纯逻辑模块 + 叶子组件 + **设置面板栈 7** + **弹窗栈 13** + **媒体查看器/文本阅读器/媒体库** + 3 个 hook。App 级冒烟 5 例护栏守住登录→聊天主链路。**已拆到「prop-drilling 墙」**：会话详情抽屉（~50 props）、成员菜单、聊天滚动核心留待 code review 定架构方向（Context vs 子件拆分）后再推进。
 

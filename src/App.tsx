@@ -3,6 +3,7 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { AppServicesProvider, type AppServices } from "./AppServicesContext";
 import { useGroupActions } from "./useGroupActions";
+import { useMessageStore } from "./useMessageStore";
 import { GroupManagePanel } from "./components/GroupManagePanel";
 import { DetailTabs } from "./components/DetailTabs";
 import { MemberMenu } from "./components/MemberMenu";
@@ -111,7 +112,12 @@ export default function App() {
   const [qrTrigger, setQrTrigger] = useState(0);
   const [state, setState] = useState<ConnState>("disconnected");
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [msgsByConv, setMsgsByConv] = useState<Record<string, ChatMessage[]>>({});
+  // 会话消息表 + 去重/墓碑集 + 去重/patch/append/删除方法：收口到 useMessageStore（纯逻辑见 messageStore.ts）。
+  const {
+    msgsByConv, setMsgsByConv, seenByConv, deletedByConv,
+    appendMsg, patchMsg, removeMsgRow, applyOp, removeSeq, clearConv,
+    preload: preloadMsgs, reset: resetMsgStore, ingestInbound, applyAck, markRejected,
+  } = useMessageStore();
   const [peer, setPeer] = useState("");
   const [input, setInput] = useState("");
   const [presence, setPresence] = useState<Record<string, Presence>>({}); // user -> 在线态（租约模型，见 sdk/presence.ts）
@@ -298,9 +304,6 @@ export default function App() {
     try { localStorage.setItem("im_dismissed_banners", JSON.stringify(dismissedBanners)); } catch { /* 隐私模式写失败可忽略 */ }
   }, [dismissedBanners]);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
-  const seenByConv = useRef<Record<string, Set<number>>>({});
-  // 内存删除墓碑（convId → 被本地删的 conv_seq）：登录时从 IndexedDB 载入，onMessage 据此拦住服务端重同步的复现。
-  const deletedByConv = useRef<Record<string, Set<number>>>({});
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
@@ -328,10 +331,6 @@ export default function App() {
   const listRefreshTimerRef = useRef<number | null>(null);
   const listRefreshInFlightRef = useRef(false);
   const listRefreshDirtyRef = useRef(false);
-
-  const appendMsg = useCallback((convId: string, m: ChatMessage) => {
-    setMsgsByConv((prev) => ({ ...prev, [convId]: [...(prev[convId] ?? []), m] }));
-  }, []);
 
   // 在线态定时重算：服务端**不推下线帧**，对端离线是靠本地租约到期体现的——而"租约到期"是
   // 纯粹的时间流逝，不改变任何 state，React 不会因此重渲染。不自己敲这个心跳的话，用户静止不动时
@@ -433,7 +432,7 @@ export default function App() {
       const seen = (seenByConv.current[c.conv_id] ??= new Set());
       local.forEach((m) => m.convSeq > 0 && seen.add(m.convSeq)); // 防服务端同步重复回显
     }
-    if (Object.keys(loaded).length) setMsgsByConv((prev) => ({ ...loaded, ...prev }));
+    if (Object.keys(loaded).length) preloadMsgs(loaded);
   }, []);
 
   const scheduleConversationRefresh = useCallback(() => {
@@ -668,57 +667,15 @@ export default function App() {
         }
       },
       onMessage: (m) => {
-        // 本地已删的消息被服务端重同步推回来：直接丢弃（读盘时 loadConversation 也会过滤，这里挡实时路径）。
-        if (m.convSeq > 0 && deletedByConv.current[m.convId]?.has(m.convSeq)) return;
-        const seen = (seenByConv.current[m.convId] ??= new Set());
-        if (m.convSeq > 0) {
-          if (seen.has(m.convSeq)) {
-            // ACK/另一条同步路径可能先创建了同序号消息；权威重拉仍需把文件元数据补到当前屏幕。
-            setMsgsByConv((prev) => {
-              const list = prev[m.convId] ?? [];
-              return {
-                ...prev,
-                [m.convId]: list.map((existing) => existing.convSeq === m.convSeq
-                  ? {
-                      ...existing,
-                      serverMsgId: m.serverMsgId || existing.serverMsgId,
-                      fileName: m.fileName || existing.fileName,
-                      fileSize: m.fileSize !== undefined && m.fileSize > 0 ? m.fileSize : existing.fileSize,
-                      recalledAt: m.recalledAt || existing.recalledAt,
-                      recalledBy: m.recalledBy || existing.recalledBy,
-                      editedAt: m.editedAt || existing.editedAt,
-                      pinnedAt: m.pinnedAt || existing.pinnedAt,
-                    }
-                  : existing),
-              };
-            });
-            return;
-          }
-          seen.add(m.convSeq);
-        }
-        appendMsg(m.convId, m);
-        // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由滚动/布局后的 markVisibleRead 读到，
-        // 在上方看历史时则不读，留到滚下去再读。
-        // 全量/多页同步会连续投递很多消息，只批量刷新一次；同账号另一端新建的会话也必须覆盖。
-        scheduleConversationRefresh();
+        // 入站落库：本端已删拦截 + 同 conv_seq 去重（命中则合并权威元数据、不新增）见 useMessageStore.ingestInbound。
+        // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由 markVisibleRead 读到，看历史时留到滚下去再读。
+        // 仅**新追加**才刷会话列表（合并/丢弃不刷）；全量/多页同步连续投递很多条，各自触发的刷新走节流合并。
+        if (ingestInbound(m)) scheduleConversationRefresh();
       },
       onAck: (clientMsgId, ok, convSeq, serverTs) => {
-        setMsgsByConv((prev) => {
-          const out: Record<string, ChatMessage[]> = {};
-          for (const [cid, list] of Object.entries(prev)) {
-            out[cid] = list.map((m) => {
-              if (m.clientMsgId !== clientMsgId) return m;
-              // 防 sync_resp/carbon 重复回显自己发的：把 ack 拿到的 conv_seq 登记进去重集
-              // （new_msg/sync 无 client_msg_id，只能按 conv_seq 去重；与 iOS handleSendResult 一致）。
-              if (ok && convSeq > 0) (seenByConv.current[cid] ??= new Set()).add(convSeq);
-              // 成功后把时间戳换成服务器时间（消除"乐观发送用客户端钟"在排序上的时钟偏差）。
-              return { ...m, status: ok ? "sent" : "failed", convSeq, timestamp: ok && serverTs ? serverTs : m.timestamp };
-            });
-          }
-          return out;
-        });
-        // 自己发送成功 → 刷新列表：新发起的会话首条消息后即出现在左侧、更新最后一条。
-        // 走节流：连发/群发时每条 ack 不再各拉一次列表（否则叠成 GET 风暴）。
+        // 按 clientMsgId 换 status/conv_seq/服务器时间戳 + 成功者登记去重集（防 sync/carbon 重复回显），见 applyAck。
+        applyAck(clientMsgId, ok, convSeq, serverTs);
+        // 自己发送成功 → 刷新列表（新会话首条上屏、更新最后一条）。走节流：连发/群发不各拉一次（否则 GET 风暴）。
         if (ok) scheduleListRefresh();
       },
       onReceipt: (convId, from, status, upToSeq) => {
@@ -769,22 +726,10 @@ export default function App() {
         }
       },
       // 某条消息被拒收（被拉黑）→ 标记该条发送失败 + 把原因挂到该条 note（微信式：红❗+下方居中系统行，不弹窗）。
-      onMsgRejected: (clientMsgId, msg, code) => {
-        setMsgsByConv((prev) => {
-          const out: Record<string, ChatMessage[]> = {};
-          for (const [cid, list] of Object.entries(prev)) {
-            out[cid] = list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, status: "failed", note: msg, noteCode: code } : m));
-          }
-          return out;
-        });
-      },
+      onMsgRejected: (clientMsgId, msg, code) => markRejected(clientMsgId, msg, code),
       // 消息操作（撤回/编辑/置顶）应用到某条消息（按 conv_seq 定位）→ 就地打补丁（撤回→墓碑，编辑→改文本）。
       onMsgOp: (cid, targetSeq, patch) => {
-        setMsgsByConv((prev) => {
-          const list = prev[cid];
-          if (!list) return prev;
-          return { ...prev, [cid]: list.map((m) => (m.convSeq === targetSeq ? { ...m, ...patch } : m)) };
-        });
+        applyOp(cid, targetSeq, patch); // 按 conv_seq 就地打补丁（撤回→墓碑/编辑→改文本/置顶）
         // 置顶态变化（G0）：重拉该会话置顶集合刷新顶部横幅（含别人置顶/取消置顶的实时同步）。
         if (patch.pinnedAt !== undefined) void refreshPinned(cid);
         // 全屏阅读器持有的是 ChatMessage 快照：被读的这条一旦撤回/编辑，快照即失真（撤回内容仍可读可复制）→ 关闭，让用户回到会话看最新态。
@@ -797,12 +742,7 @@ export default function App() {
       // 若删掉的正好是一条置顶消息，服务端下次不再返回它——重拉一次免得横幅指向已消失的消息。
       onMessageRemoved: (cid, targetSeq) => {
         void refreshPinned(cid);
-        setMsgsByConv((prev) => {
-          const list = prev[cid];
-          if (!list) return prev;
-          const next = list.filter((m) => m.convSeq !== targetSeq);
-          return next.length === list.length ? prev : { ...prev, [cid]: next };
-        });
+        removeSeq(cid, targetSeq); // 从聊天列表按 conv_seq 移除该条
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
         setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
         setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r)); // 正在全屏读的文本被删（为所有人删/仅删我）→ 关阅读器
@@ -973,11 +913,9 @@ export default function App() {
       clearTimeout(conversationRefreshTimerRef.current);
       conversationRefreshTimerRef.current = null;
     }
-    seenByConv.current = {};
-    deletedByConv.current = {};
+    resetMsgStore(); // 清空消息表 + 去重/墓碑集
     currentConvRef.current = "";
     setConversations([]);
-    setMsgsByConv({});
     setPresence({});
     setPeerReadSeq({});
     setFriends([]);
@@ -1030,15 +968,6 @@ export default function App() {
   const [uploadProgress, setUploadProgress] = useState<Record<string, { sent: number; total: number }>>({});
   const clearUploadProgress = useCallback((key: string) => {
     setUploadProgress((prev) => { if (!(key in prev)) return prev; const nx = { ...prev }; delete nx[key]; return nx; });
-  }, []);
-
-  // 从会话列表移除一条本地行（取消/重试/删除共用）。
-  const removeMsgRow = useCallback((cid: string, key: string) => {
-    setMsgsByConv((prev) => {
-      const list = prev[cid];
-      if (!list) return prev;
-      return { ...prev, [cid]: list.filter((x) => x.clientMsgId !== key) };
-    });
   }, []);
 
   // 停掉一条出箱件的上传并清理其副作用（取消发送 / 删除发送中消息共用）：abort 分片任务、清进度、
@@ -1117,15 +1046,6 @@ export default function App() {
       .filter((f): f is File => !!f);
     if (files.length) { e.preventDefault(); addPastedFiles(files); }
   }, [addPastedFiles]);
-
-  // 按 clientMsgId 就地打补丁（相册批量发送：本地占位 → 上传完成换服务器 URL/真 ID）。
-  const patchMsg = useCallback((cid: string, clientMsgId: string, patch: Partial<ChatMessage>) => {
-    setMsgsByConv((prev) => {
-      const list = prev[cid];
-      if (!list) return prev;
-      return { ...prev, [cid]: list.map((m) => (m.clientMsgId === clientMsgId ? { ...m, ...patch } : m)) };
-    });
-  }, []);
 
   // 相册批量发送（M4+）：**选完秒上屏**——每张先用本地 blob URL 占位（≥2 张共享 group_id → 宫格聚簇），
   // 逐张上传后原地替换为服务器 URL 并走 socket 发送（带 group_id）；单张失败标该格不阻塞后续。
@@ -3053,7 +2973,7 @@ export default function App() {
     void (async () => {
       if (!(await askConfirm("清空聊天记录？将删除此会话在本机的全部消息，且无法恢复。", { okText: "清空", danger: true }))) return;
       await clearMessages(uid, cid);
-      setMsgsByConv((prev) => ({ ...prev, [cid]: [] })); // 内存同步清空（当前会话/缓存）
+      clearConv(cid); // 内存同步清空（当前会话/缓存）
       setDetailMsgs([]);
       setToast("聊天记录已清空");
     })();
