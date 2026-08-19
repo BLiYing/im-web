@@ -1,6 +1,6 @@
 import type { ChatMessage } from "../../sdk/protocol";
 import type { DownloadState } from "../../download";
-import { mediaIdentity } from "../../album";
+import { msgKey } from "../../album";
 import { MediaTile } from "../MediaTile";
 import { Modal } from "../Modal";
 
@@ -26,7 +26,7 @@ export function GalleryModal({ items, gateOf, onGate, onOpen, onMenu, onMediaErr
           {items.map((mm) => {
             const gate = gateOf(mm);
             return (
-              <MediaTile key={mediaIdentity(mm)} variant="gallery" m={mm} gate={gate}
+              <MediaTile key={msgKey(mm)} variant="gallery" m={mm} gate={gate}
                 onClick={(m) => { if (gate) { onGate(m); return; } onOpen(m); }}
                 onMenu={onMenu} onMediaError={onMediaError} />
             );

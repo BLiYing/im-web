@@ -15,7 +15,7 @@ export function MediaViewer({
   videoStarted: boolean;
   isExpired: boolean; // expiredSet.has(m.content)
   unsupported: boolean; // 网页端无法渲染的图片格式（HEIC 等）
-  mediaKey: string; // mediaIdentity(m)：翻页换元素时重挂
+  mediaKey: string; // msgKey(m)：翻页换元素时重挂
   viewerIdx: number; // <0 表示不在会话媒体时间线内（如收藏/记录进入）
   viewerCount: number;
   chatTitle: string;

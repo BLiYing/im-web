@@ -113,7 +113,7 @@ export function videoFrameSrc(url: string): string {
 /**
  * 合成一条「只为进查看器」的临时 ChatMessage（收藏 / 合并转发记录里点图/视频时用）：
  * 无真实会话上下文（convId/convSeq/timestamp 全 0），仅带查看器需要的 content + 类型。
- * clientMsgId 作查看器内的稳定身份（收藏用 `fav-<id>`、记录用 `rec-<i>`），供 mediaIdentity 复位视频态。
+ * clientMsgId 作查看器内的稳定身份（收藏用 `fav-<id>`、记录用 `rec-<i>`），供 msgKey 复位视频态。
  */
 export function syntheticViewerMessage(clientMsgId: string, content: string, kind: "image" | "video"): ChatMessage {
   return { clientMsgId, convId: "", from: "", content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" };

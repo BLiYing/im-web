@@ -18,6 +18,27 @@
 
 ## 当前焦点
 
+**消息身份 key 收敛 `msgKey()` ✅（2026-08-19，tsc build + 351 vitest 绿，待浏览器手测翻历史）** — `/code-review` 体检发现的唯一实锤 bug 源：同一 ChatMessage 曾有 4 套不一致身份表达式，其中 List React key（`App.tsx` ×4）用 `clientMsgId ?? serverMsgId ?? i`——入站消息无 `clientMsgId`、实时帧缺 `server_msg_id` 时**塌到数组下标 `i`**，向上翻页 prepend 旧消息使下标平移 → React 把 DOM/组件状态（播放中视频/展开长文/编辑框）错绑到别的行（编译不报、翻历史才现形）。
+- **收敛**：`album.ts` 的 `mediaIdentity` 重命名为 **`msgKey`**（convSeq 优先、会话内唯一），作全局唯一消息身份。List key ×4、`menuActive`（3902）、详情页 media/file/link key ×3 全部改用 `msgKey`，消灭 `?? i` 与 `serverMsgId || convSeq` 漂移。文档串拓宽点明「绝不用下标兜底」。
+- **测试**：`album.test.ts` 加「React key 契约」用例（混合文本/文件/入站媒体列表每条 key 唯一、`["s78","s79","s80","s81"]`）。全量 38 文件 / 351 例绿（含 `App.smoke` 护栏）。
+- **配套**：三端「交付前自审清单」落地——iOS `CODING_STYLE.md` §9 / Go `CONVENTIONS.md` §4.8 / 本仓 §九。
+
+**体检整改 3/4 ✅（2026-08-19，tsc build + 353 vitest 绿；#3 已浏览器验证登录页两页签无回归）** — `/code-review` 体检的防复发项，除大重构外全做掉：
+- **✅ IndexedDB store 单一来源化**（`sdk/localStore.ts`）：建 `STORE_DEFS` 清单，`onupgradeneeded` 建表 + `EXPECTED_STORES` 校验都从它派生——新增 store 只改一处 + bump `DB_VERSION`，杜绝「四处漏改一处→`NotFoundError`」。`localStore.test.ts` +删除墓碑往返用例（锁定 deletions store 建成）。
+- **✅ friendlyMessage 码表对齐**（`sdk/imSdk.ts`）：局部 map 提升为导出 `FRIENDLY_MESSAGES` + 锚定后端 `errcode.go` 为权威来源；`imSdk.test.ts` +对齐用例（断言每个映射码 ⊆ 后端码集，防映射到已作废/拼错的码）。
+- **✅ CSS 泛化选择器（登录区）**：`.login button` → 显式 `.login-submit` 类（`LoginView.tsx` 两主按钮加类），消灭「染到页签/免密链接/扫码覆盖层、逼各处写特异性 hack 反染」的坑。菜单类容器（`.ctx-menu`/`.fwd-mode`/`.viewer-more-pop` button）**故意留着**——每个子元素都是同质菜单项，泛选恰当。
+**会话详情抽屉解耦（进行中）✅ 地基已落，tsc build + 358 vitest 绿** — 定了「先上 Context / 先收口群动作 / 再拆子件」的路线，已完成前两步：
+- **✅ AppServicesContext**（`src/AppServicesContext.tsx`）：收拢 9 项**稳定服务**（clientRef/setToast/comingSoon/askConfirm/askPrompt/四个 refresh*）。App 侧 `useMemo` 包一次（全稳定依赖→永不重建，消费者不额外重渲染），Provider 包住主视图。§七 合规（无高频 state）。**关键坑**：services 的 useMemo **必须放在所有 early return 之前**（否则 login/主视图两种渲染 hook 数不一致→"Rendered more hooks"崩，已踩并修）。现有测试无一需改（Provider 在 App 内部）。
+- **✅ useGroupActions 收口**（`src/useGroupActions.ts` + `.test.ts` 5 例）：把**只依赖 services** 的 7 个群写操作（doGroupAction 骨架 + rename/intro/announcement/mute/settings/myNickname）整簇抽出，只注入一个 `services`，直接复用 Context。App 里 `const {…} = useGroupActions(services)`，call site 不变、函数体逐字搬。行为等价证据：JSX 未动 + 函数体逐字 + tsc/build/358 vitest 绿。
+- **✅ 拆子件 3 个**（tsc + 358 vitest 绿，JSX 逐字搬=行为等价，**待浏览器手测**详情/群管理）：
+  - `components/GroupManagePanel.tsx`：群管理二级视图。**自取 `useGroupActions(useAppServices())`**（真正跑通 Context 消费），props 只剩数据 + App 态耦合动作（gp/groupBans/onBack/onPickAvatar/onOpenJoinRequests/onOpenBans，6 个）。
+  - `components/DetailTabs.tsx`：成员/媒体/文件/链接页签区（纯展示，数据+动作+helper 走 props）。
+  - `components/MemberMenu.tsx`：群成员 ⋯ 菜单。同样自取 useAppServices()+useGroupActions；menuRef 用 `Ref<HTMLDivElement>`（`RefObject<…|null>` 不兼容 div ref，已修）。
+  - App.tsx **5087 → 4858 行**（-229）。
+  - **`/code-review` 已过**（2026-08-19）：4 findings，唯一动手项=补 `components/DetailPanelParts.test.tsx`（5 例，Provider 包裹渲染三组件 + 接线断言，抽屉从 0 覆盖→有测；suite 358→363）。其余 3 项 skip：menuActive 在 msg 发送中被右键→ACK 时高亮会闪失（cosmetic 极罕见，修它要重引第二套身份、违背 msgKey 收敛）；useGroupActions 三处实例化（自足组件模式，硬传回退 prop-drilling）；groupInfos 双查（省它要重引 IIFE）。
+- **⏳ 剩下的硬骨头：详情头部/操作排/设置卡（DetailHeader）** 仍内联在 `App.tsx` 抽屉 IIFE。它是**耦合残渣**：IIFE 顶部算的 ~18 个派生值（title/avatarUrl/pinned/muted/peerBlocked/detailPeerIsFriend/showDetailBody…）+ ~15 个群/好友/会话动作（doFriendAction/openChat/comingSoon/doClearHistory/doToggleBlock/doLeaveGroup/doDissolveGroup/setConvPinned/setConvMuted/openGroupCard/openGroupText/setContactDraft/doEditMyGroupNickname/doEditGroupRemark/groupRemark…）。朴素抽 DetailHeader 需 **~30 props**——**是把 30-prop 接口搬个地方，不减耦合**。要么整块 `DetailPanel`（连 IIFE 派生一起搬，App 再 -250 行但组件 ~35 props），要么维持现状。**留待评审定**（与 iOS/Web 一贯「50-prop 缝是设计信号、不硬搬」一致）。
+- **⏸ 更远：拆 `useIMConnection/useMessageStore/useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，待抽屉这条线收尾后再评估。
+
 **App.tsx 拆分（累计）✅（2026-08-18，~32 提交，tsc+319 vitest+build 绿，待浏览器冒烟）** — 详见上方「技术债/下次」。6302→~5029 行、抽出 ~30 个组件文件：纯逻辑模块 + 叶子组件 + **设置面板栈 7** + **弹窗栈 13** + **媒体查看器/文本阅读器/媒体库** + 3 个 hook。App 级冒烟 5 例护栏守住登录→聊天主链路。**已拆到「prop-drilling 墙」**：会话详情抽屉（~50 props）、成员菜单、聊天滚动核心留待 code review 定架构方向（Context vs 子件拆分）后再推进。
 
 **「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，待浏览器手测）** — 纯前端（`src/fileTypes.ts` + `src/App.tsx` + `fileTypes.test.ts`）：

@@ -90,7 +90,20 @@
 - **`App.smoke.test.tsx` 是拆分护栏**（mock IMClient 渲染真实 `<App/>` 走通登录→发/收消息主链路）——**任何拆分/重构必须保持它绿**。
 - jsdom 测不到真滚动布局（`scrollTo` 已桩掉）：滚动定位/分页类改动，编译过 ≠ 对，**必须浏览器手测**。
 
-## 九、通用约定
+## 九、交付前自审清单（编译≠正确，逐条过再交付）
+`npm run build` 绿只证明「TS 类型 + 打包过」，本端多数坑是**加载不报错、运行时悄悄错**的逻辑/状态类，jsdom 也测不到真滚动。声明完成前对照下表扫一遍——每条对应一次真实/复盘出的坑，命中即停下来核：
+
+- **[消息身份] List React key / 菜单高亮 / 详情定位一律用 `album.ts#msgKey`（convSeq 优先），永不用数组下标 `i` 或 `serverMsgId` 兜底。** 入站消息无 `clientMsgId`，用 `?? i` 会让向上翻页 prepend 时下标平移、React 错绑 DOM（播放中视频/展开长文/编辑框跳到别的行）。别再各处自造身份表达式（曾 4 套漂移，已收敛）。
+- **[IndexedDB] 新增 object store 必须四处齐**（`sdk/localStore.ts`）：① bump `DB_VERSION` ② `onupgradeneeded` 建表 ③ 加进 `EXPECTED_STORES` ④ 每个读函数加 `contains` 降级分支。漏一处 → 升级过的老用户浏览器事务抛 `NotFoundError`、悄悄空列表（最好把 store 清单收敛成单一数据结构派生）。
+- **[滚动跳转] 照 `../IMServer/docs/CHAT_UX.md`**：`jumpToSeq` 用瞬时 `scrollTop` 赋值（非 `behavior:"smooth"`）、跳转前清 `wasNearBottomRef`，否则 `onMediaLoad` 把定位拽回底部。滚动/分页改动**编译过 ≠ 对，必须浏览器手测**（jsdom 测不到）。
+- **[错误码] 按业务码分支读 `Error.code`**（`qr.ts#errorCode`），**禁止 parse `error.message` 字符串**；`imSdk.ts#friendlyMessage` 手写码表与后端 errcode 各存一份，新增/改码时加对齐测试。
+- **[CSS 作用域] 别用「容器 + 裸标签」后代选择器**（`.login button` / `.modal input` 这类会误伤容器内全部子元素，日后加次要按钮无代码即被染成主按钮样式）。用类选择器（`.login-submit`）或 `> button` 限直接子级。
+- **[头像/昵称] 走 `peerAvatar.ts#resolvePeerAvatar` 多源兜底**（会话 > 好友 > 群成员 > 搜索），别只读 `peer_avatar_url` 单一来源。
+- **[防膨胀] 新功能默认进新文件**（`use*.ts` / `components/**`），别往 `App.tsx`（已 5000+ 行上帝文件）堆；`check-file-size.sh` 600 行红线。
+
+> 展开的证据与「为什么会悄悄错」见对应模块注释与 §五/§七；命中任一条 = 停下来核，别默认 build 绿就交付。
+
+## 十、通用约定
 - 提交信息：`类型(模块): 描述`（`feat(web):` / `fix(web):` / `refactor(web):` …）。
 - 每个非平凡改动后更新 `current_task.md`（活快照，就地覆盖）。
 - 新增业务/技术 Markdown 统一放 `docs/`；根目录仅留 README / CLAUDE / AGENTS / `current_task.md` / 本规范等入口。

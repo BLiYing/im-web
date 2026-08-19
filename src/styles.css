@@ -112,9 +112,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .login h1 { font-size: 20px; margin: 0 0 var(--space-2); text-align: center; }
 .login label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 .login input { padding: 10px; border: 1px solid var(--separator); border-radius: var(--radius-card); font-size: 15px; background: var(--page-bg); color: var(--text); }
-.login button { padding: 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); font-size: 15px; cursor: pointer; }
-.login button:disabled { opacity: 0.6; cursor: default; }
-.login button.secondary { background: var(--card-bg); color: var(--accent); border: 1px solid var(--accent); }
+/* 主行动按钮用显式类 `.login-submit`，不用泛化 `.login button`——后者会染到登录区里所有按钮
+   （页签/免密链接/扫码覆盖层），迫使它们各写特异性 hack 反染（见下方 .login-tabs / .qr-login）。见 CODING_STYLE §九。 */
+.login-submit { padding: 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); font-size: 15px; cursor: pointer; }
+.login-submit:disabled { opacity: 0.6; cursor: default; }
+.login-submit.secondary { background: var(--card-bg); color: var(--accent); border: 1px solid var(--accent); }
 .auth-err { margin: 0; color: var(--danger); font-size: 13px; }
 .link-inline { display: inline; padding: 0; border: 0; background: none; color: var(--accent); font-size: inherit; cursor: pointer; }
 .hint { font-size: 12px; color: var(--text-secondary); }
@@ -1379,7 +1381,7 @@ button.detail-row:hover { background: var(--surface-hover); }
 .newchat-qr { display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; background: var(--surface); border: 1px solid var(--separator); border-radius: var(--radius-card); color: var(--text-secondary); cursor: pointer; }
 .newchat-qr:hover { color: var(--accent); }
 
-/* ---- 登录页：密码 / 扫码 页签（QR P1）。选择器带 .login-tabs 抬高优先级，压过泛化的 `.login button`。---- */
+/* ---- 登录页：密码 / 扫码 页签（QR P1）。页签样式自成一套（主按钮已收敛为 .login-submit，不再泛染登录区按钮）。---- */
 .login-tabs { display: flex; gap: 4px; align-self: center; padding: 3px; background: var(--surface); border: 1px solid var(--separator); border-radius: 10px; }
 .login-tabs .login-tab { flex: 0 0 auto; padding: 6px 20px; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: none; }
 .login-tabs .login-tab.on { background: var(--card-bg); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px var(--shadow-soft); }
@@ -1390,7 +1392,7 @@ button.detail-row:hover { background: var(--surface-hover); }
 .qr-login-box { position: relative; width: 208px; height: 208px; padding: 12px; background: #fff; border: 1px solid var(--separator); border-radius: 16px; box-shadow: 0 8px 28px var(--shadow-soft); }
 .qr-login-img { width: 100%; height: 100%; display: block; border-radius: 8px; }
 .qr-login-img.dim { filter: blur(3px) grayscale(0.6); opacity: 0.5; }
-/* cover/refresh 选择器带 .qr-login，压过泛化的 `.login button`（否则会被染成主色按钮）。 */
+/* cover/refresh 自成一套样式（主按钮已收敛为 .login-submit，扫码区按钮不再被泛染成主色）。 */
 .qr-login .qr-login-cover { position: absolute; inset: 12px; border-radius: 8px; background: rgba(255, 255, 255, 0.94); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 10px; text-align: center; box-shadow: none; }
 .qr-login button.qr-login-cover { border: 0; font: inherit; cursor: pointer; }
 .qr-login-cover-t { font-size: 13.5px; font-weight: 700; color: #161a22; }

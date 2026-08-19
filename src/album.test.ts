@@ -1,6 +1,6 @@
 // 相册聚簇纯函数单测（M4+）。
 import { describe, expect, it } from "vitest";
-import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity, resolveJumpTarget } from "./album";
+import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import type { ChatMessage } from "./sdk/protocol";
 
 const msg = (over: Partial<ChatMessage>): ChatMessage => ({
@@ -26,23 +26,36 @@ describe("album clustering", () => {
     expect(isViewableMedia(msg({ recalledAt: 1 }))).toBe(false);         // 撤回不可看
   });
 
-  describe("mediaIdentity（查看器翻页定位标识，任务3 回归）", () => {
+  describe("msgKey（查看器翻页定位标识，任务3 回归）", () => {
     it("优先用 convSeq（会话内唯一）", () => {
-      expect(mediaIdentity(msg({ convSeq: 81 }))).toBe("s81");
-      expect(mediaIdentity(msg({ convSeq: 81 }))).not.toBe(mediaIdentity(msg({ convSeq: 80 })));
+      expect(msgKey(msg({ convSeq: 81 }))).toBe("s81");
+      expect(msgKey(msg({ convSeq: 81 }))).not.toBe(msgKey(msg({ convSeq: 80 })));
     });
     it("本地待发件 convSeq=0 才回退 clientMsgId", () => {
-      expect(mediaIdentity(msg({ convSeq: 0, clientMsgId: "outbox-x" }))).toBe("coutbox-x");
+      expect(msgKey(msg({ convSeq: 0, clientMsgId: "outbox-x" }))).toBe("coutbox-x");
     });
     it("回归：入站消息 clientMsgId 全为 undefined，仍能靠 convSeq 各自唯一定位（修复点最后一张却跳到最前）", () => {
       // 模拟 imSdk.processIncoming 产出的入站媒体：均无 clientMsgId，仅 convSeq 递增。
       const list = [msg({ convSeq: 78 }), msg({ convSeq: 80 }), msg({ convSeq: 81, contentType: "image" })];
       const last = list[2]; // 最后一张照片
-      const idx = list.findIndex((m) => mediaIdentity(m) === mediaIdentity(last));
+      const idx = list.findIndex((m) => msgKey(m) === msgKey(last));
       expect(idx).toBe(2); // 精确定位到末尾（旧实现用 clientMsgId 会误判为 0）
       // 反证旧实现的坑：clientMsgId 全 undefined → 一律命中第 0 条。
       const badIdx = list.findIndex((m) => m.clientMsgId === last.clientMsgId);
       expect(badIdx).toBe(0);
+    });
+    it("React key 契约：混合列表（文本/文件/入站媒体，均无 clientMsgId）每条 key 唯一，永不塌成同一值", () => {
+      // 4 处渲染站点（列表/相册/系统行/详情）都改用 msgKey——旧实现 `clientMsgId ?? serverMsgId ?? i`
+      // 对入站消息退化到数组下标 i，向上翻页 prepend 时下标平移→React 错绑 DOM。此测断言身份稳定不塌。
+      const list = [
+        msg({ convSeq: 78, contentType: "text", content: "hi" }),
+        msg({ convSeq: 79, contentType: "file", content: "/uploads/a.pdf" }),
+        msg({ convSeq: 80, contentType: "image" }),
+        msg({ convSeq: 81, contentType: "video" }),
+      ];
+      const keys = list.map(msgKey);
+      expect(new Set(keys).size).toBe(list.length); // 全唯一
+      expect(keys).toEqual(["s78", "s79", "s80", "s81"]);
     });
   });
 

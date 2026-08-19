@@ -13,6 +13,23 @@ const STORE = "messages";
 const CURSOR_STORE = "sync_cursors";
 const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
 
+/**
+ * IndexedDB object store 的**单一来源清单**。新增一个 store 只需在此加一项 + bump `DB_VERSION`：
+ * `onupgradeneeded` 建表、`EXPECTED_STORES` 校验、陈旧连接自愈都从它派生——杜绝「加 store 要四处同改、
+ * 漏一处 → 升级过的老库事务抛 `NotFoundError`、悄悄空列表」的历史坑（见 CODING_STYLE §九）。
+ * 所有 store 主键均为 `id`（复合键字符串，见各 *Record 的 id 字段）。
+ */
+interface StoreDef {
+  name: string;
+  keyPath: string;
+  indexes?: { name: string; keyPath: string; unique?: boolean }[];
+}
+const STORE_DEFS: StoreDef[] = [
+  { name: STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
+  { name: CURSOR_STORE, keyPath: "id" },
+  { name: DELETIONS_STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
+];
+
 interface MsgRecord {
   id: string;        // 已确认：owner|convId|convSeq；被拒(convSeq=0)：owner|convId|c:clientMsgId —— 唯一键，幂等覆盖
   ownerConv: string; // owner|convId —— 索引：按会话批量取
@@ -64,8 +81,8 @@ interface SyncCursorRecord {
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
-/** 本次连接期望具备的全部 object store —— 用于校验拿到的连接是不是「缺 store 的陈旧连接」。 */
-const EXPECTED_STORES = [STORE, CURSOR_STORE, DELETIONS_STORE] as const;
+/** 本次连接期望具备的全部 object store（从 STORE_DEFS 派生）——校验拿到的连接是不是「缺 store 的陈旧连接」。 */
+const EXPECTED_STORES = STORE_DEFS.map((s) => s.name);
 
 function openDB(attempt = 0): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
@@ -73,16 +90,11 @@ function openDB(attempt = 0): Promise<IDBDatabase> {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        const os = db.createObjectStore(STORE, { keyPath: "id" });
-        os.createIndex("ownerConv", "ownerConv", { unique: false });
-      }
-      if (!db.objectStoreNames.contains(CURSOR_STORE)) {
-        db.createObjectStore(CURSOR_STORE, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(DELETIONS_STORE)) {
-        const ds = db.createObjectStore(DELETIONS_STORE, { keyPath: "id" });
-        ds.createIndex("ownerConv", "ownerConv", { unique: false });
+      // 从 STORE_DEFS 派生建表：`if(!contains)` 幂等，只补缺的、不动已有数据。新增 store 改 STORE_DEFS 即可。
+      for (const def of STORE_DEFS) {
+        if (db.objectStoreNames.contains(def.name)) continue;
+        const os = db.createObjectStore(def.name, { keyPath: def.keyPath });
+        for (const idx of def.indexes ?? []) os.createIndex(idx.name, idx.keyPath, { unique: idx.unique ?? false });
       }
     };
     // 另一标签页/连接占着旧版本 → 本次升级被阻塞（多标签页测号常见）。留痕，靠对方收到 versionchange 关闭后放行。

@@ -44,8 +44,8 @@ export function LoginView({ restoring, uid, password, authErr, authBusy, loginTa
           <label>密码<input type="password" value={password} placeholder="≥ 6 位"
             onChange={(e) => onPassword(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") onLogin(password); }} /></label>
-          <button disabled={authBusy} onClick={() => onLogin(password)}>登录</button>
-          <button className="secondary" disabled={authBusy} onClick={onRegister}>注册并登录</button>
+          <button className="login-submit" disabled={authBusy} onClick={() => onLogin(password)}>登录</button>
+          <button className="login-submit secondary" disabled={authBusy} onClick={onRegister}>注册并登录</button>
           <p className="hint">
             真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
             仅调试：<button className="link-inline" disabled={authBusy} onClick={() => onLogin("")}>免密登录</button>（需后端开启 dev-login）。

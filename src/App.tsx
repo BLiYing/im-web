@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
+import { AppServicesProvider, type AppServices } from "./AppServicesContext";
+import { useGroupActions } from "./useGroupActions";
+import { GroupManagePanel } from "./components/GroupManagePanel";
+import { DetailTabs } from "./components/DetailTabs";
+import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
@@ -14,7 +19,7 @@ import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
-import { albumMembers, isAlbumLeader, isAlbumMember, isViewableMedia, mediaIdentity, resolveJumpTarget } from "./album";
+import { albumMembers, isAlbumLeader, isAlbumMember, isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
@@ -70,16 +75,15 @@ import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
 import { MediaViewer } from "./components/MediaViewer";
 import { GalleryModal } from "./components/modals/GalleryModal";
-import { MediaTile } from "./components/MediaTile";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
-  Headphones, ChevronLeft, ChevronRight, SquarePen,
+  Headphones, ChevronRight, SquarePen,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
   MoreHorizontal,
-  Search, Camera, FileText, Link2, MessageCircle, X, Forward, Eye,
+  Search, Camera, FileText, MessageCircle, X, Forward,
   ChevronDown, ChevronUp, QrCode,
 } from "lucide-react";
 
@@ -151,8 +155,8 @@ export default function App() {
   // 否则每翻到一条视频都要挂原生 controls 条 + preload=metadata 拉流，出现"黑色加载条"并使翻页发卡。
   const [videoStarted, setVideoStarted] = useState(false);
   // 按被查看**消息**（非 content URL）复位：两条不同消息可能引用同一视频 URL（如转发件），
-  // 用 URL 作 key 会漏复位 → 第二条跳过封面直接自动播/沿用上一条的不可播态。mediaIdentity 逐消息唯一。
-  const viewedKey = viewer ? mediaIdentity(viewer.m) : undefined;
+  // 用 URL 作 key 会漏复位 → 第二条跳过封面直接自动播/沿用上一条的不可播态。msgKey 逐消息唯一。
+  const viewedKey = viewer ? msgKey(viewer.m) : undefined;
   useEffect(() => { setVideoUnplayable(false); setVideoStarted(false); }, [viewedKey]);
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
@@ -1416,6 +1420,20 @@ export default function App() {
     }
   }, []);
 
+  // 应用级稳定服务（见 AppServicesContext）。**必须在所有 early return 之前调用**（Rules of Hooks）。
+  // 依赖全是 ref/setter/空依赖 useCallback → 身份恒定，此 memo 事实上只在挂载时建一次，消费组件不会因它
+  // 重渲染。别塞高频 state（§七）。
+  const services = useMemo<AppServices>(() => ({
+    clientRef, setToast, comingSoon, askConfirm, askPrompt,
+    refreshConversations, refreshFriends, refreshGroupInfo, refreshDownloadSettings,
+  }), [setToast, comingSoon, askConfirm, askPrompt,
+       refreshConversations, refreshFriends, refreshGroupInfo, refreshDownloadSettings]);
+
+  // 群资料写操作簇：收口到 useGroupActions（只吃 services）。仍留 App 的 pickGroupAvatar/doEditGroupRemark 复用 doGroupAction。
+  // App 仍用到的：doGroupAction（pickGroupAvatar 复用）、doEditAnnouncement（全文视图「编辑」）、doEditMyGroupNickname（详情主视图）。
+  // rename/intro/mute/settings 已随 GroupManagePanel 迁出（它自取 useGroupActions）。
+  const { doGroupAction, doEditAnnouncement, doEditMyGroupNickname } = useGroupActions(services);
+
   /** 保存策略（乐观应用 + PUT；失败回滚重拉，与 iOS 同口径）。 */
   const saveDownloadSettings = useCallback(async (next: DownloadSettings) => {
     const c = clientRef.current;
@@ -2611,11 +2629,11 @@ export default function App() {
   // 稳定标识 mediaId：**必须用 convSeq**（会话内唯一，收到/同步的消息都有）。绝不能用 clientMsgId——
   // 入站消息（别人发的 + 自己刷新后重新同步的）在 imSdk.processIncoming 里根本不写 clientMsgId（全为 undefined），
   // 一旦拿它 findIndex，会一律命中"第一条 undefined"的媒体，导致点最后一张却定位到最前、翻页错乱/卡死。
-  // 仅本地待发件（convSeq=0）无 convSeq，回退用其本地生成的 clientMsgId。见 album.ts mediaIdentity。
+  // 仅本地待发件（convSeq=0）无 convSeq，回退用其本地生成的 clientMsgId。见 album.ts msgKey。
   const viewerList = viewer
     ? messages.filter((mm) => isViewableMedia(mm) && !!mm.content)
     : [];
-  const viewerIdx = viewer ? viewerList.findIndex((mm) => mediaIdentity(mm) === mediaIdentity(viewer.m)) : -1;
+  const viewerIdx = viewer ? viewerList.findIndex((mm) => msgKey(mm) === msgKey(viewer.m)) : -1;
   const goViewer = (delta: number) => {
     if (viewerIdx < 0) return;
     const ni = viewerIdx + delta;
@@ -2996,16 +3014,6 @@ export default function App() {
   };
 
   // 群动作统一包装：执行 → 刷新群资料 + 会话列表；失败 alert。
-  const doGroupAction = async (cid: string, fn: () => Promise<void>) => {
-    try {
-      await fn();
-      void refreshGroupInfo(cid);
-      void refreshConversations();
-    } catch (e) {
-      setToast(`操作失败：${(e as Error).message}`);
-    }
-  };
-
   // 打开「群聊」列表弹窗（通讯录入口）。
   const openGroupsModal = async () => {
     try {
@@ -3124,46 +3132,6 @@ export default function App() {
     } catch (e) {
       setToast(`退出失败：${(e as Error).message}`);
     }
-  };
-
-  // 改群名（群主/管理员）：轻量 prompt，回车确定。
-  const doRenameGroup = async (gp: GroupInfo) => {
-    const name = await askPrompt("修改群名", gp.name, { placeholder: "群名（1~30 字）", okText: "保存", maxLength: 30 });
-    if (name === null || !name.trim() || name.trim() === gp.name) return;
-    await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url, gp.intro ?? ""));
-  };
-
-  // 群简介（G1，群主/管理员）：整体替换，随群资料写。
-  const doEditIntro = async (gp: GroupInfo) => {
-    const intro = await askPrompt("群简介", gp.intro ?? "", { placeholder: "介绍这个群（≤200 字）", okText: "保存", maxLength: 200, multiline: true });
-    if (intro === null || intro.trim() === (gp.intro ?? "")) return;
-    await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, gp.avatar_url, intro.trim()));
-  };
-
-  // 群公告（G1，群主/管理员）：发布走独立接口并落系统消息；清空文本=撤下。
-  const doEditAnnouncement = async (gp: GroupInfo) => {
-    const text = await askPrompt("群公告", gp.announcement ?? "", {
-      placeholder: "发布后通知全体成员", okText: "发布", maxLength: 500, multiline: true,
-      // 已有公告时提供「撤下」危险动作 = 发空串（决策 18，与「发布」区分）。
-      extraAction: (gp.announcement ?? "").trim() ? { label: "撤下公告", value: "", danger: true } : undefined,
-    });
-    if (text === null || text.trim() === (gp.announcement ?? "")) return;
-    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupAnnouncement(gp.conv_id, text.trim()));
-  };
-
-  // 全员禁言开关（G1，群主/管理员）：开=永久（-1），关=解除（0）。
-  const doToggleGroupMute = async (gp: GroupInfo, turnOn: boolean) => {
-    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMute(gp.conv_id, turnOn ? -1 : 0));
-  };
-
-  // 群治理开关组（G2，群主/管理员）：翻转某个布尔位，整组回带当前值上报（后端整体替换）。
-  const doToggleGroupSetting = async (gp: GroupInfo, key: "join_approval" | "perm_invite" | "perm_edit_info" | "perm_pin" | "history_visible") => {
-    const s = {
-      join_approval: !!gp.join_approval, perm_invite: !!gp.perm_invite,
-      perm_edit_info: !!gp.perm_edit_info, perm_pin: !!gp.perm_pin, history_visible: !!gp.history_visible,
-    };
-    s[key] = !s[key];
-    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupSettings(gp.conv_id, s));
   };
 
   // 打开黑名单弹窗（G2）：拉一次列表。
@@ -3296,12 +3264,6 @@ export default function App() {
   };
 
   // 我在本群的昵称（G1，任意成员）：走后端 → 刷新群资料（气泡回退名随之更新）。
-  const doEditMyGroupNickname = async (gp: GroupInfo) => {
-    const nick = await askPrompt("我在本群的昵称", gp.my_nickname ?? "", { placeholder: "群内可见（≤20 字，留空恢复默认）", okText: "保存", maxLength: 20 });
-    if (nick === null || nick.trim() === (gp.my_nickname ?? "")) return;
-    await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMyNickname(gp.conv_id, nick.trim()));
-  };
-
   // 群备注（G1，仅本人可见）：改我看到的群名，**服务端多端同步**（PUT …/remark）。
   // 成功后重拉会话列表；conv_update 也会把变更同步到本人其它端与本机列表/标题。
   const doEditGroupRemark = async (gp: GroupInfo) => {
@@ -3413,6 +3375,7 @@ export default function App() {
   ];
 
   return (
+    <AppServicesProvider value={services}>
     <div className={`app ${peer || groupConvId ? "has-sel" : "no-sel"}`}>
       <aside className="sidebar">
         <header>
@@ -3801,7 +3764,7 @@ export default function App() {
               // 系统消息（群邀请/移除/转让/禁言等留痕）：居中灰字，无气泡/勾/菜单。
               if (m.contentType === "system") {
                 return (
-                  <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  <div className="msg-item" data-seq={m.convSeq} key={msgKey(m)}>
                     {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                     {i === firstUnreadIdx && (
                       <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
@@ -3814,7 +3777,7 @@ export default function App() {
               if (m.recalledAt) {
                 const canReEdit = mine && m.contentType === "text" && !!m.content;
                 return (
-                  <div className="msg-item" data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  <div className="msg-item" data-seq={m.convSeq} key={msgKey(m)}>
                     {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                     {i === firstUnreadIdx && (
                       <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
@@ -3853,7 +3816,7 @@ export default function App() {
                   </div>
                 );
                 return (
-                  <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} data-seq-end={albumEndSeq || undefined} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                  <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} data-seq-end={albumEndSeq || undefined} key={msgKey(m)}>
                     {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                     {i === firstUnreadIdx && (
                       <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
@@ -3897,9 +3860,9 @@ export default function App() {
               const durationText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
               // 下载门控（M4-7）：undefined=就绪；非空=未下载/下载中/失败/已失效 → 卡片显 ↓ 或进度，不加载原件。
               const gate = mediaGate(m);
-              // 右键/长按选中态（方案A）：菜单作用的目标消息稳态高亮。身份用 clientMsgId ?? serverMsgId ?? convSeq
-              // （与 React key 同口径）——发送中 convSeq=0 靠 clientMsgId 区分，避免多条 sending 一起亮。
-              const menuActive = !!menu && (menu.m.clientMsgId ?? menu.m.serverMsgId ?? menu.m.convSeq) === (m.clientMsgId ?? m.serverMsgId ?? m.convSeq);
+              // 右键/长按选中态（方案A）：菜单作用的目标消息稳态高亮。身份走 msgKey（与 React key 同一唯一来源）
+              // ——convSeq 优先，发送中 convSeq=0 回退 clientMsgId 区分，避免多条 sending 一起亮。
+              const menuActive = !!menu && msgKey(menu.m) === msgKey(m);
               const bubbleBlock = (
                 <>
                   <div className="bubble-line">
@@ -4064,7 +4027,7 @@ export default function App() {
                 </>
               );
               return (
-                <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={m.clientMsgId ?? m.serverMsgId ?? i}>
+                <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={msgKey(m)}>
                   {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
                   {i === firstUnreadIdx && (
                     <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
@@ -4273,7 +4236,7 @@ export default function App() {
           videoStarted={videoStarted}
           isExpired={expiredSet.has(viewer.m.content)}
           unsupported={viewer.m.contentType !== "video" && mediaGate(viewer.m)?.phase === "unsupported"}
-          mediaKey={mediaIdentity(viewer.m)}
+          mediaKey={msgKey(viewer.m)}
           viewerIdx={viewerIdx}
           viewerCount={viewerList.length}
           chatTitle={chatTitle}
@@ -4589,70 +4552,9 @@ export default function App() {
               )}
 
               {manageOpen && gp ? (
-                /* ---- 群管理二级视图（改名 / 群头像 / 占位项） ---- */
-                <div className="detail-manage">
-                  <div className="detail-manage-head">
-                    <button className="icon-btn" onClick={() => setManageOpen(false)}><ChevronLeft size={20} /></button>
-                    <span>群管理</span>
-                  </div>
-                  <div className="detail-manage-avatar">
-                    <button className="detail-manage-avatar-btn" onClick={() => pickGroupAvatar(gp)}>
-                      <Avatar url={gp.avatar_url} label={gp.name} seed={gp.conv_id} cls="detail-avatar" />
-                      <span className="detail-manage-cam"><Camera size={18} /></span>
-                    </button>
-                    <div className="detail-manage-caption">设置新头像</div>
-                  </div>
-                  <div className="detail-card">
-                    <button className="detail-row" onClick={() => void doRenameGroup(gp)}>
-                      <span className="detail-row-ic"><SquarePen size={18} /></span><span>群名称</span>
-                      <span className="detail-row-val">{gp.name}</span><ChevronRight size={16} className="detail-row-chev" />
-                    </button>
-                    <button className="detail-row" onClick={() => void doEditIntro(gp)}>
-                      <span className="detail-row-ic"><Info size={18} /></span><span>简介</span>
-                      <span className="detail-row-val">{gp.intro || "未填写"}</span><ChevronRight size={16} className="detail-row-chev" />
-                    </button>
-                    <button className="detail-row" onClick={() => void doEditAnnouncement(gp)}>
-                      <span className="detail-row-ic"><Megaphone size={18} /></span><span>群公告</span>
-                      <span className="detail-row-val">{gp.announcement ? "已发布" : "未发布"}</span><ChevronRight size={16} className="detail-row-chev" />
-                    </button>
-                  </div>
-                  <div className="detail-card-title">加入与发言</div>
-                  <div className="detail-card">
-                    <div className="detail-row"><span className="detail-row-ic"><Lock size={18} /></span><span>进群确认</span>
-                      <button className={`switch ${gp.join_approval ? "on" : ""}`}
-                        onClick={() => void doToggleGroupSetting(gp, "join_approval")} /></div>
-                    <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>全员禁言</span>
-                      <button className={`switch ${(gp.mute_until ?? 0) > Date.now() ? "on" : ""}`}
-                        onClick={() => void doToggleGroupMute(gp, !((gp.mute_until ?? 0) > Date.now()))} /></div>
-                  </div>
-                  <div className="detail-card-title">成员权限</div>
-                  <div className="detail-card">
-                    <div className="detail-row"><span className="detail-row-ic"><UserPlus size={18} /></span><span>仅管理员可邀请</span>
-                      <button className={`switch ${gp.perm_invite ? "on" : ""}`}
-                        onClick={() => void doToggleGroupSetting(gp, "perm_invite")} /></div>
-                    <div className="detail-row"><span className="detail-row-ic"><SquarePen size={18} /></span><span>仅管理员可改群资料</span>
-                      <button className={`switch ${gp.perm_edit_info ? "on" : ""}`}
-                        onClick={() => void doToggleGroupSetting(gp, "perm_edit_info")} /></div>
-                    <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>仅管理员可置顶消息</span>
-                      <button className={`switch ${gp.perm_pin ? "on" : ""}`}
-                        onClick={() => void doToggleGroupSetting(gp, "perm_pin")} /></div>
-                    <div className="detail-row"><span className="detail-row-ic"><Eye size={18} /></span><span>新成员仅可见入群后历史</span>
-                      <button className={`switch ${gp.history_visible ? "on" : ""}`}
-                        onClick={() => void doToggleGroupSetting(gp, "history_visible")} /></div>
-                  </div>
-                  <div className="detail-card-title">治理</div>
-                  <div className="detail-card">
-                    <button className="detail-row" onClick={() => void openJoinRequests(gp.conv_id)}>
-                      <span className="detail-row-ic"><UserPlus size={18} /></span><span>待审入群申请</span>
-                      <span className="detail-row-val">{gp.pending_count ? `${gp.pending_count} 待处理` : "无"}</span><ChevronRight size={16} className="detail-row-chev" />
-                    </button>
-                    <button className="detail-row" onClick={() => void openGroupBans(gp.conv_id)}>
-                      <span className="detail-row-ic"><Ban size={18} /></span><span>黑名单</span>
-                      <span className="detail-row-val">{groupBans ? `${groupBans.length} 人` : ""}</span><ChevronRight size={16} className="detail-row-chev" />
-                    </button>
-                  </div>
-                  <div className="detail-foot-note">「新成员仅可见入群后历史」开启后，新成员看不到加入前的聊天记录。</div>
-                </div>
+                <GroupManagePanel gp={gp} groupBans={groupBans}
+                  onBack={() => setManageOpen(false)} onPickAvatar={pickGroupAvatar}
+                  onOpenJoinRequests={openJoinRequests} onOpenBans={openGroupBans} />
               ) : (
                 <>
                   {/* ---- 头部：头像 + 名 + 副标题 ---- */}
@@ -4769,97 +4671,17 @@ export default function App() {
                   )}
 
                   {/* ---- 页签 ---- */}
-                  <div className="detail-tabs">
-                    {tabs.map((t) => (
-                      <button key={t.k} className={`detail-tab ${activeTab === t.k ? "active" : ""}`} onClick={() => setDetailTab(t.k)}>{t.label}</button>
-                    ))}
-                  </div>
-                  <div className="detail-tabbody">
-                    {activeTab === "members" && gp && (
-                      <div className="detail-members">
-                        <button className="detail-row accent" onClick={() => setInviteDraft({ convId: gp.conv_id, selected: [] })}>
-                          <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
-                        </button>
-                        {gp.members.map((m) => (
-                          <div key={m.user_id} className="detail-member"
-                            onClick={() => m.user_id !== uid && openPeerDetail(m.user_id)} role="button">
-                            <Avatar url={m.avatar_url} label={m.group_nickname || m.nickname || m.user_id} seed={m.user_id} />
-                            <div className="detail-member-body">
-                              <div className="detail-member-name">{m.group_nickname || m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
-                              <div className="detail-member-sub">{m.user_id}</div>
-                            </div>
-                            {m.role === "owner" && <span className="role-badge owner">群主</span>}
-                            {m.role === "admin" && <span className="role-badge">管理员</span>}
-                            {canManageMember(gp, m) && (
-                              <button className="mini-btn ghost" title="管理"
-                                onClick={(e) => { e.stopPropagation(); setMemberMenu({ x: e.clientX, y: e.clientY, convId: gp.conv_id, m }); }}>⋯</button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {activeTab === "media" && (
-                      media.length === 0 ? <div className="detail-empty">暂无媒体</div> : (
-                        <div className="detail-media-grid">
-                          {/* 门控格子与会话媒体库共用 <MediaTile>（variant=detail：失效格无 ↓ 徽标、仍显尺寸）。
-                              点门控格=就地解门控（不进查看器），就绪格才打开查看器（对齐 iOS 详情宫格 档 A，autoPrefetch=NO）。 */}
-                          {media.map((m) => {
-                            const gate = mediaGate(m);
-                            return (
-                              <MediaTile key={m.serverMsgId || m.convSeq} variant="detail" m={m} gate={gate}
-                                onClick={(mm) => (gate ? onGateTap(mm) : setViewer({ m: mm, fromGallery: true }))}
-                                onMenu={(e, mm) => setFileMenu({ x: e.clientX, y: e.clientY, m: mm })}
-                                onMediaError={(mm) => void onPassiveMediaError(mm)} />
-                            );
-                          })}
-                        </div>
-                      )
-                    )}
-                    {activeTab === "files" && (
-                      files.length === 0 ? <div className="detail-empty">暂无文件</div> : (
-                        <div className="detail-filelist">
-                          {files.map((m) => {
-                            // 与聊天气泡共用门控/下载缓存（对齐 iOS 详情与聊天共享 IMMediaDownloadCoordinator）：
-                            // 未下载→点击就地下载（圆形图标+环形进度）；就绪→预览/另存。右键=转发/定位/取消下载/删除。
-                            const gate = mediaGate(m);
-                            const name = m.fileName || fileNameFromContent(m.content);
-                            return (
-                              <div key={m.serverMsgId || m.convSeq}
-                                   className={`detail-fileitem${gate && (gate.phase === "failed" || gate.phase === "expired") ? " failed" : ""}`}
-                                   onClick={() => (gate ? onGateTap(m) : openReadyFile(m))}
-                                   onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}
-                                   title={gate ? (gate.phase === "expired" ? "文件已失效" : "点击下载")
-                                              : (isPreviewableFile(name) ? "点击预览" : "点击下载")}>
-                                {gate ? <FileGateIcon state={gate} /> : <FileTypeIcon name={name} size={34} />}
-                                <span className="detail-file-body">
-                                  <span className="detail-file-name">{name}</span>
-                                  <span className="detail-file-size">
-                                    {gate
-                                      ? (gate.phase === "notStarted"
-                                          ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 未下载` : "未下载")
-                                          : downloadText(gate, formatFileSize(m.fileSize)))
-                                      : (formatFileSize(m.fileSize) || "")}
-                                  </span>
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )
-                    )}
-                    {activeTab === "links" && (
-                      links.length === 0 ? <div className="detail-empty">暂无链接</div> : (
-                        <div className="detail-filelist">
-                          {links.map((m) => (
-                            <a key={m.serverMsgId || m.convSeq} className="detail-linkitem" href={m.content} target="_blank" rel="noreferrer"
-                               onContextMenu={(e) => { e.preventDefault(); setFileMenu({ x: e.clientX, y: e.clientY, m }); }}>
-                              <Link2 size={16} /><span className="detail-file-name">{m.content}</span>
-                            </a>
-                          ))}
-                        </div>
-                      )
-                    )}
-                  </div>
+                  <DetailTabs
+                    tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
+                    gp={gp} uid={uid} media={media} files={files} links={links}
+                    onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
+                    onOpenMember={openPeerDetail} canManageMember={canManageMember}
+                    onMemberMenu={(e, cid, m) => setMemberMenu({ x: e.clientX, y: e.clientY, convId: cid, m })}
+                    mediaGate={mediaGate} onGateTap={onGateTap}
+                    onOpenViewer={(m) => setViewer({ m, fromGallery: true })}
+                    onFileMenu={(e, m) => setFileMenu({ x: e.clientX, y: e.clientY, m })}
+                    onMediaError={(m) => void onPassiveMediaError(m)} onOpenFile={openReadyFile}
+                  />
                   </>)}
                 </>
               )}
@@ -4888,63 +4710,11 @@ export default function App() {
       })()}
 
       {/* 群成员管理 ⋯ 菜单（按角色矩阵显隐；服务端仍会二次校验）。 */}
-      {memberMenu && (() => {
-        const gp = groupInfos[memberMenu.convId];
-        const m = memberMenu.m;
-        const cid = memberMenu.convId;
-        if (!gp) return null;
-        const run = (fn: () => Promise<void>) => { setMemberMenu(null); void doGroupAction(cid, fn); };
-        // 好友准入（微信式，任务一 P0）：好友 → 「发送消息」；非好友 → 「添加好友」（非好友发消息会被 200103 拒收）。
-        const isSelf = m.user_id === uid;
-        const isMemberFriend = friends.some((f) => f.user_id === m.user_id && f.status === "accepted");
-        return (
-          // 锚定在点击点的左上方（right/bottom 定位，菜单向左上展开）：⋯ 按钮贴屏幕右缘、成员行偏下，
-          // 原 left/top 向右下展开会把菜单推出视口（选项被截断看不到）。
-          <div ref={memberMenuRef} className="ctx-menu" style={{ right: window.innerWidth - memberMenu.x, bottom: window.innerHeight - memberMenu.y }} onClick={(e) => e.stopPropagation()}>
-            {!isSelf && isMemberFriend && (
-              <button onClick={() => { setMemberMenu(null); openChat(m.user_id); }}>发送消息</button>
-            )}
-            {!isSelf && !isMemberFriend && (
-              <button onClick={() => { setMemberMenu(null); void doFriendAction(m.user_id, async () => {
-                const becameFriend = await clientRef.current!.requestFriend(m.user_id);
-                if (!becameFriend) { setToast("已发送好友申请"); } // 直接成为好友时不吐司（见 requestFriend 注释）
-              }); }}>添加好友</button>
-            )}
-            {gp.my_role === "owner" && m.role === "member" && (
-              <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "admin"))}>设为管理员</button>
-            )}
-            {gp.my_role === "owner" && m.role === "admin" && (
-              <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "member"))}>撤销管理员</button>
-            )}
-            {gp.my_role === "owner" && (
-              <button onClick={() => {
-                setMemberMenu(null);
-                void askConfirm(`确定把群主转让给 ${m.nickname || m.user_id}？你将变为普通成员。`, { okText: "转让", danger: true }).then((ok) => {
-                  if (ok) void doGroupAction(cid, () => clientRef.current!.transferGroup(cid, m.user_id));
-                });
-              }}>转让群主</button>
-            )}
-            {/* 禁言 / 解禁（G2）：已禁言显解除，否则弹时长选择。 */}
-            {(m.mute_until ?? 0) > Date.now() ? (
-              <button onClick={() => run(() => clientRef.current!.muteGroupMember(cid, m.user_id, 0))}>解除禁言</button>
-            ) : (
-              <button onClick={() => { setMemberMenu(null); setMuteDurationFor({ convId: cid, m }); }}>禁言…</button>
-            )}
-            <button className="danger" onClick={() => {
-              setMemberMenu(null);
-              void askConfirm(`确定把 ${m.nickname || m.user_id} 移出群聊？24 小时内不可再被邀请。`, { okText: "移出", danger: true }).then((ok) => {
-                if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMemberWithBan(cid, m.user_id, "cooldown"));
-              });
-            }}>移出群聊</button>
-            <button className="danger" onClick={() => {
-              setMemberMenu(null);
-              void askConfirm(`确定把 ${m.nickname || m.user_id} 移出并不再允许加入？`, { okText: "移出并拉黑", danger: true }).then((ok) => {
-                if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMemberWithBan(cid, m.user_id, "forever"));
-              });
-            }}>移出并不再允许加入</button>
-          </div>
-        );
-      })()}
+      {memberMenu && groupInfos[memberMenu.convId] && (
+        <MemberMenu menu={memberMenu} gp={groupInfos[memberMenu.convId]} uid={uid} friends={friends}
+          menuRef={memberMenuRef} onClose={() => setMemberMenu(null)} onOpenChat={openChat}
+          onFriendAction={(userId, fn) => void doFriendAction(userId, fn)} onMutePick={setMuteDurationFor} />
+      )}
 
       {/* 禁言时长选择（G2）：见 components/modals/MuteDurationModal（until 时间戳在此算）。 */}
       {muteDurationFor && (
@@ -5041,6 +4811,7 @@ export default function App() {
 
       {toast && <div className="toast">{toast}</div>}
     </div>
+    </AppServicesProvider>
   );
 }
 

@@ -1,5 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { friendlyMessage, shouldHealGap, nextSyncCursor } from "./imSdk";
+import { friendlyMessage, FRIENDLY_MESSAGES, shouldHealGap, nextSyncCursor } from "./imSdk";
+
+// 后端 errcode 权威码集镜像——**唯一来源 `../IMServer/internal/errcode/errcode.go`**。
+// 后端加/删码时同步此集；下面的对齐测试据此断言前端 FRIENDLY_MESSAGES 没有映射到已作废/拼错的码。
+const BACKEND_ERRCODES = new Set<number>([
+  0,
+  100001, 100002, 100003, // 通用/系统
+  100101, 100102, 100103, // 认证鉴权
+  200001, 200002, 200003, 200004, // 用户
+  200101, 200102, 200103, 200104, 200105, 200106, // 好友
+  200110, // 二维码
+  300001, 300002, 300003, 300004, 300005, 300006, 300007, 300008, // 消息
+  300101, 300102, // 会话
+  300201, 300202, 300203, 300204, 300205, 300206, 300207, 300208, 300210, 300211, // 群聊（300209 已作废）
+  500001, 500002, // 文件/媒体
+]);
 
 describe("friendlyMessage 错误码友好中文", () => {
   it("已知业务码映射为中文（被拉黑用模糊文案）", () => {
@@ -22,6 +37,12 @@ describe("friendlyMessage 错误码友好中文", () => {
   });
   it("未收录且无原文给兜底", () => {
     expect(friendlyMessage(123456, "")).toBe("请求失败(123456)");
+  });
+  it("对齐后端：FRIENDLY_MESSAGES 每个键都是 errcode.go 现存码（防映射到已作废/拼错的码）", () => {
+    const mapped = Object.keys(FRIENDLY_MESSAGES).map(Number);
+    const unknown = mapped.filter((c) => !BACKEND_ERRCODES.has(c));
+    // 若这里报错：某个前端映射的码在后端 errcode.go 已不存在（作废/改义/拼错）——会显示错误中文，须修表或同步 BACKEND_ERRCODES。
+    expect(unknown).toEqual([]);
   });
 });
 

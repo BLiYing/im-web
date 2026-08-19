@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   saveMessage, saveRejected, applyMsgOpLocal, loadConversation,
   saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage,
+  markMessageDeleted, loadDeletedSeqs,
 } from "./localStore";
 import type { ChatMessage, Conversation } from "./protocol";
 
@@ -155,6 +156,18 @@ describe("localStore 消息（IndexedDB）", () => {
     await saveMessage("", msg("c1", 1, "a"));
     expect(await loadConversation("", "c1")).toEqual([]);
     expect(await loadConversation("ox", "")).toEqual([]);
+  });
+
+  // 删除墓碑走 `deletions` store——它是历史上「升级漏建」踩坑的那个 store。此用例做删除往返，
+  // 同时锁定 STORE_DEFS 单一来源：若 deletions store 没被 onupgradeneeded 建出，删除事务会抛错、此测即红。
+  it("本地删除留墓碑：删掉的消息重同步落库也不复现（deletions store 往返）", async () => {
+    await saveMessage("oDel", msg("c1", 1, "a"));
+    await saveMessage("oDel", msg("c1", 2, "a", "留着的"));
+    await markMessageDeleted("oDel", "c1", { convSeq: 1 });
+    expect((await loadConversation("oDel", "c1")).map((m) => m.convSeq)).toEqual([2]); // 1 被墓碑过滤
+    await saveMessage("oDel", msg("c1", 1, "a")); // 模拟服务端重同步把删掉的重新落库
+    expect((await loadConversation("oDel", "c1")).map((m) => m.convSeq)).toEqual([2]); // 仍不复现
+    expect(await loadDeletedSeqs("oDel", "c1")).toEqual([1]); // 内存墓碑供 onMessage 收帧时拦截
   });
 });
 

@@ -9,7 +9,7 @@ import { videoFrameSrc } from "../messageContent";
 //   - gallery（媒体库蒙层网格）：<div>、失效格显 ⊘ 徽标、失效格不显尺寸、就绪视频用 play-badge。
 //   - detail（资料页媒体页签）  ：<button>、失效格无徽标、失效格仍显尺寸、就绪视频用 detail-media-play。
 // 未下载/就绪的缩略渲染、尺寸角标、title 提示、右键=文件菜单在两 variant 间逐字一致。
-// key 由调用方 .map 提供（gallery 用 mediaIdentity、detail 用 serverMsgId||convSeq），本组件不设 key。
+// key 由调用方 .map 提供（gallery 与 detail 统一用 msgKey），本组件不设 key。
 type Variant = "gallery" | "detail";
 const SPEC: Record<Variant, { tag: "div" | "button"; cls: string; playBadge: string; expiredBadge: ReactNode; sizeWhenExpired: boolean }> = {
   gallery: { tag: "div", cls: "gallery-item", playBadge: "play-badge", expiredBadge: <span className="play-badge expired" title="已失效">⊘</span>, sizeWhenExpired: false },
