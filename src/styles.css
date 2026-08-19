@@ -219,7 +219,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .section-label { padding: var(--space-2) var(--space-4) var(--space-1); font-size: 13px; color: var(--text-secondary); }
 .section-label.with-action { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .section-action { border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; padding: 0; }
-.contact-filter-input { width: 140px; padding: 3px 8px; border: 1px solid var(--separator); border-radius: 7px; background: var(--surface); color: var(--text); font-size: 12px; }
+/* 好友表头（好友数 + 搜索框）钉在联系人滚动区顶部：滑动好友列表时整行不跟着走。
+   背景取侧栏底色遮住下方滚动内容；空搜索/新朋友区在其上时，滚上来即吸顶。 */
+.section-label.friends-head { position: sticky; top: 0; z-index: 2; background: var(--page-bg); padding-top: var(--space-2); padding-bottom: var(--space-2); }
+/* 搜索好友框复用上方「搜索用户」框的尺寸与样式（原来那个 140px 小胶囊太小）：占满整行剩余宽度。 */
+.contact-filter-input { flex: 1; min-width: 0; padding: var(--space-2) var(--space-3); border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--page-bg); color: var(--text); font-size: 15px; }
 .contact-filter-input:focus { outline: none; border-color: var(--accent); }
 .convitem.static { cursor: default; }
 .convitem.static:hover { background: none; }

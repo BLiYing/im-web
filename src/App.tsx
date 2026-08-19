@@ -3502,7 +3502,7 @@ export default function App() {
               </>
             )}
 
-            <div className="section-label with-action">
+            <div className="section-label with-action friends-head">
               <span>好友（{contactFilterQ ? `${filteredAccepted.length}/${accepted.length}` : accepted.length}）</span>
               {accepted.length > 0 && (
                 <input className="contact-filter-input" value={contactFilter} placeholder="搜索好友"
