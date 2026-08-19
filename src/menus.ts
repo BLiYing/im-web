@@ -1,7 +1,7 @@
 // 数据驱动的可扩展菜单注册表（消息右键菜单 / 会话右键菜单）。
 // 设计目标：新增一个菜单项 = 往数组里 append 一条，无需改 render 代码。
 // iOS 端可对照本文件保持菜单项与顺序一致（parity）。
-import type { ChatMessage, Conversation } from "./sdk/protocol";
+import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
@@ -122,6 +122,40 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
  * 置顶↔取消置顶 / 静音↔取消静音 / 设为已读↔标为未读 / 删除。
  * 置顶/静音/已读未读是**切换对**：每对按会话当前状态只显示其一（visible 互斥）。危险项「删除」放最后（destructive-last）。
  */
+/** 收藏菜单上下文：当前收藏项。 */
+export type FavoriteCtx = { f: Favorite };
+
+/** 收藏右键菜单处理器（转发 / 复制 / 下载 / 删除）。 */
+export interface FavoriteHandlers {
+  forward: (f: Favorite) => void;
+  copy: (f: Favorite) => void;
+  download: (f: Favorite) => void;
+  delete: (f: Favorite) => void;
+}
+
+/** 某收藏是否为文本/链接（可复制文字）：text（含 URL 文本）或 link 类型。 */
+function isCopyableFavorite(f: Favorite): boolean {
+  return f.content_type === "text" || f.content_type === "link";
+}
+
+/** 某收藏是否为媒体/文件（可下载）：image/video/file。 */
+function isDownloadableFavorite(f: Favorite): boolean {
+  return f.content_type === "image" || f.content_type === "video" || f.content_type === "file";
+}
+
+/**
+ * 构建收藏右键菜单项（数据驱动，与消息/会话菜单同注册表精神，对齐 iOS FAVORITES_DESIGN §5.2）：
+ * 转发（总是）/ 复制（文本·链接）/ 下载（媒体·文件）/ 删除（destructive-last）。
+ */
+export function buildFavoriteActions(h: FavoriteHandlers): MenuAction<FavoriteCtx>[] {
+  return [
+    { id: "forward", label: "转发", icon: Forward, visible: () => true, run: (c) => h.forward(c.f) },
+    { id: "copy", label: "复制", icon: Copy, visible: (c) => isCopyableFavorite(c.f), run: (c) => h.copy(c.f) },
+    { id: "download", label: "下载", icon: Download, visible: (c) => isDownloadableFavorite(c.f), run: (c) => h.download(c.f) },
+    { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.f) },
+  ];
+}
+
 export function buildConversationActions(h: ConversationHandlers): MenuAction<ConvCtx>[] {
   return [
     { id: "pin", label: "置顶", icon: Pin, visible: (c) => !c.c.pinned_at, run: (c) => h.setPinned(c.c, true) },

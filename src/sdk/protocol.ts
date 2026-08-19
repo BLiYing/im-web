@@ -100,6 +100,8 @@ export interface Favorite {
   content_type: string;
   content: string;
   caption?: string; // 图说随附文本快照（收藏整体，2026-08-19）：媒体/文件收藏下方显示；老收藏缺省
+  file_name?: string; // 文件收藏原文件名（§8.1，对齐后端）：空回退从 URL 反推；老收藏缺省
+  file_size?: number; // 文件收藏原字节数（§8.1）：副行显真实大小；老收藏缺省/0
   source_conv_id: string;
   source_conv_seq: number;
   source_from: string;

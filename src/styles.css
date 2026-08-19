@@ -16,6 +16,7 @@
   --text-tertiary: #aeb4bc;
   --danger: #e5484d;
   --danger-soft: rgba(229, 72, 77, 0.12);
+  --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（文本/链接图标块，§8.1b；与 iOS IMTheme.accentSoft 同源 12%） */
   --online: #1aab5b;
   --link: #2477d4;
   --check-read: #4ca64c;        /* 已读双勾绿 */
@@ -71,6 +72,7 @@
   --bubble-me: #1f4d2e; --bubble-them: #262d31;
   --text: #e6e8eb; --text-secondary: #a0a7b0; --text-tertiary: #707883;
   --danger: #ff696e; --online: #42c77a; --link: #66a9ff;
+  --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（§8.1b）：accent 深浅一致，故与浅色同值 */
   --subtle-fill: rgba(255, 255, 255, 0.07);
   --check-read: #7ddc7d; --meta-time: #9fb89a;
   --wall-top: #0e1a12; --wall-bottom: #16261a;
@@ -90,6 +92,7 @@
     --bubble-me: #1f4d2e; --bubble-them: #262d31;
     --text: #e6e8eb; --text-secondary: #a0a7b0; --text-tertiary: #707883;
     --danger: #ff696e; --online: #42c77a; --link: #66a9ff;
+    --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（§8.1b）：accent 深浅一致，故与浅色同值 */
     --subtle-fill: rgba(255, 255, 255, 0.07);
     --check-read: #7ddc7d; --meta-time: #9fb89a;
     --wall-top: #0e1a12; --wall-bottom: #16261a;
@@ -375,14 +378,38 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fwd-item:hover { background: var(--surface-hover); }
 .fwd-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .fwd-empty { padding: 16px; color: var(--text-secondary); text-align: center; }
-/* 收藏列表（M4-4）。 */
+/* 收藏列表（M4-4；收藏改造：分类 chips + 范围搜索 + 统一左图标列 + 右键菜单 + 阅读器）。 */
+.fav-modal { width: 400px; }
+/* 分类 chips：药丸横滚，选中染主色（对齐 iOS IMLiquidSegmentedControl 心智）。 */
+.fav-chips { display: flex; gap: var(--space-2); overflow-x: auto; padding-bottom: var(--space-1); margin: 0 calc(-1 * var(--space-1)); padding-left: var(--space-1); padding-right: var(--space-1); }
+.fav-chip { flex-shrink: 0; padding: 5px 12px; border: 1px solid var(--separator); border-radius: 999px; background: var(--surface); color: var(--text-secondary); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.fav-chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+/* 范围搜索：前缀 chip（分类名，accent 着色）+ 输入框同处一条。 */
+.fav-search { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--page-bg); }
+.fav-search:focus-within { border-color: var(--accent); }
+.fav-scope { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; padding: 2px 6px 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
+.fav-scope button { border: 0; background: none; color: var(--accent); cursor: pointer; display: inline-flex; padding: 0; }
+.fav-search input { flex: 1; min-width: 0; border: 0; background: none; color: var(--text); font-size: 14px; outline: none; }
 .fav-list { overflow-y: auto; max-height: 50vh; display: flex; flex-direction: column; gap: 6px; }
-.fav-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; background: var(--surface); border-radius: 8px; }
-.fav-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
-.fav-thumb { max-width: 120px; max-height: 120px; border-radius: 6px; cursor: pointer; display: block; }
-.fav-thumb-wrap { position: relative; display: inline-block; cursor: pointer; }
-.fav-caption { margin-top: 4px; font-size: 13px; color: var(--text-secondary); } /* 图说整体收藏：快照下方随附文字 */
-.fav-del { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; }
+/* 行：统一左图标列（44px）+ 右内容。pick 选中态微染 accent-soft。 */
+.fav-item { display: flex; align-items: flex-start; gap: var(--space-3); padding: 8px 10px; background: var(--surface); border-radius: 8px; cursor: pointer; }
+.fav-item.on { background: var(--accent-soft); }
+.fav-icon { position: relative; width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent); }
+.fav-icon.file { background: var(--surface-hover); color: var(--text-secondary); }
+.fav-icon img.fav-thumb, .fav-icon video.fav-thumb { width: 100%; height: 100%; object-fit: cover; border-radius: 0; display: block; }
+.fav-icon .fav-thumb-wrap { width: 100%; height: 100%; }
+.fav-icon .play-badge { position: absolute; inset: 0; margin: auto; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: var(--on-media); font-size: 12px; }
+.fav-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fav-content { min-width: 0; white-space: pre-wrap; word-break: break-word; font-size: 15px; color: var(--text); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.fav-content.link { color: var(--accent); -webkit-line-clamp: 2; }
+.fav-content.filename { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: 1; display: block; }
+.fav-meta { font-size: 13px; color: var(--text-tertiary); }
+.fav-meta .fav-src { color: var(--text-secondary); }
+.fav-caption { font-size: 13px; color: var(--text-secondary); } /* 图说整体收藏：快照下方随附文字 */
+.fav-del { align-self: center; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; flex-shrink: 0; }
+.fav-check { align-self: center; flex-shrink: 0; }
+/* 收藏阅读器（点文本 → 只读全文）：可选中复制、滚动。 */
+.fav-reader-text { white-space: pre-wrap; word-break: break-word; font-size: 17px; line-height: 1.6; color: var(--text); user-select: text; overflow-y: auto; max-height: 60vh; }
 /* 编辑标记 + 译文（M4-5）。 */
 .edited-tag { color: var(--meta-time); font-size: 11px; }
 .translation { display: flex; margin: 2px 0 4px; }

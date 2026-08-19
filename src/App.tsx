@@ -19,7 +19,7 @@ import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } f
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
-import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
+import { buildMessageActions, buildConversationActions, buildFavoriteActions, type MenuAction, type MessageCtx } from "./menus";
 import { albumMembers, isAlbumLeader, isAlbumMember, isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { FileTypeIcon } from "./FileTypeIcon";
@@ -98,6 +98,17 @@ const MAX_INITIAL_MEMBERS = MAX_GROUP_MEMBERS - 1;
 // 转发目标会话上限：一次最多转给 9 个会话，与 iOS kIMForwardMaxSelection / 微信一致。
 const MAX_FORWARD_TARGETS = 9;
 
+// 收藏 → 合成 ChatMessage：转发/从收藏发送统一走 sendForwardToTarget（§6，媒体/文件透传 URL 不重传）。
+// convSeq 置 1（快照非引用，仅为过合并转发的 convSeq>0 守卫）；from=source_from 保留最初作者链。
+function favoriteToMessage(f: Favorite): ChatMessage {
+  return {
+    clientMsgId: `fav-${f.id}`, convId: f.source_conv_id, from: f.source_from,
+    content: f.content, contentType: f.content_type,
+    fileName: f.file_name, fileSize: f.file_size, caption: f.caption,
+    convSeq: 1, timestamp: f.created_at || Date.now(), status: "sent",
+  };
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
   const [uid, setUid] = useState(() => loadSession()?.uid || "1001");
@@ -146,6 +157,7 @@ export default function App() {
     return m;
   }, [recordView]);
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
+  const [favPick, setFavPick] = useState(false); // 收藏弹窗模式：true=从附件面板进的「从收藏发送」pick 模式
   const [attachPanel, setAttachPanel] = useState(false); // 附件面板（图片或视频/文件，M4-6）
   // 媒体查看器（镜像 iOS）：图片/视频全屏 + 下载/媒体库/更多；fromGallery=从媒体库进入（不再显示媒体库按钮）。
   const [viewer, setViewer] = useState<{ m: ChatMessage; fromGallery?: boolean } | null>(null);
@@ -1655,13 +1667,23 @@ export default function App() {
       } catch (e) { setToast(`收藏失败：${(e as Error).message}`); }
     })();
   }, []);
-  // 打开收藏列表弹窗。
+  // 打开收藏列表弹窗（浏览态，账号卡入口）。
   const openFavorites = useCallback(() => {
+    setFavPick(false);
     void (async () => {
       try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
       catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
     })();
   }, []);
+  // 打开收藏弹窗（pick 态，聊天附件面板「从收藏发送」入口）。
+  const openFavoritesPick = useCallback(() => {
+    setAttachPanel(false); setFavPick(true);
+    void (async () => {
+      try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
+      catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
+    })();
+  }, []);
+  const closeFavorites = useCallback(() => { setFavorites(null); setFavPick(false); }, []);
   const removeFavorite = useCallback((id: number) => {
     void (async () => {
       try {
@@ -1698,17 +1720,19 @@ export default function App() {
     setForwardTargets(next);
   }, [forwardTargets]);
   // 向单个 target 会话发出转发（逐条保留各自类型 / 合并打包 chat_record 一条）。不负责关闭弹窗/吐司。
-  const sendForwardToTarget = useCallback((target: Conversation) => {
+  // msgsArg 显式传入时（从收藏发送）用之并按「逐条」发；否则用 forwarding 状态 + 当前 forwardMode（转发）。
+  const sendForwardToTarget = useCallback((target: Conversation, msgsArg?: ChatMessage[]) => {
     const client = clientRef.current;
-    const msgs = forwarding;
+    const msgs = msgsArg ?? forwarding;
     if (!client || !msgs) return;
+    const mode = msgsArg ? "each" : forwardMode;
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
     const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean) =>
       appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
-    if (forwardMode === "merged" && msgs.length > 0) {
+    if (mode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
         .filter((m) => m.content && !m.recalledAt && m.contentType !== "system" && m.convSeq > 0)
         .map((m) => ({
@@ -1751,13 +1775,32 @@ export default function App() {
   // 执行转发到一个或多个目标：全部发出后关闭弹窗、退出多选、单条吐司汇总。
   const doForwardToTargets = useCallback((targets: Conversation[]) => {
     if (targets.length === 0) return;
-    targets.forEach(sendForwardToTarget);
+    targets.forEach((t) => sendForwardToTarget(t)); // 不透传 forEach 的 index 作 msgsArg
     closeForwardPicker();
     exitSelectMode();
     setToast(targets.length === 1
       ? `已转发到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
       : `已转发到 ${targets.length} 个会话`);
   }, [sendForwardToTarget, closeForwardPicker, exitSelectMode]);
+
+  // ── 收藏动作（右键菜单 + 从收藏发送，复用转发/发送路径，§5.4/§6）──
+  // 转发某条收藏到任意会话：合成 ChatMessage 后复用已有 ForwardPicker（forwarding 状态）。
+  const forwardFavorite = useCallback((f: Favorite) => { setForwardMode("each"); setForwarding([favoriteToMessage(f)]); }, []);
+  // 复制收藏（文本/链接）：写入剪贴板并吐司。
+  const copyFavorite = useCallback((f: Favorite) => { void navigator.clipboard?.writeText(f.content); setToast("已复制"); }, []);
+  // 下载收藏（媒体/文件）：合成 ChatMessage 复用 saveMessageToDisk（含失效探测）。
+  const downloadFavorite = useCallback((f: Favorite) => { void saveMessageToDisk(favoriteToMessage(f)); }, [saveMessageToDisk]);
+  const favoriteActions = useMemo(() => buildFavoriteActions({
+    forward: forwardFavorite, copy: copyFavorite, download: downloadFavorite, delete: (f) => removeFavorite(f.id),
+  }), [forwardFavorite, copyFavorite, downloadFavorite, removeFavorite]);
+  // 从收藏发送（pick 模式）：所选收藏逐条发进当前会话（媒体/文件透传 URL，走 sendForwardToTarget），收起弹窗。
+  const sendFavoritesToCurrent = useCallback((favs: Favorite[]) => {
+    const conv = conversations.find((c) => c.conv_id === currentConvRef.current);
+    if (!conv || favs.length === 0) return;
+    sendForwardToTarget(conv, favs.map(favoriteToMessage));
+    closeFavorites();
+    setToast(favs.length === 1 ? "已发送" : `已发送 ${favs.length} 条`);
+  }, [conversations, sendForwardToTarget, closeFavorites]);
   // 多选批量转发：收集选中的消息，打开选择器。
   const forwardSelected = useCallback(() => {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
@@ -2915,6 +2958,14 @@ export default function App() {
   // 群项：群备注（G1，仅本人可见、多端同步）非空即替代群名；否则真实群名。
   const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
+  // 收藏来源显示名（副行「来自X」）：本人→我；好友→备注/昵称；群成员→群昵称/昵称；否则 uid（按 UI.md 优先级）。
+  const favSourceLabel = (f: Favorite): string => {
+    if (!f.source_from) return "未知";
+    if (f.source_from === uid) return "我";
+    const fr = friends.find((x) => x.user_id === f.source_from);
+    if (fr) return friendLabel(fr);
+    return memberNick(f.source_conv_id, f.source_from) || f.source_from;
+  };
   const mediaPreview = (ct: string): string | null =>
     ct === "image" ? "[图片]" : ct === "video" ? "[视频]" : ct === "file" ? "[文件]" : ct === "chat_record" ? "[聊天记录]" : null;
   const convPreview = (c: Conversation): string => {
@@ -4093,6 +4144,11 @@ export default function App() {
                           <span>{it.label}</span>
                         </button>
                       ))}
+                      {/* 从收藏发送（对齐 iOS Pick）：打开收藏弹窗 pick 模式，选中项发进当前会话。 */}
+                      <button className="attach-item" role="menuitem" onClick={openFavoritesPick}>
+                        <Bookmark size={24} aria-hidden="true" />
+                        <span>收藏</span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -4236,12 +4292,17 @@ export default function App() {
       {favorites && (
         <FavoritesModal
           favorites={favorites}
+          mode={favPick ? "pick" : "browse"}
+          sourceLabel={favSourceLabel}
+          actions={favoriteActions}
           onOpenMedia={(f, kind) => {
             setFavorites(null);
             setViewer({ m: syntheticViewerMessage(`fav-${f.id}`, f.content, kind), fromGallery: true });
           }}
-          onRemove={removeFavorite}
-          onClose={() => setFavorites(null)}
+          onOpenLink={(url) => window.open(url, "_blank", "noreferrer")}
+          onDownloadFile={downloadFavorite}
+          onPick={sendFavoritesToCurrent}
+          onClose={closeFavorites}
         />
       )}
 

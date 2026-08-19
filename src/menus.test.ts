@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { buildMessageActions, buildConversationActions, type MessageCtx, type ConvCtx } from "./menus";
-import type { ChatMessage, Conversation } from "./sdk/protocol";
+import { buildMessageActions, buildConversationActions, buildFavoriteActions, type MessageCtx, type ConvCtx, type FavoriteCtx } from "./menus";
+import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
 
 // 纯注册表测试（node 环境，无 DOM）：只验证 visible 谓词与顺序，不渲染 React。
 function msg(over: Partial<ChatMessage>): ChatMessage {
@@ -177,5 +177,55 @@ describe("buildConversationActions", () => {
     expect(convHandlers.setMuted).toHaveBeenCalledWith(c0, true);
     actions.find((a) => a.id === "delete")!.run({ c: c0 });
     expect(convHandlers.delete).toHaveBeenCalledWith(c0);
+  });
+});
+
+function fav(over: Partial<Favorite>): Favorite {
+  return {
+    id: 1, content_type: "text", content: "hi",
+    source_conv_id: "u_1001_u_2002", source_conv_seq: 5, source_from: "2002",
+    created_at: 1, ...over,
+  };
+}
+const favHandlers = { forward: vi.fn(), copy: vi.fn(), download: vi.fn(), delete: vi.fn() };
+
+describe("buildFavoriteActions", () => {
+  it("固定顺序：转发/复制/下载/删除，删除 destructive-last", () => {
+    const actions = buildFavoriteActions(favHandlers);
+    expect(actions.map((a) => a.id)).toEqual(["forward", "copy", "download", "delete"]);
+    expect(actions.find((a) => a.id === "delete")!.danger).toBe(true);
+  });
+
+  it("转发/删除对所有类型可见", () => {
+    const actions = buildFavoriteActions(favHandlers);
+    for (const ct of ["text", "link", "image", "video", "file"]) {
+      const ids = visibleIds<FavoriteCtx>(actions, { f: fav({ content_type: ct }) });
+      expect(ids).toContain("forward");
+      expect(ids).toContain("delete");
+    }
+  });
+
+  it("复制仅文本/链接；下载仅媒体/文件", () => {
+    const actions = buildFavoriteActions(favHandlers);
+    const ids = (ct: string) => visibleIds<FavoriteCtx>(actions, { f: fav({ content_type: ct }) });
+    expect(ids("text")).toContain("copy");
+    expect(ids("link")).toContain("copy");
+    expect(ids("text")).not.toContain("download");
+    expect(ids("image")).toContain("download");
+    expect(ids("video")).toContain("download");
+    expect(ids("file")).toContain("download");
+    expect(ids("image")).not.toContain("copy");
+    expect(ids("file")).not.toContain("copy");
+  });
+
+  it("run 路由到真实处理器", () => {
+    const actions = buildFavoriteActions(favHandlers);
+    const f0 = fav({ content_type: "text" });
+    actions.find((a) => a.id === "copy")!.run({ f: f0 });
+    expect(favHandlers.copy).toHaveBeenCalledWith(f0);
+    actions.find((a) => a.id === "forward")!.run({ f: f0 });
+    expect(favHandlers.forward).toHaveBeenCalledWith(f0);
+    actions.find((a) => a.id === "delete")!.run({ f: f0 });
+    expect(favHandlers.delete).toHaveBeenCalledWith(f0);
   });
 });
