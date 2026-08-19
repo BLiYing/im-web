@@ -24,7 +24,7 @@ export function LoginView({ restoring, uid, password, authErr, authBusy, loginTa
       <div className="login">
         <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
         <h1>IM Web</h1>
-        <p className="hint">正在恢复登录（{uid}）…</p>
+        <p className="hint restoring-hint">正在恢复登录（{uid}）…</p>
       </div>
     );
   }
