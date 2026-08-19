@@ -51,6 +51,8 @@ export interface ChatMessage {
   fileName?: string;
   /** file 消息原始字节数；界面只格式化，不重新下载计算。 */
   fileSize?: number;
+  /** 图文/视频文/文件文随附文本（Telegram 图说模型）：仅 image/video/file 有；渲染在媒体/文件卡下方，空=纯媒体。 */
+  caption?: string;
   convSeq: number;
   timestamp: number;
   status: MessageStatus;
@@ -97,6 +99,7 @@ export interface Favorite {
   id: number;
   content_type: string;
   content: string;
+  caption?: string; // 图说随附文本快照（收藏整体，2026-08-19）：媒体/文件收藏下方显示；老收藏缺省
   source_conv_id: string;
   source_conv_seq: number;
   source_from: string;
@@ -132,6 +135,7 @@ export interface ConvLastMessage {
   from_nickname?: string; // 发送者昵称（仅群聊填：预览"昵称: 内容"）
   content_type: string;
   content: string;
+  caption?: string; // 图文/视频文/文件文随附文本：预览"有字显字"（有 caption 显 caption，否则显 [图片]/[视频]/[文件]）
   conv_seq: number;
   timestamp: number;
   recalled_at?: number; // >0=最后一条是撤回消息（预览显示"撤回了一条消息"，原文已脱敏）

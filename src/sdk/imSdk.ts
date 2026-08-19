@@ -30,6 +30,12 @@ export interface MediaSendOptions {
   duration?: number;
   /** 极小模糊预览（~20px 缩略 JPEG 的 data URL，M4-7）：收端未下载时放大+模糊显占位。 */
   thumb?: string;
+  /** 图文/视频文/文件文随附文本（Telegram 图说模型）：与媒体同生为一条消息。仅 image/video/file 有效；空=纯媒体。 */
+  caption?: string;
+  /** 配文里的 @提及（仅群聊）：被 @ 成员 uid 列表，随媒体消息上行，服务端据此做被@强提醒（与文本消息同口径）。 */
+  mentions?: string[];
+  /** 配文 @所有人（仅群聊、群主/管理员）。 */
+  mentionAll?: boolean;
 }
 
 export interface IMClientHandlers {
@@ -92,7 +98,7 @@ export class IMClient {
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -490,7 +496,7 @@ export class IMClient {
   // ---- 收藏（M4-4）----
 
   /** 收藏一条内容（快照）：POST /api/v1/favorites。 */
-  async addFavorite(f: { content_type?: string; content: string; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
+  async addFavorite(f: { content_type?: string; content: string; caption?: string; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
     await this.api("/api/v1/favorites", { method: "POST", body: JSON.stringify(f) });
   }
   /** 我的收藏列表：GET /api/v1/favorites。 */
@@ -639,7 +645,9 @@ export class IMClient {
     const clientMsgId = crypto.randomUUID();
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
-      fileName: opts?.fileName, fileSize: opts?.fileSize, replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, replyToFrom: opts?.replyTo?.from, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster,
+      fileName: opts?.fileName, fileSize: opts?.fileSize, caption: opts?.caption,
+      mentions: opts?.mentions, mentionAll: opts?.mentionAll, // 落库供刷新后 @ 高亮与转发重发（强提醒）
+      replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, replyToFrom: opts?.replyTo?.from, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster,
       mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration, thumb: opts?.thumb });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
@@ -662,6 +670,8 @@ export class IMClient {
     if (opts?.mentions && opts.mentions.length > 0) { data.mentions = opts.mentions; }
     if (opts?.mentionAll) { data.mention_all = true; }
     if (contentType === "file" && opts?.fileName) { data.file_name = opts.fileName; }
+    // caption（图文/视频文/文件文随附文本）：仅 image/video/file 带上行（服务端也只对这三类收下）。
+    if ((contentType === "image" || contentType === "video" || contentType === "file") && opts?.caption) { data.caption = opts.caption; }
     // 媒体元数据（M4+，PROTOCOL §4.1）：尺寸/时长/字节数由发送端量出，收端据此按原比例排版 + 显时长角标。
     if (opts?.mediaW && opts.mediaW > 0) { data.media_w = opts.mediaW; }
     if (opts?.mediaH && opts.mediaH > 0) { data.media_h = opts.mediaH; }
@@ -948,7 +958,8 @@ export class IMClient {
           void localStore.saveMessage(this.uid, {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
             contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
-            fileName: pend.fileName, fileSize: pend.fileSize,
+            fileName: pend.fileName, fileSize: pend.fileSize, caption: pend.caption,
+            mentions: pend.mentions, mentionAll: pend.mentionAll,
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
             groupId: pend.groupId, posterUrl: pend.poster,
             mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb,
@@ -1068,7 +1079,8 @@ export class IMClient {
               clientMsgId: cmid, convId: pend.convId, from: this.uid,
               content: pend.content, contentType: pend.contentType,
               convSeq: 0, timestamp: pend.timestamp, status: "failed", note,
-              fileName: pend.fileName, fileSize: pend.fileSize,
+              fileName: pend.fileName, fileSize: pend.fileSize, caption: pend.caption,
+              mentions: pend.mentions, mentionAll: pend.mentionAll,
               replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot,
               replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
               groupId: pend.groupId, posterUrl: pend.poster,
@@ -1118,6 +1130,7 @@ export class IMClient {
       contentType: d.content_type || "text",
       fileName: d.file_name || undefined,
       fileSize: d.file_size !== undefined && Number(d.file_size) >= 0 ? Number(d.file_size) : undefined,
+      caption: typeof d.caption === "string" && d.caption ? d.caption : undefined, // 图文/视频文/文件文随附文本（Telegram 图说模型）
       convSeq: d.conv_seq || 0,
       timestamp: d.timestamp || 0,
       status: "received",

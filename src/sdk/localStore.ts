@@ -24,6 +24,9 @@ interface MsgRecord {
   contentType: string;
   fileName?: string;
   fileSize?: number;
+  caption?: string; // 图文/视频文/文件文随附文本（Telegram 图说模型）：仅 image/video/file 有
+  mentions?: string[]; // M4-8 被 @ 成员 uid：刷新后 caption/正文 @ 高亮可点 + 转发重发（强提醒）都靠它
+  mentionAll?: boolean; // @所有人
   timestamp: number;
   serverMsgId?: string; // 服务端真实消息 id（举报消息等需用真实 id，不能用复合键 id）
   // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。
@@ -120,7 +123,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     id: keyOf(owner, m.convId, m.convSeq),
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
-    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, timestamp: m.timestamp,
+    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionAll: m.mentionAll, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
@@ -317,7 +320,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             // 媒体字段一并还原（与下面已确认分支同一套）——少还原 groupId 会让相册散架、
             // 少还原 posterUrl/尺寸会让视频封面与比例丢失。
             clientMsgId: r.clientMsgId,
-            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize,
+            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
@@ -325,7 +328,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
-            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize,
+            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,

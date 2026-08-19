@@ -34,6 +34,8 @@ export function FavoritesModal({ favorites, onOpenMedia, onRemove, onClose }: {
                 ) : (
                   f.content
                 )}
+                {/* 图说整体收藏：媒体/文件快照下方显随附文字（老收藏无 caption 键不占位）。 */}
+                {f.caption && <div className="fav-caption">{f.caption}</div>}
               </div>
               <button className="fav-del" title="删除收藏" onClick={() => onRemove(f.id)}>✕</button>
             </div>

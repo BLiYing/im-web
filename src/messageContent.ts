@@ -31,7 +31,9 @@ export const localizeSnippet = (s: string) =>
 
 /** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。 */
 export const replyPreviewOf = (m: ChatMessage): string =>
-  m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
+  // 图说 caption「有字显字」：图文/视频文/文件文带 caption 时引用条显 caption 文字（与服务端冻结快照同口径）。
+  m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? m.caption.slice(0, 60)
+  : m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
   : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
   : m.contentType === "chat_record" ? chatRecordSnippet(m.content) : (m.content || "").slice(0, 60);
 

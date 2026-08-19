@@ -1018,7 +1018,7 @@ export default function App() {
   // 在气泡左上角显“3.9 MB / 7.9 MB”（镜像 iOS）。传完/失败即删键，角标切回视频时长。
   // 失败的媒体/文件消息要能重试，就必须留住原始 File（浏览器无法从消息里还原它）。仅内存，刷新即失效。
   // 记 convId/groupId：重试时按**原会话/原相册**重发（不耦合当前打开的会话，宫格成员回原格）。
-  const pendingFilesRef = useRef<Map<string, { file: File; mode: AttachmentPickMode; convId: string; groupId?: string }>>(new Map());
+  const pendingFilesRef = useRef<Map<string, { file: File; mode: AttachmentPickMode; convId: string; groupId?: string; caption?: string; mentions?: string[]; mentionAll?: boolean }>>(new Map());
   // 已被用户取消的出箱件：发送流水线（sendMediaBatch/uploadAndSend）在每个边界检查它，
   // 跳过后续上传与 sendMedia——因为 cancel() 只能中断在飞的**分片**任务，小文件 XHR、排队中的
   // 相册成员、以及"上传完成→poster→sendMedia"窗口都没有可 abort 的任务，必须靠这个集合拦住。
@@ -1075,6 +1075,9 @@ export default function App() {
   // 粘贴图片（Web #2）：Ctrl/Cmd+V 粘贴剪贴板中的图片 → 输入区上方预览 → 发送时作为图片上传。
   // 粘贴攒批（对齐 iOS 预览条）：图片与**任意文件**都先进预览条，发送键统一发出。
   const [pastedImages, setPastedImages] = useState<{ file: File; url: string; kind: "image" | "video" | "file" }[]>([]);
+  // 粘贴限单件的替换判定用镜像 ref（addPastedFiles 是空 deps 回调，直接读 state 会拿到陈旧闭包）。
+  const pastedImagesRef = useRef(pastedImages);
+  pastedImagesRef.current = pastedImages;
   const addPastedFiles = useCallback((files: File[]) => {
     // 走与文件选择器同一个类型闸：可发送的图片/视频进"媒体批量"通道（image/video），
     // 其余（含 svg——MIME 是 image/svg+xml，旧代码会误判成 image 送进批量→服务端拒传坏气泡）走文件通道。
@@ -1088,7 +1091,17 @@ export default function App() {
       keep.push({ file: f, url: URL.createObjectURL(f), kind: k ?? "file" });
     }
     if (dropped) setToast("为保证各端可见，已忽略 HEIC 等格式");
-    if (keep.length) setPastedImages((prev) => [...prev, ...keep]);
+    if (!keep.length) return;
+    // 粘贴限单件（2026-08-19 拍板）：一次只保留一个附件（图/视频/文件三选一），后粘的替换先前的——
+    // 图说 caption 只对单件消息定义，多件会退回「各发各的」旧路径。多选/相册仍走附件选择器，不受此限。
+    // 保留**最后一个**（=最新，与 toast 文案及 iOS 的逐张替换语义一致；code-review 修正：原取 first 与文案相反）。
+    const kept = keep[keep.length - 1];
+    const replaced = [...pastedImagesRef.current, ...keep.slice(0, -1)];
+    // 被替换项延迟 revoke：预览条 <img>/<video> 可能仍挂着旧 blob URL，同步回收会闪断图 + 控制台报错
+    //（与 send() 的 60s 延迟回收同策略）。
+    replaced.forEach((p) => window.setTimeout(() => URL.revokeObjectURL(p.url), 60_000));
+    if (replaced.length) setToast("一次只能粘贴一个文件，已保留最新的");
+    setPastedImages([kept]);
   }, []);
   const removePastedImage = useCallback((idx: number) => {
     setPastedImages((prev) => { const nx = prev.slice(); const [rm] = nx.splice(idx, 1); if (rm) URL.revokeObjectURL(rm.url); return nx; });
@@ -1112,12 +1125,17 @@ export default function App() {
 
   // 相册批量发送（M4+）：**选完秒上屏**——每张先用本地 blob URL 占位（≥2 张共享 group_id → 宫格聚簇），
   // 逐张上传后原地替换为服务器 URL 并走 socket 发送（带 group_id）；单张失败标该格不阻塞后续。
-  const sendMediaBatch = useCallback(async (files: File[], opts?: { convId?: string; groupId?: string }) => {
+  const sendMediaBatch = useCallback(async (files: File[], opts?: { convId?: string; groupId?: string; caption?: string; mentions?: string[]; mentionAll?: boolean }) => {
     const client = clientRef.current;
     // opts 用于重试：按原会话/原相册重发（不耦合当前打开的会话）。
     const cid = opts?.convId ?? (peer ? convIdFor(uid, peer) : groupConvId);
     if (!client || !cid || files.length === 0) return;
     const groupId = opts?.groupId ?? (files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined);
+    // caption（图文/视频文，Telegram 图说模型）：仅单件时随附（相册不带 caption，见 send()）；挂到唯一那条消息。
+    // 配文 @提及同随单件带上（群聊被@强提醒）。
+    const caption = files.length === 1 ? opts?.caption : undefined;
+    const capMentions = files.length === 1 ? opts?.mentions : undefined;
+    const capMentionAll = files.length === 1 ? opts?.mentionAll : undefined;
     // 图/视频归类走统一入口 mediaKindForFile（含扩展名回退）：MIME 缺失的 .mov 等也能判成 video，
     // 否则乐观气泡会当成 image（<img> 放视频→坏图）且跳过封面/时长探测。null（异常漏进来的）退回 MIME。
     const locals = files.map((f) => {
@@ -1129,7 +1147,8 @@ export default function App() {
       appendMsg(cid, {
         clientMsgId: l.localId, convId: cid, from: uid, content: l.blobUrl,
         contentType: l.isVideo ? "video" : "image",
-        convSeq: 0, timestamp: Date.now(), status: "sending", groupId,
+        convSeq: 0, timestamp: Date.now(), status: "sending", groupId, caption,
+        mentions: capMentions, mentionAll: capMentionAll,
       });
       setUploadProgress((prev) => ({ ...prev, [l.localId]: { sent: 0, total: l.f.size } })); // 排队中：先显“等待中”
     }
@@ -1169,7 +1188,8 @@ export default function App() {
         else if (contentType === "video" && l.posterFile) thumb = await makeTinyThumbFromImage(l.posterFile);
         if (takeCancelled()) continue;
         const clientMsgId = client.sendMedia(url, contentType, peer, cid, {
-          groupId, poster, thumb, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size,
+          groupId, poster, thumb, mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size, caption,
+          mentions: capMentions, mentionAll: capMentionAll,
         });
         // thumb 也写回本地行：否则转发「自己发的」图片/视频时源消息无 thumb，收端只剩空占位（详见 forward 修复）。
         patchMsg(cid, l.localId, { clientMsgId, content: url, contentType, posterUrl: poster || l.posterBlobUrl, thumb });
@@ -1180,7 +1200,7 @@ export default function App() {
         clearUploadProgress(l.localId);
         if ((e as Error).name === "UploadCancelledError") { takeCancelled(); revokeNow(); continue; } // 分片任务被 cancel()
         patchMsg(cid, l.localId, { status: "failed" });
-        pendingFilesRef.current.set(l.localId, { file: l.f, mode: "media", convId: cid, groupId }); // 留住 File+分组：点失败气泡按原相册重试
+        pendingFilesRef.current.set(l.localId, { file: l.f, mode: "media", convId: cid, groupId, caption, mentions: capMentions, mentionAll: capMentionAll }); // 留住 File+分组+caption+@：点失败气泡按原相册重试、不丢字不丢@
         // 用户只看到一句 toast；失败的会话/消息定位靠这条（可与 HTTP 层同 request_id 的上传日志对账）。
         logger.warn(LOG_TAG.media, "media_send_failed", {
           conv_id: cid, client_msg_id: l.localId, mime: l.f.type, bytes: l.f.size,
@@ -1201,7 +1221,7 @@ export default function App() {
 
   // 注意：uploadAndSend 必须声明在 send 之前——send 的 useCallback deps 数组在组件体内即时求值，
   // 后置声明会踩 const TDZ（ReferenceError）。
-  const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media", convIdOverride?: string) => {
+  const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media", convIdOverride?: string, caption?: string, mentions?: string[], mentionAll?: boolean) => {
     const client = clientRef.current;
     // convIdOverride 用于重试：按原会话重发（不耦合当前打开的会话）。
     const cid = convIdOverride ?? (peer ? convIdFor(uid, peer) : groupConvId);
@@ -1210,10 +1230,10 @@ export default function App() {
     const localId = `outbox-${crypto.randomUUID()}`;
     appendMsg(cid, {
       clientMsgId: localId, convId: cid, from: uid, content: "", contentType: attachmentContentType(pickMode, "file"),
-      fileName: file.name, fileSize: file.size, convSeq: 0, timestamp: Date.now(), status: "sending",
+      fileName: file.name, fileSize: file.size, caption, mentions, mentionAll, convSeq: 0, timestamp: Date.now(), status: "sending",
     });
     setUploadProgress((prev) => ({ ...prev, [localId]: { sent: 0, total: file.size } }));
-    pendingFilesRef.current.set(localId, { file, mode: pickMode, convId: cid }); // 失败时据此重试
+    pendingFilesRef.current.set(localId, { file, mode: pickMode, convId: cid, caption, mentions, mentionAll }); // 失败时据此重试（含 caption/@，不丢字不丢@）
     const takeCancelled = () => cancelledSendsRef.current.delete(localId); // 取消：文件无 blobURL，无需 revoke
     try {
       const { url, contentType: uploadedContentType, size } = await client.uploadFile(file, (sent, total) => {
@@ -1234,7 +1254,9 @@ export default function App() {
         thumb = await makeTinyThumbFromImage(file);
       }
       if (takeCancelled()) return; // poster 窗口内被取消 → 不发消息
-      const options = contentType === "file" ? { fileName: file.name, fileSize: size } : ((poster || thumb) ? { poster, thumb } : undefined);
+      const options = contentType === "file"
+        ? { fileName: file.name, fileSize: size, caption, mentions, mentionAll }
+        : ((poster || thumb || caption || mentions?.length || mentionAll) ? { poster, thumb, caption, mentions, mentionAll } : undefined);
       const clientMsgId = client.sendMedia(url, contentType, peer, cid, options);
       // thumb 也写回本地行：否则转发「自己发的」图片/视频时源消息无 thumb，收端只剩空占位（详见 forward 修复）。
       patchMsg(cid, localId, { clientMsgId, content: url, contentType, posterUrl: poster, thumb });
@@ -1261,11 +1283,28 @@ export default function App() {
     if (pastedImages.length) {
       const items = pastedImages;
       setPastedImages([]);
+      // 图说合并（Telegram 模型）：**恰好单件 + 有文字 + 非编辑/非引用态** → 文字作为 caption 与该媒体
+      // 同发**一条**消息，不再补发独立文本。多件（相册）/编辑/引用态一律走原有「媒体+文本各发」路径
+      //（相册不支持 caption；Web sendMedia 不支持 replyTo，引用态保持文本单发以免丢引用）。
+      const caption = items.length === 1 && text && !(editingMsg && editingMsg.convSeq > 0) && !(replyTo && replyTo.convSeq > 0)
+        ? text : undefined;
+      // 配文 @提及（仅群聊）：从 caption 文本按输入框累积的 token 还原 uid / @所有人，随媒体消息上行（被@强提醒）。
+      const capMentions = caption && !peer ? resolveMentions(caption, mentionCandidates.current) : [];
+      const capMentionAll = caption ? (!peer && resolveMentionAll(caption, mentionAllPending.current)) : false;
+      const capMentionOpts = { mentions: capMentions.length ? capMentions : undefined, mentionAll: capMentionAll || undefined };
       const imgs = items.filter((pi) => pi.kind === "image" || pi.kind === "video");
-      if (imgs.length) void sendMediaBatch(imgs.map((pi) => pi.file));
+      if (imgs.length) void sendMediaBatch(imgs.map((pi) => pi.file), caption ? { caption, ...capMentionOpts } : undefined);
       for (const pi of items) {
-        if (pi.kind === "file") void uploadAndSend(pi.file, "file");
+        if (pi.kind === "file") void uploadAndSend(pi.file, "file", undefined, caption, capMentionOpts.mentions, capMentionOpts.mentionAll);
         window.setTimeout(() => URL.revokeObjectURL(pi.url), 60_000);
+      }
+      if (caption) {
+        // 文字已随媒体作为 caption 发出：清输入与提及态，不再走下面的独立文本发送。
+        setInput("");
+        mentionCandidates.current = {};
+        mentionAllPending.current = false;
+        setMentionQuery(null);
+        return;
       }
     }
     if (!text) return;
@@ -1347,8 +1386,8 @@ export default function App() {
     if (!kept) { setToast("原文件已失效，请重新选择"); return; }
     pendingFilesRef.current.delete(key);
     removeMsgRow(m.convId, key);
-    if (kept.mode === "media") void sendMediaBatch([kept.file], { convId: kept.convId, groupId: kept.groupId });
-    else void uploadAndSend(kept.file, kept.mode, kept.convId);
+    if (kept.mode === "media") void sendMediaBatch([kept.file], { convId: kept.convId, groupId: kept.groupId, caption: kept.caption, mentions: kept.mentions, mentionAll: kept.mentionAll });
+    else void uploadAndSend(kept.file, kept.mode, kept.convId, kept.caption, kept.mentions, kept.mentionAll);
   }, [removeMsgRow, sendMediaBatch, uploadAndSend]);
 
   /// 媒体气泡点按路由（与 iOS 中心按钮状态机一致）：失败 ↻ 重试；上传中 ⏸↔↑ 暂停恢复
@@ -1671,7 +1710,7 @@ export default function App() {
     void (async () => {
       try {
         await clientRef.current?.addFavorite({
-          content_type: m.contentType, content: m.content,
+          content_type: m.contentType, content: m.content, caption: m.caption, // 图说：连文字一起收藏（整体）
           source_conv_id: m.convId, source_conv_seq: m.convSeq, source_from: m.from,
         });
         setToast("已收藏");
@@ -1728,8 +1767,8 @@ export default function App() {
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
     if (forwardMode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
@@ -1759,9 +1798,13 @@ export default function App() {
           : client.sendMedia(m.content, ct, to, target.conv_id, {
               forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize,
               mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
-              poster: m.posterUrl, thumb: m.thumb,
+              poster: m.posterUrl, thumb: m.thumb, caption: m.caption, // 图说随转发跟随（Telegram 模型）
+              // 配文 @ 随转发保留高亮+可点：mentions 服务端按目标群成员再过滤（非成员自动落普通文字）。
+              // **不带 mentionAll**：@所有人 需群主/管理员权限，转发者在目标群无权时整条会被拒发 300204；
+              // 且转发不该再次全员强提醒。丢 mention_all 后 "@所有人" 字样退化为普通文字（正确）。
+              mentions: m.mentions,
             });
-        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb);
+        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb, m.caption, m.mentions);
       }
     }
   }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);
@@ -2939,7 +2982,8 @@ export default function App() {
       return `${who}撤回了一条消息`;
     }
     const media = mediaPreview(c.last_message.content_type); // 图片/视频/文件 → [图片] 等
-    const text = media ?? c.last_message.content;
+    // 图说 caption「有字显字」（Telegram 模型）：图文/视频文/文件文带 caption 时预览直接显 caption，否则回退 [图片]/[视频]/[文件]。
+    const text = c.last_message.caption || media || c.last_message.content;
     if (!c.is_group) return text;
     if (c.last_message.content_type === "system") return c.last_message.content; // 系统消息无发送者前缀
     const who = c.last_message.from === uid ? "我" : (c.last_message.from_nickname || c.last_message.from);
@@ -3864,6 +3908,8 @@ export default function App() {
                         // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
                         <div className="quote-bar" onClick={() => locateInChat(m.convId, m.replyToConvSeq!)}>
                           {(() => { const q = messages.find((x) => x.convSeq === m.replyToConvSeq);
+                            // 图说消息（带 caption）：引用**只显文本**（快照即 caption），不挂媒体缩略图——简化、少出错。
+                            if (q?.caption) return null;
                             // 原消息在本地 → 真帧/磨砂/图标由 QuoteThumb 定；不在本地 → 从快照文本推兜底图标（与 iOS 一致，别只剩文本）。
                             return q ? <QuoteThumb m={q} gated={!!mediaGate(q)} /> : <QuoteSnapshotIcon snapshot={m.replySnapshot} />; })()}
                           <span className="quote-lines">
@@ -3988,6 +4034,11 @@ export default function App() {
                       ) : (
                         renderMessageText(m)
                       )}
+                      {/* 图说 caption（Telegram 模型）：图文/视频文/文件文的随附文本，渲染在媒体/文件卡下方、同一气泡内。
+                          媒体气泡时间压在图上（media-badge-br），故 caption 只出纯文字；文件气泡时间仍在下方 bmeta。 */}
+                      {m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? (
+                        <div className={`msg-caption${m.contentType === "file" ? " file" : ""}`}>{renderMentionText(m, m.caption)}</div>
+                      ) : null}
                       {!isMediaBubble && (
                         <span className="bmeta">
                           {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
@@ -4082,7 +4133,8 @@ export default function App() {
             // 点预览区（缩略图+文字，不含 ✕）→ 定位到被引用的原消息（与 iOS 一致）；✕ 独立在点击区外。
             <div className="reply-compose">
               <div className="reply-compose-hit" onClick={() => locateInChat(replyTo.convId, replyTo.convSeq)} title="跳到原消息">
-                <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />
+                {/* 图说消息（带 caption）：引用预览只显文本，不挂缩略图（与气泡内引用条一致，简化少出错）。 */}
+                {!replyTo.caption && <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />}
                 <div className="reply-compose-text">
                   <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
                   <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>

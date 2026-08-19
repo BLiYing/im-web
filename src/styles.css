@@ -379,6 +379,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-content { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; font-size: 14px; }
 .fav-thumb { max-width: 120px; max-height: 120px; border-radius: 6px; cursor: pointer; display: block; }
 .fav-thumb-wrap { position: relative; display: inline-block; cursor: pointer; }
+.fav-caption { margin-top: 4px; font-size: 13px; color: var(--text-secondary); } /* 图说整体收藏：快照下方随附文字 */
 .fav-del { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; }
 /* 编辑标记 + 译文（M4-5）。 */
 .edited-tag { color: var(--meta-time); font-size: 11px; }
@@ -490,6 +491,18 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
    消除内圈 18px 与外圈 4px 圆角不一致露出的楔形（浅色白、深色近黑）。 */
 .them .bubble.media .msg-media { border-bottom-left-radius: var(--space-1); }
 .me .bubble.media .msg-media { border-bottom-right-radius: var(--space-1); }
+
+/* 图说 caption（Telegram 模型）：媒体/文件卡下方的随附文字，与媒体同气泡。
+   媒体气泡 .bubble.media 是 padding:0 + overflow:hidden → caption 自带内边距把文字撑离贴边的图；
+   文件气泡本身有 padding，故 .file 变体只留顶部间距 + 一条分隔线（对齐设计草图）。 */
+/* 整体化关键：气泡是 inline-flex+wrap，**wrap 容器的收缩宽度按「全部子项排一行」求和**——
+   caption 用 flex-basis/width:100% 都会把「文字自身宽度」计入气泡宽（媒体旁多出大片空白，2026-08-19 自测截图）。
+   正确解法 width:0（收缩求宽时 caption 贡献 0 → 气泡宽=媒体/文件卡宽）+ min-width:100%（布局时再撑满整行、
+   文字按媒体宽换行）→ 媒体+caption 成一张紧凑整体卡片（对齐 iOS 整体化）。 */
+.msg-caption { width: 0; min-width: 100%; box-sizing: border-box; padding: 5px 10px 4px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; font-size: var(--msg-font); }
+.msg-caption.file { padding: 6px 0 0; margin-top: 6px; border-top: 0.5px solid var(--separator); }
+/* 文件文：caption 撑满整行后，时间行（bmeta）落到第三行——推到右侧贴角（对齐草图「时间在 caption 右下」）。 */
+.bubble:has(.msg-caption) > .bmeta { margin-left: auto; }
 /* 悬浮角标：底恒为半透明黑，浅色图上也读得清（不靠文字阴影）。 */
 .media-badge { position: absolute; padding: 1px 6px; border-radius: 9px; background: var(--overlay);
   color: var(--on-media); font-size: 11px; line-height: 16px; white-space: nowrap; pointer-events: none;
