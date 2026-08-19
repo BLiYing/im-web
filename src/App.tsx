@@ -1960,7 +1960,10 @@ export default function App() {
 
   const copyMessage = useCallback((m: ChatMessage) => {
     setMenu(null);
-    // 图片：复制真实图片字节（可粘贴回输入框直接发图）；失败或非图片：复制文本/URL。
+    // 图说消息（带 caption）：复制**仅复制文本**（caption），与「这类消息的文本操作作用于文本」约定一致。
+    // caption 只存在于 image/video/file，故一个非空判断即可覆盖三类。
+    if (m.caption) { void navigator.clipboard?.writeText(m.caption); setToast("已复制"); return; }
+    // 纯图片（无 caption）：复制真实图片字节（可粘贴回输入框直接发图）；失败或非图片：复制文本/URL。
     if (m.contentType === "image") {
       copyImageToClipboard(m.content).then(() => setToast("已复制图片"))
         .catch(() => { void navigator.clipboard?.writeText(m.content); setToast("已复制链接"); });
@@ -4290,6 +4293,8 @@ export default function App() {
           onLocate={() => { const mm = viewer.m; setViewer(null); setViewerMore(false); setGalleryOpen(false); setDetail(null); locateInChat(mm.convId || currentConvRef.current, mm.convSeq); }}
           onFavorite={() => favoriteMessage(viewer.m)}
           onCopy={() => {
+            // 图说（带 caption）：复制文本（与长按菜单「复制」同口径）。
+            if (viewer.m.caption) { void navigator.clipboard?.writeText(viewer.m.caption); setToast("已复制"); return; }
             // 图片：复制图片字节（可粘贴回输入框直接发图）；其余非视频：复制链接。
             if (viewer.m.contentType === "image") {
               copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))

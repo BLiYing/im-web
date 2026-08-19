@@ -80,7 +80,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "readReceipts", label: "已读详情", icon: Eye,
       visible: (c) => !!c.isGroup && c.m.from === c.uid && c.m.convSeq > 0, run: (c) => h.readReceipts(c.m) },
     // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发）。
-    { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image", run: (c) => h.copy(c.m) },
+    { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image" || !!c.m.caption, run: (c) => h.copy(c.m) },
     { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
     { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
     // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
