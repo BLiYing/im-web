@@ -85,7 +85,7 @@ import {
   Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
   MoreHorizontal,
   Search, Camera, FileText, MessageCircle, X, Forward,
-  ChevronDown, ChevronUp, QrCode,
+  ChevronDown, ChevronUp, QrCode, Link2,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -3094,23 +3094,26 @@ export default function App() {
     } catch (e) { setToast(`获取名片码失败：${(e as Error).message}`); }
   };
 
-  const openGroupCard = async (cid: string) => {
+  // 群二维码 / 群邀请链接同源（码即邀请链接）：asLink 仅改标题与文案，复用同一张卡片模态（内含二维码图 + 复制链接）。
+  const openGroupCard = async (cid: string, asLink = false) => {
     const gi = groupInfos[cid];
     const canManage = gi?.my_role === "owner" || gi?.my_role === "admin";
+    const noun = asLink ? "群邀请链接" : "群二维码";
+    const denyVerb = asLink ? "获取群邀请链接" : "出示群二维码";
     // perm_invite=1 时群码即邀请链接，仅群主/管理员可出示。无权限时不打开模态、直接中文吐司（对齐 iOS）。
     if (gi?.perm_invite && !canManage) {
-      setToast("群主已开启「仅管理员可邀请」，你无法出示群二维码");
+      setToast(`群主已开启「仅管理员可邀请」，你无法${denyVerb}`);
       return;
     }
     try {
       const card = await clientRef.current!.groupQR(cid);
-      setQrCardModal({ title: "群二维码", subtitle: "扫描二维码，加入群聊",
+      setQrCardModal({ title: noun, subtitle: asLink ? "复制或分享链接，邀请好友加入群聊" : "扫描二维码，加入群聊",
         name: gi?.name || "群聊", avatarUrl: gi?.avatar_url, card, canReset: canManage, kind: "group", convId: cid });
     } catch (e) {
       // 服务端兜底（本地 perm_invite 可能过期）：300204 映射为中文，其余透传。
       const msg = errorCode(e) === 300204
-        ? "群主已开启「仅管理员可邀请」，你无法出示群二维码"
-        : `获取群二维码失败：${(e as Error).message}`;
+        ? `群主已开启「仅管理员可邀请」，你无法${denyVerb}`
+        : `获取${noun}失败：${(e as Error).message}`;
       setToast(msg);
     }
   };
@@ -3234,6 +3237,9 @@ export default function App() {
       // 按业务码分支（勿直接透传服务端 message，i18n）：300207 = 被邀请者已被移出/冷却期，
       // 用邀请场景的第三人称文案，区别于自加群映射表里的第二人称「你已被移出」。
       if (errorCode(e) === 300207) setToast("该成员已被移出本群，暂时无法再次邀请");
+      // 300204 = 无邀请权（竞态：打开选择器后群主刚开启「仅管理员可邀请」）。后端此码下发英文默认文案，
+      // 且 300204 多场景复用不宜在 FRIENDLY_MESSAGES 一刀切映射，故在此邀请场景就地给中文（对齐 iOS）。
+      else if (errorCode(e) === 300204) setToast("群主已开启「仅管理员可邀请」，你无法邀请成员");
       else setToast(`邀请失败：${(e as Error).message}`);
     }
   };
@@ -3594,7 +3600,10 @@ export default function App() {
                     <div className="menu-card chat-menu" onClick={(e) => e.stopPropagation()}>
                       {(isGroupChat ? [
                         { id: "info", label: "群资料", icon: Info, run: () => openGroupPanel(groupConvId) },
-                        { id: "invite", label: "邀请成员", icon: UserPlus, run: () => setInviteDraft({ convId: groupConvId, selected: [] }) },
+                        // 「仅管理员可邀请」开启且我非管理员 → 隐藏邀请入口（对齐 iOS / 详情面板）。
+                        ...(!groupInfos[groupConvId]?.perm_invite || groupInfos[groupConvId]?.my_role !== "member"
+                          ? [{ id: "invite", label: "邀请成员", icon: UserPlus, run: () => setInviteDraft({ convId: groupConvId, selected: [] }) }]
+                          : []),
                         { id: "mute", label: groupConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (groupConv) setConvMuted(groupConv, !groupConv.muted); } },
                         { id: "select", label: "选择消息", icon: CheckSquare, run: () => enterSelectMode() },
                         { id: "leave", label: "退出群聊", icon: LogOut, danger: true, run: () => void doLeaveGroup(groupConvId) },
@@ -4433,6 +4442,8 @@ export default function App() {
         const gp = d.isGroup ? groupInfos[d.convId] : undefined;
         const canManage = !!gp && gp.my_role !== "member";
         const isOwner = !!gp && gp.my_role === "owner";
+        // 「仅管理员可邀请」开启且我非管理员 → 隐藏所有邀请类入口（群二维码/群邀请链接/添加成员），对齐 iOS。
+        const canInviteHere = !gp?.perm_invite || canManage;
         const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || "群聊")
           : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || d.peer || "");
         // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
@@ -4557,9 +4568,15 @@ export default function App() {
                         <ChevronRight size={16} className="detail-row-chev" />
                       </button>
                     )}
-                    {d.isGroup && (
+                    {d.isGroup && canInviteHere && (
                       <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
                         <span className="detail-row-ic"><QrCode size={18} /></span><span>群二维码</span>
+                        <ChevronRight size={16} className="detail-row-chev end" />
+                      </button>
+                    )}
+                    {d.isGroup && canInviteHere && (
+                      <button className="detail-row" onClick={() => void openGroupCard(d.convId, true)}>
+                        <span className="detail-row-ic"><Link2 size={18} /></span><span>群邀请链接</span>
                         <ChevronRight size={16} className="detail-row-chev end" />
                       </button>
                     )}
@@ -4594,6 +4611,7 @@ export default function App() {
                   <DetailTabs
                     tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
                     gp={gp} uid={uid} media={media} files={files} links={links}
+                    canInvite={canInviteHere}
                     onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                     onOpenMember={openPeerDetail} canManageMember={canManageMember}
                     onMemberMenu={(e, cid, m) => setMemberMenu({ x: e.clientX, y: e.clientY, convId: cid, m })}

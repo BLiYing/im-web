@@ -297,7 +297,7 @@ export interface QRGroupCard {
   intro?: string; // 群简介（可空；未入群预览也可见，草图 §05）
   joined: boolean;
   joinable: boolean;
-  reason: string; // "" 可直接入群 | approval 可申请需审批 | joined | full | banned
+  reason: string; // "" 可直接入群 | approval 可申请需审批 | joined | full | banned | invite_revoked（改为仅管理员可邀请、此码失效）
 }
 
 /** POST /qr/resolve 返回：kind 决定 data 形状。 */

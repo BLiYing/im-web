@@ -32,6 +32,11 @@ describe("groupCardAction", () => {
     expect(a.label).toContain("满");
   });
   it("黑名单 → 不可加入", () => expect(groupCardAction(gc({ joinable: false, reason: "banned" })).kind).toBe("disabled"));
+  it("仅管理员可邀请·旧码失效 → 不可加入且带原因", () => {
+    const a = groupCardAction(gc({ joinable: false, reason: "invite_revoked" }));
+    expect(a.kind).toBe("disabled");
+    expect(a.note).toContain("仅管理员可邀请");
+  });
 });
 
 describe("classifyUnknown", () => {

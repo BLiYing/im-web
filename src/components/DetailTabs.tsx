@@ -17,7 +17,7 @@ export type DetailTab = "members" | "media" | "files" | "links";
 // DOM/className/结构与原 App 内联逐字一致（行为等价）。媒体/文件门控与聊天气泡共用 MediaTile/FileGateIcon。
 export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, links,
-  onAddMember, onOpenMember, canManageMember, onMemberMenu,
+  canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu,
   mediaGate, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
 }: {
   tabs: Array<{ k: DetailTab; label: string }>;
@@ -28,6 +28,7 @@ export function DetailTabs({
   media: ChatMessage[];
   files: ChatMessage[];
   links: ChatMessage[];
+  canInvite: boolean;
   onAddMember: (cid: string) => void;
   onOpenMember: (userId: string) => void;
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
@@ -49,9 +50,12 @@ export function DetailTabs({
       <div className="detail-tabbody">
         {activeTab === "members" && gp && (
           <div className="detail-members">
-            <button className="detail-row accent" onClick={() => onAddMember(gp.conv_id)}>
-              <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
-            </button>
+            {/* 「仅管理员可邀请」开启且我非管理员 → 隐藏「添加成员」（对齐 iOS；服务端仍是权威闸门）。 */}
+            {canInvite && (
+              <button className="detail-row accent" onClick={() => onAddMember(gp.conv_id)}>
+                <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
+              </button>
+            )}
             {gp.members.map((m) => (
               <div key={m.user_id} className="detail-member"
                 onClick={() => m.user_id !== uid && onOpenMember(m.user_id)} role="button">

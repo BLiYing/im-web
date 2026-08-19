@@ -52,7 +52,7 @@ describe("GroupManagePanel", () => {
 describe("DetailTabs", () => {
   const base = {
     tabs: [{ k: "members" as DetailTab, label: "成员" }, { k: "links" as DetailTab, label: "链接" }],
-    activeTab: "members" as DetailTab, uid: "u1",
+    activeTab: "members" as DetailTab, uid: "u1", canInvite: true,
     media: [] as ChatMessage[], files: [] as ChatMessage[], links: [] as ChatMessage[],
     onSelectTab: vi.fn(), onAddMember: vi.fn(), onOpenMember: vi.fn(),
     canManageMember: () => true, onMemberMenu: vi.fn(),
@@ -76,6 +76,11 @@ describe("DetailTabs", () => {
     const { getByText } = render(<DetailTabs {...base} gp={gp()} onSelectTab={onSelectTab} />);
     fireEvent.click(getByText("链接"));
     expect(onSelectTab).toHaveBeenCalledWith("links");
+  });
+  it("无邀请权（canInvite=false）→ 隐藏「添加成员」", () => {
+    const { queryByText } = render(
+      <DetailTabs {...base} gp={gp({ members: [member({ user_id: "u2" })] })} canInvite={false} />);
+    expect(queryByText("添加成员")).toBeNull();
   });
 });
 

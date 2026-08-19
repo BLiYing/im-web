@@ -31,6 +31,8 @@ export function groupCardAction(c: QRGroupCard): GroupAction {
         return { kind: "disabled", label: "该群人数已满", note: "群成员已达上限，暂时无法加入" };
       case "banned":
         return { kind: "disabled", label: "无法加入", note: "你已被移出该群，暂时或永久不可加入" };
+      case "invite_revoked":
+        return { kind: "disabled", label: "无法加入", note: "该群已改为仅管理员可邀请，此邀请已失效" };
       default:
         return { kind: "disabled", label: "无法加入", note: "" };
     }
