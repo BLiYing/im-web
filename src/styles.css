@@ -476,7 +476,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 气泡内视频：首帧 + 居中播放角标（不自动播放，点击进查看器） */
 /* 媒体气泡（M4+）：外框按协议 media_w/media_h 的原始比例由 JS 定尺（与 iOS 同算法），
    图片/首帧 cover 填满；时长/进度压左上、时间+已读压右下，故气泡自身去内边距。 */
-.bubble.media { padding: 0; overflow: hidden; }
+/* 媒体气泡改**纵向 flex**（column）+ align-items:stretch：媒体是唯一定宽子项 → 气泡收紧到媒体宽，
+   caption/引用条/转发自都按媒体宽拉伸（长配文按图宽折，不再撑宽到 72% 露出大片绿色空白）。
+   row-wrap 下 caption 的 min-width:100% 会反把气泡撑宽（浏览器实测），必须 column（对齐 iOS 整体卡）。 */
+.bubble.media { padding: 0; overflow: hidden; flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
 /* 媒体气泡里仍可能有「转发自 X」/引用条：气泡整体去了内边距，这两行要自己补回来，否则贴着边框。 */
 .bubble.media > .forward-from, .bubble.media > .quote-bar { margin: 6px 10px 2px; }
 .msg-media { position: relative; display: inline-flex; cursor: pointer; border-radius: var(--radius-bubble); overflow: hidden; }
