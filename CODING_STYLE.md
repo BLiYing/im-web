@@ -33,8 +33,13 @@
 - 组件函数体顺序：`useState` → `useRef` → 派生值/`useMemo` → `useCallback` → `useEffect` → `return(JSX)`。
 - **Hook 顺序耦合**：`useCallback` 的依赖数组在组件体内**即时求值**——被依赖的回调/值**必须先声明**，否则 TDZ 崩溃。
   自定义 Hook（`useToast`/`useDialogs`/`useDevices`）须在**用到其返回值的回调之前**调用（放组件体最靠前）。
+- **所有 Hook 必须在任何 `return`（含 early return）之前调用**（React Hooks 规则，别与上一条 TDZ 混淆）：
+  `useState/useRef/useMemo/useCallback/useEffect` 一律放组件体顶部。放在 `if (phase==="login") return <LoginView/>` 之后
+  →登录/主视图两种渲染 hook 数不一致→运行时崩 **"Rendered more hooks than during the previous render"**
+  （本次 `AppServicesContext` 的 `services` useMemo 踩过：一开始放在 early return 之后，移到之前才好）。
 - 禁止魔法数/字符串,抽成具名常量。
-- 列表渲染 `key` 用稳定身份（消息用 `mediaIdentity`/`convSeq`，别用数组下标——除非静态列表）。
+- 列表渲染 `key` 用**稳定身份**：消息一律 `album.ts#msgKey`（convSeq 优先），**绝不用数组下标 `i` 或 `serverMsgId` 兜底**
+  （详见 §九——入站消息无 clientMsgId、翻历史 prepend 时下标平移会让 React 错绑 DOM）。静态列表除外。
 
 ## 五、错误处理与日志
 - 网络 / IO / IndexedDB 调用必须有明确失败分支，不吞错（`catch` 里至少 `setToast` 或落日志）。
@@ -49,7 +54,7 @@
 
 ## 七、防巨组件（组件/文件不膨胀）—— 重点
 `App.tsx` 曾长到 **6302 行**单体组件（改一个小格子要动整个巨文件、重渲染面巨大、出现「须在使用前定义避免 TDZ」这类顺序耦合）。
-2026-08 起分批拆分（→ ~5029，历史与方案见 `current_task.md`「技术债」）。**新代码往哪放，按此决策树，别默认往 App.tsx 堆**：
+2026-08 起分批拆分（6302 → ~4778，历史与方案见 `current_task.md`「技术债」）。**新代码往哪放，按此决策树，别默认往 App.tsx 堆**：
 
 - **① 有自己状态 + 一组操作的功能 → 自定义 Hook**（`use*.ts`）。判据：需要 **≥2 个新 state**、或有自己的
   定时器/订阅/缓存。副作用依赖（IM 客户端、吐司、弹窗）**注入进去**，别在 Hook 里直接摸全局。
@@ -84,9 +89,23 @@
   onFavorite/onCopy/onForward/onDelete…），不是跨组件共享的服务，硬传成本可接受。**Context 落地时应把这些公共服务类回调一并收编**。
 - 会话详情抽屉（~50 props）**不走硬传**：已触墙，等 `AppServicesContext` 就位再拆（见 `current_task.md`「prop-drilling 墙」）。
 
+**拆巨文件按 ROI 排序，别为「砍行数」硬拆（2026-08 抽屉 + 消息表重构复盘）**：
+- **Context/服务对巨文件瘦身的杠杆常有限**。会话详情抽屉 ~45 个依赖里，能进 `AppServicesContext` 的**稳定服务只 ~6 个（~13%）**；
+  大头是**数据**（conversations/groupInfos/detailMsgs…）+ **有状态动作**（doXxx，闭包依赖 state），它们进 Context 会拖累重渲染、进不去。
+  别指望「上了 Context 抽屉就瘦」——先分清一个巨块的依赖里，稳定服务占多少。
+- **优先级：③纯逻辑 hook ＞ ②视图组件 ＞ 胶水层**，按此顺序动手：
+  - **③纯逻辑（无 self 的转换/状态机）是唯一「可测 + 真解耦」的**——抽成 `*.ts` 纯函数 + 薄 hook 外壳并配单测。
+    参考 `messageStore.ts`（去重/合并/ack 纯变换）+ `useMessageStore`（状态外壳）。**先抽它**，收益最实。
+  - **②视图**（把 JSX 搬进高-prop 子组件）砍行最多，但多是「换个地方放」：解耦有限、jsdom 测不到、**要浏览器验**，收益递减。
+  - **胶水层别抽**：一个 hook 若要注入 **~20 个 App `set*`/`refresh*`**（如「SDK 事件 → 一堆 setter」的 handlers 总线），
+    抽出 = **搬走 tangle**、还测不动（要 mock 全部依赖 + SDK），属**负 ROI**，维持内联。
+- **目标是「把易错逻辑隔离成可测」，不是「拆到 600 红线以下」**。App.tsx 是历史欠账，逐步降即可；别为凑数字把耦合硬搬。
+
 ## 八、测试
 - **每加一个功能配 `*.test.ts(x)`**，`npm test`（vitest）自动纳入回归。
 - 纯逻辑模块直接测函数；组件/Hook 测试用 `@testing-library`，文件顶部加 `// @vitest-environment jsdom`（默认 node 环境不拖慢纯逻辑用例）。
+- **组件/Hook 测试若在一个文件里多次 `render`，须 `afterEach(cleanup)`**（`test-setup.ts` 未全局 cleanup）——否则前一个用例的 DOM 堆进
+  `document.body`，`getByText` 报「Found multiple elements」或跨用例串扰（本次 `DetailPanelParts.test` 踩过）。同名文本用 `container.querySelector` 收窄。
 - **`App.smoke.test.tsx` 是拆分护栏**（mock IMClient 渲染真实 `<App/>` 走通登录→发/收消息主链路）——**任何拆分/重构必须保持它绿**。
 - jsdom 测不到真滚动布局（`scrollTo` 已桩掉）：滚动定位/分页类改动，编译过 ≠ 对，**必须浏览器手测**。
 
