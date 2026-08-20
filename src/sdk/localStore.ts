@@ -30,7 +30,7 @@ const STORE_DEFS: StoreDef[] = [
   { name: DELETIONS_STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
 ];
 
-interface MsgRecord {
+export interface MsgRecord {
   id: string;        // 已确认：owner|convId|convSeq；被拒(convSeq=0)：owner|convId|c:clientMsgId —— 唯一键，幂等覆盖
   ownerConv: string; // owner|convId —— 索引：按会话批量取
   owner: string;
@@ -350,6 +350,84 @@ export async function loadConversation(owner: string, convId: string): Promise<C
     );
   } catch (error) {
     logger.warn(LOG_TAG.store, "conversation_load_failed", { conv_id: convId, error });
+    return [];
+  }
+}
+
+/**
+ * 命中判定（与后端 G4 口径对齐）：`content` 或 `caption` 大小写不敏感子串。
+ * 撤回消息（`recalledAt`）不参与命中；删除/自删走墓碑在外层过滤。needle 须已 `toLowerCase`。
+ */
+function matchesQuery(rec: MsgRecord, needle: string): boolean {
+  if (rec.recalledAt) return false; // 撤回消息不参与命中
+  const content = rec.content ? rec.content.toLowerCase() : "";
+  if (content.includes(needle)) return true;
+  const caption = rec.caption ? rec.caption.toLowerCase() : "";
+  return caption.includes(needle);
+}
+
+/**
+ * 本地消息搜索（纯本地，SEARCH_DESIGN §7.2）。
+ * - **会话内**（`opts.convId`）：走 `ownerConv` 索引 `getAll` 后内存过滤（零新索引）。
+ * - **全局**（无 `convId`）：游标遍历整个 `messages` store（仅 `ownerConv` 索引、无内容索引），命中即收。
+ *
+ * 命中 = `content`/`caption` 大小写不敏感子串（`matchesQuery`）；排除撤回（`recalledAt`）与本地删除墓碑。
+ * 结果**按时间倒序**（新→旧，tiebreak `convSeq` 倒序），上限 `limit`。失败记日志并返回空——搜索是增强，绝不抛。
+ */
+export async function searchMessages(
+  owner: string,
+  opts: { convId?: string; q: string; limit: number },
+): Promise<MsgRecord[]> {
+  const needle = (opts.q ?? "").trim().toLowerCase();
+  if (!owner || !needle || !opts.limit || opts.limit <= 0) return [];
+  try {
+    const db = await openDB();
+    // 陈旧连接可能缺 deletions store（升级被别标签页阻塞时）——此时不过滤墓碑，也不让事务抛 NotFoundError。
+    const hasDeletions = db.objectStoreNames.contains(DELETIONS_STORE);
+    const stores = hasDeletions ? [STORE, DELETIONS_STORE] : [STORE];
+    return await new Promise<MsgRecord[]>((resolve, reject) => {
+      const tx = db.transaction(stores, "readonly");
+      const msgStore = tx.objectStore(STORE);
+      const deleted = new Set<string>();
+      const collected: MsgRecord[] = [];
+      if (hasDeletions) {
+        const delStore = tx.objectStore(DELETIONS_STORE);
+        // 会话内只取本会话墓碑；全局取全部键。
+        const delReq = opts.convId
+          ? delStore.index("ownerConv").getAllKeys(`${owner}|${opts.convId}`)
+          : delStore.getAllKeys();
+        delReq.onsuccess = () => {
+          for (const k of (delReq.result as IDBValidKey[]) ?? []) deleted.add(String(k));
+        };
+      }
+      if (opts.convId) {
+        const req = msgStore.index("ownerConv").getAll(`${owner}|${opts.convId}`);
+        req.onsuccess = () => {
+          for (const rec of (req.result as MsgRecord[]) ?? []) {
+            if (rec.owner === owner && matchesQuery(rec, needle)) collected.push(rec);
+          }
+        };
+      } else {
+        const cursorReq = msgStore.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) return;
+          const rec = cursor.value as MsgRecord;
+          if (rec.owner === owner && matchesQuery(rec, needle)) collected.push(rec);
+          cursor.continue();
+        };
+      }
+      tx.oncomplete = () => {
+        const hits = collected
+          .filter((r) => !deleted.has(r.id))
+          .sort((a, b) => (b.timestamp - a.timestamp) || (b.convSeq - a.convSeq))
+          .slice(0, opts.limit);
+        resolve(hits);
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "message_search_failed", { conv_id: opts.convId, error });
     return [];
   }
 }

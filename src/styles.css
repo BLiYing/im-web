@@ -176,6 +176,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   border: 1px solid var(--separator);
   border-radius: var(--app-card-radius);
   margin-bottom: var(--app-gap);
+  position: relative; /* 搜索态：来自下拉 / 日历 popover 锚在标题栏下方（top:100%） */
 }
 .link { border: 0; background: none; color: var(--accent); font-size: 15px; cursor: pointer; }
 .back-btn { display: none; } /* 仅窄屏单栏模式显示 */
@@ -1244,6 +1245,88 @@ button.detail-row:hover { background: var(--surface-hover); }
   display: flex; align-items: center; justify-content: center;
   background: var(--accent); color: var(--on-accent); font-weight: 700;
 }
+
+/* ── 搜索（SEARCH_DESIGN）：命中词高亮 + 会话内搜索栏 + 日历 + 首页全局搜索 ─────────────
+   全绿主题，一律引用既有 token（--accent / --accent-flash / --seg 等），不硬编码 hex。 */
+/* 命中词高亮：底色走 --accent-flash 语义变量（非硬编码黄），与 .flash 同一套 accent 语言。 */
+mark.search-hit { background: var(--accent-flash); color: inherit; border-radius: 3px; padding: 0 1px; }
+.icon-btn.active { color: var(--accent); background: var(--surface-hover); }
+
+/* 会话内搜索栏：贴在聊天头下方（对齐草图 §05 .wsearchbar）。 */
+/* 搜索条**在标题栏内**（替换头部内容，与 iOS「搜索框在标题栏行」对齐，2026-08-20）：
+   header 自带 padding，条本身不再加；flex:1 占满整行。 */
+.chat-search-bar { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; }
+.chat-search-lead { color: var(--text-secondary); flex: none; }
+.chat-search-input {
+  flex: 1; min-width: 40px; border: 0; outline: none; background: var(--surface);
+  border-radius: var(--radius-card); height: 32px; padding: 0 10px; font-size: 14px; color: var(--text);
+}
+.chat-search-input::placeholder { color: var(--text-secondary); }
+.chat-search-fromprefix { color: var(--accent); font-weight: 600; font-size: 14px; flex: none; }
+/* 「来自:X」可删 token（钮从不显名，状态收进搜索框） */
+.from-token {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--text); border-radius: 8px; padding: 3px 5px 3px 9px; font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.from-token-x {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+  border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; padding: 0;
+}
+.chat-search-nav { display: flex; align-items: center; gap: 4px; flex: none; }
+.chat-search-count { font-size: 12px; color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+.chat-search-count b { color: var(--accent); }
+.chat-search-arrow, .chat-search-icbtn { width: 30px; height: 30px; font-size: 16px; }
+.chat-search-cancel { flex: none; border: 0; background: none; color: var(--accent); font-size: 14px; font-weight: 600; cursor: pointer; padding: 4px 6px; }
+
+/* 👤 来自：群成员下拉（仿 @ 列表，复用 .mention-avatar / .mention-name / .role-badge）。
+   锚在标题栏下方的浮层（header position:relative + top:100%），不再挤在栏内。 */
+.chat-from-pick {
+  position: absolute; left: 0; right: 0; top: 100%; z-index: 60; margin-top: 4px; padding: 4px;
+  background: var(--surface-elevated); border: 1px solid var(--separator);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-menu);
+}
+.chat-from-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); padding: 6px 9px 4px; font-weight: 700; }
+.chat-from-scroll { max-height: 264px; overflow-y: auto; }
+.chat-from-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px;
+  background: none; border: 0; border-radius: 6px; cursor: pointer; text-align: left; color: var(--text); font-size: 14px;
+}
+.chat-from-row:hover { background: var(--selection-bg); }
+.chat-from-row .role-badge { margin-left: 0; vertical-align: 0; flex: none; }
+
+/* 📅 日历 popover（选日跳当天首条；「最早/今天」快捷 §5.1）。 */
+.chat-cal-pop {
+  position: absolute; right: var(--space-3); top: 100%; z-index: 60; width: 280px; margin-top: 4px;
+  background: var(--surface-elevated); border: 1px solid var(--separator); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-menu); padding: 10px;
+}
+.chat-cal-head { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 8px; }
+.chat-cal-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.chat-cal-dow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; font-size: 11px; color: var(--text-secondary); text-align: center; padding-bottom: 4px; }
+/* 列轨必须 minmax(0,1fr)：纯 1fr 的最小值是 auto，配合格子的 aspect-ratio 触发 Chrome
+   「行高↔列宽」反馈把每列撑到 80px（7 列 560px 溢出 280px 弹层，后四列被 .chat overflow:hidden
+   裁掉——曾表现为「有的日期没有显示」，2026-08-20 修）。 */
+.chat-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.chat-cal-day {
+  aspect-ratio: 1; min-width: 0; padding: 0; display: flex; align-items: center; justify-content: center; position: relative;
+  border: 0; background: none; color: var(--text); font-size: 13px; border-radius: 50%; cursor: pointer;
+}
+.chat-cal-day:hover:not(.empty) { background: var(--surface-hover); }
+.chat-cal-day.empty { cursor: default; }
+.chat-cal-day.today { outline: 1.5px solid var(--accent); }
+.chat-cal-day.has::after { content: ""; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); }
+.chat-cal-quick { display: flex; gap: 8px; margin-top: 10px; }
+.chat-cal-q { flex: 1; text-align: center; border: 0; border-radius: 8px; background: var(--surface); color: var(--accent); font-size: 13px; font-weight: 600; padding: 8px; cursor: pointer; }
+.chat-cal-q:hover { background: var(--surface-hover); }
+
+/* 首页全局搜索框（侧栏头，SEARCH_DESIGN §04） */
+.home-search { display: flex; align-items: center; gap: 7px; margin: var(--space-2) var(--space-3); padding: 0 10px; height: 34px; background: var(--surface); border-radius: var(--radius-card); }
+.home-search-lead { color: var(--text-secondary); flex: none; }
+.home-search-input { flex: 1; min-width: 0; border: 0; outline: none; background: none; color: var(--text); font-size: 14px; }
+.home-search-input::placeholder { color: var(--text-secondary); }
+.home-search-clear { flex: none; border: 0; background: none; color: var(--text-secondary); cursor: pointer; display: flex; padding: 2px; }
+.home-results { padding-bottom: var(--space-3); }
 
 /* ── 已读名单弹窗（M4-8）：已读/未读两栏，不显读取时刻 ─────────────────────── */
 .readby-modal { width: min(360px, 92vw); }

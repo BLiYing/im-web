@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { AppServicesProvider, type AppServices } from "./AppServicesContext";
@@ -7,7 +7,7 @@ import { useMessageStore } from "./useMessageStore";
 import { GroupManagePanel } from "./components/GroupManagePanel";
 import { DetailTabs } from "./components/DetailTabs";
 import { MemberMenu } from "./components/MemberMenu";
-import { loadConversation, clearMessages, markMessageDeleted } from "./sdk/localStore";
+import { loadConversation, clearMessages, markMessageDeleted, searchMessages, type MsgRecord } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
@@ -41,6 +41,9 @@ import {
   mediaBoxProps, isPreviewableFile, videoFrameSrc, syntheticViewerMessage, type RecordItem, type ChatRecord,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
+import { ChatSearchBar } from "./components/ChatSearchBar";
+import { HomeSearchResults } from "./components/HomeSearchResults";
+import { highlightText } from "./searchHighlight";
 import { AlbumGrid } from "./components/AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
@@ -267,6 +270,21 @@ export default function App() {
   const mentionAllPending = useRef(false);
   const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
   const mentionActiveRef = useRef<HTMLButtonElement>(null); // 当前高亮行：键盘移动时滚入视野
+  // ---- 会话内搜索（SEARCH_DESIGN §4/§5）：顶栏搜索框 + 底部命中导航 ▲▼ + 📅日历 + 👤来自（纯本地）----
+  const [searchOpen, setSearchOpen] = useState(false);              // 会话内搜索态开关
+  const [searchQuery, setSearchQuery] = useState("");               // 关键词（content+caption 大小写不敏感子串）
+  const [searchHitIdx, setSearchHitIdx] = useState(0);              // 当前命中下标（在 searchHits 升序数组中，0=最早）
+  const [searchFrom, setSearchFrom] = useState("");                 // 「来自:」发件人 uid（""=不限，仅群聊）
+  const [searchFromName, setSearchFromName] = useState("");         // token 显示名（👤 钮本身从不显名）
+  const [searchFromPickerOpen, setSearchFromPickerOpen] = useState(false); // 群成员下拉开合
+  const [searchFromFilter, setSearchFromFilter] = useState("");     // 成员下拉的打字过滤词
+  const [calendarOpen, setCalendarOpen] = useState(false);          // 📅 日历 popover 开合
+  const [calendarMonth, setCalendarMonth] = useState<{ y: number; m: number }>(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchSigRef = useRef("");                                  // 上次「默认跳最新」的签名（会话|词|发件人），避免每次渲染重跳
+  // ---- 首页全局搜索（SEARCH_DESIGN §3）：侧栏头搜索框 → 会话/联系人/聊天记录三分组 ----
+  const [homeSearch, setHomeSearch] = useState("");                 // 首页全局搜索词
+  const [homeMsgHits, setHomeMsgHits] = useState<MsgRecord[]>([]);  // 聊天记录命中（防抖异步扫本地库）
   // 已读名单弹窗（M4-8）：null=关闭；tab 切换已读/未读。
   const [readReceipts, setReadReceipts] = useState<{ read: string[]; unread: string[]; tab: "read" | "unread" } | null>(null);
   // 会话详情面板（右侧抽屉，对齐 iOS IMChatDetailViewController；单聊/群聊共用）。null=关闭。
@@ -1975,14 +1993,17 @@ export default function App() {
     }
     return out;
   };
+  // 命中词高亮 highlightText 已抽到 ./searchHighlight（纯函数，与首页聊天记录摘要共用）。
+  const highlightSearch = (text: string, keyBase: string): ReactNode =>
+    searchOpen ? highlightText(text, searchQuery, keyBase) : text;
   // 把一段文本渲染为高亮 @提及的节点：命中的 `@昵称` token 上色；有 uid 且非多选态时可点 → 跳该成员资料页。
-  // @所有人 无 uid 只高亮不可点。无提及时直接返回字符串。
+  // @所有人 无 uid 只高亮不可点。无提及时直接返回字符串（叠加会话内搜索命中词高亮）。
   const renderMentionText = (m: ChatMessage, text: string) => {
     const entries = mentionEntriesFor(m);
-    if (entries.length === 0) return text;
+    if (entries.length === 0) return highlightSearch(text, "sh");
     const uidByName = new Map(entries.map((e) => [e.name, e.uid]));
     return segmentMentions(text, entries.map((e) => e.name)).map((s, i) => {
-      if (!s.mention) return s.text;
+      if (!s.mention) return <Fragment key={i}>{highlightSearch(s.text, `sh${i}`)}</Fragment>;
       const uid = uidByName.get(s.text.slice(1)); // 去掉 @ 取昵称查 uid
       if (selectMode || !uid) return <span key={i} className="mention-hl">{s.text}</span>;
       return <span key={i} className="mention-hl mention-tap"
@@ -2585,6 +2606,139 @@ export default function App() {
     .slice()
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
+
+  // ===== 会话内搜索（SEARCH_DESIGN §4）：本地过滤已加载消息 → 命中集（升序，0=最早）=====
+  // 命中口径与后端 G4 / localStore.searchMessages 一致：content|caption 大小写不敏感子串，排除撤回/系统/未确认，
+  // 叠加可选 `来自:` 发件人过滤（sender==uid）。纯内存过滤（整条会话已在本地），配合 jumpToSeq 复用跳转/高亮。
+  const searchNeedle = searchQuery.trim().toLowerCase();
+  const searchHits = (searchOpen && (searchNeedle || searchFrom))
+    ? messages.filter((m) => {
+        if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
+        if (searchFrom && m.from !== searchFrom) return false;
+        if (!searchNeedle) return true; // 仅按发件人过滤（无关键词）
+        return (m.content || "").toLowerCase().includes(searchNeedle)
+          || (m.caption || "").toLowerCase().includes(searchNeedle);
+      })
+    : [];
+  // 词/发件人/会话变化 → 默认跳「最新一条命中」（贴合「找刚才那条」）；签名去重避免每次渲染重跳。
+  useEffect(() => {
+    if (!searchOpen) { searchSigRef.current = ""; return; }
+    const sig = `${convId}|${searchNeedle}|${searchFrom}`;
+    if (sig === searchSigRef.current) return;
+    // 命中集为空时**不锁定签名**：可能是切会话后消息尚在异步载入（此路径由首页「聊天记录」下钻触发），
+    // 待 msgsByConv 到达、hits 出现后再跳；真·无匹配也停在此处（导航器保持置灰），无副作用。
+    if (searchHits.length === 0) { setSearchHitIdx(0); return; }
+    searchSigRef.current = sig;
+    const idx = searchHits.length - 1; // 升序数组末尾 = 最新
+    setSearchHitIdx(idx);
+    const seq = searchHits[idx].convSeq;
+    requestAnimationFrame(() => jumpToSeq(seq));
+  }, [searchOpen, convId, searchNeedle, searchFrom, searchHits, jumpToSeq]);
+  // ▲(更旧, idx--) / ▼(更新, idx++) 命中导航：居中滚动 + 高亮（复用 jumpToSeq）。
+  const gotoSearchHit = (idx: number) => {
+    if (idx < 0 || idx >= searchHits.length) return;
+    setSearchHitIdx(idx);
+    jumpToSeq(searchHits[idx].convSeq);
+  };
+  // 「来自:」群成员下拉行（取向 C：复用群成员数据 + @ 列表的打字过滤逻辑，装进搜索自持下拉）。含「我」。
+  const searchFromRows = useMemo(() => {
+    if (!searchFromPickerOpen || !groupConvId) return [] as { label: string; userId: string; role?: string; avatarUrl?: string }[];
+    const info = groupInfos[groupConvId];
+    if (!info) return [];
+    const all = info.members.map((m) => ({ userId: m.user_id, displayName: m.user_id === uid ? "我" : (m.nickname || m.user_id), role: m.role, avatarUrl: m.avatar_url }));
+    return filterMentionMembers(all, searchFromFilter)
+      .map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
+  }, [searchFromPickerOpen, groupConvId, groupInfos, uid, searchFromFilter]);
+
+  // 打开/关闭会话内搜索。openInChatSearch 可带入初始词（首页「聊天记录」下钻时预填，SEARCH_DESIGN §3.0）。
+  const closeInChatSearch = () => {
+    setSearchOpen(false); setSearchQuery(""); setSearchFrom(""); setSearchFromName("");
+    setSearchFromPickerOpen(false); setSearchFromFilter(""); setCalendarOpen(false);
+  };
+  const openInChatSearch = (initial = "") => {
+    setSearchOpen(true); setSearchQuery(initial); setSearchFrom(""); setSearchFromName("");
+    setSearchFromPickerOpen(false); setSearchFromFilter(""); setCalendarOpen(false);
+    searchSigRef.current = ""; // 强制下一轮默认跳最新
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+  // 👤 来自：点开成员下拉（钮随之隐藏）/ 选人得 token / ✕ 清除
+  const openFromPicker = () => { setSearchFromPickerOpen(true); setSearchFromFilter(""); setCalendarOpen(false); };
+  const pickSearchFrom = (memberUid: string, name: string) => {
+    setSearchFrom(memberUid); setSearchFromName(name);
+    setSearchFromPickerOpen(false); setSearchFromFilter("");
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+  const clearSearchFrom = () => { setSearchFrom(""); setSearchFromName(""); };
+
+  // ===== 按日期跳转 / 日历（SEARCH_DESIGN §5）：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
+  const searchableMsgs = () => messages.filter((m) => m.convSeq > 0 && !m.recalledAt && m.contentType !== "system");
+  const monthLabel = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月`;
+  const sameDay = (a: number, b: number) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
+  // 有消息的「日」集合（活跃日打点，P1）——仅覆盖已加载窗口（诚实标注 §9）。key=YYYY-M-D。
+  const activeDays = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of searchableMsgs()) { const d = new Date(m.timestamp); s.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`); }
+    return s;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, calendarOpen]);
+  const jumpToDay = (dayStart: number, label: string) => {
+    const hit = searchableMsgs().find((m) => m.timestamp >= dayStart);
+    if (!hit) {
+      const earliest = searchableMsgs()[0];
+      setToast(earliest && earliest.timestamp > dayStart ? `${label}早于已加载范围，请上拉加载更早历史` : `${label}及之后无消息`);
+      return;
+    }
+    setCalendarOpen(false);
+    if (!sameDay(hit.timestamp, dayStart)) {
+      const d = new Date(hit.timestamp);
+      setToast(`${label}无消息，已跳到最近的 ${d.getMonth() + 1}月${d.getDate()}日`);
+    }
+    locateInChat(convId, hit.convSeq);
+  };
+  const jumpToToday = () => {
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    const list = searchableMsgs();
+    const hit = list.find((m) => m.timestamp >= t.getTime());
+    if (hit) { setCalendarOpen(false); locateInChat(convId, hit.convSeq); return; }
+    const last = list[list.length - 1]; // 今天无消息 → 跳最近一条（更早）
+    if (!last) { setToast("暂无消息"); return; }
+    setCalendarOpen(false);
+    const d = new Date(last.timestamp);
+    setToast(`今天无消息，已跳到 ${d.getMonth() + 1}月${d.getDate()}日`);
+    locateInChat(convId, last.convSeq);
+  };
+  // 「最早」：自动上翻到顶再跳会话首条（Web 复用 loadOlder；页 200、上限 MAX_LOCATE_PAGES）。
+  const earliestPendingRef = useRef(false);
+  const earliestTriesRef = useRef(0);
+  const jumpToEarliest = () => {
+    setCalendarOpen(false);
+    const first = messagesRef.current.find((m) => m.convSeq > 0);
+    if (!first) { setToast("暂无消息"); return; }
+    if (minSeqOf(messagesRef.current) <= 1) { jumpToSeq(first.convSeq); return; } // 已到顶
+    earliestPendingRef.current = true; earliestTriesRef.current = 0;
+    setToast("正在加载更早历史…");
+    driveEarliest();
+  };
+  const driveEarliest = useCallback(() => {
+    if (!earliestPendingRef.current || currentConvRef.current !== convId) { earliestPendingRef.current = false; return; }
+    const list = messagesRef.current;
+    const first = list.find((m) => m.convSeq > 0);
+    const oldest = minSeqOf(list);
+    if (!first) { earliestPendingRef.current = false; return; }
+    if (oldest <= 1 || earliestTriesRef.current >= MAX_LOCATE_PAGES) { // 到顶 / 超上限 → 跳本地最早
+      earliestPendingRef.current = false;
+      requestAnimationFrame(() => jumpToSeq(first.convSeq));
+      return;
+    }
+    if (loadingOlderRef.current) return; // 有一页在飞，等它到
+    const box = msgsRef.current;
+    if (box) histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
+    earliestTriesRef.current += 1;
+    loadingOlderRef.current = true;
+    clientRef.current?.loadOlder(convId, oldest);
+  }, [convId, jumpToSeq]);
+  useEffect(() => { driveEarliest(); }, [msgsByConv, driveEarliest]);
+
   // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
   // 口径与媒体库一致（image|video && 未撤回 && content 非空）；仅覆盖**内存中已加载**的消息——翻到头即停，
   // 不自动拉更早（第一版约定）。合成消息（收藏/记录预览：convSeq=0 且不在会话流内）mediaId 找不到 → 不显箭头、不翻页。
@@ -2810,6 +2964,29 @@ export default function App() {
   // ⚠️ 必须放在下方 `if (phase === "login") return` 之前：hook 在提前 return 之后会随 phase 改变 hook 数量
   // → "Rendered more hooks than during the previous render" 白屏（2026-08-14 踩过）。
   // handleScanRaw 定义在提前 return 之后：仅在 phase==="app" 的渲染里才会被 effect 读到，届时已初始化，无 TDZ。
+  // ===== 首页全局搜索（SEARCH_DESIGN §3）：聊天记录走本地库 searchMessages（防抖 + 结果上限）=====
+  useEffect(() => {
+    const q = homeSearch.trim();
+    if (!q) { setHomeMsgHits([]); return; }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void searchMessages(uid, { q, limit: 200 })
+        .then((hits) => { if (!cancelled) setHomeMsgHits(hits); })
+        .catch(() => { if (!cancelled) setHomeMsgHits([]); });
+    }, 200);
+    return () => { cancelled = true; window.clearTimeout(t); };
+  }, [homeSearch, uid]);
+  // 聊天记录命中按会话聚合：「{会话名} · N 条相关消息」+ 最近一条命中摘要（homeMsgHits 已新→旧，首见即最近）。
+  const homeRecordGroups = useMemo(() => {
+    const byConv = new Map<string, { convId: string; count: number; latest: MsgRecord }>();
+    for (const r of homeMsgHits) {
+      const g = byConv.get(r.convId);
+      if (g) g.count += 1;
+      else byConv.set(r.convId, { convId: r.convId, count: 1, latest: r });
+    }
+    return [...byConv.values()];
+  }, [homeMsgHits]);
+
   const bootQrRef = useRef<string | null>(null);
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
@@ -2867,6 +3044,10 @@ export default function App() {
   const friendLabel = (f: FriendEntry) => (f.remark && f.remark.trim()) || (f.nickname && f.nickname.trim()) || f.user_id;
   // 会话对端显示名优先级：备注 > 昵称 > uid。
   const convLabel = (c: Conversation) => (c.peer_remark && c.peer_remark.trim()) || (c.peer_nickname && c.peer_nickname.trim()) || c.peer;
+  // 会话列表项显示名/头像（群聊 vs 单聊）。**定义前置**：首页全局搜索派生（homeConvHits）在下方更早处引用，
+  // 若留在原位置会 TDZ「Cannot access 'convDisplayLabel' before initialization」——有会话时输入搜索即白屏（2026-08-20 修）。
+  const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
+  const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
   // 对端头像/昵称多来源兜底（会话 > 好友 > 任一群成员表 > 搜索结果）：从没聊过的群成员点开单聊/资料卡时
   // 没有会话行，头像/名字需从其它内存来源回退，否则只显示首字母圈/uid（群里气泡却正常）。
   const peerSources = () => ({ conversations, friends, groups: Object.values(groupInfos), search: searchResults });
@@ -2934,6 +3115,25 @@ export default function App() {
   // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
   const senderAvatar = (m: ChatMessage): string | undefined =>
     groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
+  // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordGroups =====
+  const homeQ = homeSearch.trim().toLowerCase();
+  const homeConvHits = homeQ ? conversations.filter((c) => convDisplayLabel(c).toLowerCase().includes(homeQ)) : [];
+  const homeFriendHits = homeQ ? accepted.filter((f) =>
+    friendLabel(f).toLowerCase().includes(homeQ) ||
+    (f.nickname || "").toLowerCase().includes(homeQ) ||
+    f.user_id.toLowerCase().includes(homeQ)) : [];
+  const convById = (cid: string) => conversations.find((c) => c.conv_id === cid);
+  // 命中摘要（图说优先，与命中口径一致）。
+  const recordSnippet = (r: MsgRecord) => (r.caption || r.content || "");
+  // 打开某会话（供首页搜索点击）：群走 openGroupChat，单聊从 conv_id 还原 peer。
+  const openConvById = (cid: string) => {
+    if (cid.startsWith("g_")) { openGroupChat(cid); return; }
+    const c = convById(cid);
+    if (c && !c.is_group) { openChat(c.peer); return; }
+    const peerId = cid.replace(/^u_/, "").split("_u_").find((x) => x !== uid);
+    if (peerId) openChat(peerId);
+  };
+
   // 两条消息是否属于同一「连续段」：同发送者、非系统/撤回、同一天（跨天有日期分隔断段）。
   const sameSenderRun = (a?: ChatMessage, b?: ChatMessage): boolean =>
     !!a && !!b && a.from === b.from && a.from !== uid &&
@@ -2954,10 +3154,7 @@ export default function App() {
     }
     return undefined;
   };
-  // 会话列表项显示名/头像/预览（群聊 vs 单聊）。
-  // 群项：群备注（G1，仅本人可见、多端同步）非空即替代群名；否则真实群名。
-  const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
-  const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
+  // 会话列表项显示名/头像/预览（群聊 vs 单聊）——convDisplayLabel/convAvatarUrl 已上移至 convLabel 之后（见那里注释）。
   // 收藏来源显示名（副行「来自X」）：本人→我；好友→备注/昵称；群成员→群昵称/昵称；否则 uid（按 UI.md 优先级）。
   const favSourceLabel = (f: Favorite): string => {
     if (!f.source_from) return "未知";
@@ -3378,6 +3575,24 @@ export default function App() {
         </div>
         {tab === "chats" ? (
         <div className="convlist">
+          {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
+          <div className="home-search">
+            <Search size={15} className="home-search-lead" />
+            <input className="home-search-input" value={homeSearch} placeholder="搜索"
+              onChange={(e) => setHomeSearch(e.target.value)} />
+            {homeSearch && <button className="home-search-clear" title="清除" onClick={() => setHomeSearch("")}><X size={14} /></button>}
+          </div>
+          {homeQ ? (
+          <HomeSearchResults
+            homeConvHits={homeConvHits} homeFriendHits={homeFriendHits} homeRecordGroups={homeRecordGroups}
+            convAvatarUrl={convAvatarUrl} convDisplayLabel={convDisplayLabel} friendLabel={friendLabel}
+            convById={convById} recordSnippet={recordSnippet}
+            highlight={(t, k) => highlightText(t, homeQ, k)}
+            openConvById={openConvById} openPeerDetail={openPeerDetail}
+            onRecordClick={(cid) => { openConvById(cid); openInChatSearch(homeSearch.trim()); }}
+          />
+          ) : (
+          <>
           {conversations.length === 0 && <div className="empty">还没有会话，去「通讯录」找人发起一个吧</div>}
           {conversations.map((c) => (
             <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""}`}
@@ -3422,6 +3637,8 @@ export default function App() {
                 : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label="未读" /> : null}
             </div>
           ))}
+          </>
+          )}
         </div>
         ) : (
         <div className="contacts">
@@ -3626,6 +3843,24 @@ export default function App() {
       <main className="main">
         <div className="chat">
           <header>
+            {/* 会话内搜索（SEARCH_DESIGN §4）：搜索态下搜索条**替换标题栏内容**（与 iOS「搜索框在标题栏行」对齐，
+                2026-08-20）；来自下拉/日历 popover 锚在标题栏下方。非搜索态 = 原头像/标题/操作钮。 */}
+            {searchOpen && (isGroupChat || peer) ? (
+              <ChatSearchBar
+                searchInputRef={searchInputRef} isGroupChat={isGroupChat}
+                searchQuery={searchQuery} setSearchQuery={setSearchQuery} searchNeedle={searchNeedle}
+                searchHitCount={searchHits.length} searchHitIdx={searchHitIdx}
+                gotoSearchHit={gotoSearchHit} closeInChatSearch={closeInChatSearch}
+                searchFrom={searchFrom} searchFromName={searchFromName} clearSearchFrom={clearSearchFrom}
+                searchFromPickerOpen={searchFromPickerOpen} setSearchFromPickerOpen={setSearchFromPickerOpen}
+                searchFromFilter={searchFromFilter} setSearchFromFilter={setSearchFromFilter}
+                searchFromRows={searchFromRows} openFromPicker={openFromPicker} pickSearchFrom={pickSearchFrom}
+                calendarOpen={calendarOpen} setCalendarOpen={setCalendarOpen}
+                calendarMonth={calendarMonth} setCalendarMonth={setCalendarMonth} activeDays={activeDays}
+                jumpToDay={jumpToDay} jumpToEarliest={jumpToEarliest} jumpToToday={jumpToToday} monthLabel={monthLabel}
+              />
+            ) : (
+            <>
             {(peer || isGroupChat) && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
             {(isGroupChat || peer) ? (
               <button className="chat-identity"
@@ -3643,7 +3878,7 @@ export default function App() {
             <span className="chat-head-right">
               {(peer || isGroupChat) && (
                 <>
-                  <button className="icon-btn" title="搜索" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /></button>
+                  <button className={`icon-btn${searchOpen ? " active" : ""}`} title="搜索聊天内容" onClick={() => (searchOpen ? closeInChatSearch() : openInChatSearch())}><Search size={20} /></button>
                   {!isGroupChat && <button className="icon-btn" title="呼叫" onClick={() => comingSoon("语音通话")}><Phone size={20} /></button>}
                   <span className="chat-anchor">
                     <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
@@ -3677,6 +3912,8 @@ export default function App() {
                 </>
               )}
             </span>
+            </>
+            )}
           </header>
           {/* 入群审批横幅（G3，蓝条）：仅群主/管理员且有待审申请时显示，点条开审批列表。排在最上（需处置）。 */}
           {isGroupChat && (activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin")
@@ -4576,7 +4813,7 @@ export default function App() {
                     )}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                    {showDetailBody && <button className="detail-pill" onClick={() => comingSoon("聊天内搜索")}><Search size={20} /><span>搜索</span></button>}
+                    {showDetailBody && <button className="detail-pill" onClick={() => { close(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
                     <div className="detail-pill-anchor">
                       <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                       {detailMore && (

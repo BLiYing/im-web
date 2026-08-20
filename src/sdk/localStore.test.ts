@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   saveMessage, saveRejected, applyMsgOpLocal, loadConversation,
   saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage,
-  markMessageDeleted, loadDeletedSeqs,
+  markMessageDeleted, loadDeletedSeqs, searchMessages,
 } from "./localStore";
 import type { ChatMessage, Conversation } from "./protocol";
 
@@ -168,6 +168,68 @@ describe("localStore 消息（IndexedDB）", () => {
     await saveMessage("oDel", msg("c1", 1, "a")); // 模拟服务端重同步把删掉的重新落库
     expect((await loadConversation("oDel", "c1")).map((m) => m.convSeq)).toEqual([2]); // 仍不复现
     expect(await loadDeletedSeqs("oDel", "c1")).toEqual([1]); // 内存墓碑供 onMessage 收帧时拦截
+  });
+});
+
+describe("localStore searchMessages（本地搜索）", () => {
+  const withCaption = (convId: string, seq: number, from: string, content: string, caption?: string): ChatMessage => ({
+    convId, from, content, caption, contentType: caption ? "image" : "text", convSeq: seq, timestamp: 1000 + seq, status: "received",
+  });
+
+  it("会话内：content 命中，大小写不敏感，按时间倒序", async () => {
+    await saveMessage("sConv", withCaption("c1", 1, "a", "Q3 预算终稿"));
+    await saveMessage("sConv", withCaption("c1", 2, "b", "无关内容"));
+    await saveMessage("sConv", withCaption("c1", 3, "a", "预算表改好了"));
+    const hits = await searchMessages("sConv", { convId: "c1", q: "预算", limit: 20 });
+    expect(hits.map((m) => m.convSeq)).toEqual([3, 1]); // 新→旧
+  });
+
+  it("会话内：caption（图说）也命中", async () => {
+    await saveMessage("sCap", withCaption("c1", 1, "a", "/uploads/x.jpg", "会议室白板预算照片"));
+    const hits = await searchMessages("sCap", { convId: "c1", q: "预算", limit: 20 });
+    expect(hits.map((m) => m.convSeq)).toEqual([1]);
+  });
+
+  it("会话内：大小写不敏感（英文）", async () => {
+    await saveMessage("sCase", withCaption("c1", 1, "a", "Hello Budget World"));
+    expect((await searchMessages("sCase", { convId: "c1", q: "budget", limit: 20 })).length).toBe(1);
+    expect((await searchMessages("sCase", { convId: "c1", q: "BUDGET", limit: 20 })).length).toBe(1);
+  });
+
+  it("撤回消息不参与命中", async () => {
+    await saveMessage("sRecall", withCaption("c1", 1, "a", "预算机密"));
+    await applyMsgOpLocal("sRecall", "c1", 1, { recalledAt: 9999, recalledBy: "a" });
+    expect((await searchMessages("sRecall", { convId: "c1", q: "预算", limit: 20 })).length).toBe(0);
+  });
+
+  it("本地删除（墓碑）的消息不参与命中", async () => {
+    await saveMessage("sDelSrch", withCaption("c1", 1, "a", "预算A"));
+    await saveMessage("sDelSrch", withCaption("c1", 2, "a", "预算B"));
+    await markMessageDeleted("sDelSrch", "c1", { convSeq: 1 });
+    const hits = await searchMessages("sDelSrch", { convId: "c1", q: "预算", limit: 20 });
+    expect(hits.map((m) => m.convSeq)).toEqual([2]);
+  });
+
+  it("limit 上限截断（保留最新的）", async () => {
+    for (let i = 1; i <= 5; i++) await saveMessage("sLimit", withCaption("c1", i, "a", `预算${i}`));
+    const hits = await searchMessages("sLimit", { convId: "c1", q: "预算", limit: 2 });
+    expect(hits.map((m) => m.convSeq)).toEqual([5, 4]);
+  });
+
+  it("全局：跨会话命中，按 owner 隔离", async () => {
+    await saveMessage("sGlobal", withCaption("c1", 1, "a", "预算在 c1"));
+    await saveMessage("sGlobal", withCaption("c2", 1, "a", "预算在 c2"));
+    await saveMessage("sGlobal", withCaption("c2", 2, "a", "无关"));
+    await saveMessage("sOther", withCaption("c1", 1, "a", "别人的预算"));
+    const hits = await searchMessages("sGlobal", { q: "预算", limit: 20 });
+    expect(hits.length).toBe(2);
+    expect(new Set(hits.map((m) => m.convId))).toEqual(new Set(["c1", "c2"]));
+  });
+
+  it("空查询 / 空 owner 返回空", async () => {
+    await saveMessage("sEmpty", withCaption("c1", 1, "a", "预算"));
+    expect(await searchMessages("sEmpty", { convId: "c1", q: "  ", limit: 20 })).toEqual([]);
+    expect(await searchMessages("", { q: "预算", limit: 20 })).toEqual([]);
   });
 });
 
