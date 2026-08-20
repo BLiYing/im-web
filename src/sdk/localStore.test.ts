@@ -231,6 +231,15 @@ describe("localStore searchMessages（本地搜索）", () => {
     expect(await searchMessages("sEmpty", { convId: "c1", q: "  ", limit: 20 })).toEqual([]);
     expect(await searchMessages("", { q: "预算", limit: 20 })).toEqual([]);
   });
+
+  it("媒体/文件消息的 content（URL）不参与命中——只有 text content 与 caption 算（对齐 G4/iOS）", async () => {
+    await saveMessage("sUrl", {
+      convId: "c1", from: "a", content: "/uploads/budget-111-report.pdf",
+      contentType: "file", fileName: "budget-111-report.pdf", convSeq: 1, timestamp: 1001, status: "received",
+    });
+    expect((await searchMessages("sUrl", { convId: "c1", q: "111", limit: 20 })).length).toBe(0);
+    expect((await searchMessages("sUrl", { convId: "c1", q: "budget", limit: 20 })).length).toBe(0);
+  });
 });
 
 describe("localStore 连续同步游标（IndexedDB）", () => {

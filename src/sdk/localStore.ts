@@ -355,13 +355,15 @@ export async function loadConversation(owner: string, convId: string): Promise<C
 }
 
 /**
- * 命中判定（与后端 G4 口径对齐）：`content` 或 `caption` 大小写不敏感子串。
+ * 命中判定（与后端 G4 / iOS 口径对齐）：**text 消息的 `content`** 或任意消息的 `caption` 大小写不敏感子串。
+ * 媒体/文件消息的 content 是 URL（含服务端生成的文件名片段），**不参与命中**——否则搜索词撞上 URL 片段
+ * 会命中「看不见文字」的消息（文件名命中是 P2，做也应按 fileName 字段而非 URL）。
  * 撤回消息（`recalledAt`）不参与命中；删除/自删走墓碑在外层过滤。needle 须已 `toLowerCase`。
  */
 function matchesQuery(rec: MsgRecord, needle: string): boolean {
   if (rec.recalledAt) return false; // 撤回消息不参与命中
-  const content = rec.content ? rec.content.toLowerCase() : "";
-  if (content.includes(needle)) return true;
+  const isText = !rec.contentType || rec.contentType === "text";
+  if (isText && rec.content && rec.content.toLowerCase().includes(needle)) return true;
   const caption = rec.caption ? rec.caption.toLowerCase() : "";
   return caption.includes(needle);
 }

@@ -276,8 +276,7 @@ export default function App() {
   const [searchHitIdx, setSearchHitIdx] = useState(0);              // 当前命中下标（在 searchHits 升序数组中，0=最早）
   const [searchFrom, setSearchFrom] = useState("");                 // 「来自:」发件人 uid（""=不限，仅群聊）
   const [searchFromName, setSearchFromName] = useState("");         // token 显示名（👤 钮本身从不显名）
-  const [searchFromPickerOpen, setSearchFromPickerOpen] = useState(false); // 群成员下拉开合
-  const [searchFromFilter, setSearchFromFilter] = useState("");     // 成员下拉的打字过滤词
+  const [searchFromPickerOpen, setSearchFromPickerOpen] = useState(false); // 发件人下拉开合（候选=已发言者，无打字过滤，对齐 iOS）
   const [calendarOpen, setCalendarOpen] = useState(false);          // 📅 日历 popover 开合
   const [calendarMonth, setCalendarMonth] = useState<{ y: number; m: number }>(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -2616,7 +2615,9 @@ export default function App() {
         if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
         if (searchFrom && m.from !== searchFrom) return false;
         if (!searchNeedle) return true; // 仅按发件人过滤（无关键词）
-        return (m.content || "").toLowerCase().includes(searchNeedle)
+        // 仅 text 的 content 参与命中（媒体/文件 content=URL，撞 URL 片段会命中看不见的文字，同 G4/iOS）；caption 全类型算。
+        const isText = !m.contentType || m.contentType === "text";
+        return (isText && (m.content || "").toLowerCase().includes(searchNeedle))
           || (m.caption || "").toLowerCase().includes(searchNeedle);
       })
     : [];
@@ -2640,32 +2641,43 @@ export default function App() {
     setSearchHitIdx(idx);
     jumpToSeq(searchHits[idx].convSeq);
   };
-  // 「来自:」群成员下拉行（取向 C：复用群成员数据 + @ 列表的打字过滤逻辑，装进搜索自持下拉）。含「我」。
+  // 「来自:」候选 = 本会话**已发言者**去重（iOS 拍板口径：未发言者必 0 命中；不列全量成员、无打字过滤）。
+  // 名字：我→「我」→消息昵称→成员表昵称→uid。⚠️ 渲染期 useMemo 直接读 groupInfos，勿引用晚声明 memberNick（TDZ 前科）。
   const searchFromRows = useMemo(() => {
     if (!searchFromPickerOpen || !groupConvId) return [] as { label: string; userId: string; role?: string; avatarUrl?: string }[];
-    const info = groupInfos[groupConvId];
-    if (!info) return [];
-    const all = info.members.map((m) => ({ userId: m.user_id, displayName: m.user_id === uid ? "我" : (m.nickname || m.user_id), role: m.role, avatarUrl: m.avatar_url }));
-    return filterMentionMembers(all, searchFromFilter)
-      .map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
-  }, [searchFromPickerOpen, groupConvId, groupInfos, uid, searchFromFilter]);
+    const members = groupInfos[groupConvId]?.members ?? [];
+    const seen = new Set<string>();
+    const rows: { label: string; userId: string; role?: string; avatarUrl?: string }[] = [];
+    for (const m of messages) {
+      if (!m.from || m.recalledAt || m.contentType === "system" || seen.has(m.from)) continue;
+      seen.add(m.from);
+      const mem = members.find((x) => x.user_id === m.from);
+      rows.push({
+        userId: m.from,
+        label: m.from === uid ? "我" : (m.fromNickname || mem?.nickname || m.from),
+        role: mem?.role,
+        avatarUrl: mem?.avatar_url,
+      });
+    }
+    return rows;
+  }, [searchFromPickerOpen, groupConvId, groupInfos, uid, messages]);
 
   // 打开/关闭会话内搜索。openInChatSearch 可带入初始词（首页「聊天记录」下钻时预填，SEARCH_DESIGN §3.0）。
   const closeInChatSearch = () => {
     setSearchOpen(false); setSearchQuery(""); setSearchFrom(""); setSearchFromName("");
-    setSearchFromPickerOpen(false); setSearchFromFilter(""); setCalendarOpen(false);
+    setSearchFromPickerOpen(false); setCalendarOpen(false);
   };
   const openInChatSearch = (initial = "") => {
     setSearchOpen(true); setSearchQuery(initial); setSearchFrom(""); setSearchFromName("");
-    setSearchFromPickerOpen(false); setSearchFromFilter(""); setCalendarOpen(false);
+    setSearchFromPickerOpen(false); setCalendarOpen(false);
     searchSigRef.current = ""; // 强制下一轮默认跳最新
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
-  // 👤 来自：点开成员下拉（钮随之隐藏）/ 选人得 token / ✕ 清除
-  const openFromPicker = () => { setSearchFromPickerOpen(true); setSearchFromFilter(""); setCalendarOpen(false); };
+  // 👤 来自：点开发件人下拉（钮随之隐藏）/ 选人得 token / ✕ 清除
+  const openFromPicker = () => { setSearchFromPickerOpen(true); setCalendarOpen(false); };
   const pickSearchFrom = (memberUid: string, name: string) => {
     setSearchFrom(memberUid); setSearchFromName(name);
-    setSearchFromPickerOpen(false); setSearchFromFilter("");
+    setSearchFromPickerOpen(false);
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
   const clearSearchFrom = () => { setSearchFrom(""); setSearchFromName(""); };
@@ -2976,16 +2988,12 @@ export default function App() {
     }, 200);
     return () => { cancelled = true; window.clearTimeout(t); };
   }, [homeSearch, uid]);
-  // 聊天记录命中按会话聚合：「{会话名} · N 条相关消息」+ 最近一条命中摘要（homeMsgHits 已新→旧，首见即最近）。
-  const homeRecordGroups = useMemo(() => {
-    const byConv = new Map<string, { convId: string; count: number; latest: MsgRecord }>();
-    for (const r of homeMsgHits) {
-      const g = byConv.get(r.convId);
-      if (g) g.count += 1;
-      else byConv.set(r.convId, { convId: r.convId, count: 1, latest: r });
-    }
-    return [...byConv.values()];
-  }, [homeMsgHits]);
+  // 聊天记录命中**不聚合**（一条命中一行，同会话多行属预期，与 iOS 对齐）；仅保留现存会话——
+  // 本地库残留已退群/已删会话的消息（删会话只删摘要）无可打开落点。homeMsgHits 已新→旧。
+  const homeRecordHits = useMemo(() => {
+    const known = new Set(conversations.map((c) => c.conv_id));
+    return homeMsgHits.filter((r) => known.has(r.convId));
+  }, [homeMsgHits, conversations]);
 
   const bootQrRef = useRef<string | null>(null);
   useEffect(() => {
@@ -3115,7 +3123,7 @@ export default function App() {
   // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
   const senderAvatar = (m: ChatMessage): string | undefined =>
     groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
-  // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordGroups =====
+  // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordHits（不聚合）=====
   const homeQ = homeSearch.trim().toLowerCase();
   const homeConvHits = homeQ ? conversations.filter((c) => convDisplayLabel(c).toLowerCase().includes(homeQ)) : [];
   const homeFriendHits = homeQ ? accepted.filter((f) =>
@@ -3584,12 +3592,12 @@ export default function App() {
           </div>
           {homeQ ? (
           <HomeSearchResults
-            homeConvHits={homeConvHits} homeFriendHits={homeFriendHits} homeRecordGroups={homeRecordGroups}
+            homeConvHits={homeConvHits} homeFriendHits={homeFriendHits} homeRecordHits={homeRecordHits}
             convAvatarUrl={convAvatarUrl} convDisplayLabel={convDisplayLabel} friendLabel={friendLabel}
             convById={convById} recordSnippet={recordSnippet}
             highlight={(t, k) => highlightText(t, homeQ, k)}
             openConvById={openConvById} openPeerDetail={openPeerDetail}
-            onRecordClick={(cid) => { openConvById(cid); openInChatSearch(homeSearch.trim()); }}
+            onRecordClick={(cid, seq) => { setHomeSearch(""); locateInChat(cid, seq); }}
           />
           ) : (
           <>
@@ -3843,8 +3851,7 @@ export default function App() {
       <main className="main">
         <div className="chat">
           <header>
-            {/* 会话内搜索（SEARCH_DESIGN §4）：搜索态下搜索条**替换标题栏内容**（与 iOS「搜索框在标题栏行」对齐，
-                2026-08-20）；来自下拉/日历 popover 锚在标题栏下方。非搜索态 = 原头像/标题/操作钮。 */}
+            {/* 会话内搜索（§4）：搜索态下搜索条**替换标题栏内容**（对齐 iOS）；下拉/日历锚标题栏下方；非搜索态=原头部。 */}
             {searchOpen && (isGroupChat || peer) ? (
               <ChatSearchBar
                 searchInputRef={searchInputRef} isGroupChat={isGroupChat}
@@ -3853,7 +3860,6 @@ export default function App() {
                 gotoSearchHit={gotoSearchHit} closeInChatSearch={closeInChatSearch}
                 searchFrom={searchFrom} searchFromName={searchFromName} clearSearchFrom={clearSearchFrom}
                 searchFromPickerOpen={searchFromPickerOpen} setSearchFromPickerOpen={setSearchFromPickerOpen}
-                searchFromFilter={searchFromFilter} setSearchFromFilter={setSearchFromFilter}
                 searchFromRows={searchFromRows} openFromPicker={openFromPicker} pickSearchFrom={pickSearchFrom}
                 calendarOpen={calendarOpen} setCalendarOpen={setCalendarOpen}
                 calendarMonth={calendarMonth} setCalendarMonth={setCalendarMonth} activeDays={activeDays}

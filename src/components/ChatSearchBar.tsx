@@ -22,8 +22,6 @@ export function ChatSearchBar(p: {
   clearSearchFrom: () => void;
   searchFromPickerOpen: boolean;
   setSearchFromPickerOpen: (v: boolean) => void;
-  searchFromFilter: string;
-  setSearchFromFilter: (v: string) => void;
   searchFromRows: FromRow[];
   openFromPicker: () => void;
   pickSearchFrom: (userId: string, label: string) => void;
@@ -49,12 +47,13 @@ export function ChatSearchBar(p: {
             <button className="from-token-x" title="清除发件人" onClick={p.clearSearchFrom}><X size={11} /></button>
           </span>
         )}
+        {/* 输入框始终编辑关键词（下拉不做打字过滤，候选=已发言者，对齐 iOS 2026-08-20 拍板）。 */}
         <input
           ref={p.searchInputRef}
           className="chat-search-input"
-          value={p.searchFromPickerOpen ? p.searchFromFilter : p.searchQuery}
-          placeholder={p.searchFromPickerOpen ? "输入成员名筛选…" : "搜索聊天内容"}
-          onChange={(e) => (p.searchFromPickerOpen ? p.setSearchFromFilter(e.target.value) : p.setSearchQuery(e.target.value))}
+          value={p.searchQuery}
+          placeholder={p.searchFromPickerOpen ? "选择发件人…" : "搜索聊天内容"}
+          onChange={(e) => p.setSearchQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); p.searchFromPickerOpen ? p.setSearchFromPickerOpen(false) : p.closeInChatSearch(); } }}
         />
         {(p.searchNeedle || p.searchFrom) && !p.searchFromPickerOpen && (
@@ -76,7 +75,7 @@ export function ChatSearchBar(p: {
       {/* 👤 来自：群成员下拉（取向 C，复用群成员数据 + @ 打字过滤），锚在标题栏下方。 */}
       {p.searchFromPickerOpen && (
         <div className="chat-from-pick">
-          <div className="chat-from-lbl">选择发件人 · 群成员</div>
+          <div className="chat-from-lbl">选择发件人</div>
           <div className="chat-from-scroll">
             {p.searchFromRows.length > 0 ? p.searchFromRows.map((r) => (
               <button key={r.userId} className="chat-from-row" onClick={() => p.pickSearchFrom(r.userId, r.label)}>
@@ -85,7 +84,7 @@ export function ChatSearchBar(p: {
                 {r.role === "owner" && <span className="role-badge owner">群主</span>}
                 {r.role === "admin" && <span className="role-badge">管理员</span>}
               </button>
-            )) : <div className="mention-empty">无匹配成员</div>}
+            )) : <div className="mention-empty">暂无可筛选的发件人</div>}
           </div>
         </div>
       )}

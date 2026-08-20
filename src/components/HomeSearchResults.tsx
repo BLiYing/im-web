@@ -8,7 +8,8 @@ import type { MsgRecord } from "../sdk/localStore";
 export function HomeSearchResults(p: {
   homeConvHits: Conversation[];
   homeFriendHits: FriendEntry[];
-  homeRecordGroups: { convId: string; count: number; latest: MsgRecord }[];
+  /** 聊天记录命中：**不聚合**，一条命中一行（同会话可多行，预期内；与 iOS 对齐）。新→旧。 */
+  homeRecordHits: MsgRecord[];
   convAvatarUrl: (c: Conversation) => string | undefined;
   convDisplayLabel: (c: Conversation) => string;
   friendLabel: (f: FriendEntry) => string;
@@ -17,7 +18,8 @@ export function HomeSearchResults(p: {
   highlight: (text: string, keyBase: string) => ReactNode;
   openConvById: (cid: string) => void;
   openPeerDetail: (uid: string) => void;
-  onRecordClick: (convId: string) => void;
+  /** 点聊天记录行：直接打开会话并定位到最近命中那条（不开会话内搜索模式），seq=最近命中 convSeq。 */
+  onRecordClick: (convId: string, seq: number) => void;
 }) {
   return (
     <div className="home-results">
@@ -27,7 +29,8 @@ export function HomeSearchResults(p: {
           <Avatar url={p.convAvatarUrl(c)} label={p.convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer} />
           <div className="convbody">
             <div className="convpeer">{p.highlight(p.convDisplayLabel(c), `hcn-${c.conv_id}`)}</div>
-            <div className="convlast">{c.is_group ? `${c.member_count ?? 0} 位成员` : c.peer}</div>
+            {/* 副行与 iOS 对齐：群显「N 人」，单聊无副行。 */}
+            {c.is_group && <div className="convlast">{c.member_count ?? 0} 人</div>}
           </div>
         </div>
       ))}
@@ -37,25 +40,27 @@ export function HomeSearchResults(p: {
           <Avatar url={f.avatar_url} label={p.friendLabel(f)} seed={f.user_id} />
           <div className="convbody">
             <div className="convpeer">{p.highlight(p.friendLabel(f), `hfn-${f.user_id}`)}</div>
-            <div className="convlast">好友 · {f.user_id}</div>
+            {/* 副行与 iOS 对齐：「联系人」。 */}
+            <div className="convlast">联系人</div>
           </div>
         </div>
       ))}
-      {p.homeRecordGroups.length > 0 && <div className="section-label">聊天记录</div>}
-      {p.homeRecordGroups.map((g) => {
-        const c = p.convById(g.convId);
-        const name = c ? p.convDisplayLabel(c) : g.convId;
+      {p.homeRecordHits.length > 0 && <div className="section-label">聊天记录</div>}
+      {p.homeRecordHits.map((r) => {
+        const c = p.convById(r.convId);
+        const name = c ? p.convDisplayLabel(c) : r.convId;
         return (
-          <div key={`hr-${g.convId}`} className="convitem" onClick={() => p.onRecordClick(g.convId)}>
-            <Avatar url={c ? p.convAvatarUrl(c) : undefined} label={name} seed={c && c.is_group ? c.conv_id : (c?.peer ?? g.convId)} />
+          <div key={`hr-${r.convId}-${r.convSeq}`} className="convitem" onClick={() => p.onRecordClick(r.convId, r.convSeq)}>
+            <Avatar url={c ? p.convAvatarUrl(c) : undefined} label={name} seed={c && c.is_group ? c.conv_id : (c?.peer ?? r.convId)} />
             <div className="convbody">
-              <div className="convpeer">{name} · {g.count} 条相关消息</div>
-              <div className="convlast">{p.highlight(p.recordSnippet(g.latest), `hrs-${g.convId}`)}</div>
+              <div className="convpeer">{name}</div>
+              {/* 副行 = 该条命中的内容摘要（命中词高亮；不聚合，与 iOS 对齐）。 */}
+              <div className="convlast">{p.highlight(p.recordSnippet(r), `hrs-${r.convId}-${r.convSeq}`)}</div>
             </div>
           </div>
         );
       })}
-      {p.homeConvHits.length === 0 && p.homeFriendHits.length === 0 && p.homeRecordGroups.length === 0 && (
+      {p.homeConvHits.length === 0 && p.homeFriendHits.length === 0 && p.homeRecordHits.length === 0 && (
         <div className="empty">未找到相关内容</div>
       )}
     </div>
