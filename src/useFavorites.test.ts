@@ -1,16 +1,17 @@
 // @vitest-environment jsdom
 // useFavorites（阶段 6 抽出）：收藏快照、打开两态、删除、从收藏发送（复用转发簇）、转发/复制收藏。
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook, act, waitFor , cleanup } from "@testing-library/react";
+import { fakeClientRef } from "./testing/fakeIMClient";
 import { useFavorites, type FavoritesDeps } from "./useFavorites";
 import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
-import type { IMClient } from "./sdk/imSdk";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 const fav = (over: Partial<Favorite> = {}): Favorite => ({ id: 7, content_type: "text", content: "收藏的话", source_conv_id: "c1", source_conv_seq: 3, source_from: "u2", created_at: 1, ...over } as Favorite);
 function mount(over: Partial<FavoritesDeps> = {}) {
   const client = { addFavorite: vi.fn(async () => ({})), listFavorites: vi.fn(async () => [fav()]), deleteFavorite: vi.fn(async () => ({})) };
   const deps: FavoritesDeps = {
-    clientRef: { current: client as unknown as IMClient }, setToast: vi.fn(), setMenu: vi.fn(), setAttachPanel: vi.fn(),
+    clientRef: fakeClientRef(client), setToast: vi.fn(), setMenu: vi.fn(), setAttachPanel: vi.fn(),
     saveMessageToDisk: vi.fn(async () => {}), conversations: [{ conv_id: "c1", peer: "u2" } as Conversation], currentConvRef: { current: "c1" },
     setForwardMode: vi.fn(), setForwarding: vi.fn(), sendForwardToTarget: vi.fn(), ...over,
   };

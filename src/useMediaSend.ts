@@ -216,7 +216,7 @@ export function useMediaSend(d: MediaSendDeps) {
     }
   }, [peer, groupConvId, uid, appendMsg, patchMsg, clearUploadProgress]);
 
-  // 注意：uploadAndSend 必须声明在 send 之前——send 的 useCallback deps 数组在组件体内即时求值，
+  // 注意：uploadAndSend 须先于 retryUpload / onFilePicked 声明——它们的 useCallback deps 在 Hook 体内即时求值，
   // 后置声明会踩 const TDZ（ReferenceError）。
   const uploadAndSend = useCallback(async (file: File, pickMode: AttachmentPickMode = "media", convIdOverride?: string, caption?: string, mentions?: string[], mentionAll?: boolean) => {
     const client = clientRef.current;
@@ -298,7 +298,6 @@ export function useMediaSend(d: MediaSendDeps) {
     document.addEventListener("pointerdown", closeOutside);
     return () => document.removeEventListener("pointerdown", closeOutside);
   }, [attachPanel, cancelAttachClose]);
-  // （声明已前移到 uploadProgress 附近：cancelSendMessage 也要用它。）
 
 
   /// 重试失败的媒体/文件消息（图片/视频/文件通吃）：移除旧占位，用留存的 File 按**原会话/原相册**

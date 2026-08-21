@@ -4,7 +4,7 @@
 import { Search, ChevronUp, ChevronDown, User, Calendar, X } from "lucide-react";
 import { Avatar } from "./Avatar";
 
-type FromRow = { label: string; userId: string; role?: string; avatarUrl?: string };
+export type FromRow = { label: string; userId: string; role?: string; avatarUrl?: string };
 
 export function ChatSearchBar(p: {
   searchInputRef: React.RefObject<HTMLInputElement>;

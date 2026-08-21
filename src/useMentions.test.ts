@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
 import { createRef } from "react";
 import { useMentions, type MentionsDeps } from "./useMentions";
 import type { GroupInfo } from "./sdk/protocol";
 import { MENTION_ALL_LABEL } from "./mention";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 const gi = (role = "owner"): GroupInfo => ({ conv_id: "g1", name: "群", my_role: role, members: [
   { user_id: "u1", role: "owner", nickname: "我" }, { user_id: "u2", role: "member", nickname: "小明" }, { user_id: "u3", role: "admin", nickname: "小红" }] } as unknown as GroupInfo);

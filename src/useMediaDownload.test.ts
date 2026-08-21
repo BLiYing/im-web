@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 // useMediaDownload（阶段 4 抽出）的判定/状态机回归：门控优先级（失效 > 解门控 > 策略）、解门控幂等落盘、
 // 退登清空、mediaSrc 回退。只断言与策略默认值无关的确定性路径（策略细节由 download.test 覆盖）。
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
 import { createRef } from "react";
 import { useMediaDownload } from "./useMediaDownload";
 import type { ChatMessage } from "./sdk/protocol";
 import type { IMClient } from "./sdk/imSdk";
-import { loadStrSet, expiredKey } from "./mediaCache";
+import { loadStrSet, expiredKey, saveStrSet, downloadedFilesKey } from "./mediaCache";
+import * as mediaCache from "./mediaCache";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
   convId: "c1", from: "u2", content: "https://cdn/x/a.png", contentType: "image", convSeq: 1, timestamp: 1, status: "sent", fileSize: 1024, ...over,
@@ -68,5 +70,19 @@ describe("useMediaDownload", () => {
     expect(abortSignal?.aborted).toBe(true);
     expect(result.current.dlStates["https://cdn/x/f.bin"]).toBeUndefined();
     vi.unstubAllGlobals();
+  });
+  it("回灌竞态：A 的 restore 尚在飞时 reset（退登）→ 结果作废、不并进后续账号的 dlBlobs", async () => {
+    saveStrSet(downloadedFilesKey("uA"), new Set(["https://cdn/a.bin"]));
+    let release!: (b: Blob | null) => void;
+    vi.spyOn(mediaCache, "cacheMatchBlob").mockImplementation(() => new Promise((r) => { release = r; }));
+    URL.createObjectURL = vi.fn(() => "blob:A") as unknown as typeof URL.createObjectURL; URL.revokeObjectURL = vi.fn();
+    const { result } = mount("uA");
+    let p!: Promise<void>;
+    act(() => { p = result.current.restoreDownloadState("uA"); });
+    act(() => result.current.resetDownloadState()); // 退登（或切账号）发生在 Cache Storage 循环中途
+    await act(async () => { release(new Blob(["x"])); await p; });
+    expect(Object.keys(result.current.dlBlobs)).toHaveLength(0);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:A"); // 作废结果的 objectURL 被回收
+    vi.restoreAllMocks();
   });
 });

@@ -13,70 +13,12 @@ import "@testing-library/jest-dom/vitest";
 import type { Conversation, ChatMessage } from "./sdk/protocol";
 
 // ---- mock ./sdk/imSdk（vi.mock 提升到顶部，工厂内自包含）----
-vi.mock("./sdk/imSdk", () => {
-  type Handlers = Record<string, ((...a: unknown[]) => void) | undefined>;
-  class FakeIMClient {
-    static last: FakeIMClient | null = null;
-    static conversations: Conversation[] = [];
-    handlers: Handlers;
-    calls: Record<string, unknown[][]> = {}; // 方法名 → 各次调用实参（断言用）
-    private seq = 0;
-    constructor(handlers: Handlers = {}) {
-      this.handlers = handlers;
-      FakeIMClient.last = this;
-      // 未显式实现的方法一律 async no-op（记录调用），避免逐一枚举 40+ 个 SDK 方法。
-      return new Proxy(this, {
-        get: (t, p, r) => {
-          if (p in t) return Reflect.get(t, p, r);
-          const fn = async (...a: unknown[]) => { (t.calls[String(p)] ??= []).push(a); return undefined; };
-          Reflect.set(t, p, fn);
-          return fn;
-        },
-      });
-    }
-    private rec(name: string, ...a: unknown[]) { (this.calls[name] ??= []).push(a); }
-    // —— 启动链路 ——
-    async connect(uid: string, pwd: string) { this.rec("connect", uid, pwd); }
-    async connectWithToken(uid: string, token: string) { this.rec("connectWithToken", uid, token); }
-    disconnect() { this.rec("disconnect"); }
-    cachedConversations(): Conversation[] { return []; }
-    cacheConversations() {}
-    async fetchConversations(): Promise<Conversation[]> { return FakeIMClient.conversations; }
-    syncTracked() {}
-    async listFriends() { return []; }
-    async fetchMyProfile() { return { nickname: "我自己", phone: "", avatar_url: "" }; }
-    async downloadSettings() { return { version: 1, settings: {} }; }
-    // —— 会话/消息链路 ——
-    async loadLocal(): Promise<ChatMessage[]> { return []; }
-    async loadDeletedSeqs(): Promise<number[]> { return []; }
-    async loadSyncCursor(): Promise<number> { return 0; }
-    openConversation(...a: unknown[]) { this.rec("openConversation", ...a); }
-    trackConversation() {}
-    watchUsers(...a: unknown[]) { this.rec("watchUsers", ...a); }
-    markRead(...a: unknown[]) { this.rec("markRead", ...a); }
-    sendTyping() {}
-    loadOlder() {}
-    loadNewer() {}
-    async fetchUserPresence() { return { onlineUntil: 0, lastSeen: 0 }; }
-    async fetchPinned() { return []; }
-    sendText(content: string, to: string, convId: string): string {
-      this.rec("sendText", content, to, convId);
-      return `cmid-${++this.seq}`;
-    }
-  }
-  return { IMClient: FakeIMClient, registerAccount: vi.fn(async () => {}) };
-});
+vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));
 
 import { IMClient } from "./sdk/imSdk";
 import App from "./App";
 
-type Fake = {
-  last: {
-    handlers: Record<string, (...a: unknown[]) => void>;
-    calls: Record<string, unknown[][]>;
-  } | null;
-  conversations: Conversation[];
-};
+import type { Fake } from "./testing/fakeIMClient";
 const Fake = IMClient as unknown as Fake;
 
 const UID = "1001", PEER = "2002";

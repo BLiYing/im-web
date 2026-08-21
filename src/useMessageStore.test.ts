@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
 import { useMessageStore } from "./useMessageStore";
 import type { ChatMessage } from "./sdk/protocol";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
   convId: "c1", from: "u", content: "x", contentType: "text", convSeq: 0, timestamp: 0, status: "received", ...over,

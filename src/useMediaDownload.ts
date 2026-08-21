@@ -326,7 +326,11 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
   }, [uid]);
 
   /** 登录后回灌（原 enterApp 内联）：解门控记录 / 失效标记 / Cache Storage 里的已下载文件 → objectURL。 */
+  // 回灌代际：退登/再次回灌会递增；慢速 Cache Storage 循环结束后若代际已变（A 退登、B 登入），丢弃并 revoke 本次结果，
+  // 不把 A 的 objectURL 并进 B 的 dlBlobs（/code-review 2026-08-22）。
+  const restoreGenRef = useRef(0);
   const restoreDownloadState = useCallback(async (forUid: string) => {
+    const gen = ++restoreGenRef.current;
     setMediaOptedIn(loadOptedIn(forUid)); // 恢复图片/视频「已解门控」记录（方案 B）：刷新后已看过的媒体仍直显，不回退门控
     setExpiredSet(loadStrSet(expiredKey(forUid))); // 恢复失效标记：已知 404 的媒体刷新后仍显失效、不再回源
     // rehydrate 已下载文件（C1）：从 Cache Storage 取回持久字节 → 重建 objectURL → dlBlobs，对齐 iOS 读盘即"就绪"。
@@ -336,6 +340,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
       const blob = await cacheMatchBlob(forUid, k);
       if (blob) restored[k] = URL.createObjectURL(blob);
     }
+    if (gen !== restoreGenRef.current) { Object.values(restored).forEach((u) => URL.revokeObjectURL(u)); return; } // 已退登/切账号：作废
     if (Object.keys(restored).length) {
       setDlBlobs((p) => ({ ...restored, ...p })); // 已在飞/新下的优先，不覆盖
       logger.info(LOG_TAG.media, "media_cache_rehydrated", { count: Object.keys(restored).length });
@@ -344,6 +349,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
 
   /** 退登清空（原 logout 内联）：revoke 应用内 blob、清下载态，避免 objectURL 泄漏与跨账号残留。 */
   const resetDownloadState = useCallback(() => {
+    restoreGenRef.current++; // 作废在飞的回灌
     Object.values(dlBlobsRef.current).forEach((u) => URL.revokeObjectURL(u));
     dlAbortRef.current = {};
     setDlBlobs({});

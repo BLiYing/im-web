@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
 import { useAppearanceSettings } from "./useAppearanceSettings";
 import { DEFAULT_WALLPAPER } from "./wallpaper";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 beforeEach(() => { localStorage.clear(); document.documentElement.removeAttribute("data-theme"); });
 describe("useAppearanceSettings", () => {

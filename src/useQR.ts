@@ -25,7 +25,6 @@ export interface QRDeps {
 
 export function useQR(d: QRDeps) {
   const { phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshFriends, refreshConversations, openPeerDetailRef } = d;
-  void (null as QRCard | QRResolved | null);
   const [qrScan, setQrScan] = useState(false); // 扫一扫浮层
   const [qrCardModal, setQrCardModal] = useState<{ title: string; subtitle: string; name: string; avatarUrl?: string; card: QRCard; canReset: boolean; kind: "me" | "group"; convId?: string } | null>(null);
   const [qrResult, setQrResult] = useState<{ data: QRResolved | { kind: "expired" }; raw: string } | null>(null);

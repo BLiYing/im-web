@@ -26,7 +26,6 @@ import { useChatActions } from "../ChatActionsContext";
 
 export interface MessageListProps {
   messages: ChatMessage[];
-  convId: string;
   peer: string;
   isGroupChat: boolean;
   uid: string;
@@ -56,7 +55,7 @@ export interface MessageListProps {
 
 export function MessageList(p: MessageListProps) {
   const {
-    messages, convId, peer, isGroupChat, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
+    messages, peer, isGroupChat, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
     timeFormat, translations, uploadProgress, dividerRef,
     mediaGate, mediaSrc, senderLabel, senderRole, senderAvatar, memberNick, renderMentionText, renderMessageText,
     openPeerDetail, handleScanRaw, requestFriendFromNote,
@@ -66,7 +65,6 @@ export function MessageList(p: MessageListProps) {
     onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause,
     toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
   } = useChatActions();
-  void convId;
 
   // 两条消息是否属于同一「连续段」：同发送者、非系统/撤回、同一天（跨天有日期分隔断段）。
   const sameSenderRun = (a?: ChatMessage, b?: ChatMessage): boolean =>

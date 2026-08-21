@@ -1,3 +1,4 @@
+import { isSearchableMessage } from "./messageContent";
 // 搜索命中判定 + 命中摘要（纯函数，从 App.tsx 抽出控制体量，CODING_STYLE §7；配 searchPredicate.test.ts）。
 // 口径与 sdk/localStore.matchesQuery、后端 G4、iOS 本地一致：**text 的 content / 任意 caption / file_name**
 // 大小写不敏感子串；媒体/文件的 content 是 URL，不参与（撞 URL 片段会命中看不见文字的消息）。needle 须已 trim+lowercase。
@@ -28,7 +29,7 @@ export function hitSnippet(r: Matchable, needle: string): string {
 export function activeDayKeys(msgs: { timestamp: number; convSeq: number; recalledAt?: number; contentType?: string }[]): Set<string> {
   const s = new Set<string>();
   for (const m of msgs) {
-    if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") continue;
+    if (!isSearchableMessage(m)) continue;
     const d = new Date(m.timestamp);
     s.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
   }

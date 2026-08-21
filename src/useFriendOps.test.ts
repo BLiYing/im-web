@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
+import { fakeClientRef } from "./testing/fakeIMClient";
 import { useFriendOps, type FriendOpsDeps } from "./useFriendOps";
-import type { IMClient } from "./sdk/imSdk";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 function mount(client: Record<string, unknown> = {}) {
   const c = { searchUsers: vi.fn(async () => [{ user_id: "u9", nickname: "老王", tags: [] }]), listFriends: vi.fn(async () => [{ user_id: "b1", status: "blocked" }]), friendAction: vi.fn(async () => {}), ...client };
-  const deps: FriendOpsDeps = { clientRef: { current: c as unknown as IMClient }, setToast: vi.fn(), refreshFriends: vi.fn(async () => {}) };
+  const deps: FriendOpsDeps = { clientRef: fakeClientRef(c), setToast: vi.fn(), refreshFriends: vi.fn(async () => {}) };
   return { ...renderHook(() => useFriendOps(deps)), deps, c };
 }
 describe("useFriendOps", () => {

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // useMediaSend（阶段 5 抽出）的发送流水线/攒批/重试回归。注入假 clientRef + 消息表三方法，断言编排顺序与副作用。
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach , afterEach } from "vitest";
+import { renderHook, act, waitFor , cleanup } from "@testing-library/react";
+import { fakeClientRef } from "./testing/fakeIMClient";
 import { useMediaSend, type MediaSendDeps } from "./useMediaSend";
-import type { IMClient } from "./sdk/imSdk";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 beforeEach(() => {
   URL.createObjectURL = vi.fn(() => `blob:${Math.random()}`) as unknown as typeof URL.createObjectURL;
@@ -16,7 +17,7 @@ function mount(over: Partial<{ uploadFile: unknown; sendMedia: unknown }> = {}) 
     ...over,
   };
   const deps: MediaSendDeps = {
-    uid: "u1", peer: "u2", groupConvId: "", clientRef: { current: client as unknown as IMClient },
+    uid: "u1", peer: "u2", groupConvId: "", clientRef: fakeClientRef(client),
     setToast: vi.fn(), appendMsg: vi.fn(), patchMsg: vi.fn(), removeMsgRow: vi.fn(),
   };
   return { ...renderHook(() => useMediaSend(deps)), deps, client };

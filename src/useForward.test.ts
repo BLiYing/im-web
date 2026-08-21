@@ -1,17 +1,18 @@
 // @vitest-environment jsdom
 // useForward（阶段 6 抽出）：目标上限、逐条/合并转发编排、执行后收尾、多选批量转发。
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
+import { fakeClientRef } from "./testing/fakeIMClient";
 import { useForward, MAX_FORWARD_TARGETS, type ForwardDeps } from "./useForward";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
-import type { IMClient } from "./sdk/imSdk";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({ convId: "c1", from: "u2", fromNickname: "小明", content: "你好", contentType: "text", convSeq: 1, timestamp: 1, status: "sent", ...over } as ChatMessage);
 const conv = (over: Partial<Conversation> = {}): Conversation => ({ conv_id: "u_u1_u_u3", peer: "u3", peer_nickname: "老王", latest_conv_seq: 0, unread: 0, read_seq: 0, peer_read_seq: 0, ...over } as Conversation);
 function mount(over: Partial<ForwardDeps> = {}) {
   const client = { sendText: vi.fn(() => "cm-t"), sendMedia: vi.fn(() => "cm-m") };
   const deps: ForwardDeps = {
-    uid: "u1", peer: "u2", groupConvId: "", clientRef: { current: client as unknown as IMClient }, setToast: vi.fn(),
+    uid: "u1", peer: "u2", groupConvId: "", clientRef: fakeClientRef(client), setToast: vi.fn(),
     appendMsg: vi.fn(), msgsByConv: {}, groupInfos: {}, selected: new Set(), setMenu: vi.fn(), exitSelectMode: vi.fn(), ...over,
   };
   return { ...renderHook(() => useForward(deps)), deps, client };

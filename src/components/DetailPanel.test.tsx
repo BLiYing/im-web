@@ -38,7 +38,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     conversations: [peerConv()], groupInfos: { g1: gp() }, friends: [friendOf("u2")], uid: "u1",
     detailTab: "media", detailMsgs: [], detailMore: false, manageOpen: false, groupBans: null,
     groupRemark: () => "", peerNick: () => "小明", peerAvatar: () => undefined, mediaGate: () => undefined, canManageMember: () => true,
-    onClose: vi.fn(), setDetailTab: vi.fn(), setDetailMore: vi.fn(), setDetailMoreOff: vi.fn(), setManageOpen: vi.fn(),
+    onClose: vi.fn(), setDetailTab: vi.fn(), setDetailMore: vi.fn(), setManageOpen: vi.fn(),
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),
     doFriendAction: vi.fn(async () => {}), openChat: vi.fn(), openInChatSearch: vi.fn(),
     doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),

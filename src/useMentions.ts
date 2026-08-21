@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type { GroupInfo } from "./sdk/protocol";
+import type { MentionRow } from "./components/Composer";
 import { applyMentionToken, filterMentionMembers, canMentionAll, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 
 export interface MentionsDeps {
@@ -38,7 +39,7 @@ export function useMentions(d: MentionsDeps) {
     // 二者互不写入对方，故搜索框不会被 @文字自动回填；清空搜索框即回落到消息框驱动。
     const effQuery = mentionFilter.trim() !== "" ? mentionFilter : mentionQuery;
     const hits = filterMentionMembers(others, effQuery);
-    const rows: { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string }[] =
+    const rows: MentionRow[] =
       hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
     if (canMentionAll(info.my_role) && effQuery.trim() === "") {
       rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });

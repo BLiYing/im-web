@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook, act , cleanup } from "@testing-library/react";
+import { fakeClientRef } from "./testing/fakeIMClient";
 import { useProfileEdit, type ProfileEditDeps } from "./useProfileEdit";
-import type { IMClient } from "./sdk/imSdk";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 function mount(client: Record<string, unknown> = {}) {
   const c = { fetchMyProfile: vi.fn(async () => ({ nickname: "我", avatar_url: "a.png", tags: ["x", "y"] })), updateMyProfile: vi.fn(async (p: Record<string, unknown>) => ({ nickname: p.nickname, phone: p.phone, avatar_url: p.avatar_url })), uploadAvatar: vi.fn(async () => ({ url: "https://cdn/av.jpg" })), ...client };
-  const deps: ProfileEditDeps = { clientRef: { current: c as unknown as IMClient }, setToast: vi.fn() };
+  const deps: ProfileEditDeps = { clientRef: fakeClientRef(c), setToast: vi.fn() };
   return { ...renderHook(() => useProfileEdit(deps)), deps, c };
 }
 describe("useProfileEdit", () => {

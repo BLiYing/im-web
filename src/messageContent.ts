@@ -37,10 +37,12 @@ export const replyPreviewOf = (m: ChatMessage): string =>
   : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
   : m.contentType === "chat_record" ? chatRecordSnippet(m.content) : (m.content || "").slice(0, 60);
 
+/** 「可搜索/可选/可定位」的消息：已确认（convSeq>0）、非撤回、非系统提示。搜索命中集、日历活跃日、多选勾选共用此一处谓词。 */
+export const isSearchableMessage = (m: Pick<ChatMessage, "convSeq"> & { recalledAt?: number; contentType?: string }): boolean =>
+  m.convSeq > 0 && !m.recalledAt && m.contentType !== "system";
 /** 多选态该消息是否可勾选：系统提示/撤回墓碑/发送中·失败的本地件（无服务端内容，转出去是空的）不可选。
  *  与 iOS isSelectableMessage: 同语义。 */
-export const selectableInMultiSelect = (m: ChatMessage): boolean =>
-  m.convSeq > 0 && !m.recalledAt && m.contentType !== "system";
+export const selectableInMultiSelect = (m: ChatMessage): boolean => isSearchableMessage(m);
 
 /** 消息列表里的最小 conv_seq（发送中的 0 不计；空列表返回 0）。供定位/搜索「最早」翻页判据用。 */
 export function minSeqOf(messages: ChatMessage[]): number {

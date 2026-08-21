@@ -4,6 +4,7 @@
 // - 稳定服务走 Context：AppServicesContext（clientRef/setToast/comingSoon）+ ChatActionsContext（setViewer/onGateTap/onPassiveMediaError/openReadyFile）；
 // - 其余动作多定义在 App 的 login 早退之后（plain fn，不能进 memo 化 context）→ 按组走 props（此前登记的「~35 props」路线，用户拍板整块抽）。
 // 护栏：DetailPanel.test.tsx + DetailPanelParts.test.tsx（子件）。
+import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
@@ -40,8 +41,7 @@ export interface DetailPanelProps {
   // —— 抽屉自身 UI 态 ——
   onClose: () => void;
   setDetailTab: (k: DetailTab) => void;
-  setDetailMore: (fn: (v: boolean) => boolean) => void;
-  setDetailMoreOff: () => void;
+  setDetailMore: Dispatch<SetStateAction<boolean>>;
   setManageOpen: (v: boolean) => void;
   setContactDraft: (v: { peer: string; remark: string }) => void;
   setInviteDraft: (v: { convId: string; selected: string[] }) => void;
@@ -71,7 +71,7 @@ export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
     groupRemark, peerNick, peerAvatar, mediaGate, canManageMember,
-    onClose, setDetailTab, setDetailMore, setDetailMoreOff, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
+    onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail,
@@ -110,15 +110,14 @@ export function DetailPanel(p: DetailPanelProps) {
       ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }]
       : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }];
     const activeTab = tabs.some((t) => t.k === detailTab) ? detailTab : tabs[0].k;
-    const close = onClose;
 
     return (
-      <div className="detail-mask" onClick={close}>
+      <div className="detail-mask" onClick={onClose}>
         <aside className="detail-panel" onClick={(e) => e.stopPropagation()}>
           {!manageOpen && (
             // 标题栏随面板滚动固定在顶部（对齐 iOS 大标题折叠为常驻导航栏）：关闭按钮一并锁在标题栏内。
             <div className="detail-sticky-head">
-              <button className="detail-close" title="关闭" onClick={close}><X size={20} /></button>
+              <button className="detail-close" title="关闭" onClick={onClose}><X size={20} /></button>
               <div className="detail-topbar">{d.isGroup ? "群组信息" : "用户信息"}</div>
             </div>
           )}
@@ -152,24 +151,24 @@ export function DetailPanel(p: DetailPanelProps) {
                   })}><UserPlus size={20} /><span>加好友</span></button>
                 )}
                 {!d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
-                  <button className="detail-pill" onClick={() => { close(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
+                  <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
                 )}
                 {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
                 {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                {showDetailBody && <button className="detail-pill" onClick={() => { close(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
+                {showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
                 <div className="detail-pill-anchor">
                   <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                   {detailMore && (
                     <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
-                      <button className="menu-item" onClick={() => { setDetailMoreOff(); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
+                      <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
                       {!d.isGroup && (
-                        <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMoreOff(); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
+                        <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
                       )}
                       {d.isGroup && (
-                        <button className="menu-item danger" onClick={() => { setDetailMoreOff(); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />退出群组</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />退出群组</button>
                       )}
                       {isOwner && (
-                        <button className="menu-item danger" onClick={() => { setDetailMoreOff(); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />删除群组</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />删除群组</button>
                       )}
                     </div>
                   )}

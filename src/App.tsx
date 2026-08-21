@@ -23,6 +23,7 @@ import { Composer } from "./components/Composer";
 import { ContactsTab } from "./components/ContactsTab";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
+import { useEvent } from "./useEvent";
 import { textTier, charCountLabel } from "./longtext";
 import {
   parseDownloadSettings,
@@ -191,6 +192,7 @@ export default function App() {
   // 通用设置项：theme / timeFormat / fontSize / sendKey / wallpaper 均为本机真功能。
   // ---- 群聊（M3-4）----
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
+  const convId = peer ? convIdFor(uid, peer) : groupConvId; // 当前会话 id（唯一定义，下方各处引用；勿再内联重算）
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
   // @提及（M4-8，仅群聊）：面板开合 + 过滤词 + 候选表（显示名→uid，发送时按文本里是否还留着 token 复核）。
   // ---- 会话内搜索（SEARCH_DESIGN §4/§5）：顶栏搜索框 + 底部命中导航 ▲▼ + 📅日历 + 👤来自（纯本地）----
@@ -808,11 +810,11 @@ export default function App() {
   const {
     mentionQuery, setMentionQuery, mentionFilter, setMentionFilter, mentionActive, setMentionActive,
     mentionCandidates, mentionAllPending, mentionPanelRef, mentionActiveRef, mentionRows, pickMention, onMentionNavKey,
-  } = useMentions({ convId: peer ? convIdFor(uid, peer) : groupConvId, groupConvId, peer, uid, groupInfos, input, setInput, composerRef });
+  } = useMentions({ convId, groupConvId, peer, uid, groupInfos, input, setInput, composerRef });
   const send = useCallback(() => {
     const text = input.trim();
     const client = clientRef.current;
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    const cid = convId;
     if (!client || !cid) return;
     // 先发预览条攒的粘贴件（Web #2）：图片走相册批量通道（≥2 张聚簇成宫格），
     // 文件走既有文件通道（≥8MB 自动分片可暂停续传）；文字随后补发一条文本。
@@ -934,7 +936,7 @@ export default function App() {
 
   // 多选批量删除（仅本端）。
   const deleteSelected = useCallback(() => {
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    const cid = convId;
     setMsgsByConv((prev) => {
       const list = (prev[cid] ?? []).filter((m) => !(m.convSeq > 0 && selected.has(m.convSeq)));
       return { ...prev, [cid]: list };
@@ -1536,7 +1538,7 @@ export default function App() {
       setMentionQuery(null);
     }
     const now = Date.now();
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
+    const cid = convId;
     if (val && cid && now - lastTypingSent.current > 2000) {
       lastTypingSent.current = now;
       clientRef.current?.sendTyping(cid);
@@ -1551,7 +1553,6 @@ export default function App() {
 
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
-  const convId = peer ? convIdFor(uid, peer) : groupConvId;
   // 进会话拉一次置顶集合（G0）；切会话时把横幅索引复位到第一条。
   useEffect(() => {
     setPinnedIdx(0);
@@ -1804,17 +1805,47 @@ export default function App() {
   // handleScanRaw 定义在提前 return 之后：仅在 phase==="app" 的渲染里才会被 effect 读到，届时已初始化，无 TDZ。
   // 聊天动作 Context（阶段 1 · MessageList 消费）：成员皆 setter/ref/useCallback，定义均在 login 早退之前；
   // 本 useMemo 亦须在早退之前（hook 数恒定）。reactive 值与晚定义的 openPeerDetail/handleScanRaw 走 MessageList props。
+  // 函数成员一律经 useEvent 包成恒定身份（send/onGateTap/pickMention… 的 useCallback 依赖 input/dlStates/uploadProgress 等高频 state，
+  // 直接放进来会让 Context 值每次按键/上传 tick 重建、所有消费组件重渲染——/code-review 2026-08-22）。setter/ref 本身恒定。
+  const locateInChatEv = useEvent(locateInChat);
+  const onGateTapEv = useEvent(onGateTap);
+  const onMediaBubbleTapEv = useEvent(onMediaBubbleTap);
+  const openReadyFileEv = useEvent(openReadyFile);
+  const onPassiveMediaErrorEv = useEvent(onPassiveMediaError);
+  const retryUploadEv = useEvent(retryUpload);
+  const toggleUploadPauseEv = useEvent(toggleUploadPause);
+  const toggleSelectedEv = useEvent(toggleSelected);
+  const fetchLinkPreviewEv = useEvent(fetchLinkPreview);
+  const onMediaLoadEv = useEvent(onMediaLoad);
+  const jumpToBottomEv = useEvent(jumpToBottom);
+  const unblockEv = useEvent(unblock);
+  const exitSelectModeEv = useEvent(exitSelectMode);
+  const forwardSelectedEv = useEvent(forwardSelected);
+  const deleteSelectedEv = useEvent(deleteSelected);
+  const removePastedImageEv = useEvent(removePastedImage);
+  const cancelAttachCloseEv = useEvent(cancelAttachClose);
+  const scheduleAttachCloseEv = useEvent(scheduleAttachClose);
+  const pickFileEv = useEvent(pickFile);
+  const openFavoritesPickEv = useEvent(openFavoritesPick);
+  const onFilePickedEv = useEvent(onFilePicked);
+  const pickMentionEv = useEvent(pickMention);
+  const onInputChangeEv = useEvent(onInputChange);
+  const onComposerPasteEv = useEvent(onComposerPaste);
+  const sendEv = useEvent(send);
   const chatActions = useMemo<ChatActions>(() => ({
-    setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat,
-    onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause,
-    toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
-    // 阶段 3 · Composer 用（皆 useCallback/setter/useRef）
-    jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, deleteSelected,
-    removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, onFilePicked,
-    setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, send,
+    setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat: locateInChatEv,
+    onGateTap: onGateTapEv, onMediaBubbleTap: onMediaBubbleTapEv, openReadyFile: openReadyFileEv, onPassiveMediaError: onPassiveMediaErrorEv,
+    retryUpload: retryUploadEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
+    onMediaLoad: onMediaLoadEv, pendingFilesRef,
+    jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
+    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, removePastedImage: removePastedImageEv,
+    cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
+    openFavoritesPick: openFavoritesPickEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
+    setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, send: sendEv,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
-  }), [setToast, locateInChat, onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause, toggleSelected, fetchLinkPreview, onMediaLoad,
-       jumpToBottom, unblock, exitSelectMode, forwardSelected, deleteSelected, removePastedImage, cancelAttachClose, scheduleAttachClose, pickFile, openFavoritesPick, onFilePicked, pickMention, onInputChange, onComposerPaste, send]);
+  // 全部成员身份恒定 → 依赖为空，Context 值只建一次。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
   // 二维码簇 → useQR（阶段 7c）：openPeerDetail 定义在早退后，经 ref 注入（定义处回写 .current）。
   const openPeerDetailRef = useRef<(peer: string) => void>(() => {});
@@ -2482,7 +2513,7 @@ export default function App() {
           />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
             <MessageList
-                messages={messages} convId={convId} peer={peer} isGroupChat={isGroupChat} uid={uid}
+                messages={messages} peer={peer} isGroupChat={isGroupChat} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
                 timeFormat={timeFormat} translations={translations} uploadProgress={uploadProgress} dividerRef={dividerRef}
                 mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} senderRole={senderRole} senderAvatar={senderAvatar}
@@ -2803,7 +2834,7 @@ export default function App() {
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} mediaGate={mediaGate} canManageMember={canManageMember}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
-          setDetailTab={setDetailTab} setDetailMore={setDetailMore} setDetailMoreOff={() => setDetailMore(false)} setManageOpen={setManageOpen}
+          setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
           doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={() => search.openInChatSearch()}
           doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}

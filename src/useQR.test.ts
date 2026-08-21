@@ -1,15 +1,16 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook, act, waitFor , cleanup } from "@testing-library/react";
+import { fakeClientRef } from "./testing/fakeIMClient";
 import { useQR, type QRDeps } from "./useQR";
-import type { IMClient } from "./sdk/imSdk";
 import type { GroupInfo } from "./sdk/protocol";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 const err = (code: number) => Object.assign(new Error(`E${code}`), { code });
 function mount(client: Record<string, unknown> = {}, over: Partial<QRDeps> = {}) {
   const c = { qrResolve: vi.fn(async () => ({ kind: "user", user_id: "u9" })), qrMyCard: vi.fn(async () => ({ code: "c1" })), groupQR: vi.fn(async () => ({ code: "g" })),
     qrResetMyCard: vi.fn(async () => ({ code: "c2" })), groupQRReset: vi.fn(async () => ({ code: "g2" })), joinGroupByCode: vi.fn(async () => ({ name: "测试群", conv_id: "g1" })), requestFriend: vi.fn(async () => true), ...client };
-  const deps: QRDeps = { phase: "app", uid: "u1", myInfo: { nickname: "我", avatar_url: "" }, groupInfos: {}, clientRef: { current: c as unknown as IMClient }, setToast: vi.fn(),
+  const deps: QRDeps = { phase: "app", uid: "u1", myInfo: { nickname: "我", avatar_url: "" }, groupInfos: {}, clientRef: fakeClientRef(c), setToast: vi.fn(),
     openChat: vi.fn(), openGroupChat: vi.fn(), refreshFriends: vi.fn(async () => {}), refreshConversations: vi.fn(async () => []), openPeerDetailRef: { current: vi.fn() }, ...over };
   return { ...renderHook(() => useQR(deps)), deps, c };
 }

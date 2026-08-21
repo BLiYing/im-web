@@ -4,7 +4,7 @@
  * 通过真实 <App/> + mock IMClient 注入各类型消息，钉住每条渲染分支的结构与关键交互——
  * 之后把消息列表从 App.tsx 抽成组件时，这些断言必须保持绿（静默运行时回归的护栏）。
  *
- * mock 结构镜像 App.smoke.test.tsx（vi.mock 需在各测试文件内、无法跨文件共享）；此处仅把
+ * FakeIMClient 与 App.smoke.test.tsx 共享 testing/fakeIMClient（vi.mock 工厂内 await import）；此处仅把
  * incoming 扩成可传任意 ChatMessage 字段的 recv()，用于造图/视频/文件/相册/引用/撤回/系统等。
  *
  * 覆盖：system / 撤回(己·对方) / 图片 / 视频 / 文件 / 相册宫格 / 引用条 / 转发溯源 / 图说 caption /
@@ -16,64 +16,12 @@ import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/re
 import "@testing-library/jest-dom/vitest";
 import type { Conversation, ChatMessage } from "./sdk/protocol";
 
-vi.mock("./sdk/imSdk", () => {
-  type Handlers = Record<string, ((...a: unknown[]) => void) | undefined>;
-  class FakeIMClient {
-    static last: FakeIMClient | null = null;
-    static conversations: Conversation[] = [];
-    handlers: Handlers;
-    calls: Record<string, unknown[][]> = {};
-    private seq = 0;
-    constructor(handlers: Handlers = {}) {
-      this.handlers = handlers;
-      FakeIMClient.last = this;
-      return new Proxy(this, {
-        get: (t, p, r) => {
-          if (p in t) return Reflect.get(t, p, r);
-          const fn = async (...a: unknown[]) => { (t.calls[String(p)] ??= []).push(a); return undefined; };
-          Reflect.set(t, p, fn);
-          return fn;
-        },
-      });
-    }
-    private rec(name: string, ...a: unknown[]) { (this.calls[name] ??= []).push(a); }
-    async connect(uid: string, pwd: string) { this.rec("connect", uid, pwd); }
-    async connectWithToken(uid: string, token: string) { this.rec("connectWithToken", uid, token); }
-    disconnect() { this.rec("disconnect"); }
-    cachedConversations(): Conversation[] { return []; }
-    cacheConversations() {}
-    async fetchConversations(): Promise<Conversation[]> { return FakeIMClient.conversations; }
-    syncTracked() {}
-    async listFriends() { return []; }
-    async fetchMyProfile() { return { nickname: "我自己", phone: "", avatar_url: "" }; }
-    async downloadSettings() { return { version: 1, settings: {} }; }
-    async loadLocal(): Promise<ChatMessage[]> { return []; }
-    async loadDeletedSeqs(): Promise<number[]> { return []; }
-    async loadSyncCursor(): Promise<number> { return 0; }
-    openConversation(...a: unknown[]) { this.rec("openConversation", ...a); }
-    trackConversation() {}
-    watchUsers(...a: unknown[]) { this.rec("watchUsers", ...a); }
-    markRead(...a: unknown[]) { this.rec("markRead", ...a); }
-    sendTyping() {}
-    loadOlder() {}
-    loadNewer() {}
-    async fetchUserPresence() { return { onlineUntil: 0, lastSeen: 0 }; }
-    async fetchPinned() { return []; }
-    sendText(content: string, to: string, convId: string): string {
-      this.rec("sendText", content, to, convId);
-      return `cmid-${++this.seq}`;
-    }
-  }
-  return { IMClient: FakeIMClient, registerAccount: vi.fn(async () => {}) };
-});
+vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));
 
 import { IMClient } from "./sdk/imSdk";
 import App from "./App";
 
-type Fake = {
-  last: { handlers: Record<string, (...a: unknown[]) => void>; calls: Record<string, unknown[][]> } | null;
-  conversations: Conversation[];
-};
+import type { Fake } from "./testing/fakeIMClient";
 const Fake = IMClient as unknown as Fake;
 
 const UID = "1001", PEER = "2002";

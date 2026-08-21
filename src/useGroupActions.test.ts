@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, it, expect, vi , afterEach } from "vitest";
+import { renderHook , cleanup } from "@testing-library/react";
 import { useGroupActions } from "./useGroupActions";
 import type { AppServices } from "./AppServicesContext";
 import type { GroupInfo } from "./sdk/protocol";
+afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 // 最小假客户端：只桩本簇会调到的群写接口。
 function makeClient() {

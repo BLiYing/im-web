@@ -9,10 +9,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import type { ChatMessage, Conversation, GroupInfo } from "./sdk/protocol";
 import { searchMessages, type MsgRecord } from "./sdk/localStore";
 import type { IMClient } from "./sdk/imSdk";
-import { minSeqOf } from "./messageContent";
+import { minSeqOf, isSearchableMessage } from "./messageContent";
 import { messageMatchesNeedle, activeDayKeys } from "./searchPredicate";
+import { isSameDay } from "./time";
 
-type FromRow = { label: string; userId: string; role?: string; avatarUrl?: string };
+import type { FromRow } from "./components/ChatSearchBar";
 
 export interface ChatSearchDeps {
   // 受控的会话内搜索文本态（App 拥有，见文件头注释）
@@ -69,7 +70,7 @@ export function useChatSearch(d: ChatSearchDeps) {
   const searchHits = useMemo(() =>
     (searchOpen && (searchNeedle || searchFrom))
       ? messages.filter((m) => {
-          if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
+          if (!isSearchableMessage(m)) return false;
           if (searchFrom && m.from !== searchFrom) return false;
           return !searchNeedle || messageMatchesNeedle(m, searchNeedle);
         })
@@ -130,9 +131,8 @@ export function useChatSearch(d: ChatSearchDeps) {
   useEffect(() => { closeInChatSearch(); }, [convId]);
 
   // ===== 按日期跳转 / 日历：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
-  const searchableMsgs = () => messages.filter((m) => m.convSeq > 0 && !m.recalledAt && m.contentType !== "system");
+  const searchableMsgs = () => messages.filter(isSearchableMessage);
   const monthLabel = (dt: Date) => `${dt.getFullYear()}年${dt.getMonth() + 1}月`;
-  const sameDay = (a: number, b: number) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
   const activeDays = useMemo(() => activeDayKeys(messages), [messages]);
   const jumpToDay = (dayStart: number, label: string) => {
     const list = searchableMsgs();
@@ -145,7 +145,7 @@ export function useChatSearch(d: ChatSearchDeps) {
     const hit = list.find((m) => m.timestamp >= dayStart);
     if (!hit) { setToast(`${label}及之后无消息`); return; }
     setCalendarOpen(false);
-    if (!sameDay(hit.timestamp, dayStart)) {
+    if (!isSameDay(hit.timestamp, dayStart)) {
       const dt = new Date(hit.timestamp);
       setToast(`${label}无消息，已跳到最近的 ${dt.getMonth() + 1}月${dt.getDate()}日`);
     }
