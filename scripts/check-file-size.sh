@@ -17,11 +17,11 @@ MAX_LINES=${MAX_LINES:-600}           # 未登记文件行数上限（可用环�
 WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败），尽早规划拆分
 
 # 历史欠账（已超 MAX_LINES、待拆分）。值 = 当前行数 + 少量余量，**只准降不准升**。
-#   - src/App.tsx      : 上帝组件，2026-08 起分批拆分中（6302 → 4932，已抽 useChatSearch）；剩会话详情抽屉/聊天滚动核心，见 current_task.md。
+#   - src/App.tsx      : 应用外壳，2026-08 系统性拆分至 ~3000（6302 → 4891 → 2960±：9 阶段抽 MessageList/DetailPanel/Composer/ContactsTab/ChatHeader + useChatSearch/useMediaDownload/useMediaSend/useForward/useFavorites/useMentions/useQR/useAppearanceSettings/useFriendOps/useProfileEdit）。剩余=核心 state/连接/滚动核心/菜单表/enterApp 等胶水（§7 不硬抽），见 current_task.md。
 #   - src/sdk/imSdk.ts : IM 客户端 API 面（40+ 方法），大而由业务性质决定；如拆按域分（auth/messages/groups/qr）。
 grandfather_limit() {
   case "$1" in
-    src/App.tsx)      echo 3100 ;;  # 棘轮下调（5100→…→3300→3100，阶段8 抽 useAppearanceSettings/useFriendOps/useProfileEdit 后 3022）；只准降不准升
+    src/App.tsx)      echo 3000 ;;  # 棘轮下调（5100→…→3100→3000，阶段9 抽 ChatHeader 后 2958）；只准降不准升
     src/sdk/imSdk.ts) echo 1450 ;;
     *)                echo "" ;;
   esac

@@ -21,6 +21,7 @@ import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
 import { Composer } from "./components/Composer";
 import { ContactsTab } from "./components/ContactsTab";
+import { ChatHeader } from "./components/ChatHeader";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
 import { textTier, charCountLabel } from "./longtext";
 import {
@@ -33,7 +34,6 @@ import {
   syntheticViewerMessage, minSeqOf, type ChatRecord,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
-import { ChatSearchBar } from "./components/ChatSearchBar";
 import { HomeSearchResults } from "./components/HomeSearchResults";
 import { highlightText } from "./searchHighlight";
 import { hitSnippet } from "./searchPredicate";
@@ -82,9 +82,9 @@ import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
-  Headphones, SquarePen,
-  MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
-  UserPlus, LogOut, Info, Pin,
+  Headphones, 
+  Trash2, BellOff, Menu,
+  Pin,
   Search, FileText, MessageCircle, X, Forward,
   ChevronDown, ChevronUp, QrCode,
 } from "lucide-react";
@@ -2462,77 +2462,13 @@ export default function App() {
           未选会话时用 .main-empty 覆盖层遮住。否则条件挂载会让 virtua 在布局未定时测到 0。 */}
       <main className="main">
         <div className="chat">
-          <header>
-            {/* 会话内搜索（§4）：搜索态下搜索条**替换标题栏内容**（对齐 iOS）；下拉/日历锚标题栏下方；非搜索态=原头部。 */}
-            {searchOpen && (isGroupChat || peer) ? (
-              <ChatSearchBar
-                searchInputRef={search.searchInputRef} isGroupChat={isGroupChat}
-                searchQuery={searchQuery} setSearchQuery={setSearchQuery} searchNeedle={search.searchNeedle}
-                searchHitCount={search.searchHits.length} searchHitIdx={search.searchHitIdx}
-                gotoSearchHit={search.gotoSearchHit} closeInChatSearch={search.closeInChatSearch}
-                searchFrom={search.searchFrom} searchFromName={search.searchFromName} clearSearchFrom={search.clearSearchFrom}
-                searchFromPickerOpen={search.searchFromPickerOpen} setSearchFromPickerOpen={search.setSearchFromPickerOpen}
-                searchFromRows={search.searchFromRows} openFromPicker={search.openFromPicker} pickSearchFrom={search.pickSearchFrom}
-                calendarOpen={search.calendarOpen} setCalendarOpen={search.setCalendarOpen}
-                calendarMonth={search.calendarMonth} setCalendarMonth={search.setCalendarMonth} activeDays={search.activeDays}
-                jumpToDay={search.jumpToDay} jumpToEarliest={search.jumpToEarliest} jumpToToday={search.jumpToToday} monthLabel={search.monthLabel}
-              />
-            ) : (
-            <>
-            {(peer || isGroupChat) && <button className="link back-btn" onClick={deselect}>‹ 会话</button>}
-            {(isGroupChat || peer) ? (
-              <button className="chat-identity"
-                title={isGroupChat ? "查看群资料" : "查看资料"}
-                onClick={() => isGroupChat ? openGroupPanel(groupConvId) : openPeerDetail(peer, true)}>
-                <Avatar url={chatAvatarURL} label={chatTitle} seed={groupConvId || peer} cls="chat-avatar" />
-                <span className="chat-identity-copy">
-                  <span className="chat-title">{chatTitle}</span>
-                  <span className="chat-subtitle">{visibleChatSubtitle}</span>
-                </span>
-              </button>
-            ) : (
-              <span className="muted">未选择会话</span>
-            )}
-            <span className="chat-head-right">
-              {(peer || isGroupChat) && (
-                <>
-                  <button className={`icon-btn${searchOpen ? " active" : ""}`} title="搜索聊天内容" onClick={() => (searchOpen ? search.closeInChatSearch() : search.openInChatSearch())}><Search size={20} /></button>
-                  {!isGroupChat && <button className="icon-btn" title="呼叫" onClick={() => comingSoon("语音通话")}><Phone size={20} /></button>}
-                  <span className="chat-anchor">
-                    <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
-                  {chatMenu && (
-                    <div className="menu-card chat-menu" onClick={(e) => e.stopPropagation()}>
-                      {(isGroupChat ? [
-                        { id: "info", label: "群资料", icon: Info, run: () => openGroupPanel(groupConvId) },
-                        // 「仅管理员可邀请」开启且我非管理员 → 隐藏邀请入口（对齐 iOS / 详情面板）。
-                        ...(!groupInfos[groupConvId]?.perm_invite || groupInfos[groupConvId]?.my_role !== "member"
-                          ? [{ id: "invite", label: "邀请成员", icon: UserPlus, run: () => setInviteDraft({ convId: groupConvId, selected: [] }) }]
-                          : []),
-                        { id: "mute", label: groupConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (groupConv) setConvMuted(groupConv, !groupConv.muted); } },
-                        { id: "select", label: "选择消息", icon: CheckSquare, run: () => enterSelectMode() },
-                        { id: "leave", label: "退出群聊", icon: LogOut, danger: true, run: () => void doLeaveGroup(groupConvId) },
-                      ] : [
-                        { id: "edit", label: "编辑联系人", icon: SquarePen, run: () => setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
-                        { id: "call", label: "视频通话", icon: Video, run: () => comingSoon("视频通话") },
-                        { id: "mute", label: peerConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (peerConv) setConvMuted(peerConv, !peerConv.muted); } },
-                        { id: "select", label: "选择消息", icon: CheckSquare, run: () => enterSelectMode() },
-                        { id: "block", label: peerBlocked ? "取消拉黑" : "拉黑", icon: Ban, danger: !peerBlocked, run: () => doToggleBlock(peer, !peerBlocked) },
-                        { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => { if (peerConv) deleteConv(peerConv); } },
-                      ]).map((r) => (
-                        <button key={r.id} className={`menu-card-row${"danger" in r && r.danger ? " danger" : ""}`}
-                          onClick={() => { setChatMenu(false); r.run(); }}>
-                          <r.icon size={18} className="row-icon" /><span className="row-label">{r.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  </span>
-                </>
-              )}
-            </span>
-            </>
-            )}
-          </header>
+          {/* 标题栏（搜索态=ChatSearchBar；否则 返回/身份/搜索/呼叫/⋯菜单）：见 components/ChatHeader（动作打包 actions 注入）。 */}
+          <ChatHeader
+            searchOpen={searchOpen} isGroupChat={isGroupChat} peer={peer} groupConvId={groupConvId} searchQuery={searchQuery} setSearchQuery={setSearchQuery} search={search}
+            chatTitle={chatTitle} chatAvatarURL={chatAvatarURL} visibleChatSubtitle={visibleChatSubtitle} chatMenu={chatMenu} setChatMenu={setChatMenu}
+            groupInfos={groupInfos} groupConv={groupConv} peerConv={peerConv} peerBlocked={peerBlocked}
+            actions={{ deselect, openGroupPanel, openPeerDetail, setInviteDraft, setConvMuted, enterSelectMode, doLeaveGroup, setContactDraft, doToggleBlock, deleteConv }}
+          />
           {/* 聊天头横幅（审批 G3 / 公告 G1 / 置顶 G0）：见 components/ChatBanners（状态/动作在 App 组装）。 */}
           <ChatBanners
             isGroupChat={isGroupChat} groupInfo={activeGroupInfo}
