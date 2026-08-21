@@ -15,7 +15,7 @@ import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionA
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
 import { toggleCapped } from "./selection";
-import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
+import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
@@ -46,6 +46,7 @@ import { HomeSearchResults } from "./components/HomeSearchResults";
 import { highlightText } from "./searchHighlight";
 import { hitSnippet } from "./searchPredicate";
 import { useChatSearch } from "./useChatSearch";
+import { ChatBanners } from "./components/ChatBanners";
 import { AlbumGrid } from "./components/AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
@@ -87,7 +88,7 @@ import {
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
   Headphones, ChevronRight, SquarePen,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
-  Image as ImageIcon, UserPlus, LogOut, Info, Pin, List,
+  Image as ImageIcon, UserPlus, LogOut, Info, Pin,
   MoreHorizontal,
   Search, Camera, FileText, MessageCircle, X, Forward,
   ChevronDown, ChevronUp, QrCode, Link2,
@@ -3758,59 +3759,17 @@ export default function App() {
             </>
             )}
           </header>
-          {/* 入群审批横幅（G3，蓝条）：仅群主/管理员且有待审申请时显示，点条开审批列表。排在最上（需处置）。 */}
-          {isGroupChat && (activeGroupInfo?.my_role === "owner" || activeGroupInfo?.my_role === "admin")
-            && (activeGroupInfo?.pending_count ?? 0) > 0 && (
-            <div className="pin-banner approve" onClick={() => void openJoinRequests(groupConvId)} role="button">
-              <span className="pin-banner-main" style={{ cursor: "pointer" }}>
-                <span className="pin-banner-bar" />
-                <span className="pin-banner-copy">
-                  <span className="pin-banner-kicker"><UserPlus size={12} /> 入群申请</span>
-                  <span className="pin-banner-text">{activeGroupInfo!.pending_count} 人申请加入本群 · 点击审批</span>
-                </span>
-              </span>
-            </div>
-          )}
-          {/* 群公告横幅（G1，黄条）：排在置顶横幅之上（优先级 公告 > 置顶）。点条直接开公告全文视图（决策 16）。 */}
-          {isGroupChat && activeGroupInfo?.announcement && !dismissedBanners[annDismissKey] && (
-            <div className="pin-banner announce">
-              <button className="pin-banner-main" onClick={() => openGroupText("announcement", groupConvId)}>
-                <span className="pin-banner-bar" />
-                <span className="pin-banner-copy">
-                  <span className="pin-banner-kicker"><Megaphone size={12} /> 群公告</span>
-                  <span className="pin-banner-text">{activeGroupInfo.announcement}</span>
-                </span>
-              </button>
-              <button className="icon-btn pin-banner-close" title="收起公告"
-                onClick={() => setDismissedBanners((d) => ({ ...d, [annDismissKey]: true }))}><X size={16} /></button>
-            </div>
-          )}
-          {/* 置顶消息横幅（G0）：点条=跳到那条并轮转到下一条；右侧 ☰=展开全部置顶。 */}
-          {pinnedShown && !dismissedBanners[pinDismissKey] && (
-            <div className="pin-banner">
-              <button className="pin-banner-main"
-                title="跳转到该消息"
-                onClick={() => { jumpToSeq(pinnedShown.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}>
-                <span className={`pin-banner-bar${activePinned.length > 1 ? " multi" : ""}`} />
-                <span className="pin-banner-copy">
-                  <span className="pin-banner-kicker">
-                    <Pin size={12} /> 置顶消息
-                    {activePinned.length > 1 && <span className="pin-banner-count">{pinnedShownIdx + 1}/{activePinned.length}</span>}
-                    {pinnedSenderLabel(pinnedShown, isGroupChat) && (
-                      <span className="pin-banner-from">· {pinnedSenderLabel(pinnedShown, isGroupChat)}</span>
-                    )}
-                  </span>
-                  <span className="pin-banner-text">{pinnedPreview(pinnedShown)}</span>
-                </span>
-              </button>
-              {activePinned.length > 1 && (
-                <button className="icon-btn pin-banner-list" title="全部置顶消息"
-                  onClick={() => setPinnedListOpen(true)}><List size={18} /></button>
-              )}
-              <button className="icon-btn pin-banner-close" title="收起置顶"
-                onClick={() => setDismissedBanners((d) => ({ ...d, [pinDismissKey]: true }))}><X size={16} /></button>
-            </div>
-          )}
+          {/* 聊天头横幅（审批 G3 / 公告 G1 / 置顶 G0）：见 components/ChatBanners（状态/动作在 App 组装）。 */}
+          <ChatBanners
+            isGroupChat={isGroupChat} groupInfo={activeGroupInfo}
+            dismissedBanners={dismissedBanners} annDismissKey={annDismissKey} pinDismissKey={pinDismissKey}
+            dismiss={(key) => setDismissedBanners((d) => ({ ...d, [key]: true }))}
+            pinnedShown={pinnedShown} pinnedShownIdx={pinnedShownIdx} activePinned={activePinned}
+            onOpenJoinRequests={() => void openJoinRequests(groupConvId)}
+            onOpenAnnouncement={() => openGroupText("announcement", groupConvId)}
+            onJumpPinned={() => { jumpToSeq(pinnedShown!.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}
+            onOpenPinnedList={() => setPinnedListOpen(true)}
+          />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
             {messages.map((m, i) => {
               const mine = m.from === uid;
