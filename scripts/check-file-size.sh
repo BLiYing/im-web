@@ -17,11 +17,11 @@ MAX_LINES=${MAX_LINES:-600}           # 未登记文件行数上限（可用环�
 WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败），尽早规划拆分
 
 # 历史欠账（已超 MAX_LINES、待拆分）。值 = 当前行数 + 少量余量，**只准降不准升**。
-#   - src/App.tsx      : 上帝组件，2026-08 起分批拆分中（6302 → ~5029）；剩会话详情抽屉/聊天滚动核心，见 current_task.md。
+#   - src/App.tsx      : 上帝组件，2026-08 起分批拆分中（6302 → 4932，已抽 useChatSearch）；剩会话详情抽屉/聊天滚动核心，见 current_task.md。
 #   - src/sdk/imSdk.ts : IM 客户端 API 面（40+ 方法），大而由业务性质决定；如拆按域分（auth/messages/groups/qr）。
 grandfather_limit() {
   case "$1" in
-    src/App.tsx)      echo 5100 ;;
+    src/App.tsx)      echo 5000 ;;  # 棘轮下调（原 5100→5000，抽 useChatSearch 后 4932）；只准降不准升
     src/sdk/imSdk.ts) echo 1450 ;;
     *)                echo "" ;;
   esac
