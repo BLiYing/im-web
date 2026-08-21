@@ -44,6 +44,7 @@ import { Avatar } from "./components/Avatar";
 import { ChatSearchBar } from "./components/ChatSearchBar";
 import { HomeSearchResults } from "./components/HomeSearchResults";
 import { highlightText } from "./searchHighlight";
+import { messageMatchesNeedle, hitSnippet, activeDayKeys } from "./searchPredicate";
 import { AlbumGrid } from "./components/AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
@@ -2606,21 +2607,19 @@ export default function App() {
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
 
-  // ===== 会话内搜索（SEARCH_DESIGN §4）：本地过滤已加载消息 → 命中集（升序，0=最早）=====
-  // 命中口径与后端 G4 / localStore.searchMessages 一致：content|caption 大小写不敏感子串，排除撤回/系统/未确认，
-  // 叠加可选 `来自:` 发件人过滤（sender==uid）。纯内存过滤（整条会话已在本地），配合 jumpToSeq 复用跳转/高亮。
+  // ===== 会话内搜索（SEARCH_DESIGN §4）：本地过滤已加载消息 → 命中集（升序，0=最早）；排除撤回/系统/未确认，
+  // 叠加可选 `来自:` 发件人过滤（sender==uid）；命中口径见 searchPredicate（与后端 G4/iOS 一致），配合 jumpToSeq 跳转/高亮。=====
   const searchNeedle = searchQuery.trim().toLowerCase();
-  const searchHits = (searchOpen && (searchNeedle || searchFrom))
-    ? messages.filter((m) => {
-        if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
-        if (searchFrom && m.from !== searchFrom) return false;
-        if (!searchNeedle) return true; // 仅按发件人过滤（无关键词）
-        // 仅 text 的 content 参与命中（媒体/文件 content=URL，撞 URL 片段会命中看不见的文字，同 G4/iOS）；caption 全类型算；文件名(P2)算。
-        const isText = !m.contentType || m.contentType === "text";
-        return (isText && (m.content || "").toLowerCase().includes(searchNeedle))
-          || (m.caption || "").toLowerCase().includes(searchNeedle) || (m.fileName || "").toLowerCase().includes(searchNeedle);
-      })
-    : [];
+  // useMemo：非搜索态返回稳定空数组，避免无关渲染重扫数千条 + 稳定下方 effect 依赖（否则每渲染重入，/code-review #5）。
+  const searchHits = useMemo(() =>
+    (searchOpen && (searchNeedle || searchFrom))
+      ? messages.filter((m) => {
+          if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
+          if (searchFrom && m.from !== searchFrom) return false;
+          return !searchNeedle || messageMatchesNeedle(m, searchNeedle); // 仅发件人过滤（无词）时全算；否则命中判定见 searchPredicate
+        })
+      : [],
+    [searchOpen, searchNeedle, searchFrom, messages]);
   // 词/发件人/会话变化 → 默认跳「最新一条命中」（贴合「找刚才那条」）；签名去重避免每次渲染重跳。
   useEffect(() => {
     if (!searchOpen) { searchSigRef.current = ""; return; }
@@ -2681,25 +2680,26 @@ export default function App() {
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
   const clearSearchFrom = () => { setSearchFrom(""); setSearchFromName(""); };
+  // 切会话 → 关残留搜索态（单页共享态，否则关键词+「来自:A成员」泄漏到 B；同会话开搜不改 convId 故不误关，/code-review #2）。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { closeInChatSearch(); }, [convId]);
 
   // ===== 按日期跳转 / 日历（SEARCH_DESIGN §5）：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
   const searchableMsgs = () => messages.filter((m) => m.convSeq > 0 && !m.recalledAt && m.contentType !== "system");
   const monthLabel = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月`;
   const sameDay = (a: number, b: number) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
-  // 有消息的「日」集合（活跃日打点，P1）——仅覆盖已加载窗口（诚实标注 §9）。key=YYYY-M-D。
-  const activeDays = useMemo(() => {
-    const s = new Set<string>();
-    for (const m of searchableMsgs()) { const d = new Date(m.timestamp); s.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`); }
-    return s;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, calendarOpen]);
+  // 活跃日打点（P1）——仅覆盖已加载窗口（诚实标注 §9）。仅随 messages（去掉 calendarOpen 依赖，开合日历不再重扫，#5）。
+  const activeDays = useMemo(() => activeDayKeys(messages), [messages]);
   const jumpToDay = (dayStart: number, label: string) => {
-    const hit = searchableMsgs().find((m) => m.timestamp >= dayStart);
-    if (!hit) {
-      const earliest = searchableMsgs()[0];
-      setToast(earliest && earliest.timestamp > dayStart ? `${label}早于已加载范围，请上拉加载更早历史` : `${label}及之后无消息`);
+    const list = searchableMsgs();
+    const oldest = list[0]; // 升序，[0]=已加载窗口最旧
+    // 选中日早于已加载最旧且未到顶（minSeq>1）→ 提示上拉；否则会误跳已加载最旧并谎称「已跳到最近的 X」（原判据恒假、不可达，#1）。
+    if (oldest && dayStart < oldest.timestamp && minSeqOf(messagesRef.current) > 1) {
+      setToast(`${label}早于已加载范围，请上拉加载更早历史`);
       return;
     }
+    const hit = list.find((m) => m.timestamp >= dayStart);
+    if (!hit) { setToast(`${label}及之后无消息`); return; } // 选中日晚于最新消息（全部更早）
     setCalendarOpen(false);
     if (!sameDay(hit.timestamp, dayStart)) {
       const d = new Date(hit.timestamp);
@@ -3131,8 +3131,7 @@ export default function App() {
     (f.nickname || "").toLowerCase().includes(homeQ) ||
     f.user_id.toLowerCase().includes(homeQ)) : [];
   const convById = (cid: string) => conversations.find((c) => c.conv_id === cid);
-  // 命中摘要（图说优先，与命中口径一致）。
-  const recordSnippet = (r: MsgRecord) => (r.caption || r.fileName || r.content || "");
+  const recordSnippet = (r: MsgRecord) => hitSnippet(r, homeQ); // 优先真正含 needle 的字段（见 searchPredicate，/code-review #3）
   // 打开某会话（供首页搜索点击）：群走 openGroupChat，单聊从 conv_id 还原 peer。
   const openConvById = (cid: string) => {
     if (cid.startsWith("g_")) { openGroupChat(cid); return; }
@@ -4544,6 +4543,7 @@ export default function App() {
           }}
           onOpenLink={(url) => window.open(url, "_blank", "noreferrer")}
           onDownloadFile={downloadFavorite}
+          onOpenRecord={(f) => { closeFavorites(); setRecordStack([parseChatRecord(f.content)]); }}
           onPick={sendFavoritesToCurrent}
           onClose={closeFavorites}
         />

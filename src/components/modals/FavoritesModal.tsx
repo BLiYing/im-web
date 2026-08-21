@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Link as LinkIcon, MessageSquareQuote, X } from "lucide-react";
+import { Check, Link as LinkIcon, MessageSquareQuote, MessagesSquare, X } from "lucide-react";
 import type { Favorite } from "../../sdk/protocol";
 import type { FavoriteCtx, MenuAction } from "../../menus";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, isUrlText, videoFrameSrc } from "../../messageContent";
+import { fileNameFromContent, isUrlText, looksLikeChatRecordJSON, parseChatRecord, videoFrameSrc } from "../../messageContent";
 import { formatFileSize } from "../../fileMetadata";
 import {
   CATEGORY_LABELS, deriveCategories, matchesCategory, type FavoriteKind,
@@ -12,12 +12,14 @@ import { Modal } from "../Modal";
 import { AnchoredMenu } from "../AnchoredMenu";
 
 /** 收藏项渲染类型（决定左图标列与正文样式）。语音落地前 audio/voice 暂按文件视觉兜底。 */
-type FavKind = "image" | "video" | "file" | "link" | "text";
+type FavKind = "image" | "video" | "file" | "link" | "record" | "text";
 function favKind(f: Favorite): FavKind {
   const ct = f.content_type;
   if (ct === "image") return "image";
   if (ct === "video") return "video";
   if (ct === "file" || ct === "audio" || ct === "voice") return "file";
+  // 合并转发「聊天记录」：内容是 JSON，须在 link/text 前拦下——否则会当纯文本显 JSON 串。
+  if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return "record";
   if (ct === "link" || (ct === "text" && isUrlText(f.content))) return "link";
   return "text";
 }
@@ -48,7 +50,7 @@ function favDate(ts: number): string {
  */
 export function FavoritesModal({
   favorites, mode = "browse", sourceLabel, actions,
-  onOpenMedia, onOpenLink, onDownloadFile, onPick, onClose,
+  onOpenMedia, onOpenLink, onDownloadFile, onOpenRecord, onPick, onClose,
 }: {
   favorites: Favorite[];
   mode?: "browse" | "pick";
@@ -57,6 +59,7 @@ export function FavoritesModal({
   onOpenMedia: (fav: Favorite, kind: "image" | "video") => void;
   onOpenLink: (url: string) => void;
   onDownloadFile: (fav: Favorite) => void;
+  onOpenRecord: (fav: Favorite) => void;   // 聊天记录 → 打开记录查看器（recordStack）
   onPick?: (favs: Favorite[]) => void;     // pick 模式：发送选中项到当前会话
   onClose: () => void;
 }) {
@@ -107,6 +110,7 @@ export function FavoritesModal({
     if (k === "image" || k === "video") onOpenMedia(f, k);
     else if (k === "link") onOpenLink(f.content);
     else if (k === "file") onDownloadFile(f);
+    else if (k === "record") onOpenRecord(f);   // 聊天记录 → 记录查看器（非 JSON 串）
     else setReader(f);               // 文本 → 阅读器
   };
 
@@ -169,6 +173,8 @@ export function FavoritesModal({
                   <FileTypeIcon name={favFileName(f)} size={28} />
                 ) : k === "link" ? (
                   <LinkIcon size={22} />
+                ) : k === "record" ? (
+                  <MessagesSquare size={22} />
                 ) : (
                   <MessageSquareQuote size={22} />
                 )}
@@ -181,6 +187,10 @@ export function FavoritesModal({
                   <div className="fav-content link">{f.content}</div>
                 ) : k === "image" || k === "video" ? (
                   <div className="fav-content">{f.caption || (k === "image" ? "[图片]" : "[视频]")}</div>
+                ) : k === "record" ? (
+                  (() => { const r = parseChatRecord(f.content); return (
+                    <div className="fav-content">{r.t || "聊天记录"}<span className="fav-record-count"> · {r.items.length} 条消息</span></div>
+                  ); })()
                 ) : (
                   <div className="fav-content">{f.content}</div>
                 )}

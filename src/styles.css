@@ -404,6 +404,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-content { min-width: 0; white-space: pre-wrap; word-break: break-word; font-size: 15px; color: var(--text); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .fav-content.link { color: var(--accent); -webkit-line-clamp: 2; }
 .fav-content.filename { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: 1; display: block; }
+.fav-record-count { color: var(--text-secondary); font-size: 13px; }
 .fav-meta { font-size: 13px; color: var(--text-tertiary); }
 .fav-meta .fav-src { color: var(--text-secondary); }
 .fav-caption { font-size: 13px; color: var(--text-secondary); } /* 图说整体收藏：快照下方随附文字 */
