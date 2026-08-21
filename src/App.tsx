@@ -11,11 +11,10 @@ import { errorCode } from "./qr";
 import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
-import { toggleCapped } from "./selection";
 import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
-import { buildMessageActions, buildConversationActions, buildFavoriteActions, type MenuAction, type MessageCtx } from "./menus";
+import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
 import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { MessageList } from "./components/MessageList";
@@ -31,8 +30,8 @@ import { DEFAULT_WALLPAPER, loadWallpaper, wallpaperCSS, type WallpaperChoice } 
 import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
 import {
   replyPreviewOf,
-  parseChatRecord, fileNameFromContent, copyImageToClipboard,
-  syntheticViewerMessage, minSeqOf, type RecordItem, type ChatRecord,
+  parseChatRecord, copyImageToClipboard,
+  syntheticViewerMessage, minSeqOf, type ChatRecord,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { ChatSearchBar } from "./components/ChatSearchBar";
@@ -42,6 +41,8 @@ import { hitSnippet } from "./searchPredicate";
 import { useChatSearch } from "./useChatSearch";
 import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
+import { useForward } from "./useForward";
+import { useFavorites } from "./useFavorites";
 import { ChatBanners } from "./components/ChatBanners";
 import { AnchoredMenu } from "./components/AnchoredMenu";
 import { type LinkPreview } from "./components/LinkCard";
@@ -92,18 +93,8 @@ type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
 const MAX_GROUP_MEMBERS = 500;
 const MAX_INITIAL_MEMBERS = MAX_GROUP_MEMBERS - 1;
 // 转发目标会话上限：一次最多转给 9 个会话，与 iOS kIMForwardMaxSelection / 微信一致。
-const MAX_FORWARD_TARGETS = 9;
 
 // 收藏 → 合成 ChatMessage：转发/从收藏发送统一走 sendForwardToTarget（§6，媒体/文件透传 URL 不重传）。
-// convSeq 置 1（快照非引用，仅为过合并转发的 convSeq>0 守卫）；from=source_from 保留最初作者链。
-function favoriteToMessage(f: Favorite): ChatMessage {
-  return {
-    clientMsgId: `fav-${f.id}`, convId: f.source_conv_id, from: f.source_from,
-    content: f.content, contentType: f.content_type,
-    fileName: f.file_name, fileSize: f.file_size, caption: f.caption,
-    convSeq: 1, timestamp: f.created_at || Date.now(), status: "sent",
-  };
-}
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -139,10 +130,6 @@ export default function App() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
   const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null); // 正在编辑的消息（M4-5，编辑态）
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
-  const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
-  const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
-  const [forwardMulti, setForwardMulti] = useState(false); // 转发选择器：多选目标会话模式（对齐 iOS「多选」）
-  const [forwardTargets, setForwardTargets] = useState<string[]>([]); // 多选选中的目标 conv_id（有序，上限 MAX_FORWARD_TARGETS）
   // 合并转发详情弹窗：栈式，支持嵌套「套娃」下钻/返回（栈顶=当前展示层，空=关闭）。
   const [recordStack, setRecordStack] = useState<ChatRecord[]>([]);
   const recordView = recordStack.length > 0 ? recordStack[recordStack.length - 1] : null;
@@ -152,8 +139,6 @@ export default function App() {
     recordView?.items.forEach((it, i) => { if (it.ct === "chat_record") m.set(i, parseChatRecord(it.c)); });
     return m;
   }, [recordView]);
-  const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
-  const [favPick, setFavPick] = useState(false); // 收藏弹窗模式：true=从附件面板进的「从收藏发送」pick 模式
   // 媒体查看器（镜像 iOS）：图片/视频全屏 + 下载/媒体库/更多；fromGallery=从媒体库进入（不再显示媒体库按钮）。
   const [viewer, setViewer] = useState<{ m: ChatMessage; fromGallery?: boolean } | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false); // 会话媒体库（蒙层网格）
@@ -1031,44 +1016,6 @@ export default function App() {
 
 
 
-  // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
-  const favoriteMessage = useCallback((m: ChatMessage) => {
-    setMenu(null);
-    void (async () => {
-      try {
-        await clientRef.current?.addFavorite({
-          content_type: m.contentType, content: m.content, caption: m.caption, // 图说：连文字一起收藏（整体）
-          source_conv_id: m.convId, source_conv_seq: m.convSeq, source_from: m.from,
-        });
-        setToast("已收藏");
-      } catch (e) { setToast(`收藏失败：${(e as Error).message}`); }
-    })();
-  }, []);
-  // 打开收藏列表弹窗（浏览态，账号卡入口）。
-  const openFavorites = useCallback(() => {
-    setFavPick(false);
-    void (async () => {
-      try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
-      catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
-    })();
-  }, []);
-  // 打开收藏弹窗（pick 态，聊天附件面板「从收藏发送」入口）。
-  const openFavoritesPick = useCallback(() => {
-    setAttachPanel(false); setFavPick(true);
-    void (async () => {
-      try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
-      catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
-    })();
-  }, []);
-  const closeFavorites = useCallback(() => { setFavorites(null); setFavPick(false); }, []);
-  const removeFavorite = useCallback((id: number) => {
-    void (async () => {
-      try {
-        await clientRef.current?.deleteFavorite(id);
-        setFavorites((prev) => (prev ? prev.filter((f) => f.id !== id) : prev));
-      } catch (e) { setToast(`删除失败：${(e as Error).message}`); }
-    })();
-  }, []);
 
   // 转发（M4-3）：打开会话选择器，选目标后逐条转发（带 forward_from 溯源）。
   // 链接富预览抓取（供 LinkCard；稳定引用避免重复请求）。
@@ -1077,7 +1024,6 @@ export default function App() {
     if (!c) throw new Error("未连接");
     return c.linkPreview(url);
   }, []);
-  const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwardMode("each"); setForwarding([m]); }, []);
   // 进入多选态（M4-3）：从消息右键进入时预选当前消息；从标题栏「选择消息」进入时不预选（m 省略）。
   const enterSelectMode = useCallback((m?: ChatMessage) => {
     setMenu(null); setChatMenu(false); setSelectMode(true);
@@ -1087,103 +1033,18 @@ export default function App() {
   const toggleSelected = useCallback((seq: number) => {
     setSelected((prev) => { const n = new Set(prev); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
   }, []);
-  // 关闭转发选择器并复位多选态（点蒙层 / 取消 / 发送完成统一走这里）。
-  const closeForwardPicker = useCallback(() => { setForwarding(null); setForwardMulti(false); setForwardTargets([]); }, []);
-  // 多选态切换某个目标会话（上限 MAX_FORWARD_TARGETS，超限吐司，对齐 iOS）。
-  // 副作用（吐司）在 updater 外算，避免 StrictMode 双调用致重复吐司。
-  const toggleForwardTarget = useCallback((cid: string) => {
-    const { next, overflow } = toggleCapped(forwardTargets, cid, MAX_FORWARD_TARGETS);
-    if (overflow) { setToast(`最多选择 ${MAX_FORWARD_TARGETS} 个会话`); return; }
-    setForwardTargets(next);
-  }, [forwardTargets]);
-  // 向单个 target 会话发出转发（逐条保留各自类型 / 合并打包 chat_record 一条）。不负责关闭弹窗/吐司。
-  // msgsArg 显式传入时（从收藏发送）用之并按「逐条」发；否则用 forwarding 状态 + 当前 forwardMode（转发）。
-  const sendForwardToTarget = useCallback((target: Conversation, msgsArg?: ChatMessage[]) => {
-    const client = clientRef.current;
-    const msgs = msgsArg ?? forwarding;
-    if (!client || !msgs) return;
-    const mode = msgsArg ? "each" : forwardMode;
-    const to = target.is_group ? "" : target.peer;
-    // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
-    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+  // 转发簇 → useForward（阶段 6）：须在 exitSelectMode/setMenu/useMessageStore/selected/groupInfos 之后。
+  const {
+    forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
+    forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected,
+  } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode });
+  // 收藏簇 → useFavorites（阶段 6）：消费 useForward 的 setForwardMode/setForwarding/sendForwardToTarget。
+  const {
+    favorites, setFavorites, favPick,
+    favoriteMessage, openFavorites, openFavoritesPick, closeFavorites, 
+    downloadFavorite, favoriteActions, sendFavoritesToCurrent,
+  } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget });
 
-    if (mode === "merged" && msgs.length > 0) {
-      const items: RecordItem[] = msgs
-        .filter((m) => m.content && !m.recalledAt && m.contentType !== "system" && m.convSeq > 0)
-        .map((m) => ({
-          n: nameOf(m), ct: m.contentType || "text", c: m.content,
-          // 文件行随包携带原名与大小（fn/fs，与 iOS 同约定）——收端不再只显「[文件]」。
-          ...(m.contentType === "file"
-            ? { fn: m.fileName || fileNameFromContent(m.content), ...(m.fileSize ? { fs: m.fileSize } : {}) }
-            : {}),
-          // 图说条目携带 caption（cap，与 iOS 同 key）——收端记录卡「有字显字」，不再只显 [图片]。
-          ...(m.caption ? { cap: m.caption } : {}),
-        }));
-      const names = new Set(items.map((i) => i.n));
-      const title = names.size <= 1 ? `${[...names][0] || "聊天"} 的聊天记录` : "群聊的聊天记录";
-      const json = JSON.stringify({ t: title, items });
-      const clientMsgId = client.sendMedia(json, "chat_record", to, target.conv_id);
-      pushOptimistic(clientMsgId, json, "chat_record");
-    } else {
-      for (const m of msgs) {
-        if (!m.content || m.recalledAt) continue;
-        const origin = m.forwardFrom || m.fromNickname || m.from; // 转发链保留最初作者
-        const ct = m.contentType || "text";
-        // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
-        const clientMsgId = ct === "text"
-          ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
-          // 转发也要带上媒体尺寸/时长 + **封面/缩略图**：源消息手上就有，丢了收端就只能按未知渲染
-          // （视频没 poster → 资料卡宫格只能抓首帧甚至裂图；且事后补不回来）。poster/thumb 对文件为空，无害。
-          : client.sendMedia(m.content, ct, to, target.conv_id, {
-              forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize,
-              mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
-              poster: m.posterUrl, thumb: m.thumb, caption: m.caption, // 图说随转发跟随（Telegram 模型）
-              // 配文 @ 随转发保留高亮+可点：mentions 服务端按目标群成员再过滤（非成员自动落普通文字）。
-              // **不带 mentionAll**：@所有人 需群主/管理员权限，转发者在目标群无权时整条会被拒发 300204；
-              // 且转发不该再次全员强提醒。丢 mention_all 后 "@所有人" 字样退化为普通文字（正确）。
-              mentions: m.mentions,
-            });
-        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb, m.caption, m.mentions);
-      }
-    }
-  }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);
-  // 执行转发到一个或多个目标：全部发出后关闭弹窗、退出多选、单条吐司汇总。
-  const doForwardToTargets = useCallback((targets: Conversation[]) => {
-    if (targets.length === 0) return;
-    targets.forEach((t) => sendForwardToTarget(t)); // 不透传 forEach 的 index 作 msgsArg
-    closeForwardPicker();
-    exitSelectMode();
-    setToast(targets.length === 1
-      ? `已转发到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
-      : `已转发到 ${targets.length} 个会话`);
-  }, [sendForwardToTarget, closeForwardPicker, exitSelectMode]);
-
-  // ── 收藏动作（右键菜单 + 从收藏发送，复用转发/发送路径，§5.4/§6）──
-  // 转发某条收藏到任意会话：合成 ChatMessage 后复用已有 ForwardPicker（forwarding 状态）。
-  const forwardFavorite = useCallback((f: Favorite) => { setForwardMode("each"); setForwarding([favoriteToMessage(f)]); }, []);
-  // 复制收藏（文本/链接）：写入剪贴板并吐司。
-  const copyFavorite = useCallback((f: Favorite) => { void navigator.clipboard?.writeText(f.content); setToast("已复制"); }, []);
-  // 下载收藏（媒体/文件）：合成 ChatMessage 复用 saveMessageToDisk（含失效探测）。
-  const downloadFavorite = useCallback((f: Favorite) => { void saveMessageToDisk(favoriteToMessage(f)); }, [saveMessageToDisk]);
-  const favoriteActions = useMemo(() => buildFavoriteActions({
-    forward: forwardFavorite, copy: copyFavorite, download: downloadFavorite, delete: (f) => removeFavorite(f.id),
-  }), [forwardFavorite, copyFavorite, downloadFavorite, removeFavorite]);
-  // 从收藏发送（pick 模式）：所选收藏逐条发进当前会话（媒体/文件透传 URL，走 sendForwardToTarget），收起弹窗。
-  const sendFavoritesToCurrent = useCallback((favs: Favorite[]) => {
-    const conv = conversations.find((c) => c.conv_id === currentConvRef.current);
-    if (!conv || favs.length === 0) return;
-    sendForwardToTarget(conv, favs.map(favoriteToMessage));
-    closeFavorites();
-    setToast(favs.length === 1 ? "已发送" : `已发送 ${favs.length} 条`);
-  }, [conversations, sendForwardToTarget, closeFavorites]);
-  // 多选批量转发：收集选中的消息，打开选择器。
-  const forwardSelected = useCallback(() => {
-    const cid = peer ? convIdFor(uid, peer) : groupConvId;
-    const list = (msgsByConv[cid] ?? []).filter((m) => m.convSeq > 0 && selected.has(m.convSeq) && !m.recalledAt);
-    if (list.length > 0) { setForwardMode("each"); setForwarding(list); }
-  }, [msgsByConv, peer, uid, groupConvId, selected]);
   // 多选批量删除（仅本端）。
   const deleteSelected = useCallback(() => {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;

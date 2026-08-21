@@ -1,7 +1,7 @@
 // 消息内容纯函数：快照本地化、引用预览、聊天记录解析、文件名/URL 处理、媒体定框等。
 // 从 App.tsx 抽出（无 JSX、无 React 状态），单测见 chatRecord.test.ts。
 import type { CSSProperties } from "react";
-import type { ChatMessage } from "./sdk/protocol";
+import type { ChatMessage, Favorite } from "./sdk/protocol";
 import { mediaDisplaySize } from "./media";
 
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
@@ -124,4 +124,14 @@ export function videoFrameSrc(url: string): string {
  */
 export function syntheticViewerMessage(clientMsgId: string, content: string, kind: "image" | "video"): ChatMessage {
   return { clientMsgId, convId: "", from: "", content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" };
+}
+
+// convSeq 置 1（快照非引用，仅为过合并转发的 convSeq>0 守卫）；from=source_from 保留最初作者链。
+export function favoriteToMessage(f: Favorite): ChatMessage {
+  return {
+    clientMsgId: `fav-${f.id}`, convId: f.source_conv_id, from: f.source_from,
+    content: f.content, contentType: f.content_type,
+    fileName: f.file_name, fileSize: f.file_size, caption: f.caption,
+    convSeq: 1, timestamp: f.created_at || Date.now(), status: "sent",
+  };
 }
