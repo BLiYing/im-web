@@ -4,8 +4,6 @@ import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { AppServicesProvider, type AppServices } from "./AppServicesContext";
 import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
-import { GroupManagePanel } from "./components/GroupManagePanel";
-import { DetailTabs } from "./components/DetailTabs";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
@@ -23,6 +21,7 @@ import { buildMessageActions, buildConversationActions, buildFavoriteActions, ty
 import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { MessageList } from "./components/MessageList";
+import { DetailPanel } from "./components/DetailPanel";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
@@ -37,7 +36,7 @@ import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expir
 import { DEFAULT_WALLPAPER, loadWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
 import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
 import {
-  isUrlText, replyPreviewOf,
+  replyPreviewOf,
   parseChatRecord, fileNameFromContent, copyImageToClipboard,
   isPreviewableFile, syntheticViewerMessage, minSeqOf, type RecordItem, type ChatRecord,
 } from "./messageContent";
@@ -85,12 +84,11 @@ import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
-  Headphones, ChevronRight, SquarePen,
+  Headphones, SquarePen,
   MoreVertical, Video, Ban, Trash2, CheckSquare, BellOff, Menu,
   Image as ImageIcon, UserPlus, LogOut, Info, Pin,
-  MoreHorizontal,
-  Search, Camera, FileText, MessageCircle, X, Forward,
-  ChevronDown, ChevronUp, QrCode, Link2,
+  Search, FileText, MessageCircle, X, Forward,
+  ChevronDown, ChevronUp, QrCode,
 } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -3383,6 +3381,7 @@ export default function App() {
 
   return (
     <AppServicesProvider value={services}>
+    <ChatActionsProvider value={chatActions}>
     <div className={`app ${peer || groupConvId ? "has-sel" : "no-sel"}`}>
       <aside className="sidebar">
         <header>
@@ -3758,8 +3757,7 @@ export default function App() {
             onOpenPinnedList={() => setPinnedListOpen(true)}
           />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
-            <ChatActionsProvider value={chatActions}>
-              <MessageList
+            <MessageList
                 messages={messages} convId={convId} peer={peer} isGroupChat={isGroupChat} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
                 timeFormat={timeFormat} translations={translations} uploadProgress={uploadProgress} dividerRef={dividerRef}
@@ -3767,7 +3765,6 @@ export default function App() {
                 memberNick={memberNick} renderMentionText={renderMentionText} renderMessageText={renderMessageText}
                 openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
               />
-            </ChatActionsProvider>
           </div>
           {showJump && convId && (
             <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
@@ -4212,198 +4209,22 @@ export default function App() {
         />
       )}
 
-      {/* 会话详情抽屉（对齐 iOS IMChatDetailViewController）：单聊/群聊共用——头部 + 操作排 + 设置 + 页签。 */}
-      {detail && (() => {
-        const d = detail;
-        const conv = conversations.find((c) => c.conv_id === d.convId);
-        const gp = d.isGroup ? groupInfos[d.convId] : undefined;
-        const canManage = !!gp && gp.my_role !== "member";
-        const isOwner = !!gp && gp.my_role === "owner";
-        // 「仅管理员可邀请」开启且我非管理员 → 隐藏所有邀请类入口（群二维码/群邀请链接/添加成员），对齐 iOS。
-        const canInviteHere = !gp?.perm_invite || canManage;
-        const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || "群聊")
-          : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || d.peer || "");
-        // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
-        // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
-        const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url)
-          : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
-        const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (d.peer ?? "");
-        const pinned = (conv?.pinned_at ?? 0) > 0;
-        const muted = !!conv?.muted;
-        const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
-        // 好友准入（微信式，任务一 P0）：非好友不显示「消息/呼叫/视频」，改显「加好友」。
-        // 拉黑的好友 status 仍 accepted（仍算好友，可发消息），故只看 status 不看 blocked。
-        const detailPeerIsFriend = !d.isGroup && !!d.peer && friends.some((f) => f.user_id === d.peer && f.status === "accepted");
-        // 非好友（单聊）只保留头像 + 操作排（加好友/更多），隐藏设置·备注名·页签——尚未建立关系时这些设置无意义。
-        // 仅隐藏，数据加载逻辑不动（加为好友后重新渲染即恢复）。与 iOS sectionLayout 同语义。
-        const showDetailBody = d.isGroup || detailPeerIsFriend;
-        // 页签数据（本地历史）
-        const media = detailMsgs.filter((m) => m.contentType === "image" || m.contentType === "video")
-          .sort((a, b) => b.convSeq - a.convSeq);
-        const files = detailMsgs.filter((m) => m.contentType === "file").sort((a, b) => b.convSeq - a.convSeq);
-        const links = detailMsgs.filter((m) => isUrlText(m.content)).sort((a, b) => b.convSeq - a.convSeq);
-        const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
-          ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }]
-          : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }];
-        const activeTab = tabs.some((t) => t.k === detailTab) ? detailTab : tabs[0].k;
-        const close = () => { setDetail(null); setDetailMore(false); setManageOpen(false); };
-
-        return (
-          <div className="detail-mask" onClick={close}>
-            <aside className="detail-panel" onClick={(e) => e.stopPropagation()}>
-              {!manageOpen && (
-                // 标题栏随面板滚动固定在顶部（对齐 iOS 大标题折叠为常驻导航栏）：关闭按钮一并锁在标题栏内。
-                <div className="detail-sticky-head">
-                  <button className="detail-close" title="关闭" onClick={close}><X size={20} /></button>
-                  <div className="detail-topbar">{d.isGroup ? "群组信息" : "用户信息"}</div>
-                </div>
-              )}
-
-              {manageOpen && gp ? (
-                <GroupManagePanel gp={gp} groupBans={groupBans}
-                  onBack={() => setManageOpen(false)} onPickAvatar={pickGroupAvatar}
-                  onOpenJoinRequests={openJoinRequests} onOpenBans={openGroupBans} />
-              ) : (
-                <>
-                  {/* ---- 头部：头像 + 名 + 副标题 ---- */}
-                  <div className="detail-header">
-                    <div className="detail-avatar-wrap">
-                      <Avatar url={avatarUrl} label={title} seed={d.isGroup ? d.convId : (d.peer ?? "")} cls="detail-avatar" />
-                      {canManage && (
-                        <button className="detail-cam" title="设置群头像" onClick={() => pickGroupAvatar(gp!)}><Camera size={15} /></button>
-                      )}
-                    </div>
-                    <div className="detail-name">{title}</div>
-                    <div className="detail-sub">{subtitle}</div>
-                  </div>
-
-                  {/* ---- 操作排 pills ---- */}
-                  <div className="detail-pills">
-                    {!d.isGroup && !detailPeerIsFriend && (
-                      <button className="detail-pill" onClick={() => void doFriendAction(d.peer!, async () => {
-                        // 已直接成为好友（我曾单向删除对方而对方仍视我为好友）→ 不吐司，doFriendAction 的
-                        // refreshFriends 会让操作排/卡片立即恢复；说「已发送申请」反而误导要等对方通过。
-                        const becameFriend = await clientRef.current!.requestFriend(d.peer!);
-                        if (!becameFriend) { setToast("已发送好友申请"); }
-                      })}><UserPlus size={20} /><span>加好友</span></button>
-                    )}
-                    {!d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
-                      <button className="detail-pill" onClick={() => { close(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
-                    )}
-                    {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
-                    {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                    {showDetailBody && <button className="detail-pill" onClick={() => { close(); search.openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
-                    <div className="detail-pill-anchor">
-                      <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
-                      {detailMore && (
-                        <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
-                          <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
-                          {!d.isGroup && (
-                            <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
-                          )}
-                          {d.isGroup && (
-                            <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />退出群组</button>
-                          )}
-                          {isOwner && (
-                            <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />删除群组</button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {showDetailBody && (<>
-                  {/* ---- 群公告 / 群简介卡（决策 17，Pills 下第一卡，全员只读；一行预览 + 点开全文视图） ---- */}
-                  {d.isGroup && gp && (gp.announcement || gp.intro) && (
-                    <div className="detail-card">
-                      {gp.announcement && (
-                        <button className="detail-row" onClick={() => openGroupText("announcement", d.convId)}>
-                          <span className="detail-row-ic"><Megaphone size={18} /></span><span>群公告</span>
-                          <span className="detail-row-val">{gp.announcement}</span><ChevronRight size={16} className="detail-row-chev" />
-                        </button>
-                      )}
-                      {gp.intro && (
-                        <button className="detail-row" onClick={() => openGroupText("intro", d.convId)}>
-                          <span className="detail-row-ic"><Info size={18} /></span><span>群简介</span>
-                          <span className="detail-row-val">{gp.intro}</span><ChevronRight size={16} className="detail-row-chev" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {/* ---- 设置：置顶 / 免打扰 (+群管理) ---- */}
-                  <div className="detail-card">
-                    <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>置顶聊天</span>
-                      <button className={`switch ${pinned ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvPinned(conv, !pinned)} /></div>
-                    <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>消息免打扰</span>
-                      <button className={`switch ${muted ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvMuted(conv, !muted)} /></div>
-                    {canManage && (
-                      <button className="detail-row" onClick={() => setManageOpen(true)}>
-                        <span className="detail-row-ic"><Settings2 size={18} /></span><span>群管理</span>
-                        {(gp?.pending_count ?? 0) > 0
-                          ? <span className="detail-badge">{gp!.pending_count}</span>
-                          : <span className="detail-row-val muted">仅群主/管理员</span>}
-                        <ChevronRight size={16} className="detail-row-chev" />
-                      </button>
-                    )}
-                    {d.isGroup && canInviteHere && (
-                      <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
-                        <span className="detail-row-ic"><QrCode size={18} /></span><span>群二维码</span>
-                        <ChevronRight size={16} className="detail-row-chev end" />
-                      </button>
-                    )}
-                    {d.isGroup && canInviteHere && (
-                      <button className="detail-row" onClick={() => void openGroupCard(d.convId, true)}>
-                        <span className="detail-row-ic"><Link2 size={18} /></span><span>群邀请链接</span>
-                        <ChevronRight size={16} className="detail-row-chev end" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* ---- 群：我在本群的昵称 / 群备注（任意成员，G1） ---- */}
-                  {d.isGroup && gp && (
-                    <div className="detail-card">
-                      <button className="detail-row" onClick={() => void doEditMyGroupNickname(gp)}>
-                        <span className="detail-row-ic"><SquarePen size={18} /></span><span>我在本群的昵称</span>
-                        <span className="detail-row-val">{gp.my_nickname || "未设置"}</span><ChevronRight size={16} className="detail-row-chev" />
-                      </button>
-                      <button className="detail-row" onClick={() => void doEditGroupRemark(gp)}>
-                        <span className="detail-row-ic"><Bookmark size={18} /></span><span>群备注</span>
-                        <span className="detail-row-val">{groupRemark(gp.conv_id) || "未设置"}</span><ChevronRight size={16} className="detail-row-chev" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* ---- 单聊：备注名 / 用户名 ---- */}
-                  {!d.isGroup && (
-                    <div className="detail-card">
-                      <button className="detail-row" onClick={() => setContactDraft({ peer: d.peer!, remark: conv?.peer_remark ?? "" })}>
-                        <span className="detail-row-ic"><SquarePen size={18} /></span><span>备注名</span>
-                        <span className="detail-row-val">{conv?.peer_remark || "点击设置"}</span><ChevronRight size={16} className="detail-row-chev" />
-                      </button>
-                      <div className="detail-row"><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">{d.peer}</span></div>
-                    </div>
-                  )}
-
-                  {/* ---- 页签 ---- */}
-                  <DetailTabs
-                    tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
-                    gp={gp} uid={uid} media={media} files={files} links={links}
-                    canInvite={canInviteHere}
-                    onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
-                    onOpenMember={openPeerDetail} canManageMember={canManageMember}
-                    onMemberMenu={(e, cid, m) => setMemberMenu({ x: e.clientX, y: e.clientY, convId: cid, m })}
-                    mediaGate={mediaGate} onGateTap={onGateTap}
-                    onOpenViewer={(m) => setViewer({ m, fromGallery: true })}
-                    onFileMenu={(e, m) => setFileMenu({ x: e.clientX, y: e.clientY, m })}
-                    onMediaError={(m) => void onPassiveMediaError(m)} onOpenFile={openReadyFile}
-                  />
-                  </>)}
-                </>
-              )}
-            </aside>
-          </div>
-        );
-      })()}
+      {/* 会话详情抽屉：见 components/DetailPanel（派生 + JSX 整块平移；稳定服务走 Context，其余动作按组注入）。 */}
+      {detail && (
+        <DetailPanel detail={detail}
+          conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
+          detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
+          groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} mediaGate={mediaGate} canManageMember={canManageMember}
+          onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
+          setDetailTab={setDetailTab} setDetailMore={setDetailMore} setDetailMoreOff={() => setDetailMore(false)} setManageOpen={setManageOpen}
+          setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
+          doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={() => search.openInChatSearch()}
+          doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
+          setConvPinned={setConvPinned} setConvMuted={setConvMuted} openGroupText={openGroupText} openGroupCard={openGroupCard}
+          doEditMyGroupNickname={doEditMyGroupNickname} doEditGroupRemark={doEditGroupRemark} pickGroupAvatar={pickGroupAvatar}
+          openJoinRequests={openJoinRequests} openGroupBans={openGroupBans} openPeerDetail={openPeerDetail}
+        />
+      )}
 
       {/* 邀请成员弹窗：见 components/modals/InviteMembersModal（候选=非群内好友）。 */}
       {inviteDraft && (() => {
@@ -4526,6 +4347,7 @@ export default function App() {
 
       {toast && <div className="toast">{toast}</div>}
     </div>
+    </ChatActionsProvider>
     </AppServicesProvider>
   );
 }
