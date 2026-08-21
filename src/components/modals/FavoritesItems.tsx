@@ -43,17 +43,12 @@ export function favFileName(f: Favorite): string {
   return (f.file_name && f.file_name.trim()) || fileNameFromContent(f.content);
 }
 
-/** 收藏时间显示：今天显时分、昨天、更早显日期（与 iOS 相对时间同心智）。 */
+/** 收藏时间显示：年月日 时:分（与 iOS IMFormatFileDateTime 一致）。 */
 export function favDate(ts: number): string {
   if (!ts) return "";
-  const d = new Date(ts), now = new Date();
-  const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  const hm = `${String(d.getHours()).padStart(2, "0")}:${mm}`;
-  if (sameDay(d, now)) return hm;
-  const y = new Date(now); y.setDate(now.getDate() - 1);
-  if (sameDay(d, y)) return `昨天 ${hm}`;
-  return `${d.getFullYear() === now.getFullYear() ? "" : d.getFullYear() + "/"}${d.getMonth() + 1}/${d.getDate()}`;
+  const d = new Date(ts);
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
 /** 行右槽：pick 多选=勾选圈；browse=删除 ✕ 快捷。 */

@@ -2600,7 +2600,7 @@ export default function App() {
           onOpenLink={(url) => window.open(url, "_blank", "noreferrer")}
           glue={{ gateOf: mediaGate, onGateTap, onOpenFile: (m) => void openReadyFile(m), onMediaError: (m) => void onPassiveMediaError(m) }}
           myUid={uid} conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl}
-          onOpenRecord={(f) => { closeFavorites(); setRecordStack([parseChatRecord(f.content)]); }}
+          onOpenRecord={(f) => setRecordStack([parseChatRecord(f.content)])}
           onPick={sendFavoritesToCurrent}
           onClose={closeFavorites}
         />

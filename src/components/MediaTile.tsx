@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { DownloadState } from "../download";
 import { formatFileSize } from "../fileMetadata";
+import { formatMediaDuration } from "../media";
 import { videoFrameSrc } from "../messageContent";
 
 // 门控媒体格子（图片/视频缩略）：会话媒体库与资料页「媒体」页签共用。
@@ -43,6 +44,9 @@ export function MediaTile({ variant, m, gate, onClick, onMenu, onMediaError }: {
         ? (gate.phase === "expired" ? s.expiredBadge : <span className="detail-media-dl">↓</span>)
         : m.contentType === "video" && <span className={s.playBadge}>▶</span>}
       {showSize && <span className="detail-media-size">{sizeText}</span>}
+      {!gate && m.contentType === "video" && formatMediaDuration(m.duration) && (
+        <span className="detail-media-dur">{formatMediaDuration(m.duration)}</span>
+      )}
     </Tag>
   );
 }

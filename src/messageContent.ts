@@ -131,7 +131,7 @@ export function favoriteToMessage(f: Favorite): ChatMessage {
   return {
     clientMsgId: `fav-${f.id}`, convId: f.source_conv_id, from: f.source_from,
     content: f.content, contentType: f.content_type,
-    fileName: f.file_name, fileSize: f.file_size, caption: f.caption,
+    fileName: f.file_name, fileSize: f.file_size, duration: f.duration ?? 0, caption: f.caption,
     convSeq: 1, timestamp: f.created_at || Date.now(), status: "sent",
   };
 }

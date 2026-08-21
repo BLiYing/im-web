@@ -1172,6 +1172,8 @@ button.detail-row:hover { background: var(--surface-hover); }
   color: var(--on-media); font-size: 22px; font-weight: 700; text-shadow: 0 1px 6px var(--overlay-strong); pointer-events: none; z-index: 1; }
 .detail-media-size { position: absolute; left: 4px; top: 4px; padding: 0 6px; border-radius: 8px;
   background: var(--overlay); color: var(--on-media); font-size: 10px; line-height: 16px; pointer-events: none; z-index: 1; }
+.detail-media-dur { position: absolute; right: 4px; bottom: 4px; padding: 0 6px; border-radius: 8px;
+  background: var(--overlay); color: var(--on-media); font-size: 10px; line-height: 16px; pointer-events: none; z-index: 1; }
 /* 引用条缩略的门控态（档 B）：磨砂缩略（32px 用较小模糊，避免溢出邻块）/ 无 thumb 的类型图标兜底。 */
 .quote-thumb.gate-blur { filter: blur(4px) saturate(0.9); transform: none; }
 .quote-thumb-ph { display: inline-flex; align-items: center; justify-content: center; background: var(--surface-hover); color: var(--text-secondary); }
