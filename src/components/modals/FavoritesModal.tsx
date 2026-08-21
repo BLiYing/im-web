@@ -192,7 +192,7 @@ export function FavoritesModal({
           ) : kind === "file" || kind === "voice" ? (
             <div className="fav-list detail-filelist fav-files">
               {shown.map((f) => (
-                <FavFileRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} glue={glue}
+                <FavFileRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel} glue={glue}
                   onClick={onFileClick(f)} onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
               ))}
             </div>

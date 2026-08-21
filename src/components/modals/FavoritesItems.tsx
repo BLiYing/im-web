@@ -100,7 +100,7 @@ export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onM
 }
 
 /** 文件 chip：三态行（未下载 ↓ / 下载中环 / 已下载类型图标 / 失败 ↻），DOM 与详情页 detail-fileitem 同款。 */
-export function FavFileRow({ f, on, pickMulti, glue, onClick, onMenu, onDelete }: Omit<RowCommon, "sourceLabel" | "onClick"> & {
+export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
   glue: FavoritesMediaGlue;
   onClick: (m: ChatMessage, gate: DownloadState | undefined) => void;
 }) {
@@ -121,6 +121,7 @@ export function FavFileRow({ f, on, pickMulti, glue, onClick, onMenu, onDelete }
         <span className="detail-file-name">{name}</span>
         {f.caption && <span className="fav-caption">{f.caption}</span>}
         {meta && <span className="detail-file-size">{meta}</span>}
+        <span className="fav-src">来自{sourceLabel(f)}{favDate(f.created_at) && ` · ${favDate(f.created_at)}`}</span>
       </span>
       <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
     </div>
