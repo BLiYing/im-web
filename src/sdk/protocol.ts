@@ -103,6 +103,7 @@ export interface Favorite {
   file_name?: string; // 文件收藏原文件名（§8.1，对齐后端）：空回退从 URL 反推；老收藏缺省
   file_size?: number;
   duration?: number; // 视频/语音时长（毫秒；媒体宫格角标） // 文件收藏原字节数（§8.1）：副行显真实大小；老收藏缺省/0
+  thumb?: string; // 磨砂占位缩略 dataURI（图片/视频未下载态）
   source_conv_id: string;
   source_conv_seq: number;
   source_from: string;

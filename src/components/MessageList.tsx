@@ -255,7 +255,8 @@ export function MessageList(p: MessageListProps) {
                         : m.contentType === "video" && <span className="play-badge">▶</span>}
                     {gate
                       ? <span className="media-badge media-badge-tl">
-                          {downloadText(gate, formatFileSize(m.fileSize), m.contentType as MediaKind)}{durationText && gate.phase !== "expired" ? ` · ${durationText}` : ""}
+                          {/* 未下载=「时长 · 大小」；下载中/暂停/失败=只显状态，藏时长（省空间、防溢出，与 iOS 一致）。 */}
+                          {gate.phase === "notStarted" && durationText ? `${durationText} · ` : ""}{downloadText(gate, formatFileSize(m.fileSize), m.contentType as MediaKind)}
                         </span>
                       : uploading
                       ? <span className="media-badge media-badge-tl">{uploadPaused ? "⏸ " : ""}{formatUploadProgress(uploading.sent, uploading.total)}</span>

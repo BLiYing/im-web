@@ -87,7 +87,7 @@ export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onM
         const on = selected.has(f.id);
         return (
           <div key={f.id} className={`fav-tile${pickMulti && on ? " on" : ""}`}>
-            <MediaTile variant="detail" m={m} gate={gate} alwaysShowDuration
+            <MediaTile variant="detail" m={m} gate={gate}
               onClick={() => onTileClick(f, m, gate)}
               onMenu={(e) => onMenu?.(e, f)}
               onMediaError={glue.onMediaError} />

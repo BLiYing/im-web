@@ -17,11 +17,10 @@ const SPEC: Record<Variant, { tag: "div" | "button"; cls: string; playBadge: str
   detail: { tag: "button", cls: "detail-media-tile", playBadge: "detail-media-play", expiredBadge: null, sizeWhenExpired: true },
 };
 
-export function MediaTile({ variant, m, gate, alwaysShowDuration, onClick, onMenu, onMediaError }: {
+export function MediaTile({ variant, m, gate, onClick, onMenu, onMediaError }: {
   variant: Variant;
   m: ChatMessage;
   gate: DownloadState | undefined; // 门控态：undefined=就绪直显；否则未下载/失效
-  alwaysShowDuration?: boolean; // 收藏页：未下载也预显视频时长（元数据发送时即知，Telegram 同）
   onClick: (m: ChatMessage) => void; // 就绪=打开查看器；门控=就地下载（gate 逻辑由调用方按 variant 决定）
   onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
   onMediaError: (m: ChatMessage) => void;
@@ -45,7 +44,7 @@ export function MediaTile({ variant, m, gate, alwaysShowDuration, onClick, onMen
         ? (gate.phase === "expired" ? s.expiredBadge : <span className="detail-media-dl">↓</span>)
         : m.contentType === "video" && <span className={s.playBadge}>▶</span>}
       {showSize && <span className="detail-media-size">{sizeText}</span>}
-      {(alwaysShowDuration || !gate) && m.contentType === "video" && formatMediaDuration(m.duration) && (
+      {m.contentType === "video" && formatMediaDuration(m.duration) && (  /* 时长恒显：未下载也预显（元数据发送时即知，详情页+收藏一致） */
         <span className="detail-media-dur">{formatMediaDuration(m.duration)}</span>
       )}
     </Tag>
