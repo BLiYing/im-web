@@ -7,7 +7,7 @@ import { useMessageStore } from "./useMessageStore";
 import { GroupManagePanel } from "./components/GroupManagePanel";
 import { DetailTabs } from "./components/DetailTabs";
 import { MemberMenu } from "./components/MemberMenu";
-import { loadConversation, clearMessages, markMessageDeleted, searchMessages, type MsgRecord } from "./sdk/localStore";
+import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
@@ -38,13 +38,14 @@ import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
 import {
   isUrlText, localizeSnippet, replyPreviewOf, selectableInMultiSelect,
   parseChatRecord, recordItemPreview, fileNameFromContent, copyImageToClipboard,
-  mediaBoxProps, isPreviewableFile, videoFrameSrc, syntheticViewerMessage, type RecordItem, type ChatRecord,
+  mediaBoxProps, isPreviewableFile, videoFrameSrc, syntheticViewerMessage, minSeqOf, type RecordItem, type ChatRecord,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { ChatSearchBar } from "./components/ChatSearchBar";
 import { HomeSearchResults } from "./components/HomeSearchResults";
 import { highlightText } from "./searchHighlight";
-import { messageMatchesNeedle, hitSnippet, activeDayKeys } from "./searchPredicate";
+import { hitSnippet } from "./searchPredicate";
+import { useChatSearch } from "./useChatSearch";
 import { AlbumGrid } from "./components/AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
@@ -272,19 +273,10 @@ export default function App() {
   const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
   const mentionActiveRef = useRef<HTMLButtonElement>(null); // 当前高亮行：键盘移动时滚入视野
   // ---- 会话内搜索（SEARCH_DESIGN §4/§5）：顶栏搜索框 + 底部命中导航 ▲▼ + 📅日历 + 👤来自（纯本地）----
+  // searchOpen/searchQuery 留在此处（受控）：下方 highlightSearch 定义在 useChatSearch 调用点之前、消息气泡渲染
+  // 要读它俩；其余会话内搜索/日历/来自/首页搜索的全部状态与逻辑已抽到 useChatSearch（见下方 const search=…）。
   const [searchOpen, setSearchOpen] = useState(false);              // 会话内搜索态开关
   const [searchQuery, setSearchQuery] = useState("");               // 关键词（content+caption 大小写不敏感子串）
-  const [searchHitIdx, setSearchHitIdx] = useState(0);              // 当前命中下标（在 searchHits 升序数组中，0=最早）
-  const [searchFrom, setSearchFrom] = useState("");                 // 「来自:」发件人 uid（""=不限，仅群聊）
-  const [searchFromName, setSearchFromName] = useState("");         // token 显示名（👤 钮本身从不显名）
-  const [searchFromPickerOpen, setSearchFromPickerOpen] = useState(false); // 发件人下拉开合（候选=已发言者，无打字过滤，对齐 iOS）
-  const [calendarOpen, setCalendarOpen] = useState(false);          // 📅 日历 popover 开合
-  const [calendarMonth, setCalendarMonth] = useState<{ y: number; m: number }>(() => { const d = new Date(); return { y: d.getFullYear(), m: d.getMonth() }; });
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const searchSigRef = useRef("");                                  // 上次「默认跳最新」的签名（会话|词|发件人），避免每次渲染重跳
-  // ---- 首页全局搜索（SEARCH_DESIGN §3）：侧栏头搜索框 → 会话/联系人/聊天记录三分组 ----
-  const [homeSearch, setHomeSearch] = useState("");                 // 首页全局搜索词
-  const [homeMsgHits, setHomeMsgHits] = useState<MsgRecord[]>([]);  // 聊天记录命中（防抖异步扫本地库）
   // 已读名单弹窗（M4-8）：null=关闭；tab 切换已读/未读。
   const [readReceipts, setReadReceipts] = useState<{ read: string[]; unread: string[]; tab: "read" | "unread" } | null>(null);
   // 会话详情面板（右侧抽屉，对齐 iOS IMChatDetailViewController；单聊/群聊共用）。null=关闭。
@@ -2607,149 +2599,14 @@ export default function App() {
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
 
-  // ===== 会话内搜索（SEARCH_DESIGN §4）：本地过滤已加载消息 → 命中集（升序，0=最早）；排除撤回/系统/未确认，
-  // 叠加可选 `来自:` 发件人过滤（sender==uid）；命中口径见 searchPredicate（与后端 G4/iOS 一致），配合 jumpToSeq 跳转/高亮。=====
-  const searchNeedle = searchQuery.trim().toLowerCase();
-  // useMemo：非搜索态返回稳定空数组，避免无关渲染重扫数千条 + 稳定下方 effect 依赖（否则每渲染重入，/code-review #5）。
-  const searchHits = useMemo(() =>
-    (searchOpen && (searchNeedle || searchFrom))
-      ? messages.filter((m) => {
-          if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
-          if (searchFrom && m.from !== searchFrom) return false;
-          return !searchNeedle || messageMatchesNeedle(m, searchNeedle); // 仅发件人过滤（无词）时全算；否则命中判定见 searchPredicate
-        })
-      : [],
-    [searchOpen, searchNeedle, searchFrom, messages]);
-  // 词/发件人/会话变化 → 默认跳「最新一条命中」（贴合「找刚才那条」）；签名去重避免每次渲染重跳。
-  useEffect(() => {
-    if (!searchOpen) { searchSigRef.current = ""; return; }
-    const sig = `${convId}|${searchNeedle}|${searchFrom}`;
-    if (sig === searchSigRef.current) return;
-    // 命中集为空时**不锁定签名**：可能是切会话后消息尚在异步载入（此路径由首页「聊天记录」下钻触发），
-    // 待 msgsByConv 到达、hits 出现后再跳；真·无匹配也停在此处（导航器保持置灰），无副作用。
-    if (searchHits.length === 0) { setSearchHitIdx(0); return; }
-    searchSigRef.current = sig;
-    const idx = searchHits.length - 1; // 升序数组末尾 = 最新
-    setSearchHitIdx(idx);
-    const seq = searchHits[idx].convSeq;
-    requestAnimationFrame(() => jumpToSeq(seq));
-  }, [searchOpen, convId, searchNeedle, searchFrom, searchHits, jumpToSeq]);
-  // ▲(更旧, idx--) / ▼(更新, idx++) 命中导航：居中滚动 + 高亮（复用 jumpToSeq）。
-  const gotoSearchHit = (idx: number) => {
-    if (idx < 0 || idx >= searchHits.length) return;
-    setSearchHitIdx(idx);
-    jumpToSeq(searchHits[idx].convSeq);
-  };
-  // 「来自:」候选 = 本会话**已发言者**去重（iOS 拍板口径：未发言者必 0 命中；不列全量成员、无打字过滤）。
-  // 名字：我→「我」→消息昵称→成员表昵称→uid。⚠️ 渲染期 useMemo 直接读 groupInfos，勿引用晚声明 memberNick（TDZ 前科）。
-  const searchFromRows = useMemo(() => {
-    if (!searchFromPickerOpen || !groupConvId) return [] as { label: string; userId: string; role?: string; avatarUrl?: string }[];
-    const members = groupInfos[groupConvId]?.members ?? [];
-    const seen = new Set<string>();
-    const rows: { label: string; userId: string; role?: string; avatarUrl?: string }[] = [];
-    for (const m of messages) {
-      if (!m.from || m.recalledAt || m.contentType === "system" || seen.has(m.from)) continue;
-      seen.add(m.from);
-      const mem = members.find((x) => x.user_id === m.from);
-      rows.push({
-        userId: m.from,
-        label: m.from === uid ? "我" : (m.fromNickname || mem?.nickname || m.from),
-        role: mem?.role,
-        avatarUrl: mem?.avatar_url,
-      });
-    }
-    return rows;
-  }, [searchFromPickerOpen, groupConvId, groupInfos, uid, messages]);
-
-  // 打开/关闭会话内搜索。openInChatSearch 可带入初始词（首页「聊天记录」下钻时预填，SEARCH_DESIGN §3.0）。
-  const closeInChatSearch = () => {
-    setSearchOpen(false); setSearchQuery(""); setSearchFrom(""); setSearchFromName("");
-    setSearchFromPickerOpen(false); setCalendarOpen(false);
-  };
-  const openInChatSearch = (initial = "") => {
-    setSearchOpen(true); setSearchQuery(initial); setSearchFrom(""); setSearchFromName("");
-    setSearchFromPickerOpen(false); setCalendarOpen(false);
-    searchSigRef.current = ""; // 强制下一轮默认跳最新
-    requestAnimationFrame(() => searchInputRef.current?.focus());
-  };
-  // 👤 来自：点开发件人下拉（钮随之隐藏）/ 选人得 token / ✕ 清除
-  const openFromPicker = () => { setSearchFromPickerOpen(true); setCalendarOpen(false); };
-  const pickSearchFrom = (memberUid: string, name: string) => {
-    setSearchFrom(memberUid); setSearchFromName(name);
-    setSearchFromPickerOpen(false);
-    requestAnimationFrame(() => searchInputRef.current?.focus());
-  };
-  const clearSearchFrom = () => { setSearchFrom(""); setSearchFromName(""); };
-  // 切会话 → 关残留搜索态（单页共享态，否则关键词+「来自:A成员」泄漏到 B；同会话开搜不改 convId 故不误关，/code-review #2）。
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { closeInChatSearch(); }, [convId]);
-
-  // ===== 按日期跳转 / 日历（SEARCH_DESIGN §5）：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
-  const searchableMsgs = () => messages.filter((m) => m.convSeq > 0 && !m.recalledAt && m.contentType !== "system");
-  const monthLabel = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月`;
-  const sameDay = (a: number, b: number) => { const x = new Date(a), y = new Date(b); return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate(); };
-  // 活跃日打点（P1）——仅覆盖已加载窗口（诚实标注 §9）。仅随 messages（去掉 calendarOpen 依赖，开合日历不再重扫，#5）。
-  const activeDays = useMemo(() => activeDayKeys(messages), [messages]);
-  const jumpToDay = (dayStart: number, label: string) => {
-    const list = searchableMsgs();
-    const oldest = list[0]; // 升序，[0]=已加载窗口最旧
-    // 选中日早于已加载最旧且未到顶（minSeq>1）→ 提示上拉；否则会误跳已加载最旧并谎称「已跳到最近的 X」（原判据恒假、不可达，#1）。
-    if (oldest && dayStart < oldest.timestamp && minSeqOf(messagesRef.current) > 1) {
-      setToast(`${label}早于已加载范围，请上拉加载更早历史`);
-      return;
-    }
-    const hit = list.find((m) => m.timestamp >= dayStart);
-    if (!hit) { setToast(`${label}及之后无消息`); return; } // 选中日晚于最新消息（全部更早）
-    setCalendarOpen(false);
-    if (!sameDay(hit.timestamp, dayStart)) {
-      const d = new Date(hit.timestamp);
-      setToast(`${label}无消息，已跳到最近的 ${d.getMonth() + 1}月${d.getDate()}日`);
-    }
-    locateInChat(convId, hit.convSeq);
-  };
-  const jumpToToday = () => {
-    const t = new Date(); t.setHours(0, 0, 0, 0);
-    const list = searchableMsgs();
-    const hit = list.find((m) => m.timestamp >= t.getTime());
-    if (hit) { setCalendarOpen(false); locateInChat(convId, hit.convSeq); return; }
-    const last = list[list.length - 1]; // 今天无消息 → 跳最近一条（更早）
-    if (!last) { setToast("暂无消息"); return; }
-    setCalendarOpen(false);
-    const d = new Date(last.timestamp);
-    setToast(`今天无消息，已跳到 ${d.getMonth() + 1}月${d.getDate()}日`);
-    locateInChat(convId, last.convSeq);
-  };
-  // 「最早」：自动上翻到顶再跳会话首条（Web 复用 loadOlder；页 200、上限 MAX_LOCATE_PAGES）。
-  const earliestPendingRef = useRef(false);
-  const earliestTriesRef = useRef(0);
-  const jumpToEarliest = () => {
-    setCalendarOpen(false);
-    const first = messagesRef.current.find((m) => m.convSeq > 0);
-    if (!first) { setToast("暂无消息"); return; }
-    if (minSeqOf(messagesRef.current) <= 1) { jumpToSeq(first.convSeq); return; } // 已到顶
-    earliestPendingRef.current = true; earliestTriesRef.current = 0;
-    setToast("正在加载更早历史…");
-    driveEarliest();
-  };
-  const driveEarliest = useCallback(() => {
-    if (!earliestPendingRef.current || currentConvRef.current !== convId) { earliestPendingRef.current = false; return; }
-    const list = messagesRef.current;
-    const first = list.find((m) => m.convSeq > 0);
-    const oldest = minSeqOf(list);
-    if (!first) { earliestPendingRef.current = false; return; }
-    if (oldest <= 1 || earliestTriesRef.current >= MAX_LOCATE_PAGES) { // 到顶 / 超上限 → 跳本地最早
-      earliestPendingRef.current = false;
-      requestAnimationFrame(() => jumpToSeq(first.convSeq));
-      return;
-    }
-    if (loadingOlderRef.current) return; // 有一页在飞，等它到
-    const box = msgsRef.current;
-    if (box) histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
-    earliestTriesRef.current += 1;
-    loadingOlderRef.current = true;
-    clientRef.current?.loadOlder(convId, oldest);
-  }, [convId, jumpToSeq]);
-  useEffect(() => { driveEarliest(); }, [msgsByConv, driveEarliest]);
+  // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
+  // searchOpen/searchQuery 受控注入（见上）；副作用依赖（jumpToSeq/locateInChat/setToast/各 ref/客户端）注入进去。=====
+  const search = useChatSearch({
+    searchOpen, setSearchOpen, searchQuery, setSearchQuery,
+    messages, convId, groupConvId, uid, groupInfos, conversations, msgsByConv,
+    messagesRef, currentConvRef, loadingOlderRef, msgsRef, histAnchorRef, clientRef,
+    jumpToSeq, locateInChat, setToast, maxLocatePages: MAX_LOCATE_PAGES,
+  });
 
   // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
   // 口径与媒体库一致（image|video && 未撤回 && content 非空）；仅覆盖**内存中已加载**的消息——翻到头即停，
@@ -2976,25 +2833,6 @@ export default function App() {
   // ⚠️ 必须放在下方 `if (phase === "login") return` 之前：hook 在提前 return 之后会随 phase 改变 hook 数量
   // → "Rendered more hooks than during the previous render" 白屏（2026-08-14 踩过）。
   // handleScanRaw 定义在提前 return 之后：仅在 phase==="app" 的渲染里才会被 effect 读到，届时已初始化，无 TDZ。
-  // ===== 首页全局搜索（SEARCH_DESIGN §3）：聊天记录走本地库 searchMessages（防抖 + 结果上限）=====
-  useEffect(() => {
-    const q = homeSearch.trim();
-    if (!q) { setHomeMsgHits([]); return; }
-    let cancelled = false;
-    const t = window.setTimeout(() => {
-      void searchMessages(uid, { q, limit: 200 })
-        .then((hits) => { if (!cancelled) setHomeMsgHits(hits); })
-        .catch(() => { if (!cancelled) setHomeMsgHits([]); });
-    }, 200);
-    return () => { cancelled = true; window.clearTimeout(t); };
-  }, [homeSearch, uid]);
-  // 聊天记录命中**不聚合**（一条命中一行，同会话多行属预期，与 iOS 对齐）；仅保留现存会话——
-  // 本地库残留已退群/已删会话的消息（删会话只删摘要）无可打开落点。homeMsgHits 已新→旧。
-  const homeRecordHits = useMemo(() => {
-    const known = new Set(conversations.map((c) => c.conv_id));
-    return homeMsgHits.filter((r) => known.has(r.convId));
-  }, [homeMsgHits, conversations]);
-
   const bootQrRef = useRef<string | null>(null);
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
@@ -3124,7 +2962,7 @@ export default function App() {
   const senderAvatar = (m: ChatMessage): string | undefined =>
     groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
   // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordHits（不聚合）=====
-  const homeQ = homeSearch.trim().toLowerCase();
+  const homeQ = search.homeSearch.trim().toLowerCase();
   const homeConvHits = homeQ ? conversations.filter((c) => convDisplayLabel(c).toLowerCase().includes(homeQ)) : [];
   const homeFriendHits = homeQ ? accepted.filter((f) =>
     friendLabel(f).toLowerCase().includes(homeQ) ||
@@ -3585,18 +3423,18 @@ export default function App() {
           {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
           <div className="home-search">
             <Search size={15} className="home-search-lead" />
-            <input className="home-search-input" value={homeSearch} placeholder="搜索"
-              onChange={(e) => setHomeSearch(e.target.value)} />
-            {homeSearch && <button className="home-search-clear" title="清除" onClick={() => setHomeSearch("")}><X size={14} /></button>}
+            <input className="home-search-input" value={search.homeSearch} placeholder="搜索"
+              onChange={(e) => search.setHomeSearch(e.target.value)} />
+            {search.homeSearch && <button className="home-search-clear" title="清除" onClick={() => search.setHomeSearch("")}><X size={14} /></button>}
           </div>
           {homeQ ? (
           <HomeSearchResults
-            homeConvHits={homeConvHits} homeFriendHits={homeFriendHits} homeRecordHits={homeRecordHits}
+            homeConvHits={homeConvHits} homeFriendHits={homeFriendHits} homeRecordHits={search.homeRecordHits}
             convAvatarUrl={convAvatarUrl} convDisplayLabel={convDisplayLabel} friendLabel={friendLabel}
             convById={convById} recordSnippet={recordSnippet}
             highlight={(t, k) => highlightText(t, homeQ, k)}
             openConvById={openConvById} openPeerDetail={openPeerDetail}
-            onRecordClick={(cid, seq) => { setHomeSearch(""); locateInChat(cid, seq); }}
+            onRecordClick={(cid, seq) => { search.setHomeSearch(""); locateInChat(cid, seq); }}
           />
           ) : (
           <>
@@ -3853,16 +3691,16 @@ export default function App() {
             {/* 会话内搜索（§4）：搜索态下搜索条**替换标题栏内容**（对齐 iOS）；下拉/日历锚标题栏下方；非搜索态=原头部。 */}
             {searchOpen && (isGroupChat || peer) ? (
               <ChatSearchBar
-                searchInputRef={searchInputRef} isGroupChat={isGroupChat}
-                searchQuery={searchQuery} setSearchQuery={setSearchQuery} searchNeedle={searchNeedle}
-                searchHitCount={searchHits.length} searchHitIdx={searchHitIdx}
-                gotoSearchHit={gotoSearchHit} closeInChatSearch={closeInChatSearch}
-                searchFrom={searchFrom} searchFromName={searchFromName} clearSearchFrom={clearSearchFrom}
-                searchFromPickerOpen={searchFromPickerOpen} setSearchFromPickerOpen={setSearchFromPickerOpen}
-                searchFromRows={searchFromRows} openFromPicker={openFromPicker} pickSearchFrom={pickSearchFrom}
-                calendarOpen={calendarOpen} setCalendarOpen={setCalendarOpen}
-                calendarMonth={calendarMonth} setCalendarMonth={setCalendarMonth} activeDays={activeDays}
-                jumpToDay={jumpToDay} jumpToEarliest={jumpToEarliest} jumpToToday={jumpToToday} monthLabel={monthLabel}
+                searchInputRef={search.searchInputRef} isGroupChat={isGroupChat}
+                searchQuery={searchQuery} setSearchQuery={setSearchQuery} searchNeedle={search.searchNeedle}
+                searchHitCount={search.searchHits.length} searchHitIdx={search.searchHitIdx}
+                gotoSearchHit={search.gotoSearchHit} closeInChatSearch={search.closeInChatSearch}
+                searchFrom={search.searchFrom} searchFromName={search.searchFromName} clearSearchFrom={search.clearSearchFrom}
+                searchFromPickerOpen={search.searchFromPickerOpen} setSearchFromPickerOpen={search.setSearchFromPickerOpen}
+                searchFromRows={search.searchFromRows} openFromPicker={search.openFromPicker} pickSearchFrom={search.pickSearchFrom}
+                calendarOpen={search.calendarOpen} setCalendarOpen={search.setCalendarOpen}
+                calendarMonth={search.calendarMonth} setCalendarMonth={search.setCalendarMonth} activeDays={search.activeDays}
+                jumpToDay={search.jumpToDay} jumpToEarliest={search.jumpToEarliest} jumpToToday={search.jumpToToday} monthLabel={search.monthLabel}
               />
             ) : (
             <>
@@ -3883,7 +3721,7 @@ export default function App() {
             <span className="chat-head-right">
               {(peer || isGroupChat) && (
                 <>
-                  <button className={`icon-btn${searchOpen ? " active" : ""}`} title="搜索聊天内容" onClick={() => (searchOpen ? closeInChatSearch() : openInChatSearch())}><Search size={20} /></button>
+                  <button className={`icon-btn${searchOpen ? " active" : ""}`} title="搜索聊天内容" onClick={() => (searchOpen ? search.closeInChatSearch() : search.openInChatSearch())}><Search size={20} /></button>
                   {!isGroupChat && <button className="icon-btn" title="呼叫" onClick={() => comingSoon("语音通话")}><Phone size={20} /></button>}
                   <span className="chat-anchor">
                     <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
@@ -4819,7 +4657,7 @@ export default function App() {
                     )}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
                     {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                    {showDetailBody && <button className="detail-pill" onClick={() => { close(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
+                    {showDetailBody && <button className="detail-pill" onClick={() => { close(); search.openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
                     <div className="detail-pill-anchor">
                       <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                       {detailMore && (
@@ -5092,9 +4930,3 @@ function maxSeqOf(messages: ChatMessage[]): number {
   return m;
 }
 
-// 消息列表里的最小 conv_seq（发送中的 0 不计；空列表返回 0）。
-function minSeqOf(messages: ChatMessage[]): number {
-  let m = 0;
-  for (const x of messages) if (x.convSeq > 0 && (m === 0 || x.convSeq < m)) m = x.convSeq;
-  return m;
-}

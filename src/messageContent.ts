@@ -42,6 +42,13 @@ export const replyPreviewOf = (m: ChatMessage): string =>
 export const selectableInMultiSelect = (m: ChatMessage): boolean =>
   m.convSeq > 0 && !m.recalledAt && m.contentType !== "system";
 
+/** 消息列表里的最小 conv_seq（发送中的 0 不计；空列表返回 0）。供定位/搜索「最早」翻页判据用。 */
+export function minSeqOf(messages: ChatMessage[]): number {
+  let m = 0;
+  for (const x of messages) if (x.convSeq > 0 && (m === 0 || x.convSeq < m)) m = x.convSeq;
+  return m;
+}
+
 /** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
  *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
 export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number; cap?: string };
