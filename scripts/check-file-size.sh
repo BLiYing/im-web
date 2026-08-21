@@ -21,7 +21,7 @@ WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败�
 #   - src/sdk/imSdk.ts : IM 客户端 API 面（40+ 方法），大而由业务性质决定；如拆按域分（auth/messages/groups/qr）。
 grandfather_limit() {
   case "$1" in
-    src/App.tsx)      echo 3300 ;;  # 棘轮下调（5100→…→3500→3300，阶段7 抽 ContactsTab/useMentions/useQR 后 3204）；只准降不准升
+    src/App.tsx)      echo 3100 ;;  # 棘轮下调（5100→…→3300→3100，阶段8 抽 useAppearanceSettings/useFriendOps/useProfileEdit 后 3022）；只准降不准升
     src/sdk/imSdk.ts) echo 1450 ;;
     *)                echo "" ;;
   esac

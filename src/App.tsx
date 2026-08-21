@@ -5,7 +5,7 @@ import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL } from "./mention";
@@ -26,8 +26,7 @@ import { textTier, charCountLabel } from "./longtext";
 import {
   parseDownloadSettings,
 } from "./download";
-import { DEFAULT_WALLPAPER, loadWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
-import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
+import { clamp } from "./color";
 import {
   replyPreviewOf,
   parseChatRecord, copyImageToClipboard,
@@ -45,6 +44,9 @@ import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
 import { useMentions } from "./useMentions";
 import { useQR } from "./useQR";
+import { useAppearanceSettings } from "./useAppearanceSettings";
+import { useFriendOps } from "./useFriendOps";
+import { useProfileEdit } from "./useProfileEdit";
 import { ChatBanners } from "./components/ChatBanners";
 import { AnchoredMenu } from "./components/AnchoredMenu";
 import { type LinkPreview } from "./components/LinkCard";
@@ -164,15 +166,8 @@ export default function App() {
   const contactsScrollRef = useRef<HTMLDivElement>(null); // 通讯录滚动容器（好友列表虚拟化的滚动父，见 VirtualList）
   const [contactFilter, setContactFilter] = useState(""); // 通讯录本地过滤（按备注/昵称/uid 即时筛已有好友；桌面端替代 iOS 的 A–Z 索引尺）
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
-  const [searchQ, setSearchQ] = useState(""); // 找人搜索框
-  const [searchResults, setSearchResults] = useState<UserCard[] | null>(null); // null=未搜索；[]=搜过无结果
-  const [busyUser, setBusyUser] = useState<string | null>(null); // 正在执行好友动作的对端 uid（防重复点击）
-  const [profileDraft, setProfileDraft] = useState<{ nickname: string; avatar_url: string; phone: string; tags: string } | null>(null); // 编辑资料弹窗（null=关闭）
   // 头像裁切请求（方案 C）：选好图后开裁切弹窗；确定拿到 blob 交给 onDone（个人/群各自上传落库）。
-  const [cropReq, setCropReq] = useState<{ file: File; onDone: (blob: Blob) => void | Promise<void> } | null>(null);
-  const [profileBusy, setProfileBusy] = useState(false);
   const [friendMenu, setFriendMenu] = useState<{ x: number; y: number; userId: string } | null>(null); // 好友行 ⋯ 菜单
-  const [blockedList, setBlockedList] = useState<FriendEntry[] | null>(null); // 黑名单弹窗（null=关闭）
   const [convMenu, setConvMenu] = useState<{ x: number; y: number; c: Conversation } | null>(null); // 会话行右键菜单
   const [chatMenu, setChatMenu] = useState(false); // 聊天页右上 ⋮ 下拉菜单
   const [contactDraft, setContactDraft] = useState<{ peer: string; remark: string } | null>(null); // 编辑联系人（备注名）弹窗
@@ -185,7 +180,6 @@ export default function App() {
   const [fullTextModal, setFullTextModal] = useState<{ kind: "announcement" | "intro"; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
-  const [myInfo, setMyInfo] = useState<{ nickname: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
   // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
   // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
@@ -194,11 +188,6 @@ export default function App() {
   // 查看器一关（点蒙层 / ✕ / 定位·转发·删除等 setViewer(null) 的任一路径），「更多」浮层一并收起：
   // 否则残留的 viewerMore=true 会在下次打开任意媒体时立刻弹出上一张的菜单。
   useEffect(() => { if (!viewer) setViewerMore(false); }, [viewer]);
-  const [wallpaperOpen, setWallpaperOpen] = useState(false); // 通用设置 ▸ 聊天壁纸
-  const [wallpaper, setWallpaper] = useState<WallpaperChoice>(loadWallpaper);
-  const [wallpaperBlur, setWallpaperBlur] = useState(() => localStorage.getItem("im.wallpaperBlur") === "1");
-  const [wallpaperColorOpen, setWallpaperColorOpen] = useState(false);
-  const [colorHSV, setColorHSV] = useState<HSVColor>(() => hexToHSV("#567e71"));
   // 通用设置项：theme / timeFormat / fontSize / sendKey / wallpaper 均为本机真功能。
   // ---- 群聊（M3-4）----
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
@@ -232,12 +221,13 @@ export default function App() {
   const [memberMenu, setMemberMenu] = useState<{ x: number; y: number; convId: string; m: GroupMember } | null>(null); // 成员行 ⋯ 菜单
   const memberMenuRef = useRef<HTMLDivElement | null>(null); // 菜单本体：捕获阶段关闭时用来排除菜单内点击
   const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
-  const [theme, setTheme] = useState<"light" | "dark" | "system">(() => (localStorage.getItem("im.theme") as "light" | "dark" | "system") || "system");
+  // 外观/通用设置簇 → useAppearanceSettings（阶段 8a）：主题/字号/时间格式/发送键/壁纸 + 持久化 effect + isDark。
+  const {
+    theme, setTheme, isDark, fontSize, setFontSize, timeFormat, setTimeFormat, sendKey, setSendKey,
+    wallpaper, setWallpaper, wallpaperBlur, setWallpaperBlur, wallpaperOpen, setWallpaperOpen,
+    wallpaperColorOpen, setWallpaperColorOpen, colorHSV, pickWallpaperImage, resetWallpaper, applyWallpaperColor, openWallpaperColor,
+  } = useAppearanceSettings(setToast);
   // 系统深色偏好（仅在 theme==="system" 时决定实际明暗）：跟随 prefers-color-scheme 实时变化，供默认壁纸随主题切换。
-  const [systemDark, setSystemDark] = useState(() => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false);
-  const [fontSize, setFontSize] = useState<number>(() => Number(localStorage.getItem("im.fontSize")) || 15);
-  const [timeFormat, setTimeFormat] = useState<"12" | "24">(() => (localStorage.getItem("im.timeFormat") as "12" | "24") || "24");
-  const [sendKey, setSendKey] = useState<"enter" | "cmd">(() => (localStorage.getItem("im.sendKey") as "enter" | "cmd") || "enter");
 
   const clientRef = useRef<IMClient | null>(null);
   // 下载门控/缓存簇 → useMediaDownload（阶段 4）。须在 clientRef/setViewer/groupConvId/uid/setToast 之后、
@@ -505,113 +495,11 @@ export default function App() {
     }
   }, [conversations, groupConvId]);
 
-  const doSearch = useCallback(async () => {
-    const q = searchQ.trim();
-    if (!q) { setSearchResults(null); return; }
-    try {
-      const users = await clientRef.current?.searchUsers(q);
-      setSearchResults(users ?? []);
-    } catch (e) {
-      setToast(`搜索失败：${(e as Error).message}`);
-    }
-  }, [searchQ]);
-
-  // 好友动作（申请/同意/拒绝/删除）统一走这里：执行 → 刷新关系 → 解锁按钮。
-  const doFriendAction = useCallback(async (userId: string, fn: () => Promise<void>) => {
-    setBusyUser(userId);
-    try {
-      await fn();
-      await refreshFriends();
-    } catch (e) {
-      setToast(`操作失败：${(e as Error).message}`);
-    } finally {
-      setBusyUser(null);
-    }
-  }, [refreshFriends]);
-
-  // 加载本人资料到 myInfo（左上角头像 / 设置页头部共用同一份数据）。失败静默回退首字母圈。
-  const loadMyInfo = useCallback(async () => {
-    try {
-      const p = await clientRef.current?.fetchMyProfile();
-      if (p) setMyInfo({ nickname: p.nickname ?? "", phone: p.phone ?? "", avatar_url: p.avatar_url ?? "" });
-    } catch { /* 忽略：头像回退首字母圈 */ }
-  }, []);
-
-  // 打开"编辑资料"弹窗：拉本人资料填入草稿（tags 以空格连接成可编辑串）。
-  const openProfile = useCallback(async () => {
-    try {
-      const p = await clientRef.current?.fetchMyProfile();
-      // phone 后端是 omitempty：空时 JSON 无该键 → undefined，须兜底为 ""，否则 input 由非受控变受控告警。
-      if (p) setProfileDraft({ nickname: p.nickname ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
-    } catch (e) {
-      setToast(`加载资料失败：${(e as Error).message}`);
-    }
-  }, []);
-
-  // 打开黑名单弹窗：拉 status=blocked 的关系。
-  const openBlacklist = useCallback(async () => {
-    try {
-      const list = await clientRef.current?.listFriends("blocked");
-      setBlockedList(list ?? []);
-    } catch (e) {
-      setToast(`加载黑名单失败：${(e as Error).message}`);
-    }
-  }, []);
-
-  // 解除拉黑：unblock 后从弹窗列表移除。
-  const unblock = useCallback(async (userId: string) => {
-    setBusyUser(userId);
-    try {
-      await clientRef.current?.friendAction("unblock", userId);
-      setBlockedList((prev) => (prev ?? []).filter((f) => f.user_id !== userId));
-      void refreshFriends(); // 同步主好友态：聊天页"已拉黑"横幅随之消失、输入恢复
-
-    } catch (e) {
-      setToast(`解除失败：${(e as Error).message}`);
-    } finally {
-      setBusyUser(null);
-    }
-  }, [refreshFriends]);
-
-  // 保存资料：tags 按空格/逗号切分去空，PUT 整体替换。
-  const saveProfile = useCallback(async () => {
-    if (!profileDraft) return;
-    setProfileBusy(true);
-    try {
-      const updated = await clientRef.current?.updateMyProfile({
-        nickname: profileDraft.nickname.trim(),
-        avatar_url: profileDraft.avatar_url.trim(),
-        phone: profileDraft.phone.trim(),
-        tags: profileDraft.tags.split(/[\s,]+/).filter(Boolean),
-      });
-      // 保存后刷新设置页顶部名片（否则头像/昵称仍显旧值）。
-      if (updated) setMyInfo({ nickname: updated.nickname ?? "", phone: updated.phone ?? "", avatar_url: updated.avatar_url ?? "" });
-      setProfileDraft(null);
-    } catch (e) {
-      setToast(`保存失败：${(e as Error).message}`);
-    } finally {
-      setProfileBusy(false);
-    }
-  }, [profileDraft]);
-
-  // 选本机图片做头像：<input type=file> 浏览器自动用当前系统(Mac/Windows/Linux)的原生文件框，无需检测系统。
-  // 个人头像（方案 C）：选图 → 圆形裁切 → 上传专用端点 → 存 /avatars/<hash>.jpg（不再 data URL）。
-  const onPickAvatar = useCallback((file: File | undefined) => {
-    if (!file) return;
-    setCropReq({
-      file,
-      onDone: async (blob) => {
-        try {
-          setToast("上传中…");
-          const { url } = await clientRef.current!.uploadAvatar(blob);
-          setProfileDraft((d) => (d ? { ...d, avatar_url: url } : d));
-          setToast("头像已更新");
-        } catch (e) {
-          setToast(`头像上传失败：${(e as Error).message}`);
-        }
-      },
-    });
-  }, []);
+  // 找人/好友动作/黑名单 → useFriendOps；本人资料 → useProfileEdit（阶段 8b）。须在 refreshFriends/clientRef/setToast 之后。
+  const { searchQ, setSearchQ, searchResults, setSearchResults, busyUser, blockedList, setBlockedList, doSearch, doFriendAction, openBlacklist, unblock } =
+    useFriendOps({ clientRef, setToast, refreshFriends });
+  const { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq, loadMyInfo, openProfile, saveProfile, onPickAvatar } =
+    useProfileEdit({ clientRef, setToast });
 
   // token 非空=扫码登录路径（无密码，走 connectWithToken）；否则密码/免密登录。
   const enterApp = useCallback(async (pwd: string, token?: string) => {
@@ -1616,76 +1504,6 @@ export default function App() {
     void loadMyInfo();
   }, [showSettings]);
 
-  // 主题：真功能——写 <html data-theme> 驱动 CSS 变量切换（浅/深/跟随系统）+ 持久化。
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("im.theme", theme);
-  }, [theme]);
-  // 监听系统深色偏好变化（仅影响 theme==="system"）；用于自动壁纸随明暗切换。
-  useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    if (!mq) return;
-    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  }, []);
-  // 当前实际是否深色：显式 dark，或跟随系统且系统为深色。
-  const isDark = theme === "dark" || (theme === "system" && systemDark);
-  // 消息字体大小：真功能——写 CSS 变量 --msg-font 驱动消息气泡文本字号 + 持久化。
-  useEffect(() => {
-    localStorage.setItem("im.fontSize", String(fontSize));
-    document.documentElement.style.setProperty("--msg-font", `${fontSize}px`);
-  }, [fontSize]);
-  useEffect(() => { localStorage.setItem("im.timeFormat", timeFormat); }, [timeFormat]);
-  useEffect(() => { localStorage.setItem("im.sendKey", sendKey); }, [sendKey]);
-  useEffect(() => {
-    // 依赖 isDark：auto 壁纸在明暗切换时需重新解析（深色默认 midnight / 浅色默认 dawn）。
-    document.documentElement.style.setProperty("--chat-wallpaper", wallpaperCSS(wallpaper, isDark));
-    try {
-      localStorage.setItem("im.wallpaper", JSON.stringify(wallpaper));
-    } catch {
-      setToast("图片较大，壁纸仅在本次页面有效");
-    }
-  }, [wallpaper, isDark]);
-  useEffect(() => {
-    document.documentElement.style.setProperty("--wallpaper-blur", wallpaperBlur ? "10px" : "0px");
-    document.documentElement.style.setProperty("--wallpaper-scale", wallpaperBlur ? "1.06" : "1");
-    localStorage.setItem("im.wallpaperBlur", wallpaperBlur ? "1" : "0");
-  }, [wallpaperBlur]);
-
-  const pickWallpaperImage = (file?: File) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setToast("请选择图片文件");
-      return;
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      setToast("图片不能超过 8 MB");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") setWallpaper({ kind: "image", value: reader.result });
-    };
-    reader.onerror = () => setToast("读取图片失败");
-    reader.readAsDataURL(file);
-  };
-
-  const resetWallpaper = () => {
-    setWallpaper(DEFAULT_WALLPAPER);
-    setWallpaperBlur(false);
-  };
-
-  const applyWallpaperColor = (next: HSVColor) => {
-    const normalized = { h: clamp(next.h, 0, 360), s: clamp(next.s), v: clamp(next.v) };
-    setColorHSV(normalized);
-    setWallpaper({ kind: "color", value: hsvToHex(normalized) });
-  };
-
-  const openWallpaperColor = () => {
-    setColorHSV(hexToHSV(wallpaper.kind === "color" ? wallpaper.value : "#567e71"));
-    setWallpaperColorOpen(true);
-  };
 
   const updateColorFromSpectrum = (event: React.PointerEvent<HTMLDivElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
