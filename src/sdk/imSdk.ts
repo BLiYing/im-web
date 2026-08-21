@@ -496,7 +496,7 @@ export class IMClient {
   // ---- 收藏（M4-4）----
 
   /** 收藏一条内容（快照）：POST /api/v1/favorites。 */
-  async addFavorite(f: { content_type?: string; content: string; caption?: string; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
+  async addFavorite(f: { content_type?: string; content: string; caption?: string; file_name?: string; file_size?: number; duration?: number; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
     await this.api("/api/v1/favorites", { method: "POST", body: JSON.stringify(f) });
   }
   /** 我的收藏列表：GET /api/v1/favorites。 */

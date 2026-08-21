@@ -70,7 +70,7 @@ interface RowCommon {
   onDelete?: () => void;
 }
 
-/** 媒体 chip：3 列宫格，逐格门控（复用详情页 MediaTile variant=detail）。视频时长收藏无字段，不显。 */
+/** 媒体 chip：3 列宫格，逐格门控（复用详情页 MediaTile variant=detail）。视频时长角标（未下载也预显）。 */
 export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onMenu }: {
   favs: Favorite[];
   glue: FavoritesMediaGlue;
@@ -87,7 +87,7 @@ export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onM
         const on = selected.has(f.id);
         return (
           <div key={f.id} className={`fav-tile${pickMulti && on ? " on" : ""}`}>
-            <MediaTile variant="detail" m={m} gate={gate}
+            <MediaTile variant="detail" m={m} gate={gate} alwaysShowDuration
               onClick={() => onTileClick(f, m, gate)}
               onMenu={(e) => onMenu?.(e, f)}
               onMediaError={glue.onMediaError} />
