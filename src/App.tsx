@@ -5,10 +5,10 @@ import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type UserCard, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
-import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
+import { activeMentionQuery, resolveMentions, resolveMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL } from "./mention";
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
 import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
@@ -20,8 +20,8 @@ import { formatTime } from "./time";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
 import { Composer } from "./components/Composer";
+import { ContactsTab } from "./components/ContactsTab";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
-import { VirtualList } from "./VirtualList";
 import { textTier, charCountLabel } from "./longtext";
 import {
   parseDownloadSettings,
@@ -43,6 +43,8 @@ import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
 import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
+import { useMentions } from "./useMentions";
+import { useQR } from "./useQR";
 import { ChatBanners } from "./components/ChatBanners";
 import { AnchoredMenu } from "./components/AnchoredMenu";
 import { type LinkPreview } from "./components/LinkCard";
@@ -202,12 +204,6 @@ export default function App() {
   const [groupConvId, setGroupConvId] = useState(""); // 当前打开的群会话 conv_id（"" = 单聊模式，peer 生效）
   const [groupInfos, setGroupInfos] = useState<Record<string, GroupInfo>>({}); // conv_id -> 群资料缓存（标题/气泡昵称回退/资料面板共用）
   // @提及（M4-8，仅群聊）：面板开合 + 过滤词 + 候选表（显示名→uid，发送时按文本里是否还留着 token 复核）。
-  const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=面板关闭
-  const [mentionFilter, setMentionFilter] = useState(""); // 面板顶部搜索框的**独立**搜索词（从空开始，不随消息框 @后文字回填；空时列表跟随 mentionQuery）
-  const mentionCandidates = useRef<MentionCandidates>({});
-  const mentionAllPending = useRef(false);
-  const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
-  const mentionActiveRef = useRef<HTMLButtonElement>(null); // 当前高亮行：键盘移动时滚入视野
   // ---- 会话内搜索（SEARCH_DESIGN §4/§5）：顶栏搜索框 + 底部命中导航 ▲▼ + 📅日历 + 👤来自（纯本地）----
   // searchOpen/searchQuery 留在此处（受控）：下方 highlightSearch 定义在 useChatSearch 调用点之前、消息气泡渲染
   // 要读它俩；其余会话内搜索/日历/来自/首页搜索的全部状态与逻辑已抽到 useChatSearch（见下方 const search=…）。
@@ -227,9 +223,6 @@ export default function App() {
   const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null); // 当前群黑名单（管理面板显示计数）
   const [groupBansModal, setGroupBansModal] = useState<{ convId: string; bans: GroupBan[] } | null>(null); // 黑名单弹窗
   // 二维码体系（QRCODE P0）+ G3 入群 UI 状态。
-  const [qrScan, setQrScan] = useState(false); // 扫一扫浮层
-  const [qrCardModal, setQrCardModal] = useState<{ title: string; subtitle: string; name: string; avatarUrl?: string; card: QRCard; canReset: boolean; kind: "me" | "group"; convId?: string } | null>(null);
-  const [qrResult, setQrResult] = useState<{ data: QRResolved | { kind: "expired" }; raw: string } | null>(null);
   const [joinReqModal, setJoinReqModal] = useState<{ convId: string; requests: JoinRequest[]; loading: boolean } | null>(null);
   const [muteDurationFor, setMuteDurationFor] = useState<{ convId: string; m: GroupMember } | null>(null); // 成员禁言时长选择
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
@@ -922,6 +915,12 @@ export default function App() {
     retryUpload, onMediaBubbleTap, fileInputRef, attachAnchorRef, cancelAttachClose, scheduleAttachClose, attachItems, pickFile, onFilePicked,
   } = useMediaSend({ uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
 
+  // @提及簇 → useMentions（阶段 7b）：须在 send()（读 mentionCandidates/mentionAllPending）之前；convId 在此处尚未定义，
+  // 用与其定义完全相同的表达式就地计算（脚本已断言一致）。
+  const {
+    mentionQuery, setMentionQuery, mentionFilter, setMentionFilter, mentionActive, setMentionActive,
+    mentionCandidates, mentionAllPending, mentionPanelRef, mentionActiveRef, mentionRows, pickMention, onMentionNavKey,
+  } = useMentions({ convId: peer ? convIdFor(uid, peer) : groupConvId, groupConvId, peer, uid, groupInfos, input, setInput, composerRef });
   const send = useCallback(() => {
     const text = input.trim();
     const client = clientRef.current;
@@ -1730,61 +1729,7 @@ export default function App() {
    * @面板当前候选行（渲染与键盘导航共用同一份，避免两处各算一次导致高亮与实际选中错位）。
    * 「@所有人」占首位、仅群主/管理员且无过滤词时出现（一旦开始搜人，列表就该只剩人）。
    */
-  const mentionRows = useMemo(() => {
-    if (mentionQuery === null || !groupConvId || peer) return [];
-    const info = groupInfos[groupConvId];
-    if (!info) return [];
-    const others = info.members
-      .filter((m) => m.user_id !== uid)
-      .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, role: m.role, avatarUrl: m.avatar_url }));
-    // 生效过滤词：用户在面板搜索框主动打字时以搜索框为准（独立搜索）；否则跟随消息框 @后的字符（mentionQuery）。
-    // 二者互不写入对方，故搜索框不会被 @文字自动回填；清空搜索框即回落到消息框驱动。
-    const effQuery = mentionFilter.trim() !== "" ? mentionFilter : mentionQuery;
-    const hits = filterMentionMembers(others, effQuery);
-    const rows: { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string }[] =
-      hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
-    if (canMentionAll(info.my_role) && effQuery.trim() === "") {
-      rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });
-    }
-    return rows;
-  }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, uid]);
 
-  // 面板关闭时清空搜索框：下次打开是干净的空框（搜索词不跨会话/跨次残留）。
-  useEffect(() => { if (mentionQuery === null) setMentionFilter(""); }, [mentionQuery]);
-  // 键盘导航的高亮项；过滤词一变就回到首项（否则旧下标会指向另一个人）。
-  const [mentionActive, setMentionActive] = useState(0);
-  useEffect(() => { setMentionActive(0); }, [mentionQuery, mentionFilter]);
-  // 高亮项滚入视野：成员多时用 ↓ 走到列表下缘，高亮不能停在可视区外。
-  useEffect(() => { mentionActiveRef.current?.scrollIntoView({ block: "nearest" }); }, [mentionActive]);
-
-  /** 选中某成员 / @所有人：回填 token、记入候选表、关面板并把焦点与光标交还输入框。 */
-  const pickMention = useCallback((displayName: string, userId: string | null) => {
-    const el = composerRef.current;
-    const caret = el?.selectionStart ?? input.length;
-    const next = applyMentionToken(input, caret, displayName);
-    setInput(next.text);
-    if (userId) mentionCandidates.current[userId] = displayName; // 键必须是 uid：同名成员不能互相覆盖
-    else mentionAllPending.current = true;
-    setMentionQuery(null);
-    window.setTimeout(() => {
-      el?.focus();
-      el?.setSelectionRange(next.caret, next.caret);
-    }, 0);
-  }, [input]);
-
-  /** @面板导航键（消息框与面板搜索框共用）：↑/↓ 移动、Enter/Tab 选中、Esc 关闭。返回 true=已消费。 */
-  const onMentionNavKey = (e: React.KeyboardEvent<HTMLElement>): boolean => {
-    if (mentionQuery === null || e.nativeEvent.isComposing) return false;
-    if (e.key === "Escape") { e.preventDefault(); setMentionQuery(null); return true; }
-    if (mentionRows.length === 0) return false;
-    if (e.key === "ArrowDown") { e.preventDefault(); setMentionActive((i) => (i + 1) % mentionRows.length); return true; }
-    if (e.key === "ArrowUp") { e.preventDefault(); setMentionActive((i) => (i - 1 + mentionRows.length) % mentionRows.length); return true; }
-    if (e.key === "Enter" || e.key === "Tab") {
-      const r = mentionRows[Math.min(mentionActive, mentionRows.length - 1)];
-      if (r) { e.preventDefault(); pickMention(r.label, r.userId); return true; }
-    }
-    return false;
-  };
 
   const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
 
@@ -1797,28 +1742,6 @@ export default function App() {
   }, [convId, refreshPinned]);
 
   // 切换会话时清空 @提及态（M4-8）：input 不随会话清空，候选表若留到下一个会话，
-  // 手打同名成员时会命中**上一个群**的 uid —— 服务端按新群成员集过滤后把它丢掉，
-  // 结果本群那位同名成员一条提醒都收不到，发送方却毫无察觉。面板同理必须收起。
-  useEffect(() => {
-    mentionCandidates.current = {};
-    mentionAllPending.current = false;
-    setMentionQuery(null);
-    setMentionFilter("");
-  }, [convId]);
-  // @面板的关闭路径（M4-8）：Esc 或点击面板外。没有这条路径时面板会一直悬在输入框上方，
-  // 只能靠"打一个空格"才消失——用户想手打昵称或去点别处时无从关闭。
-  useEffect(() => {
-    if (mentionQuery === null) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMentionQuery(null); };
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node | null;
-      if (t && (mentionPanelRef.current?.contains(t) || composerRef.current?.contains(t))) return;
-      setMentionQuery(null);
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("mousedown", onDown); };
-  }, [mentionQuery]);
   // 按时间戳排序（发送中/失败的 convSeq=0 但有发送时刻，故按时间能正确落位——
   // 否则它们会被挤到末尾，导致"解除拉黑后新发的消息排在更早的失败消息之前"）。
   // conv_seq 仅作同一毫秒内的次级排序，保证已送达消息间仍按服务端顺序。
@@ -2075,22 +1998,10 @@ export default function App() {
   }), [setToast, locateInChat, onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause, toggleSelected, fetchLinkPreview, onMediaLoad,
        jumpToBottom, unblock, exitSelectMode, forwardSelected, deleteSelected, removePastedImage, cancelAttachClose, scheduleAttachClose, pickFile, openFavoritesPick, onFilePicked, pickMention, onInputChange, onComposerPaste, send]);
 
-  const bootQrRef = useRef<string | null>(null);
-  useEffect(() => {
-    const sp = new URLSearchParams(location.search);
-    const q = sp.get("qr");
-    if (!q) return;
-    bootQrRef.current = q;
-    sp.delete("qr");
-    history.replaceState(null, "", location.pathname + (sp.toString() ? `?${sp.toString()}` : "") + location.hash);
-  }, []);
-  useEffect(() => {
-    if (phase !== "app" || !bootQrRef.current) return;
-    const raw = bootQrRef.current;
-    bootQrRef.current = null;
-    void handleScanRaw(raw);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
+  // 二维码簇 → useQR（阶段 7c）：openPeerDetail 定义在早退后，经 ref 注入（定义处回写 .current）。
+  const openPeerDetailRef = useRef<(peer: string) => void>(() => {});
+  const { qrScan, setQrScan, qrCardModal, setQrCardModal, qrResult, setQrResult, handleScanRaw, openMyCard, openGroupCard, resetQRCard, qrResultActions } =
+    useQR({ phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshFriends, refreshConversations, openPeerDetailRef });
 
   // ---- 登录 ----
   if (phase === "login") {
@@ -2282,6 +2193,7 @@ export default function App() {
     setDetail({ convId: cid, isGroup: false, peer, fromOwnChat });
     setDetailMsgs([]); loadDetailMsgs(cid);
   };
+  openPeerDetailRef.current = openPeerDetail; // 供 useQR（早退前调用）在点击时取到早退后定义的函数
 
   // 清空聊天记录（仅本机，对齐 iOS）：清 IndexedDB → 通知聊天区刷新 → 关面板。
   const doClearHistory = (cid: string) => {
@@ -2389,90 +2301,6 @@ export default function App() {
 
   // ---- 二维码体系（QRCODE P0）----
 
-  // 扫到原文 → 服务端 resolve → 按 kind 展示分支；码失效（200110）走「已失效」分支。
-  const handleScanRaw = async (raw: string) => {
-    setQrScan(false);
-    try {
-      const data = await clientRef.current!.qrResolve(raw);
-      setQrResult({ data, raw });
-    } catch (e) {
-      if (errorCode(e) === 200110) setQrResult({ data: { kind: "expired" }, raw });
-      else setToast((e as Error).message);
-    }
-  };
-
-  const openMyCard = async () => {
-    try {
-      const card = await clientRef.current!.qrMyCard();
-      setQrCardModal({ title: "我的二维码", subtitle: "扫描二维码，加我为朋友",
-        name: myInfo?.nickname || uid, avatarUrl: myInfo?.avatar_url, card, canReset: true, kind: "me" });
-    } catch (e) { setToast(`获取名片码失败：${(e as Error).message}`); }
-  };
-
-  // 群二维码 / 群邀请链接同源（码即邀请链接）：asLink 仅改标题与文案，复用同一张卡片模态（内含二维码图 + 复制链接）。
-  const openGroupCard = async (cid: string, asLink = false) => {
-    const gi = groupInfos[cid];
-    const canManage = gi?.my_role === "owner" || gi?.my_role === "admin";
-    const noun = asLink ? "群邀请链接" : "群二维码";
-    const denyVerb = asLink ? "获取群邀请链接" : "出示群二维码";
-    // perm_invite=1 时群码即邀请链接，仅群主/管理员可出示。无权限时不打开模态、直接中文吐司（对齐 iOS）。
-    if (gi?.perm_invite && !canManage) {
-      setToast(`群主已开启「仅管理员可邀请」，你无法${denyVerb}`);
-      return;
-    }
-    try {
-      const card = await clientRef.current!.groupQR(cid);
-      setQrCardModal({ title: noun, subtitle: asLink ? "复制或分享链接，邀请好友加入群聊" : "扫描二维码，加入群聊",
-        name: gi?.name || "群聊", avatarUrl: gi?.avatar_url, card, canReset: canManage, kind: "group", convId: cid });
-    } catch (e) {
-      // 服务端兜底（本地 perm_invite 可能过期）：300204 映射为中文，其余透传。
-      const msg = errorCode(e) === 300204
-        ? `群主已开启「仅管理员可邀请」，你无法${denyVerb}`
-        : `获取${noun}失败：${(e as Error).message}`;
-      setToast(msg);
-    }
-  };
-
-  // 名片码/群码重置：换新码（旧码立即失效），更新模态内展示。
-  // 失败必须自己吞并提示——模态里的确认按钮只有 try/finally，抛出去会变成未处理的 rejection 且界面毫无反馈。
-  const resetQRCard = async () => {
-    const m = qrCardModal;
-    if (!m) return;
-    try {
-      const card = m.kind === "me"
-        ? await clientRef.current!.qrResetMyCard()
-        : await clientRef.current!.groupQRReset(m.convId!);
-      setQrCardModal({ ...m, card });
-      setToast("二维码已重置，旧码已失效");
-    } catch (e) {
-      setToast(`重置失败：${(e as Error).message}`);
-    }
-  };
-
-  // 扫码结果的动作集：加好友 / 发消息 / 看资料 / 加群 / 进群。
-  const qrResultActions = {
-    onAddFriend: async (peer: string) => {
-      const became = await clientRef.current!.requestFriend(peer);
-      setToast(became ? "已添加为好友" : "已发送好友申请");
-      void refreshFriends();
-    },
-    onMessage: (peer: string) => openChat(peer),
-    onViewProfile: (peer: string) => openPeerDetail(peer),
-    onEnterGroup: (cid: string) => openGroupChat(cid),
-    // 凭扫到的原始码入群：直连成功进群；需审批（300210）转"已提交"提示；已满/黑名单等透传文案。
-    onJoinGroup: async (hello: string) => {
-      const raw = qrResult?.raw ?? "";
-      try {
-        const info = await clientRef.current!.joinGroupByCode(raw, hello);
-        setToast(`已加入「${info.name}」`);
-        await refreshConversations();
-        openGroupChat(info.conv_id);
-      } catch (e) {
-        if (errorCode(e) === 300210) setToast("入群申请已提交，等待管理员审批");
-        else setToast((e as Error).message);
-      }
-    },
-  };
 
   // ---- 入群审批（G3）----
 
@@ -2709,106 +2537,12 @@ export default function App() {
           )}
         </div>
         ) : (
-        <div className="contacts">
-          <div className="newchat">
-            <input value={searchQ} placeholder="对方完整 uid 或手机号"
-              onChange={(e) => setSearchQ(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
-            <button onClick={() => void doSearch()}>搜索</button>
-            <button className="newchat-qr" title="扫一扫 / 我的二维码" aria-label="扫一扫" onClick={() => setQrScan(true)}><QrCode size={18} /></button>
-          </div>
-          <div className="contact-entries">
-            {contactEntries.map((r) => renderRow(r, "entry-row"))}
-          </div>
-          <div className="convlist" ref={contactsScrollRef}>
-            {searchResults !== null && (
-              <>
-                <div className="section-label">搜索结果</div>
-                {searchResults.length === 0 && <div className="empty">没有找到匹配的用户</div>}
-                {searchResults.map((u) => {
-                  const st = friendStatus.get(u.user_id);
-                  return (
-                    <div key={`s-${u.user_id}`} className="convitem static">
-                      <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname)} seed={u.user_id} />
-                      <div className="convbody">
-                        <div className="convpeer">{labelOf(u.user_id, u.nickname)}</div>
-                        <div className="convlast">{u.user_id}{u.tags.length > 0 ? ` · ${u.tags.join(" ")}` : ""}</div>
-                      </div>
-                      <div className="row-actions">
-                        {st === "accepted" ? (
-                          <button className="mini-btn" onClick={() => openFriendChat(u.user_id)}>发消息</button>
-                        ) : st === "requested" ? (
-                          <button className="mini-btn ghost" disabled>已申请</button>
-                        ) : st === "pending" ? (
-                          <button className="mini-btn" disabled={busyUser === u.user_id}
-                            onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("accept", u.user_id))}>同意</button>
-                        ) : st === "blocked" ? (
-                          <button className="mini-btn ghost" disabled>已拉黑</button>
-                        ) : (
-                          <button className="mini-btn" disabled={busyUser === u.user_id}
-                            onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("request", u.user_id))}>加好友</button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </>
-            )}
-
-            {incoming.length > 0 && (
-              <>
-                <div className="section-label">新的朋友（{incoming.length}）</div>
-                {incoming.map((f) => (
-                  <div key={`p-${f.user_id}`} className="convitem static">
-                    <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname)} seed={f.user_id} />
-                    <div className="convbody">
-                      <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
-                      <div className="convlast">请求加你为好友</div>
-                    </div>
-                    <div className="row-actions">
-                      <button className="mini-btn" disabled={busyUser === f.user_id}
-                        onClick={() => void doFriendAction(f.user_id, () => clientRef.current!.friendAction("accept", f.user_id))}>同意</button>
-                      <button className="mini-btn ghost" disabled={busyUser === f.user_id}
-                        onClick={() => void doFriendAction(f.user_id, () => clientRef.current!.friendAction("reject", f.user_id))}>拒绝</button>
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-
-            <div className="section-label with-action friends-head">
-              <span>好友（{contactFilterQ ? `${filteredAccepted.length}/${accepted.length}` : accepted.length}）</span>
-              {accepted.length > 0 && (
-                <input className="contact-filter-input" value={contactFilter} placeholder="搜索好友"
-                  onChange={(e) => setContactFilter(e.target.value)} />
-              )}
-            </div>
-            {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
-            {accepted.length > 0 && filteredAccepted.length === 0 && <div className="empty">没有匹配的好友</div>}
-            {/* 好友列表虚拟化：只渲染视口内可见行，2000 好友首屏渲染从 ≈530ms 降到 <100ms
-                （LOAD_TESTING 场景⑥）。共用 .convlist 滚动，上方搜索/新朋友/标签同处一个滚动条。 */}
-            <VirtualList
-              items={filteredAccepted}
-              scrollElRef={contactsScrollRef}
-              getKey={(f) => f.user_id}
-              renderRow={(f) => (
-                <div className="convitem" onClick={() => openFriendChat(f.user_id)}>
-                  <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}>
-                    {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
-                  </Avatar>
-                  <div className="convbody">
-                    <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
-                    <div className="convlast">{f.user_id}</div>
-                  </div>
-                  <div className="row-actions">
-                    <button className="mini-btn ghost" title="更多"
-                      onClick={(e) => { e.stopPropagation(); setFriendMenu({ x: e.clientX, y: e.clientY, userId: f.user_id }); }}>⋯</button>
-                  </div>
-                </div>
-              )}
-            />
-          </div>
-        </div>
+        <ContactsTab
+          searchQ={searchQ} setSearchQ={setSearchQ} doSearch={doSearch} onScan={() => setQrScan(true)} contactEntries={contactEntries} contactsScrollRef={contactsScrollRef}
+          searchResults={searchResults} friendStatus={friendStatus} labelOf={labelOf} openFriendChat={openFriendChat} busyUser={busyUser} doFriendAction={doFriendAction}
+          incoming={incoming} accepted={accepted} filteredAccepted={filteredAccepted} contactFilter={contactFilter} setContactFilter={setContactFilter} contactFilterQ={contactFilterQ}
+          friendLabel={friendLabel} presence={presence} setFriendMenu={setFriendMenu}
+        />
         )}
 
         {/* 设置面板：见 components/settings/SettingsPanel（行数据与动作在上方组装）。 */}
