@@ -37,6 +37,11 @@
   `useState/useRef/useMemo/useCallback/useEffect` 一律放组件体顶部。放在 `if (phase==="login") return <LoginView/>` 之后
   →登录/主视图两种渲染 hook 数不一致→运行时崩 **"Rendered more hooks than during the previous render"**
   （本次 `AppServicesContext` 的 `services` useMemo 踩过：一开始放在 early return 之后，移到之前才好）。
+- **早退前的 hook 需要早退后定义的函数 → 经 ref 注入，别复制那段派生**（2026-08 App.tsx 系统性拆分沉淀）：
+  从 App 抽出的 hook 必须在 `if (phase==="login") return` 之前调用，但它要用的某个函数（如 `openPeerDetail`/`handleScanRaw`，
+  依赖只在主视图存在的 state）定义在早退**之后**。解法：App 建一个 `const xRef = useRef(noop)`，在 x 定义处回写 `xRef.current = x`，
+  把 `xRef` 注入 hook（样板 `useQR` 的 `openPeerDetailRef`）。**这是退而求其次**——首选把该函数/其依赖 hoist 到早退之前；
+  ref 注入只在 hoist 会引起大范围挪动时用，且**别为每个晚定义函数复刻一对 ref**（味道），必要时抽一个通用 `useLatest(fn)`。
 - 禁止魔法数/字符串,抽成具名常量。
 - 列表渲染 `key` 用**稳定身份**：消息一律 `album.ts#msgKey`（convSeq 优先），**绝不用数组下标 `i` 或 `serverMsgId` 兜底**
   （详见 §九——入站消息无 clientMsgId、翻历史 prepend 时下标平移会让 React 错绑 DOM）。静态列表除外。
@@ -85,6 +90,12 @@
 `clientRef`/`setToast`/`askConfirm`/`refresh*` 这类公共服务**时，就该停下来考虑：别硬传，先建 `AppServicesContext` 收拢这批
 稳定依赖，组件从 `useAppServices()` 取，props 降到个位数（方案与触发点见 `current_task.md`）。**注意 Context 只放稳定的服务，
 不放高频变化的 state**（如 `input`/`msgsByConv`——放进去会让所有消费组件跟着重渲染）。
+- **要把「依赖高频 state 的回调」放进 Context → 先用 `useEvent` 抹平身份，别裸 `useMemo`（假稳定陷阱）**（2026-08 `ChatActionsContext` /code-review 沉淀）：
+  一个 `useCallback` 若依赖 `input`/`dlStates`/`uploadProgress`（如 `send`/`onGateTap`/`pickMention`），它**每次按键/上传 tick 都换新身份**。
+  把它塞进 `chatActions = useMemo(() => ({ send, … }), [send, …])`，看着像「memo 一次」，实则依赖里带着它 → **context 值每次按键重建、
+  所有消费组件重渲染**，比 prop-drilling 还糟且更隐蔽（`memo(子组件)` 会被静默击穿）。正确做法：用 `src/useEvent.ts` 把这些回调包成
+  **身份恒定、调用走最新实现**的版本（`const sendEv = useEvent(send)`），Context 只收 `*Ev` + setter/ref，`useMemo` 依赖数组**为空**、值只建一次。
+  判据：**Context 成员的身份必须恒定**——setter/ref 天然恒定；`useCallback([])` 恒定；带非空 deps 的 `useCallback` **必经 `useEvent`** 才能进。
 - **已登记例外**：`MediaViewer`（~24 props）在 Context 落地前先按纯 props 拆出——它的多是**一次性动作回调**（onLocate/
   onFavorite/onCopy/onForward/onDelete…），不是跨组件共享的服务，硬传成本可接受。**Context 落地时应把这些公共服务类回调一并收编**。
 - 会话详情抽屉（~50 props）**不走硬传**：已触墙，等 `AppServicesContext` 就位再拆（见 `current_task.md`「prop-drilling 墙」）。
@@ -106,7 +117,10 @@
 - 纯逻辑模块直接测函数；组件/Hook 测试用 `@testing-library`，文件顶部加 `// @vitest-environment jsdom`（默认 node 环境不拖慢纯逻辑用例）。
 - **组件/Hook 测试若在一个文件里多次 `render`，须 `afterEach(cleanup)`**（`test-setup.ts` 未全局 cleanup）——否则前一个用例的 DOM 堆进
   `document.body`，`getByText` 报「Found multiple elements」或跨用例串扰（本次 `DetailPanelParts.test` 踩过）。同名文本用 `container.querySelector` 收窄。
-- **`App.smoke.test.tsx` 是拆分护栏**（mock IMClient 渲染真实 `<App/>` 走通登录→发/收消息主链路）——**任何拆分/重构必须保持它绿**。
+- **`App.smoke.test.tsx` 是拆分护栏**（mock IMClient 渲染真实 `<App/>` 走通登录→发/收消息主链路）——**任何拆分/重构必须保持它绿**；
+  抽出大块（如 `MessageList`）时先给它补交互特征测试（`App.messageList.test.tsx`），再动代码。
+- **App 级 mock 别各文件复制**：`FakeIMClient` 收在 `src/testing/fakeIMClient.ts`，测试用 `vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, … }))` 共享
+  （工厂内 `await import` 可跨文件复用，不必内联重抄 ~50 行）；hook 测试的 `clientRef` 走同文件的 `fakeClientRef(partial)`。
 - jsdom 测不到真滚动布局（`scrollTo` 已桩掉）：滚动定位/分页类改动，编译过 ≠ 对，**必须浏览器手测**。
 
 ## 九、交付前自审清单（编译≠正确，逐条过再交付）
