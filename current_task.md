@@ -4,7 +4,7 @@
 > 历史流水见 `current_task.archive.md` + `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 技术债 / 下次
-- **`src/App.tsx` 拆分进行中（2026-08-18，三轮累计 6302 → 5125 行，~25 个绿提交）**。每步 `tsc + vitest (+ build)` 全绿、单独 commit。已抽出：
+- **`src/App.tsx` 系统性拆分 ✅ 收口（2026-08-21，9 阶段 / 11 个绿提交，4891 → 2958 行；累计 6302 → 2958）**。每阶段 `tsc + vitest`（含 `App.smoke` 护栏）全绿、单独 commit、行数闸棘轮只降不升（5100 → 3000）。抽出：展示组件 `MessageList`/`DetailPanel`/`Composer`/`ChatBanners`/`ContactsTab`/`ChatHeader`；Hook `useChatSearch`/`useMediaDownload`/`useMediaSend`/`useForward`/`useFavorites`/`useMentions`/`useQR`/`useAppearanceSettings`/`useFriendOps`/`useProfileEdit`；纯函数 `searchPredicate`/`minSeqOf`/`favoriteToMessage`/`isSameDay·dayHeader`（→ time.ts）。新增 `ChatActionsContext`（聊天列**稳定动作包**：setter/ref/useCallback，App 侧 useMemo 一次、置于 login 早退前；与 AppServicesContext 分开——后者要求永不重建）。**关键约束（再拆必守）**：① Hook 调用须在 `if (phase==='login') return` 之前，且其注入依赖必须已定义（定义在早退后的函数如 openPeerDetail/handleScanRaw 走 props 或 ref 注入，见 useQR.openPeerDetailRef）；② `searchOpen/searchQuery` 留 App（highlightSearch 定义在 Hook 之前会 TDZ）；③ 行为保持型——函数体/JSX 逐字平移，测试 427 → 488。**剩余 2958 行 = 应用外壳本体**（44 个核心 state/连接/phase 路由 + enterApp 173 行 + 滚动·定位·已读核心 ~320 行·20 个互咬 ref + conversationActions 菜单表 160 行/43 依赖 + send() 编排 + 子组件组装接线）——均为 §7 点名的胶水，**不再硬抽**；新功能按决策树进新文件即可。
   - **✅ 测试安全网（共 319 例，拆分护栏）**：devDeps 加 `jsdom + @testing-library/*`；vitest include 扩 `.test.tsx`（默认仍 node 环境，组件测试逐文件 `// @vitest-environment jsdom`；jest-dom 走 `/vitest` 入口）。**`App.smoke.test.tsx` 5 例**——mock `./sdk/imSdk`（FakeIMClient，Proxy 兜底 40+ 方法），渲染真实 `<App/>` 走通 登录→会话列表→进会话→发消息(乐观回显/ACK 不重复)→收消息(同 seq 去重)→顺序。**今后任何拆分必须保持它绿**。另 Avatar 6 + useDialogs 4 + useToast 3 + useDevices 7。
   - **✅ 纯逻辑模块**：`wallpaper.ts` / `color.ts` / `messageContent.ts`（快照本地化/引用预览/聊天记录解析/文件名·URL/媒体定框）/ `session.ts` / `optedIn.ts` / `videoPoster.ts`。测试导入已改指向新模块。
   - **✅ 叶子展示组件** `src/components/`：`Avatar`、`AlbumGrid`、`QuoteThumb`(+`QuoteSnapshotIcon`)、`AnchoredMenu`、`FileGateIcon`、`LinkCard`、`LoginView`、共享 `rows.tsx`（Row 类型 + renderRow）。
@@ -17,6 +17,8 @@
   - **注意**：全程**行为保持型**抽取，靠 App 冒烟 + tsc + build + 319 例回归兜底。**待用户浏览器手测**冒烟（登录/发消息/设置各子面板/各弹窗/转发/收藏/查看器翻页/媒体库）。
 
 ## 当前焦点
+
+**App.tsx 系统性拆分收口 ✅（2026-08-21，4891 → 2958，见「技术债」首条；待浏览器手测一轮：聊天/发送/媒体/详情/通讯录/设置/扫码/转发/收藏）**。
 
 **消息身份 key 收敛 `msgKey()` ✅（2026-08-19，tsc build + 351 vitest 绿，待浏览器手测翻历史）** — `/code-review` 体检发现的唯一实锤 bug 源：同一 ChatMessage 曾有 4 套不一致身份表达式，其中 List React key（`App.tsx` ×4）用 `clientMsgId ?? serverMsgId ?? i`——入站消息无 `clientMsgId`、实时帧缺 `server_msg_id` 时**塌到数组下标 `i`**，向上翻页 prepend 旧消息使下标平移 → React 把 DOM/组件状态（播放中视频/展开长文/编辑框）错绑到别的行（编译不报、翻历史才现形）。
 - **收敛**：`album.ts` 的 `mediaIdentity` 重命名为 **`msgKey`**（convSeq 优先、会话内唯一），作全局唯一消息身份。List key ×4、`menuActive`（3902）、详情页 media/file/link key ×3 全部改用 `msgKey`，消灭 `?? i` 与 `serverMsgId || convSeq` 漂移。文档串拓宽点明「绝不用下标兜底」。
