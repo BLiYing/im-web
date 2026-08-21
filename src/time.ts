@@ -16,3 +16,21 @@ export function formatTime(ts: number, fmt: TimeFormat = "24"): string {
   }
   return `${String(d.getHours()).padStart(2, "0")}:${mm}`;
 }
+
+// 两个毫秒时间戳是否同一自然日（聊天页按日期分组用）。
+export function isSameDay(a: number, b: number): boolean {
+  if (!a || !b) return false;
+  const da = new Date(a), db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
+}
+
+// 毫秒时间戳 → 日期分隔文案：今天/昨天/M月d日（今年）/yyyy年M月d日（往年）。
+export function dayHeader(ts: number): string {
+  if (!ts) return "";
+  const d = new Date(ts), now = new Date();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (isSameDay(ts, now.getTime())) return "今天";
+  if (isSameDay(ts, yesterday.getTime())) return "昨天";
+  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+}

@@ -20,25 +20,26 @@ import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
 import { buildMessageActions, buildConversationActions, buildFavoriteActions, type MenuAction, type MessageCtx } from "./menus";
-import { albumMembers, isAlbumLeader, isAlbumMember, isViewableMedia, msgKey, resolveJumpTarget } from "./album";
+import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
+import { MessageList } from "./components/MessageList";
+import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { VirtualList } from "./VirtualList";
 import { mediaKindForFile, webCanRenderMedia, MEDIA_PICKER_ACCEPT } from "./fileTypes";
 import { textTier, charCountLabel } from "./longtext";
-import { formatFileSize } from "./fileMetadata";
-import { formatMediaDuration, formatUploadProgress, makeTinyThumbFromImage, probeMediaMetadata } from "./media";
+import { makeTinyThumbFromImage, probeMediaMetadata } from "./media";
 import {
-  downloadGlyph, downloadText, parseDownloadSettings, shouldAutoDownload,
-  type DownloadSettings, type DownloadState, type MediaKind,
+  parseDownloadSettings, shouldAutoDownload,
+  type DownloadSettings, type DownloadState,
 } from "./download";
 import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
 import { DEFAULT_WALLPAPER, loadWallpaper, wallpaperCSS, type WallpaperChoice } from "./wallpaper";
 import { clamp, hsvToHex, hexToHSV, type HSVColor } from "./color";
 import {
-  isUrlText, localizeSnippet, replyPreviewOf, selectableInMultiSelect,
-  parseChatRecord, recordItemPreview, fileNameFromContent, copyImageToClipboard,
-  mediaBoxProps, isPreviewableFile, videoFrameSrc, syntheticViewerMessage, minSeqOf, type RecordItem, type ChatRecord,
+  isUrlText, replyPreviewOf,
+  parseChatRecord, fileNameFromContent, copyImageToClipboard,
+  isPreviewableFile, syntheticViewerMessage, minSeqOf, type RecordItem, type ChatRecord,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { ChatSearchBar } from "./components/ChatSearchBar";
@@ -47,11 +48,9 @@ import { highlightText } from "./searchHighlight";
 import { hitSnippet } from "./searchPredicate";
 import { useChatSearch } from "./useChatSearch";
 import { ChatBanners } from "./components/ChatBanners";
-import { AlbumGrid } from "./components/AlbumGrid";
-import { QuoteThumb, QuoteSnapshotIcon } from "./components/QuoteThumb";
+import { QuoteThumb } from "./components/QuoteThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
-import { FileGateIcon } from "./components/FileGateIcon";
-import { LinkCard, type LinkPreview } from "./components/LinkCard";
+import { type LinkPreview } from "./components/LinkCard";
 import { LoginView } from "./components/LoginView";
 import { SESSION_KEY, loadSession } from "./session";
 import { optedInKey, loadOptedIn, saveOptedIn } from "./optedIn";
@@ -2834,6 +2833,14 @@ export default function App() {
   // ⚠️ 必须放在下方 `if (phase === "login") return` 之前：hook 在提前 return 之后会随 phase 改变 hook 数量
   // → "Rendered more hooks than during the previous render" 白屏（2026-08-14 踩过）。
   // handleScanRaw 定义在提前 return 之后：仅在 phase==="app" 的渲染里才会被 effect 读到，届时已初始化，无 TDZ。
+  // 聊天动作 Context（阶段 1 · MessageList 消费）：成员皆 setter/ref/useCallback，定义均在 login 早退之前；
+  // 本 useMemo 亦须在早退之前（hook 数恒定）。reactive 值与晚定义的 openPeerDetail/handleScanRaw 走 MessageList props。
+  const chatActions = useMemo<ChatActions>(() => ({
+    setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat,
+    onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause,
+    toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
+  }), [setToast, locateInChat, onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause, toggleSelected, fetchLinkPreview, onMediaLoad]);
+
   const bootQrRef = useRef<string | null>(null);
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
@@ -2980,26 +2987,6 @@ export default function App() {
     if (peerId) openChat(peerId);
   };
 
-  // 两条消息是否属于同一「连续段」：同发送者、非系统/撤回、同一天（跨天有日期分隔断段）。
-  const sameSenderRun = (a?: ChatMessage, b?: ChatMessage): boolean =>
-    !!a && !!b && a.from === b.from && a.from !== uid &&
-    a.contentType !== "system" && b.contentType !== "system" &&
-    !a.recalledAt && !b.recalledAt && isSameDay(a.timestamp, b.timestamp);
-  // 上/下一「可见消息」（跳过相册零高从行；多选态相册展开为独立行则不跳）——用于连续段首/末判定。
-  const prevVisibleMsg = (list: ChatMessage[], i: number): ChatMessage | undefined => {
-    for (let j = i - 1; j >= 0; j--) {
-      if (!selectMode && isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
-      return list[j];
-    }
-    return undefined;
-  };
-  const nextVisibleMsg = (list: ChatMessage[], i: number): ChatMessage | undefined => {
-    for (let j = i + 1; j < list.length; j++) {
-      if (!selectMode && isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
-      return list[j];
-    }
-    return undefined;
-  };
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）——convDisplayLabel/convAvatarUrl 已上移至 convLabel 之后（见那里注释）。
   // 收藏来源显示名（副行「来自X」）：本人→我；好友→备注/昵称；群成员→群昵称/昵称；否则 uid（按 UI.md 优先级）。
   const favSourceLabel = (f: Favorite): string => {
@@ -3771,327 +3758,16 @@ export default function App() {
             onOpenPinnedList={() => setPinnedListOpen(true)}
           />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
-            {messages.map((m, i) => {
-              const mine = m.from === uid;
-              const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
-              const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
-              // Telegram 式连续消息分组（群聊对方）：连续同发送者只首条显名、末条显头像；非首条收紧上间距。
-              const grpThem = isGroupChat && !mine;
-              const showSender = grpThem && !sameSenderRun(prevVisibleMsg(messages, i), m);
-              const showAvatar = grpThem && !sameSenderRun(m, nextVisibleMsg(messages, i));
-              const grouped = grpThem && sameSenderRun(prevVisibleMsg(messages, i), m);
-              // 系统消息（群邀请/移除/转让/禁言等留痕）：居中灰字，无气泡/勾/菜单。
-              if (m.contentType === "system") {
-                return (
-                  <div className="msg-item" data-seq={m.convSeq} key={msgKey(m)}>
-                    {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
-                    {i === firstUnreadIdx && (
-                      <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
-                    )}
-                    <div className="sys-line"><span>{m.content}</span></div>
-                  </div>
-                );
-              }
-              // 撤回消息（M4-1）：居中系统行"撤回了一条消息"，隐藏原气泡；本人文本可"重新编辑"回填输入框。
-              if (m.recalledAt) {
-                const canReEdit = mine && m.contentType === "text" && !!m.content;
-                return (
-                  <div className="msg-item" data-seq={m.convSeq} key={msgKey(m)}>
-                    {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
-                    {i === firstUnreadIdx && (
-                      <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
-                    )}
-                    <div className="sys-line">
-                      <span>{mine ? "你撤回了一条消息" : `${isGroupChat ? senderLabel(m) : "对方"}撤回了一条消息`}</span>
-                      {canReEdit && (
-                        <button className="reedit-btn" onClick={() => setInput(m.content)}>重新编辑</button>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-              // 相册宫格（M4+）：同 group_id 聚簇——主行渲染整个宫格，从行跳过；多选态展开为独立行（逐条可勾选）。
-              if (!selectMode && isAlbumMember(m)) {
-                if (!isAlbumLeader(messages, i)) return null;
-                const members = albumMembers(messages, m.groupId!);
-                const last = members[members.length - 1];
-                // 相册尾条的 conv_seq（供「可见即读」：主行虽只带 data-seq=主行 seq，但看到宫格=看到整组，
-                // 已读须能推进到末条，否则以相册结尾的会话未读永远卡在相册首条、清不掉。乐观态 seq=0 取到者忽略）。
-                const albumEndSeq = members.reduce((mx, mm) => Math.max(mx, mm.convSeq || 0), 0);
-                // 整组共用一条失败/拒收表达（同批发送、同一原因被拒）：取首个带 note 的成员。
-                const notedMember = members.find((mm) => mm.note);
-                const albumFailed = mine && members.some((mm) => mm.status === "failed");
-                const grid = (
-                  <div className="bubble-line">
-                    {albumFailed && <span className="fail-badge" title={notedMember?.note || "发送失败"}>!</span>}
-                    <AlbumGrid members={members}
-                      timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
-                      progress={uploadProgress}
-                      gateFor={(mm) => !!mediaGate(mm)}
-                      expiredFor={(mm) => mediaGate(mm)?.phase === "expired"}
-                      onMediaError={onPassiveMediaError}
-                      onOpen={(mm) => (mediaGate(mm) ? onGateTap(mm) : onMediaBubbleTap(mm, () => setViewer({ m: mm })))}
-                      onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
-                  </div>
-                );
-                return (
-                  <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} data-seq-end={albumEndSeq || undefined} key={msgKey(m)}>
-                    {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
-                    {i === firstUnreadIdx && (
-                      <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
-                    )}
-                    <div className={`row ${mine ? "me" : "them"}`}>
-                      {grpThem ? (
-                        <div className="them-wrap">
-                          <div className="avatar-col">
-                            {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} seed={m.from} onClick={() => openPeerDetail(m.from)} />}
-                          </div>
-                          <div className="them-stack">
-                            {showSender && (
-                            <span className="sender-row">
-                              <span className="sender-name">{senderLabel(m)}</span>
-                              {senderRole(m) === "owner" && <span className="role-badge owner">群主</span>}
-                              {senderRole(m) === "admin" && <span className="role-badge">管理员</span>}
-                            </span>
-                          )}
-                            {grid}
-                          </div>
-                        </div>
-                      ) : grid}
-                    </div>
-                    {/* 被拒收系统行（整组一条）：此前相册分支完全没有，图片被拒时既无文案也无恢复入口。 */}
-                    {albumFailed && notedMember?.note && (
-                      <div className="sys-note">
-                        <span>{notedMember.note}</span>
-                        {notedMember.noteCode === 200103 && peer && (
-                          <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>发送好友申请</button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-              // 媒体气泡：时间/已读压在图上（右下角），故不再渲染气泡下方的 .bmeta 行。
-              const isMediaBubble = m.contentType === "image" || m.contentType === "video";
-              const uploading = uploadProgress[m.clientMsgId ?? ""];
-              // 暂停态唯一真相=分片任务（toggleUploadPause bump 进度对象触发重渲染）；小文件无任务恒 false。
-              const uploadPaused = !!chunkedTaskFor(m.clientMsgId ?? "")?.paused;
-              const durationText = m.contentType === "video" ? formatMediaDuration(m.duration) : "";
-              // 下载门控（M4-7）：undefined=就绪；非空=未下载/下载中/失败/已失效 → 卡片显 ↓ 或进度，不加载原件。
-              const gate = mediaGate(m);
-              // 右键/长按选中态（方案A）：菜单作用的目标消息稳态高亮。身份走 msgKey（与 React key 同一唯一来源）
-              // ——convSeq 优先，发送中 convSeq=0 回退 clientMsgId 区分，避免多条 sending 一起亮。
-              const menuActive = !!menu && msgKey(menu.m) === msgKey(m);
-              const bubbleBlock = (
-                <>
-                  <div className="bubble-line">
-                    {mine && m.status === "failed" && (
-                      <span className="fail-badge" title={m.note || "发送失败"}>!</span>
-                    )}
-                    <div className={`bubble${isMediaBubble ? " media" : ""}${menuActive ? " ctx-active" : ""}`}
-                      onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
-                      {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
-                      {m.replyToConvSeq ? (
-                        // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
-                        <div className="quote-bar" onClick={() => locateInChat(m.convId, m.replyToConvSeq!)}>
-                          {(() => { const q = messages.find((x) => x.convSeq === m.replyToConvSeq);
-                            // 图说消息（带 caption）：引用**只显文本**（快照即 caption），不挂媒体缩略图——简化、少出错。
-                            if (q?.caption) return null;
-                            // 原消息在本地 → 真帧/磨砂/图标由 QuoteThumb 定；不在本地 → 从快照文本推兜底图标（与 iOS 一致，别只剩文本）。
-                            return q ? <QuoteThumb m={q} gated={!!mediaGate(q)} /> : <QuoteSnapshotIcon snapshot={m.replySnapshot} />; })()}
-                          <span className="quote-lines">
-                            {isGroupChat && m.replyToFrom && (
-                              <span className="quote-who">{m.replyToFrom === uid ? "你" : (memberNick(m.convId, m.replyToFrom) || m.replyToFrom)}</span>
-                            )}
-                            <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
-                          </span>
-                        </div>
-                      ) : null}
-                      {isMediaBubble ? (
-                        // 图片/视频：按 media_w/media_h 的原始比例定框（未知回退方块），
-                        // 左上角时长或上传进度、右下角时间+已读态、视频居中播放角标——与 iOS 同版式。
-                        // 点按走状态机（与 iOS 中心按钮一致）：失败 ↻ 重试 / 上传中 ⏸↔↑ / 其余打开查看器。
-                        <span {...mediaBoxProps(m)}
-                              onClick={() => (gate ? onGateTap(m) : onMediaBubbleTap(m, () => setViewer({ m })))}
-                              title={gate ? downloadText(gate, formatFileSize(m.fileSize)) : undefined}>
-                          {/* 门控（未下载）：不拉原图/原视频，只显 thumb 模糊占位（~200B data URI），没有就留灰底。 */}
-                          {gate
-                            ? (m.thumb
-                                ? <img className="msg-image msg-image-blur" src={m.thumb} alt="未下载" />
-                                : <span className="msg-image msg-image-empty" />)
-                            : m.contentType === "video"
-                              ? (m.posterUrl
-                                  ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />
-                                  : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} onError={() => void onPassiveMediaError(m)} />)
-                              : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />}
-                          {gate
-                            ? (gate.phase === "expired"
-                                ? <span className="play-badge expired" title="已失效">⊘</span>
-                                : downloadGlyph(gate) && <span className="play-badge">{downloadGlyph(gate)}</span>)
-                            : uploading
-                            ? (chunkedTaskFor(m.clientMsgId ?? "") && <span className="play-badge">{uploadPaused ? "↑" : "⏸"}</span>)
-                            : (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? ""))
-                              ? <span className="play-badge">↻</span>
-                              : m.contentType === "video" && <span className="play-badge">▶</span>}
-                          {gate
-                            ? <span className="media-badge media-badge-tl">
-                                {downloadText(gate, formatFileSize(m.fileSize), m.contentType as MediaKind)}{durationText && gate.phase !== "expired" ? ` · ${durationText}` : ""}
-                              </span>
-                            : uploading
-                            ? <span className="media-badge media-badge-tl">{uploadPaused ? "⏸ " : ""}{formatUploadProgress(uploading.sent, uploading.total)}</span>
-                            : (durationText && <span className="media-badge media-badge-tl">{durationText}</span>)}
-                          <span className="media-badge media-badge-br">
-                            {mine
-                              // 只有真正在传输才显「发送中…」；暂停时回落显示时间（与 iOS 一致）。
-                              ? (m.status === "sending" ? (uploadPaused ? formatTime(m.timestamp, timeFormat) : "发送中…")
-                                // 被拒收（有 note）时失败已由红❗+下方系统行表达，角标只显时间，不重复报错（与 iOS 一致）。
-                                : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : "未发送 ✗")
-                                : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>)
-                              : formatTime(m.timestamp, timeFormat)}
-                          </span>
-                        </span>
-                      ) : m.contentType === "chat_record" ? (
-                        // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
-                        (() => { const r = parseChatRecord(m.content); return (
-                          <div className="record-card" onClick={() => setRecordStack([r])}>
-                            <div className="record-title">{r.t}</div>
-                            <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
-                              <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
-                            ))}</div>
-                            <div className="record-foot">聊天记录</div>
-                          </div>
-                        ); })()
-                      ) : m.contentType === "file" ? (
-                        // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。
-                        uploading || !m.content ? (
-                          <span className={`msg-file${m.status === "failed" ? " failed" : ""}`}
-                                onClick={m.status === "failed" ? () => retryUpload(m)
-                                       : uploading ? () => toggleUploadPause(m) : undefined}>
-                            <FileTypeIcon name={m.fileName || ""} size={30} />
-                            <span className="msg-file-body">
-                              <span className="msg-file-name">{m.fileName || "文件"}</span>
-                              <span className="msg-file-size">
-                                {m.status === "failed"
-                                  ? `${formatFileSize(m.fileSize)} · 上传失败，点击重试`
-                                  : uploading
-                                    ? `${formatUploadProgress(uploading.sent, uploading.total)}${
-                                        chunkedTaskFor(m.clientMsgId ?? "") ? (uploadPaused ? " · 已暂停，点击继续" : " · 点击暂停") : ""}`
-                                    : formatFileSize(m.fileSize)}
-                              </span>
-                              {/* 失败态不显进度条：0% 的空条会让人以为"还没开始传"。 */}
-                              {m.status !== "failed" && (
-                                <span className="file-progress">
-                                  <span className="file-progress-bar"
-                                        style={{ width: `${uploading && uploading.total > 0 ? Math.round((uploading.sent / uploading.total) * 100) : 0}%` }} />
-                                </span>
-                              )}
-                            </span>
-                          </span>
-                        ) : gate ? (
-                          // 门控（M4-7）：未下载/下载中/失败——圆形图标位即状态位（↓ / 环形进度 / ↻），点击就地下载，不跳页。
-                          // 进度改由 FileGateIcon 的圆环表示（去底部线性条），图标槽位恒定 → 状态切换不撑高卡片。
-                          <span className={`msg-file${gate.phase === "failed" || gate.phase === "expired" ? " failed" : ""}`}
-                                onClick={() => onGateTap(m)}
-                                title={gate.phase === "expired" ? "文件已失效" : "点击下载"}>
-                            <FileGateIcon state={gate} />
-                            <span className="msg-file-body">
-                              <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
-                              <span className="msg-file-size">
-                                {gate.phase === "notStarted"
-                                  ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 点击下载` : "点击下载")
-                                  : downloadText(gate, formatFileSize(m.fileSize))}
-                              </span>
-                            </span>
-                          </span>
-                        ) : (
-                          // 就绪：点击路由（可预览类型新标签预览 / 其余另存，对齐 iOS QuickLook）。已手动下过走应用内 blob。
-                          <span className="msg-file clickable" onClick={() => openReadyFile(m)}
-                                title={isPreviewableFile(m.fileName || fileNameFromContent(m.content)) ? "点击预览" : "点击下载"}>
-                            <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
-                            <span className="msg-file-body">
-                              <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
-                              {formatFileSize(m.fileSize) && <span className="msg-file-size">{formatFileSize(m.fileSize)}</span>}
-                            </span>
-                          </span>
-                        )
-                      ) : isUrlText(m.content) ? (
-                        // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
-                        <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad}
-                                  onOpenInvite={(u) => void handleScanRaw(u)} />
-                      ) : (
-                        renderMessageText(m)
-                      )}
-                      {/* 图说 caption（Telegram 模型）：图文/视频文/文件文的随附文本，渲染在媒体/文件卡下方、同一气泡内。
-                          媒体气泡时间压在图上（media-badge-br），故 caption 只出纯文字；文件气泡时间仍在下方 bmeta。 */}
-                      {m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? (
-                        <div className={`msg-caption${m.contentType === "file" ? " file" : ""}`}>{renderMentionText(m, m.caption)}</div>
-                      ) : null}
-                      {!isMediaBubble && (
-                        <span className="bmeta">
-                          {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
-                          {mine ? (
-                            m.status === "sending" ? "发送中…"
-                              : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
-                                : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
-                          ) : (
-                            formatTime(m.timestamp, timeFormat)
-                          )}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {m.convSeq > 0 && translations[m.convSeq] && (
-                    <div className="translation"><span>{translations[m.convSeq]}</span></div>
-                  )}
-                </>
-              );
-              return (
-                <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={msgKey(m)}>
-                  {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
-                  {i === firstUnreadIdx && (
-                    <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
-                  )}
-                  <div className={`row ${mine ? "me" : "them"}${selectMode ? " selecting" : ""}`}
-                    onClick={!selectMode ? undefined
-                      : selectableInMultiSelect(m) ? () => toggleSelected(m.convSeq)
-                      // 发送中/失败的本地件：无勾选圈，点按直接提示原因（系统行/撤回墓碑静默）。
-                      : m.convSeq <= 0 && m.contentType !== "system" ? () => setToast("发送中/失败的消息不可选择")
-                      : undefined}>
-                    {selectMode && selectableInMultiSelect(m) && (
-                      <span className={`sel-check${selected.has(m.convSeq) ? " on" : ""}`}>{selected.has(m.convSeq) ? "✓" : ""}</span>
-                    )}
-                    {grpThem ? (
-                      // 群聊对方：左侧头像列（连续段末条显头像）+ 昵称（连续段首条）在气泡上方。
-                      <div className="them-wrap">
-                        <div className="avatar-col">
-                          {showAvatar && <Avatar cls="avatar bubble-avatar" url={senderAvatar(m)} label={senderLabel(m)} seed={m.from} onClick={() => openPeerDetail(m.from)} />}
-                        </div>
-                        <div className="them-stack">
-                          {showSender && (
-                            <span className="sender-row">
-                              <span className="sender-name">{senderLabel(m)}</span>
-                              {senderRole(m) === "owner" && <span className="role-badge owner">群主</span>}
-                              {senderRole(m) === "admin" && <span className="role-badge">管理员</span>}
-                            </span>
-                          )}
-                          {bubbleBlock}
-                        </div>
-                      </div>
-                    ) : bubbleBlock}
-                  </div>
-                  {mine && m.status === "failed" && m.note && (
-                    <div className="sys-note">
-                      <span>{m.note}</span>
-                      {/* 恢复入口：仅非好友(200103) 给——被拉黑(200102) 刻意不给，服务端对两者回同样的
-                          模糊文案以不泄露拉黑，给了入口反而会因申请被 200102 拒而暴露。 */}
-                      {m.noteCode === 200103 && peer && (
-                        <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>发送好友申请</button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            <ChatActionsProvider value={chatActions}>
+              <MessageList
+                messages={messages} convId={convId} peer={peer} isGroupChat={isGroupChat} uid={uid}
+                selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
+                timeFormat={timeFormat} translations={translations} uploadProgress={uploadProgress} dividerRef={dividerRef}
+                mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} senderRole={senderRole} senderAvatar={senderAvatar}
+                memberNick={memberNick} renderMentionText={renderMentionText} renderMessageText={renderMessageText}
+                openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
+              />
+            </ChatActionsProvider>
           </div>
           {showJump && convId && (
             <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
@@ -4854,23 +4530,6 @@ export default function App() {
   );
 }
 
-// 两个毫秒时间戳是否同一自然日（聊天页按日期分组用）。
-function isSameDay(a: number, b: number): boolean {
-  if (!a || !b) return false;
-  const da = new Date(a), db = new Date(b);
-  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
-}
-
-// 毫秒时间戳 → 日期分隔文案：今天/昨天/M月d日（今年）/yyyy年M月d日（往年）。
-function dayHeader(ts: number): string {
-  if (!ts) return "";
-  const d = new Date(ts), now = new Date();
-  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-  if (isSameDay(ts, now.getTime())) return "今天";
-  if (isSameDay(ts, yesterday.getTime())) return "昨天";
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
-}
 
 // 毫秒时间戳 → "M月d日 HH:mm"（往年带年份）。群公告发布时间用。
 function fmtDateTime(ts: number): string {
