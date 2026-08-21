@@ -35,7 +35,8 @@ export function useFavorites(d: FavoritesDeps) {
       try {
         await clientRef.current?.addFavorite({
           content_type: m.contentType, content: m.content, caption: m.caption, // 图说：连文字一起收藏（整体）
-          file_name: m.fileName, file_size: m.fileSize, duration: m.duration, thumb: m.thumb, // 文件名/大小/时长/磨砂缩略保真
+          file_name: m.fileName, file_size: m.fileSize, duration: m.duration, thumb: m.thumb, poster: m.posterUrl, // 文件名/大小/时长/磨砂缩略/视频封面首帧保真
+          media_w: m.mediaW, media_h: m.mediaH, // 像素尺寸：收端按原比例定框，转发不丢宽高
           source_conv_id: m.convId, source_conv_seq: m.convSeq, source_from: m.from,
         });
         setToast("已收藏");

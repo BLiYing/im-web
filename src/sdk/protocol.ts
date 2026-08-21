@@ -104,6 +104,9 @@ export interface Favorite {
   file_size?: number;
   duration?: number; // 视频/语音时长（毫秒；媒体宫格角标） // 文件收藏原字节数（§8.1）：副行显真实大小；老收藏缺省/0
   thumb?: string; // 磨砂占位缩略 dataURI（图片/视频未下载态）
+  poster?: string; // 视频封面首帧 URL（收端直显免解码；Web 解不了 HEVC 时靠它出封面）；老收藏缺省
+  media_w?: number; // 媒体像素宽（图片/视频）：收端按原比例定框，转发不丢宽高；老收藏缺省/0
+  media_h?: number;
   source_conv_id: string;
   source_conv_seq: number;
   source_from: string;
