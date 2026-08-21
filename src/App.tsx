@@ -929,7 +929,7 @@ export default function App() {
   const {
     favorites, setFavorites, favPick,
     favoriteMessage, openFavorites, openFavoritesPick, closeFavorites, 
-    downloadFavorite, favoriteActions, sendFavoritesToCurrent,
+    favoriteActions, sendFavoritesToCurrent,
   } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget });
 
   // 多选批量删除（仅本端）。
@@ -2586,7 +2586,7 @@ export default function App() {
         />
       )}
 
-      {/* 收藏列表（M4-4）：见 components/modals/FavoritesModal（合成消息在 App 构造后进查看器）。 */}
+      {/* 收藏列表（M4-4 / B 方案 §14）：见 components/modals/FavoritesModal；门控 glue 与聊天页同一套 useMediaDownload。 */}
       {favorites && (
         <FavoritesModal
           favorites={favorites}
@@ -2598,7 +2598,8 @@ export default function App() {
             setViewer({ m: syntheticViewerMessage(`fav-${f.id}`, f.content, kind), fromGallery: true });
           }}
           onOpenLink={(url) => window.open(url, "_blank", "noreferrer")}
-          onDownloadFile={downloadFavorite}
+          glue={{ gateOf: mediaGate, onGateTap, onOpenFile: (m) => void openReadyFile(m), onMediaError: (m) => void onPassiveMediaError(m) }}
+          myUid={uid} conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl}
           onOpenRecord={(f) => { closeFavorites(); setRecordStack([parseChatRecord(f.content)]); }}
           onPick={sendFavoritesToCurrent}
           onClose={closeFavorites}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveCategories, matchesCategory, CATEGORY_LABELS, type FavoriteKind } from "./favoritesCategories";
+import { deriveCategories, defaultCategory, matchesCategory, CATEGORY_LABELS, type FavoriteKind } from "./favoritesCategories";
 import type { Favorite } from "./sdk/protocol";
 
 function fav(over: Partial<Favorite>): Favorite {
@@ -46,6 +46,14 @@ describe("matchesCategory", () => {
     expect(matchesCategory(fav({ content_type: "text", content: "https://a.com" }), "text")).toBe(false);
     expect(matchesCategory(fav({ content_type: "link", content: "https://a.com" }), "text")).toBe(false);
   });
+
+  const RECORD_JSON = JSON.stringify({ t: "设计组的聊天记录", items: [{ from: "2002", content: "hi", content_type: "text", timestamp: 1 }] });
+  it("聊天记录 = chat_record 类型 或 形如合并转发 JSON；文本段排除记录", () => {
+    expect(matchesCategory(fav({ content_type: "chat_record", content: RECORD_JSON }), "record")).toBe(true);
+    expect(matchesCategory(fav({ content_type: "text", content: RECORD_JSON }), "record")).toBe(true);
+    expect(matchesCategory(fav({ content_type: "text", content: RECORD_JSON }), "text")).toBe(false);
+    expect(matchesCategory(fav({ content_type: "text", content: "笔记" }), "record")).toBe(false);
+  });
 });
 
 describe("deriveCategories", () => {
@@ -73,8 +81,25 @@ describe("deriveCategories", () => {
     expect(cats).not.toContain("text");
   });
 
+  it("B 方案（includeAll:false）：无「全部」，仅存在者按 媒体<文件<链接<语音<文本<聊天记录；空 → []", () => {
+    expect(deriveCategories([], { includeAll: false })).toEqual([]);
+    const favs = [
+      fav({ id: 1, content_type: "chat_record", content: "{}" }),
+      fav({ id: 2, content_type: "text", content: "笔记" }),
+      fav({ id: 3, content_type: "file", content: "https://a.com/a.zip" }),
+      fav({ id: 4, content_type: "image", content: "https://a.com/1.jpg" }),
+    ];
+    expect(deriveCategories(favs, { includeAll: false })).toEqual<FavoriteKind[]>(["media", "file", "text", "record"]);
+  });
+
+  it("默认签：有媒体停媒体，否则首个存在签；空 → null", () => {
+    expect(defaultCategory(["file", "media", "text"])).toBe("media");
+    expect(defaultCategory(["file", "text"])).toBe("file");
+    expect(defaultCategory([])).toBeNull();
+  });
+
   it("每个动态段都有中文标题", () => {
-    for (const k of ["all", "media", "file", "link", "voice", "text"] as FavoriteKind[]) {
+    for (const k of ["all", "media", "file", "link", "voice", "text", "record"] as FavoriteKind[]) {
       expect(CATEGORY_LABELS[k]).toBeTruthy();
     }
   });

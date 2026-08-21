@@ -412,6 +412,41 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-check { align-self: center; flex-shrink: 0; }
 /* 收藏阅读器（点文本 → 只读全文）：可选中复制、滚动。 */
 .fav-reader-text { white-space: pre-wrap; word-break: break-word; font-size: 17px; line-height: 1.6; color: var(--text); user-select: text; overflow-y: auto; max-height: 60vh; }
+/* ── 收藏 B 方案（FAVORITES_DESIGN §14）：头部副行/⋯、媒体宫格、文件三态行、来源分组行、模式菜单 ── */
+.fav-head { align-items: flex-start; }
+.fav-head-main { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.fav-head-titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fav-head-titles > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fav-subtitle { font-size: 12px; font-weight: 400; color: var(--text-secondary); } /* 标题副行显当前模式 */
+.fav-back, .fav-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--neutral-control); color: var(--text); cursor: pointer; flex-shrink: 0; padding: 0; }
+.fav-back:hover, .fav-more:hover { background: var(--neutral-control-hover); }
+.fav-scope { padding-right: 8px; } /* B：范围 token 不可删，无 ✕ */
+/* 媒体 chip：3 列宫格，格子复用详情页 .detail-media-tile（逐格门控 ↓ / 就绪 ▶）。 */
+.fav-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+.fav-tile { position: relative; }
+.fav-tile .detail-media-tile { width: 100%; }
+.fav-tile.on .detail-media-tile { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fav-tile-check { position: absolute; top: 6px; right: 6px; background: var(--overlay); border-color: var(--on-media); pointer-events: none; }
+.fav-tile-check.on { background: var(--accent); border-color: var(--accent); }
+/* 文件 chip：行复用详情页 .detail-fileitem；pick 选中微染 accent-soft。 */
+.fav-files { gap: 0; }
+.fav-fileitem.on { background: var(--accent-soft); }
+.fav-fileitem .fav-caption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 聊天模式：来源会话分组行。 */
+.fav-src-list { gap: 0; margin: 0 calc(-1 * var(--space-4)); }
+.fav-src-row { display: flex; align-items: center; gap: var(--space-3); width: 100%; padding: 8px var(--space-4); border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; font-size: 15px; }
+.fav-src-row:hover { background: var(--surface-hover); }
+.fav-src-row .avatar { width: 40px; height: 40px; font-size: 14px; flex-shrink: 0; }
+.fav-src-main { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.fav-src-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fav-src-preview { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fav-src-count { flex-shrink: 0; min-width: 20px; padding: 0 7px; border-radius: 10px; background: var(--neutral-control); color: var(--text-secondary); font-size: 12px; line-height: 20px; text-align: center; }
+.fav-src-chevron { color: var(--text-tertiary); flex-shrink: 0; }
+/* 模式菜单：互斥 ✓（右槽）。 */
+.fav-mode-menu { min-width: 180px; }
+.fav-mode-menu button { justify-content: space-between; }
+.fav-mode-menu button.on { color: var(--accent); }
+.fav-mode-check { flex-shrink: 0; }
 /* 编辑标记 + 译文（M4-5）。 */
 .edited-tag { color: var(--meta-time); font-size: 11px; }
 .translation { display: flex; margin: 2px 0 4px; }

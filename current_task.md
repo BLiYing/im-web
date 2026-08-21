@@ -18,6 +18,8 @@
 
 ## 当前焦点
 
+**收藏 B 方案（FAVORITES_DESIGN §14）Web 落地 ✅（2026-08-21，tsc + build + 502 vitest 绿，未提交，待浏览器手测）** — 无「全部」分签（默认媒体）/ 媒体 chip 3 列宫格（复用 `MediaTile` 逐格门控）/ 文件 chip 三态行（复用 `detail-fileitem` + `FileGateIcon`，门控走 App 注入 `glue`=useMediaDownload 同一套）/ 链接·文本·聊天记录统一行 / 右上 ⋯ 互斥菜单「以消息模式 / 以聊天模式查看」（`localStorage im.favorites.viewMode`）/ 聊天模式按 `source_conv_id` 分组（自己发的·无来源→「我的」，未知会话显 id）→ 点进同一分签页按来源过滤（「来自 X · N 条」+ 返回）。新文件：`favoritesGrouping.ts(+test)`、`favoritesViewMode.ts(+test)`、`components/modals/FavoritesItems.tsx`；`favoritesCategories.ts` 加 `record` 签 + `deriveCategories(favs,{includeAll:false})` + `defaultCategory`。App.tsx 仅换 props（2958→2959）。已知限制：视频时长无字段不显；`mediaGate` 的群/单聊分档按**当前打开会话**判定；文件就绪行只显大小（同详情页，不显「已下载」）。
+
 **App.tsx 系统性拆分收口 ✅（2026-08-21，4891 → 2958，见「技术债」首条；待浏览器手测一轮：聊天/发送/媒体/详情/通讯录/设置/扫码/转发/收藏）**。
 
 **消息身份 key 收敛 `msgKey()` ✅（2026-08-19，tsc build + 351 vitest 绿，待浏览器手测翻历史）** — `/code-review` 体检发现的唯一实锤 bug 源：同一 ChatMessage 曾有 4 套不一致身份表达式，其中 List React key（`App.tsx` ×4）用 `clientMsgId ?? serverMsgId ?? i`——入站消息无 `clientMsgId`、实时帧缺 `server_msg_id` 时**塌到数组下标 `i`**，向上翻页 prepend 旧消息使下标平移 → React 把 DOM/组件状态（播放中视频/展开长文/编辑框）错绑到别的行（编译不报、翻历史才现形）。
