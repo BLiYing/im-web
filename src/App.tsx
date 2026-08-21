@@ -2615,10 +2615,10 @@ export default function App() {
         if (m.convSeq <= 0 || m.recalledAt || m.contentType === "system") return false;
         if (searchFrom && m.from !== searchFrom) return false;
         if (!searchNeedle) return true; // 仅按发件人过滤（无关键词）
-        // 仅 text 的 content 参与命中（媒体/文件 content=URL，撞 URL 片段会命中看不见的文字，同 G4/iOS）；caption 全类型算。
+        // 仅 text 的 content 参与命中（媒体/文件 content=URL，撞 URL 片段会命中看不见的文字，同 G4/iOS）；caption 全类型算；文件名(P2)算。
         const isText = !m.contentType || m.contentType === "text";
         return (isText && (m.content || "").toLowerCase().includes(searchNeedle))
-          || (m.caption || "").toLowerCase().includes(searchNeedle);
+          || (m.caption || "").toLowerCase().includes(searchNeedle) || (m.fileName || "").toLowerCase().includes(searchNeedle);
       })
     : [];
   // 词/发件人/会话变化 → 默认跳「最新一条命中」（贴合「找刚才那条」）；签名去重避免每次渲染重跳。
@@ -3132,7 +3132,7 @@ export default function App() {
     f.user_id.toLowerCase().includes(homeQ)) : [];
   const convById = (cid: string) => conversations.find((c) => c.conv_id === cid);
   // 命中摘要（图说优先，与命中口径一致）。
-  const recordSnippet = (r: MsgRecord) => (r.caption || r.content || "");
+  const recordSnippet = (r: MsgRecord) => (r.caption || r.fileName || r.content || "");
   // 打开某会话（供首页搜索点击）：群走 openGroupChat，单聊从 conv_id 还原 peer。
   const openConvById = (cid: string) => {
     if (cid.startsWith("g_")) { openGroupChat(cid); return; }

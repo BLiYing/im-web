@@ -364,8 +364,9 @@ function matchesQuery(rec: MsgRecord, needle: string): boolean {
   if (rec.recalledAt) return false; // 撤回消息不参与命中
   const isText = !rec.contentType || rec.contentType === "text";
   if (isText && rec.content && rec.content.toLowerCase().includes(needle)) return true;
-  const caption = rec.caption ? rec.caption.toLowerCase() : "";
-  return caption.includes(needle);
+  if (rec.caption && rec.caption.toLowerCase().includes(needle)) return true;
+  // P2：文件名命中（Q3预算.xlsx）。媒体/文件的 content(URL) 仍不参与。
+  return !!rec.fileName && rec.fileName.toLowerCase().includes(needle);
 }
 
 /**
