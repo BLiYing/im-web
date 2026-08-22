@@ -169,6 +169,21 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 未选会话时覆盖在 chat 之上（chat 始终挂载，保证 VList 早早测到高度）。 */
 .main-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--card-bg); border: 1px solid var(--separator); border-radius: var(--app-card-radius); }
 .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+/* 无详情卡时聊天区太宽 → 收窄到「详情卡出现时的宽度」并水平居中；开/合详情时聊天整体左右平移。
+   **用 transform 而非 margin 做居中偏移**：两态宽度恒为 calc(100% - 2*sidebar - 2*gap)（无详情 max-width 钳制、
+   有详情 flex:1 在 detail-mask 占列后自然同宽），transform 只做视觉平移、不改布局、无回流。
+   这样开合**对称顺滑**——margin 方案开详情时「边距+满宽在剩余空间挤不下 → 聊天先压窄再展开」的抖动被彻底消除。
+   开详情：聊天 translateX 收到 0（向左滑贴边），detail-mask（z-index:5 不透明卡片）盖在滑动重叠区之上不露馅；
+   关详情：translateX 回到居中偏移（向右滑）。`.main` 内无 fixed 定位后代、菜单在 <main> 外渲染，transform 安全。
+   仅宽屏三栏态（>1120px，detail 才作第三列并排；≤1120 隐 sidebar、≤760 覆盖层）才收窄居中，窄屏维持填满。 */
+@media (min-width: 1121px) {
+  .main { transition: transform .24s cubic-bezier(0.22, 1, 0.36, 1); }
+  .app > .main { transform: translateX(0); } /* 有详情：贴边（显式 0，保证与下方偏移可平滑插值，勿依赖 none） */
+  .app:not(:has(.detail-mask)) > .main {
+    max-width: calc(100% - 2 * var(--sidebar-w) - 2 * var(--app-gap));
+    transform: translateX(calc((var(--sidebar-w) + var(--app-gap)) / 2)); /* 无详情：右移居中 */
+  }
+}
 .sidebar header, .chat header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--separator); font-weight: 600; }
 .chat > header {
   min-height: 64px;
@@ -604,7 +619,12 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .msg-caption { width: 0; min-width: 100%; box-sizing: border-box; padding: 5px 10px 4px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; font-size: var(--msg-font); }
 .msg-caption.file { padding: 6px 0 0; margin-top: 6px; border-top: 0.5px solid var(--separator); }
 /* 文件文：caption 撑满整行后，时间行（bmeta）落到第三行——推到右侧贴角（对齐草图「时间在 caption 右下」）。 */
-.bubble:has(.msg-caption) > .bmeta { margin-left: auto; }
+/* 同理：定宽/块级卡片（链接富预览 .link-card 260px、合并转发 .record-card 220px、超长文本 .longtext-card block）
+   会把 bmeta 挤到下一行——不加 auto 就停在左下角，与其余气泡的右下角时间不一致。统一推到右下角。 */
+.bubble:has(.msg-caption) > .bmeta,
+.bubble:has(> .link-card) > .bmeta,
+.bubble:has(> .record-card) > .bmeta,
+.bubble:has(> .longtext-card) > .bmeta { margin-left: auto; }
 /* 悬浮角标：底恒为半透明黑，浅色图上也读得清（不靠文字阴影）。 */
 .media-badge { position: absolute; padding: 1px 6px; border-radius: 9px; background: var(--overlay);
   color: var(--on-media); font-size: 11px; line-height: 16px; white-space: nowrap; pointer-events: none;

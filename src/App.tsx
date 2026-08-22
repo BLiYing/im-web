@@ -511,6 +511,8 @@ export default function App() {
     }
     setAuthBusy(true);
     setAuthErr("");
+    // 防「被自己上一次登录踢下线」：先断旧 client，否则同 device_id 再登被 upsert 顶替，旧 client 拿撤销 token 探活得 100101 触发 logout 把新会话一起踢回登录页。
+    clientRef.current?.disconnect(); clientRef.current = null;
     const client = new IMClient({
       onState: (nextState) => {
         setState(nextState);
@@ -617,6 +619,8 @@ export default function App() {
       //    「边看本地边被踢」自相矛盾）；原因写到登录页顶部红字。与 iOS 握手 401 直跳登录对齐。
       // ② 其余（100102 过期等良性失效）→ 仍弹框二选一：确定重新登录 / 取消留看本地缓存聊天记录。
       onAuthError: (msg, code) => {
+        // 兜底：只有「当前活动 client」的鉴权失效才处理；被顶替的旧 client 残留重连不得代表新会话踢 app。
+        if (client !== clientRef.current) return;
         if (code === 100101) {
           logout();
           // 重连路径里 100101 只会是「会话被吊销」（活 token 老化只会得 100102），即被踢/退其他/超限 LRU。
@@ -1790,14 +1794,13 @@ export default function App() {
     if (!box) return;
     const cid = currentConvRef.current;
     const newest = maxSeqOf(msgsByConv[cid] ?? []);
+    // 无条件先滚一次消除假死（500人大群必现）：openConversation 拉回一页若全命中 seen → mergeMetaBySeq 不改 messages.length → layout effect 不重跑 → pendingScrollRef 卡住。真新消息到达时 layout effect 会再精修。
+    box.scrollTop = box.scrollHeight;
     if (newest < latestSeqRef.current) {
-      // 下方还有大段未加载 → 重载最近一页再贴底。
       setEntryUnread(0);
       forceBottomRef.current = true;
       pendingScrollRef.current = true;
       clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current);
-    } else {
-      box.scrollTop = box.scrollHeight;
     }
     wasNearBottomRef.current = true;
     setShowJump(false);
@@ -2735,8 +2738,8 @@ export default function App() {
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
             <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
               <Forward size={16} className="menu-icon" />转发</button>
-            {/* 定位=回到聊天：关掉所有可能盖住聊天区的宿主（详情面板 / 会话媒体库蒙层 / 查看器），否则定位发生在蒙层背后。 */}
-            <button onClick={() => { setFileMenu(null); setDetail(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
+            {/* 定位=回到聊天：只关会遮聊天的宿主（媒体库 / 查看器）；详情卡是右侧列不遮聊天，按用户要求保持不消失。 */}
+            <button onClick={() => { setFileMenu(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
               <MessageCircle size={16} className="menu-icon" />定位到聊天</button>
             {downloading && (
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
