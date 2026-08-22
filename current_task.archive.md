@@ -4,6 +4,56 @@
 
 # Current Task — im-web（Web 客户端）
 
+## 归档于 2026-08-22（收藏 B 方案 · App.tsx 拆分收口 · msgKey 收敛 · 体检整改 · 详情抽屉解耦地基 · Phase A · HEIC 禁选 · 粘贴视频修复 · 设置/壁纸/弹窗打磨 · QR/群 G0–G3 · 下载门控全链路 · 四大任务——全部手测通过）
+
+> 从活快照转入。以下均已完成、手测通过（逐 commit 见 git log，逐功能×端状态见 `../IMServer/docs/CLIENT_PARITY.md`）。App.tsx 拆分的「再拆必守约束 / prop-drilling 墙」等**前瞻性架构指引**仍留在活快照「技术债 / 下次」。
+
+**收藏 B 方案（FAVORITES_DESIGN §14）Web 落地 ✅（2026-08-21，tsc + build + 502 vitest 绿，手测通过）** — 无「全部」分签（默认媒体）/ 媒体 chip 3 列宫格（复用 `MediaTile` 逐格门控）/ 文件 chip 三态行（复用 `detail-fileitem` + `FileGateIcon`，门控走 App 注入 `glue`=useMediaDownload）/ 链接·文本·聊天记录统一行 / 右上 ⋯ 互斥菜单「以消息模式 / 以聊天模式查看」（`localStorage im.favorites.viewMode`）/ 聊天模式按 `source_conv_id` 分组（自己发·无来源→「我的」）→ 点进按来源过滤。新文件：`favoritesGrouping.ts(+test)`、`favoritesViewMode.ts(+test)`、`components/modals/FavoritesItems.tsx`；`favoritesCategories.ts` 加 `record` 签 + `deriveCategories(favs,{includeAll:false})`。App.tsx 仅换 props（2958→2959）。已知限制：视频时长无字段不显；`mediaGate` 按当前打开会话判档；文件就绪行只显大小。
+
+**消息身份 key 收敛 `msgKey()` ✅（2026-08-19，tsc build + 351 vitest 绿，手测通过）** — `/code-review` 体检发现的唯一实锤 bug 源：同一 ChatMessage 曾有 4 套不一致身份表达式，List React key（`App.tsx` ×4）用 `clientMsgId ?? serverMsgId ?? i`——入站消息无 `clientMsgId`、实时帧缺 `server_msg_id` 时**塌到数组下标 `i`**，向上翻页 prepend 使下标平移 → React 把 DOM/组件状态错绑到别的行。**收敛**：`album.ts` 的 `mediaIdentity` 重命名为 **`msgKey`**（convSeq 优先、会话内唯一），List key ×4、`menuActive`、详情页 media/file/link key ×3 全部改用，消灭 `?? i` 与 `serverMsgId || convSeq` 漂移。`album.test.ts` 加「React key 契约」用例。**配套**：三端「交付前自审清单」落地——iOS `CODING_STYLE.md` §9 / Go `CONVENTIONS.md` §4.8 / 本仓 §九。
+
+**体检整改 3/4 ✅（2026-08-19，tsc build + 353 vitest 绿，#3 已浏览器验证）** — `/code-review` 防复发项：① **IndexedDB store 单一来源化**（`sdk/localStore.ts` 建 `STORE_DEFS` 清单，`onupgradeneeded` 建表 + `EXPECTED_STORES` 校验都从它派生，杜绝「四处漏改一处→`NotFoundError`」）；② **friendlyMessage 码表对齐**（局部 map 提升为导出 `FRIENDLY_MESSAGES` + 锚定后端 `errcode.go`，`imSdk.test.ts` 断言映射码 ⊆ 后端码集）；③ **CSS 泛化选择器**（`.login button` → 显式 `.login-submit` 类，消灭染到页签/免密链接的坑；菜单类容器故意留泛选）。
+
+**会话详情抽屉解耦（地基已落）✅（2026-08-19，tsc build + 358~363 vitest 绿，手测通过）** — 路线「先上 Context / 先收口群动作 / 再拆子件」前两步完成：① **AppServicesContext**（收拢 9 项稳定服务 clientRef/setToast/comingSoon/askConfirm/askPrompt/四 refresh*，`useMemo` 包一次永不重建；**坑**：services 的 useMemo 必须放在所有 early return 之前，否则 hook 数不一致崩）；② **useGroupActions 收口**（7 个只依赖 services 的群写操作整簇抽出，`.test.ts` 5 例）；③ **拆子件 3 个**（`GroupManagePanel`/`DetailTabs`/`MemberMenu`，自取 `useGroupActions(useAppServices())`，App.tsx 5087→4858）。`/code-review` 已过（补 `DetailPanelParts.test.tsx` 5 例）。**⏳ 剩硬骨头 DetailHeader**（~30 props，留待评审）——已转入活快照技术债的 prop-drilling 墙。
+
+**Phase A 逻辑 hook 收口 ✅（2026-08-19，tsc build + 375 vitest 绿）** — **useMessageStore**（`messageStore.ts` 纯变换 + `useMessageStore.ts` 有状态外壳 + 两 `.test`）：去重/合并/patch/append/删除那套从 SDK handlers 收口为可单测纯函数（+12 例）。App.tsx 4858→4778。**⏹ useIMConnection 评估后不做**（handlers 引用 ~25 个 App 符号，抽出=搬走 tangle 非解耦）。**⏸ useChatScroll** 留作独立大重构。
+
+**App.tsx 系统性拆分收口 ✅（2026-08-18~21，~32+ 提交，6302 → 2958 行；tsc + 319~502 vitest + build 逐阶段绿，手测通过）** — 抽出 ~30+ 组件/hook/纯函数文件：纯逻辑模块（wallpaper/color/messageContent/session/optedIn/videoPoster/time/album/searchPredicate…）+ 叶子展示组件（Avatar/AlbumGrid/QuoteThumb/AnchoredMenu/FileGateIcon/LinkCard/LoginView/MessageList/DetailPanel/Composer/ChatBanners/ContactsTab/ChatHeader）+ 设置面板栈 7 + 弹窗栈 13 + 媒体查看器/文本阅读器/媒体库 + Hook（useChatSearch/useMediaDownload/useMediaSend/useForward/useFavorites/useMentions/useQR/useAppearanceSettings/useFriendOps/useProfileEdit/useDevices/useDialogs/useToast/useMessageStore/useGroupActions）+ `ChatActionsContext`/`AppServicesContext`。`App.smoke.test.tsx` 5 例护栏守登录→聊天主链路。行数闸棘轮只降不升。**详细约束（再拆必守）与 prop-drilling 墙留在活快照技术债。**
+
+**「图片或视频」入口从源头禁选 HEIC ✅（2026-08-18，tsc+build+12 vitest 绿，手测通过）** — `accept="image/*,video/*"` 通配把 HEIC 也列可选。改 `MEDIA_PICKER_ACCEPT` 显式扩展名白名单（从 `RULES` image/video 集合派生，减黑名单+svg，与发送闸 `webCanRenderMedia` 天然一致）；保留第二道 JS 闸兜底（可被「所有文件」/拖拽/粘贴绕过），安全边界仍在服务端。`fileTypes.test.ts` +3 例。
+
+**粘贴视频预览异常修复 ✅（2026-08-18，tsc+build 绿，手测通过）** — `addPastedFiles` 把视频与图片一并压成 `kind:"image"` → 预览条对 image 一律 `<img>` → 视频 blob 破图。修：`pastedImages` 项 `kind` 扩为 `"image"|"video"|"file"`，预览条 video 分支用 `<video muted preload=metadata playsInline>` + 中心 ▶；发送 filter 改 `kind==="image"||"video"` 仍同批走 `sendMediaBatch`。**核对**：粘贴图片/视频 thumb 磨砂 web 端无缺失（统一 `sendMediaBatch`）。
+
+**设置页优化四项（2026-08-15，tsc + build 绿，手测通过）** — ① 卡片字号等比放大；② iOS 风格图标色块（`Row.iconTint` + `.row-icon-tile` 29×29，色块令牌 `--ic-{gray,red,orange,…}` 三主题分支，分色对齐 iOS `IMSettingsViewController`）；③ 数据与存储可读性；④ 返回/编辑按钮加大（仅设置头 `.settings-head .icon-btn` 32→38，聊天头不受影响）。
+
+**壁纸改版（深色默认）+ 色板脱节修复（2026-08-15，tsc + 291 vitest + build 绿，手测通过）** — 壁纸目录换 14 张分层柔和渐变（6 浅 6+2 深）；新增 `WallpaperChoice` 第 4 种 `{kind:"auto"}`（新默认，`resolveWallpaper(choice,isDark)` 按明暗解析，听 `matchMedia(prefers-color-scheme)`）。**色板脱节修复**：`styles.css .color-spectrum{--picker-hue:156}` 就地重声明遮蔽父卡片动态 `--picker-hue` → 删掉重声明，兜底移到 `.color-editor-card`。`appearance.test.ts` +2 例。**注意**：老用户 localStorage 存了具体 preset，需点一次「恢复默认」才切到 auto。
+
+**弹窗视觉打磨 ✅（2026-08-14，tsc+build 绿，用户自测通过）** — 纯 CSS：`.modal-close` 补整幅次要按钮样式；模态圆角统一 `var(--radius-card)`；磨砂玻璃复用（`.ctx-menu,.menu-card,.viewer-more-pop,.mention-panel` 合并规则 + `--glass-menu-*` + `backdrop-filter: blur(24px) saturate(165%)`）；圆角/阴影抽令牌 `--radius-menu:8px`/`--shadow-menu`；`@supports not (backdrop-filter…)` 兜底。规范同步 `UI_COLOR.md §5`。
+
+**QRCODE P0 + 群组 G3 入群 ✅（2026-08-13，tsc + build + 249 vitest 绿 + HTTP E2E 全通，手测通过）** — 方案 `../IMServer/docs/QRCODE_DESIGN.md` / `GROUP_FEATURES_DESIGN.md` §4-G3。依赖 `qrcode`+`jsqr`（bundle 398→572KB）。SDK：`qrMyCard`/`groupQR`/`qrResolve`/`joinGroupByCode`/`fetchJoinRequests`/`decideJoinRequest`，`api()` 把 errcode 挂 `Error.code`。纯逻辑 `src/qr.ts`（15 例）。UI `src/QRUI.tsx`：扫码浮层（摄像头+上传/拖拽/⌘V）、我的名片码/群二维码模态、resolve 四分支、G3 待审入群申请审批。`/code-review` 修复 2 项（`resetQRCard` try/catch+失败 toast、`handleFile` 捕获非图片 reject）。**已知限制**：一图多码点选仅 Chrome/Edge（BarcodeDetector）；扫码登录 `q/l`（P1）未做。
+
+**G2 群治理 ✅（2026-08-13，tsc+234 vitest+build 绿，手测通过）** — 群管理面板三卡（加入与发言/成员权限/治理）+ 黑名单弹窗；成员菜单加禁言（时长选择弹窗）/移出/移出并拉黑；composer 禁言锁（`composerMuteReason`）。SDK 加 setGroupSettings/muteGroupMember/removeGroupMemberWithBan/fetchGroupBans/unbanGroupMember。
+
+**G1 群资料闭环 ✅（2026-08-12，tsc+234 vitest+build 绿，手测通过）** — 群管理三行（简介/公告/全员禁言）+ 详情面板公告卡·「我在本群的昵称」·「群备注」+ 聊天区公告黄条横幅。`memberNick` 群昵称优先。群备注本地存储（后已改服务端多端同步，见归档⑨）。SDK 加 `setGroupAnnouncement`/`setGroupMute`/`setGroupMyNickname`。
+
+**G0 置顶消息横幅 ✅（2026-08-12，tsc + 234 vitest + build 绿，手测通过）** — 进会话拉 `GET /conversations/{id}/pinned` 回填 `.pin-banner`（`📌 置顶消息 i/N · 发送者` + 单行预览），点条=跳转轮转，多条右侧 ☰ 开列表弹窗，右键菜单加置顶↔取消（群内仅群主/管理员可见）。纯逻辑 `src/pinned.ts`（12 例）。**顺带修**：`applyMsgOp` 对 `op=pin` 写死 `pinnedAt`→改认 `data.pinned` + 服务端 timestamp。
+
+**气泡内 `@昵称` 高亮 + 点击跳资料 ✅（2026-08-12，tsc + 210 vitest + build 绿，手测通过）** — `segmentMentions`（mention.ts，7 例）用消息 `mentions`+群昵称还原 `@昵称`，short/long 气泡 + 阅读器高亮 `.mention-hl`；可点 `@昵称`（有 uid、`@所有人` 除外）= `.mention-tap` onClick `openPeerDetail`。**顺带修 `@<uid>` 不高亮**：`mentionEntriesFor` 取昵称失败未回退 uid → 改 `memberNick||uid`。
+
+**三项 UX 优化 ✅ + /code-review 7 条全修（2026-08-11，tsc + 210 vitest + build 绿，手测通过）** — ① 长文本三档显示（`src/longtext.ts` `textTier`+`charCountLabel`，阈值与 iOS 统一：huge `≥2000|≥60`、long `≥300|≥10`；short 全显/long 夹 8 行+展开/huge 摘要卡→全屏阅读器）；② 视频禁复制；③ 媒体入口类型校验（`mediaKindForFile` MIME 前缀优先→扩展名回退，svg 拒收；后端白名单仍权威）。
+
+**任务二 详情页删文件两档 ✅ 三端手测通过（2026-08-11，tsc + 165 vitest 绿）** — 为所有人删除（`OP.DELETE`→WS `msg_op op=delete`→`removeMessageLocal` 落墓碑物理移除；`processIncoming` 遇 `deleted_at>0` 直接移除）+ 仅删除自己（`hideMessage` POST `/messages/hide`；`fetchHidden` 登录 catch-up，uid 维度去重；`msg_hidden` 帧→本端移除）。详情文件右键两档 UX。`/code-review` 5 条全修。
+
+**媒体持久化 C1 + 持久失效标记（2026-08-07，tsc + 144 vitest + build 绿，手测通过）** — 对齐 iOS「原件落盘、命中即就绪」。`src/mediaCache.ts`（Cache Storage 薄封装，按 uid 命名空间，无 `caches` 静默降级内存 blob 绝不抛）+ 6 单测。C1 已下载文件持久化（`startDownload` 成功→`cachePutBlob`+`im.dlfiles.<uid>` 键集，登录 rehydrate）；图片/视频走 `mediaOptedIn`+远端 URL+浏览器 HTTP 缓存。**持久失效标记** `expiredSet`（`im.expired.<uid>`，命中来源 404/410 + `<img> onError` ranged GET 复验；`mediaGate` 命中即返回 expired 不回源，掐 404 风暴）+ 失效占位 ⊘。清理边界：`clearMediaCache` 清 opt-in/dlfiles，**失效标记不清**。
+
+**下载门控 阶段 6/7 + 数据与存储（任务三/四，2026-08-06~07，tsc + 138 vitest 绿，手测通过）** — `src/download.ts`（纯逻辑，21 例，策略/`shouldAutoDownload`/快捷档/状态机，逐条对齐后端 `internal/downloadsettings` 与 iOS `IMDownloadPolicy`）。SDK：`downloadSettings/saveDownloadSettings/resetDownloadSettings`（PUT 体就是 settings 本身）+ `capabilities_update` 帧→重拉。卡片门控：媒体气泡未下载 thumb 模糊/斜纹 + ↓ + 尺寸角标；文件条状态位 + 进度条；下载走 `fetch`+`ReadableStream` 真进度，✕ 用 AbortController 真中止。设置▸数据与存储（存储用量/清缓存/自动下载总开关/低中高档/图片单群·视频·文件上限滑块/重置）。**Web 诚实差异**：只读写 Wi-Fi 档。阶段 6/7：圆形图标+环形进度（`FileGateIcon`）；`openReadyFile` 预览路由；详情「文件」页签并入门控；**图片/视频改 URL 直取（方案 B）**（解门控后 `<img/video src=远端>`，浏览器 HTTP 缓存持久，`mediaOptedIn` 记已解门控）；相册/详情/引用/媒体库四处逐格门控（`AlbumGrid.gateFor`/`detail-media-tile.mediaGate`/`QuoteThumb.gated`/`gallery-item passivePreviewSource`）。日志统一 `logger.*(LOG_TAG.media)`。
+
+**修复用户手测多个新问题（2026-08-07，tsc + 135~138 vitest 绿，浏览器实证）** — ① **详情文件「定位到聊天」失败**：根因 `jumpToSeq` 用 `scrollTo({behavior:"smooth"})` 远距离滚不动 + 下方媒体 onLoad 因 `wasNearBottom` 仍 true 把 scrollTop 拽回底部 → 改**瞬时滚动 + rAF 校正 + 置 `wasNearBottom=false`**，新增 `locateInChat`（详情读全量、聊天页分页窗口不在窗口内则自动上翻分页再定位）；② 媒体库点格后九宫格不消失→`gallery-item` onClick 补 `setGalleryOpen(false)`；③ 查看器「更多」hover 即消失→改点击切换。④ **资料卡「媒体/文件」列表全空**：根因缺 `deletions` store 的陈旧 IndexedDB 连接被模块级缓存复用→事务 `NotFoundError`→catch 返回 `[]`；修 `openDB` 加 `onblocked`+`onversionchange`+缺 store 关掉重开自愈、`loadConversation` 按 `objectStoreNames.contains` 决定事务 store 列表。⑤ **门控图刷新退化 + opt-in 丢失**：`localStore` 补持久化 `thumb` + 已解门控存 localStorage。⑥ **删了又冒出来**：**双层墓碑**（IndexedDB `deletions` 表读盘过滤 + 内存墓碑 `deletedByConv` 登录载入 `onMessage` 丢弃），缺一都复现。
+
+**Typing 提示位置对齐（2026-08-05，手测通过）** — 移除输入栏上方提示条；收到 typing 后聊天标题栏副标题显「正在输入」，3 秒无新帧恢复在线态/成员数。
+
+**参与四大任务 · 任务一 ✅（2026-08-05，tsc + 92 vitest 绿，浏览器实测通过）** — 非好友聊天拦截（微信式）：资料面板非好友显「加好友」隐藏消息/呼叫/视频三卡（`showDetailBody`）；拒收系统行带「发送好友申请」恢复入口（`noteCode` 瞬态）；`requestFriend()` 读 `outcome` 已直接成好友时不吐司；聊天顶栏头像进资料隐藏「消息」（`fromOwnChat`）；**修被拒媒体消息退化成 URL 文本**（`saveRejected`/`loadMessages` 只存 6 字段 + SDK 写死 `contentType:"text"` → 三处补齐完整字段集，配回归测试）。未做 P1（全局开关切 Telegram 式）。任务二/三/四方案后续落地（详情删文件两档 / 下载门控 / 数据存储，见上）。
+
 ## 归档于 2026-08-05（引用消息增强收口，转入四大任务协作）
 
 **当时焦点**：
