@@ -52,8 +52,8 @@ export function useForward(d: ForwardDeps) {
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean, groupId?: string) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
 
     if (mode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
@@ -73,10 +73,26 @@ export function useForward(d: ForwardDeps) {
       const clientMsgId = client.sendMedia(json, "chat_record", to, target.conv_id);
       pushOptimistic(clientMsgId, json, "chat_record");
     } else {
+      // 整体转发相册（用户要求）：同一原相册被选 ≥2 张 → 用**一个新的共享 group_id** 一起转发，收端重新聚成宫格；
+      // 只选 1 张或非相册 → 单发。仅对多选转发生效（收藏发送的 msgs 无 groupId，自然走单发）。
+      const albumCount = new Map<string, number>();
+      for (const m of msgs) {
+        if (!m.content || m.recalledAt) continue;
+        if (m.groupId && (m.contentType === "image" || m.contentType === "video")) {
+          albumCount.set(m.groupId, (albumCount.get(m.groupId) ?? 0) + 1);
+        }
+      }
+      const newGidForOld = new Map<string, string>(); // 原 group_id → 本会话新 group_id
       for (const m of msgs) {
         if (!m.content || m.recalledAt) continue;
         const origin = m.forwardFrom || m.fromNickname || m.from; // 转发链保留最初作者
         const ct = m.contentType || "text";
+        // 该媒体属于某原相册且被选 ≥2 张 → 分配/复用本会话的新 group_id。
+        let groupId: string | undefined;
+        if (m.groupId && (ct === "image" || ct === "video") && (albumCount.get(m.groupId) ?? 0) >= 2) {
+          groupId = newGidForOld.get(m.groupId);
+          if (!groupId) { groupId = `alb-${crypto.randomUUID()}`; newGidForOld.set(m.groupId, groupId); }
+        }
         // 保留原类型：图片/视频/文件按 media 转发（否则收方收到的是 URL 文本、会话预览也丢 [图片]）。
         const clientMsgId = ct === "text"
           ? client.sendText(m.content, to, target.conv_id, { forwardFrom: origin })
@@ -86,12 +102,13 @@ export function useForward(d: ForwardDeps) {
               forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize,
               mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
               poster: m.posterUrl, thumb: m.thumb, caption: m.caption, // 图说随转发跟随（Telegram 模型）
+              groupId, // 整体转发：同册共享新 group_id，收端聚簇成宫格
               // 配文 @ 随转发保留高亮+可点：mentions 服务端按目标群成员再过滤（非成员自动落普通文字）。
               // **不带 mentionAll**：@所有人 需群主/管理员权限，转发者在目标群无权时整条会被拒发 300204；
               // 且转发不该再次全员强提醒。丢 mention_all 后 "@所有人" 字样退化为普通文字（正确）。
               mentions: m.mentions,
             });
-        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb, m.caption, m.mentions);
+        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb, m.caption, m.mentions, false, groupId);
       }
     }
   }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);

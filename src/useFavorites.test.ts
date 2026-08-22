@@ -13,7 +13,8 @@ function mount(over: Partial<FavoritesDeps> = {}) {
   const deps: FavoritesDeps = {
     clientRef: fakeClientRef(client), setToast: vi.fn(), setMenu: vi.fn(), setAttachPanel: vi.fn(),
     saveMessageToDisk: vi.fn(async () => {}), conversations: [{ conv_id: "c1", peer: "u2" } as Conversation], currentConvRef: { current: "c1" },
-    setForwardMode: vi.fn(), setForwarding: vi.fn(), sendForwardToTarget: vi.fn(), ...over,
+    setForwardMode: vi.fn(), setForwarding: vi.fn(), sendForwardToTarget: vi.fn(),
+    msgsByConv: {}, selected: new Set<number>(), exitSelectMode: vi.fn(), ...over,
   };
   return { ...renderHook(() => useFavorites(deps)), deps, client };
 }
@@ -26,6 +27,18 @@ describe("useFavorites", () => {
     expect(deps.setMenu).toHaveBeenCalledWith(null);
     await waitFor(() => expect(deps.setToast).toHaveBeenCalledWith("已收藏"));
     expect(client.addFavorite).toHaveBeenCalledWith(expect.objectContaining({ content_type: "text", content: "hi", source_conv_id: "c1", source_conv_seq: 5, source_from: "u2" }));
+  });
+  it("favoriteSelected：批量收藏当前会话所选（跳过撤回/系统/空内容）+ 汇总 toast + 退出多选", async () => {
+    const msgsByConv = { c1: [
+      { convId: "c1", from: "u2", content: "a", contentType: "text", convSeq: 5, timestamp: 1, status: "sent" },
+      { convId: "c1", from: "u2", content: "b", contentType: "text", convSeq: 6, timestamp: 1, status: "sent" },
+      { convId: "c1", from: "u2", content: "", contentType: "text", convSeq: 7, timestamp: 1, status: "sent" }, // 空内容跳过
+    ] as ChatMessage[] };
+    const { result, deps, client } = mount({ msgsByConv, selected: new Set([5, 6, 7]) });
+    act(() => result.current.favoriteSelected());
+    await waitFor(() => expect(client.addFavorite).toHaveBeenCalledTimes(2)); // 只收 5、6（7 空内容跳过）
+    await waitFor(() => expect(deps.setToast).toHaveBeenCalledWith("已收藏 2 条"));
+    expect(deps.exitSelectMode).toHaveBeenCalled();
   });
   it("openFavorites=浏览态 / openFavoritesPick=发送态（并收起附件面板）；closeFavorites 复位", async () => {
     const { result, deps } = mount();

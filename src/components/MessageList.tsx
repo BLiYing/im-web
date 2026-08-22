@@ -65,23 +65,28 @@ export function MessageList(p: MessageListProps) {
     onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause,
     toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
   } = useChatActions();
+  // 相册左侧框=整组全选/全不选：全在→把在的逐个翻掉、否则把不在的逐个翻上（复用 toggleSelected，全有/全无语义）。
+  const toggleAlbumGroup = (seqs: number[]) => {
+    const allIn = seqs.length > 0 && seqs.every((s) => selected.has(s));
+    seqs.forEach((s) => { if (allIn ? selected.has(s) : !selected.has(s)) toggleSelected(s); });
+  };
 
   // 两条消息是否属于同一「连续段」：同发送者、非系统/撤回、同一天（跨天有日期分隔断段）。
   const sameSenderRun = (a?: ChatMessage, b?: ChatMessage): boolean =>
     !!a && !!b && a.from === b.from && a.from !== uid &&
     a.contentType !== "system" && b.contentType !== "system" &&
     !a.recalledAt && !b.recalledAt && isSameDay(a.timestamp, b.timestamp);
-  // 上/下一「可见消息」（跳过相册零高从行；多选态相册展开为独立行则不跳）——用于连续段首/末判定。
+  // 上/下一「可见消息」（跳过相册零高从行）——用于连续段首/末判定。多选态相册同样聚簇（整组一个勾选单位），故两态都跳从行。
   const prevVisibleMsg = (list: ChatMessage[], i: number): ChatMessage | undefined => {
     for (let j = i - 1; j >= 0; j--) {
-      if (!selectMode && isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
+      if (isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
       return list[j];
     }
     return undefined;
   };
   const nextVisibleMsg = (list: ChatMessage[], i: number): ChatMessage | undefined => {
     for (let j = i + 1; j < list.length; j++) {
-      if (!selectMode && isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
+      if (isAlbumMember(list[j]) && !isAlbumLeader(list, j)) continue;
       return list[j];
     }
     return undefined;
@@ -128,8 +133,9 @@ export function MessageList(p: MessageListProps) {
             </div>
           );
         }
-        // 相册宫格（M4+）：同 group_id 聚簇——主行渲染整个宫格，从行跳过；多选态展开为独立行（逐条可勾选）。
-        if (!selectMode && isAlbumMember(m)) {
+        // 相册宫格（M4+）：同 group_id 聚簇——主行渲染整个宫格，从行跳过。多选态**同样聚簇**：整组作为一个
+        // 勾选单位（不再拆成独立行），勾选左侧检查框即选中整组（见 toggleSelectedGroup / albumSelected）。
+        if (isAlbumMember(m)) {
           if (!isAlbumLeader(messages, i)) return null;
           const members = albumMembers(messages, m.groupId!);
           const last = members[members.length - 1];
@@ -139,6 +145,10 @@ export function MessageList(p: MessageListProps) {
           // 整组共用一条失败/拒收表达（同批发送、同一原因被拒）：取首个带 note 的成员。
           const notedMember = members.find((mm) => mm.note);
           const albumFailed = mine && members.some((mm) => mm.status === "failed");
+          // 多选：整组作为一个勾选单位——可选成员=已入库(convSeq>0)未撤回；整组"已选"=全部可选成员都在选择集。
+          const memberSeqs = members.filter((mm) => mm.convSeq > 0 && !mm.recalledAt).map((mm) => mm.convSeq);
+          const albumSelectable = memberSeqs.length > 0;
+          const albumSelected = albumSelectable && memberSeqs.every((s) => selected.has(s));
           const grid = (
             <div className="bubble-line">
               {albumFailed && <span className="fail-badge" title={notedMember?.note || "发送失败"}>!</span>}
@@ -148,8 +158,11 @@ export function MessageList(p: MessageListProps) {
                 gateFor={(mm) => !!mediaGate(mm)}
                 expiredFor={(mm) => mediaGate(mm)?.phase === "expired"}
                 onMediaError={onPassiveMediaError}
-                onOpen={(mm) => (mediaGate(mm) ? onGateTap(mm) : onMediaBubbleTap(mm, () => setViewer({ m: mm })))}
-                onMenu={(e, mm) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m: mm }); }} />
+                onOpen={(mm) => { if (selectMode) return; mediaGate(mm) ? onGateTap(mm) : onMediaBubbleTap(mm, () => setViewer({ m: mm })); }}
+                onMenu={(e, mm) => { e.preventDefault(); if (selectMode) return; setMenu({ x: e.clientX, y: e.clientY, m: mm }); }}
+                selectMode={selectMode}
+                isSelected={(mm) => selected.has(mm.convSeq)}
+                onToggleTile={(mm) => toggleSelected(mm.convSeq)} />
             </div>
           );
           return (
@@ -158,7 +171,12 @@ export function MessageList(p: MessageListProps) {
               {i === firstUnreadIdx && (
                 <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
               )}
-              <div className={`row ${mine ? "me" : "them"}`}>
+              <div className={`row ${mine ? "me" : "them"}${selectMode ? " selecting" : ""}`}>
+                {/* 左侧勾选框 = 整组全选/全不选 + 全选态指示（逐格勾选走宫格内 album-sel）。 */}
+                {selectMode && albumSelectable && (
+                  <span className={`sel-check${albumSelected ? " on" : ""}`}
+                    onClick={(e) => { e.stopPropagation(); toggleAlbumGroup(memberSeqs); }}>{albumSelected ? "✓" : ""}</span>
+                )}
                 {grpThem ? (
                   <div className="them-wrap">
                     <div className="avatar-col">
@@ -208,7 +226,7 @@ export function MessageList(p: MessageListProps) {
               )}
               <div className={`bubble${isMediaBubble ? " media" : ""}${menuActive ? " ctx-active" : ""}`}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
-                {m.forwardFrom ? <span className="forward-from">转发自 {m.forwardFrom}</span> : null}
+                {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
                 {m.replyToConvSeq ? (
                   // 引用条：媒体内嵌小缩略图；群聊两行式——被引用者昵称（accent）+ 内容预览（M4-x，单聊不显示发送者）。
                   <div className="quote-bar" onClick={() => locateInChat(m.convId, m.replyToConvSeq!)}>

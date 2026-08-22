@@ -136,10 +136,13 @@ describe("消息列表：引用 / 转发 / 图说", () => {
     expect(msgs().querySelector(".quote-text")).toHaveTextContent("被引用的原文");
   });
 
-  it("转发消息渲染「转发自 X」溯源", async () => {
+  it("转发消息按普通消息显示：不再渲染「转发自 X」溯源（隐私保护）", async () => {
     await enterChat();
     await push(recv({ content: "看这个", forwardFrom: "老王" }));
-    expect(await screen.findByText(/转发自\s*老王/)).toBeInTheDocument();
+    // 正文照常显示，但不出现"转发自"溯源行（forwardFrom 仍在模型里、供再转发链路，仅不外显）。
+    expect(await screen.findByText("看这个")).toBeInTheDocument();
+    expect(screen.queryByText(/转发自/)).not.toBeInTheDocument();
+    expect(msgs().querySelector(".forward-from")).toBeNull();
   });
 
   it("图片带 caption：媒体卡下方渲染 .msg-caption", async () => {

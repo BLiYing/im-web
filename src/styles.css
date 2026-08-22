@@ -366,6 +366,38 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
    压回底对齐，导致「已选 N」贴底、与按钮中线错位（曾踩坑）。 */
 .chat footer.select-bar { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
 .select-bar .select-count { flex: 1; display: flex; align-items: center; color: var(--text-secondary); font-size: 13px; }
+/* 多选动作按钮：去掉整条工具栏背景（继承自 .chat footer），三个动作改为独立圆形 Liquid Glass（复用 --glass-menu-*）。 */
+.chat footer.select-bar { background: transparent; border: none; box-shadow: none; }
+.sel-action {
+  flex: 0 0 auto; width: 46px; height: 46px; padding: 0; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-primary); cursor: pointer;
+  background: var(--glass-menu-bg);
+  border: 1px solid var(--glass-menu-border);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(24px) saturate(165%);
+  -webkit-backdrop-filter: blur(24px) saturate(165%);
+  transition: transform .12s ease, opacity .12s ease;
+}
+.sel-action:hover:not(:disabled) { transform: translateY(-1px); }
+.sel-action:active:not(:disabled) { transform: scale(.94); }
+.sel-action:disabled { opacity: .4; cursor: default; }
+.sel-action.danger { color: var(--danger); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sel-action { background: var(--card-bg); }
+}
+/* 「仅为我删除」确认气泡：钉在删除钮正上方，复用毛玻璃气泡样式。 */
+.sel-del-wrap { position: relative; flex: 0 0 auto; display: inline-flex; }
+.sel-del-backdrop { position: fixed; inset: 0; z-index: 40; }
+.sel-del-pop { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 41;
+  background: var(--glass-menu-bg); border: 1px solid var(--glass-menu-border); border-radius: var(--radius-menu, 12px);
+  box-shadow: var(--shadow-menu); backdrop-filter: blur(24px) saturate(165%); -webkit-backdrop-filter: blur(24px) saturate(165%);
+  padding: 4px; white-space: nowrap; }
+.sel-del-only { display: block; padding: 8px 16px; border-radius: 8px; color: var(--danger); font-size: 15px; font-weight: 600; cursor: pointer; }
+.sel-del-only:hover { background: var(--danger-soft); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sel-del-pop { background: var(--card-bg); }
+}
 /* 转发会话选择器。 */
 .fwd-picker { max-height: 70vh; }
 .fwd-list { overflow-y: auto; max-height: 46vh; display: flex; flex-direction: column; margin: 0 calc(-1 * var(--space-4)); }
@@ -620,6 +652,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .album-row { display: flex; }
 .album-tile { position: relative; overflow: hidden; cursor: pointer; background: var(--separator); }
 .album-tile img, .album-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 多选逐格勾选框（2a）：右上角圆圈，选中填 accent + 对勾；未选空心白圈半透明底衬（压在亮图上仍可辨）。 */
+.album-sel { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; z-index: 3;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 13px; line-height: 1;
+  border: 1.5px solid rgba(255,255,255,0.95); background: var(--overlay); color: var(--on-accent); pointer-events: none; }
+.album-sel.on { background: var(--accent); border-color: var(--accent); }
 .album-tile .play-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .album-tile-dim { position: absolute; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 .album-spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--on-media-muted); border-top-color: var(--on-media); animation: album-spin 0.9s linear infinite; }

@@ -913,7 +913,7 @@ export default function App() {
     if (!c) throw new Error("未连接");
     return c.linkPreview(url);
   }, []);
-  // 进入多选态（M4-3）：从消息右键进入时预选当前消息；从标题栏「选择消息」进入时不预选（m 省略）。
+  // 进入多选态（M4-3）：从消息右键进入时预选当前消息（相册某格 → 只预选该格，逐格勾选 2a）；从标题栏进入不预选。
   const enterSelectMode = useCallback((m?: ChatMessage) => {
     setMenu(null); setChatMenu(false); setSelectMode(true);
     setSelected(new Set(m && m.convSeq > 0 ? [m.convSeq] : []));
@@ -922,6 +922,7 @@ export default function App() {
   const toggleSelected = useCallback((seq: number) => {
     setSelected((prev) => { const n = new Set(prev); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
   }, []);
+  // 相册整组全选/全不选在 MessageList 就地用 toggleSelected 循环实现（见 toggleAlbumGroup），此处不再单列。
   // 转发簇 → useForward（阶段 6）：须在 exitSelectMode/setMenu/useMessageStore/selected/groupInfos 之后。
   const {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
@@ -930,9 +931,9 @@ export default function App() {
   // 收藏簇 → useFavorites（阶段 6）：消费 useForward 的 setForwardMode/setForwarding/sendForwardToTarget。
   const {
     favorites, setFavorites, favPick,
-    favoriteMessage, openFavorites, openFavoritesPick, closeFavorites, 
+    favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites,
     favoriteActions, sendFavoritesToCurrent,
-  } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget });
+  } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode });
 
   // 多选批量删除（仅本端）。
   const deleteSelected = useCallback(() => {
@@ -947,6 +948,8 @@ export default function App() {
     });
     exitSelectMode();
   }, [peer, uid, groupConvId, selected, exitSelectMode]);
+
+  // 多选批量收藏（favoriteSelected）已收进 useFavorites（收藏动作簇，见其 return）。
 
   // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
   const jumpToSeq = useCallback((seq: number) => {
@@ -1243,6 +1246,9 @@ export default function App() {
     if (annPoppedRef.current[cid] === at) return; // 本会话本版本已弹过，防重入
     annPoppedRef.current[cid] = at;
     try { localStorage.setItem(key, String(at)); } catch { /* 配额满等，忽略 */ }
+    // 自己就是本版公告的发布者（管理员/群主刚编辑）→ 不弹窗（内容自己写的、已知），仅记版本供下版仍能弹。
+    // 与 iOS 拉齐（maybeAutoPopAnnouncement 同 announcementBy === userID 守卫）。
+    if (gi.announcement_by && gi.announcement_by === uid) return;
     openGroupText("announcement", cid);
   }, [groupConvId, groupInfos, uid, openGroupText]);
 
@@ -1822,6 +1828,7 @@ export default function App() {
   const exitSelectModeEv = useEvent(exitSelectMode);
   const forwardSelectedEv = useEvent(forwardSelected);
   const deleteSelectedEv = useEvent(deleteSelected);
+  const favoriteSelectedEv = useEvent(favoriteSelected);
   const removePastedImageEv = useEvent(removePastedImage);
   const cancelAttachCloseEv = useEvent(cancelAttachClose);
   const scheduleAttachCloseEv = useEvent(scheduleAttachClose);
@@ -1838,7 +1845,7 @@ export default function App() {
     retryUpload: retryUploadEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
     onMediaLoad: onMediaLoadEv, pendingFilesRef,
     jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
-    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, removePastedImage: removePastedImageEv,
+    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, favoriteSelected: favoriteSelectedEv, removePastedImage: removePastedImageEv,
     cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
     openFavoritesPick: openFavoritesPickEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
     setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, send: sendEv,

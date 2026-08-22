@@ -4,8 +4,8 @@
 // - 稳定动作与 ref（send/pickFile/onInputChange/composerRef…皆 useCallback/useRef，定义均在 login 早退前）走 ChatActionsContext；
 // - reactive 值（input/replyTo/editingMsg/selectMode/pastedImages/mentionRows…）走 props。
 // 护栏：Composer.test.tsx + App.smoke.test.tsx（发消息主链路）。
-import type { KeyboardEvent } from "react";
-import { Bookmark, type LucideIcon } from "lucide-react";
+import { useState, type KeyboardEvent } from "react";
+import { Bookmark, Forward, Trash2, type LucideIcon } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
 import type { DownloadState } from "../download";
@@ -54,11 +54,12 @@ export function Composer(p: ComposerProps) {
     mentionQuery, mentionFilter, mentionRows, mentionActive, mediaGate, senderLabel, onMentionNavKey,
   } = p;
   const {
-    setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, deleteSelected,
+    setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, deleteSelected,
     removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, onFilePicked,
     setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, send,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   } = useChatActions();
+  const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」）
   return (
     <>
       {showJump && convId && (
@@ -99,12 +100,24 @@ export function Composer(p: ComposerProps) {
         </div>
       )}
       {selectMode ? (
-        // 多选态工具栏（M4-3）：批量 转发/删除，替换输入区。
+        // 多选态工具栏（M4-3）：批量 转发/收藏/删除——独立圆形 Liquid Glass 按钮、无工具栏背景（与 iOS 拉齐）。
         <footer className="select-bar">
-          <button className="link-inline" onClick={exitSelectMode}>取消</button>
+          <button className="link-inline" onClick={() => { setDelConfirm(false); exitSelectMode(); }}>取消</button>
           <span className="select-count">已选 {selected.size}</span>
-          <button disabled={selected.size === 0} onClick={forwardSelected}>转发</button>
-          <button className="danger" disabled={selected.size === 0} onClick={deleteSelected}>删除</button>
+          <button className="sel-action" title="转发" aria-label="转发" disabled={selected.size === 0} onClick={forwardSelected}><Forward size={22} aria-hidden="true" /></button>
+          <button className="sel-action" title="收藏" aria-label="收藏" disabled={selected.size === 0} onClick={favoriteSelected}><Bookmark size={22} aria-hidden="true" /></button>
+          {/* 删除：点按不直接删，先在按钮**上方**弹「仅为我删除」确认气泡，点它才删（与 iOS 拉齐）。 */}
+          <span className="sel-del-wrap">
+            <button className="sel-action danger" title="删除" aria-label="删除" disabled={selected.size === 0} onClick={() => setDelConfirm(true)}><Trash2 size={22} aria-hidden="true" /></button>
+            {delConfirm && selected.size > 0 && (
+              <>
+                <span className="sel-del-backdrop" onClick={() => setDelConfirm(false)} />
+                <span className="sel-del-pop" role="menu">
+                  <button className="sel-del-only" role="menuitem" onClick={() => { setDelConfirm(false); deleteSelected(); }}>仅为我删除</button>
+                </span>
+              </>
+            )}
+          </span>
         </footer>
       ) : (
         <>

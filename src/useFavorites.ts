@@ -21,10 +21,14 @@ export interface FavoritesDeps {
   setForwardMode: (m: "each" | "merged") => void;
   setForwarding: (m: ChatMessage[] | null) => void;
   sendForwardToTarget: (target: Conversation, msgsArg?: ChatMessage[]) => void;
+  // 多选批量收藏（favoriteSelected）用：当前会话消息 + 已选 conv_seq 集 + 退出多选。
+  msgsByConv: Record<string, ChatMessage[]>;
+  selected: Set<number>;
+  exitSelectMode: () => void;
 }
 
 export function useFavorites(d: FavoritesDeps) {
-  const { clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget } = d;
+  const { clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode } = d;
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
   const [favPick, setFavPick] = useState(false); // 收藏弹窗模式：true=从附件面板进的「从收藏发送」pick 模式
 
@@ -43,6 +47,27 @@ export function useFavorites(d: FavoritesDeps) {
       } catch (e) { setToast(`收藏失败：${(e as Error).message}`); }
     })();
   }, []);
+  // 多选批量收藏（与 iOS 拉齐）：当前会话所选消息逐条快照到收藏，末尾汇总吐司；系统行/撤回件跳过。
+  const favoriteSelected = useCallback(() => {
+    const list = (msgsByConv[currentConvRef.current] ?? []).filter((m) => m.convSeq > 0 && selected.has(m.convSeq) && !m.recalledAt && m.contentType !== "system" && m.content);
+    if (list.length === 0) return;
+    void (async () => {
+      let ok = 0;
+      for (const m of list) {
+        try {
+          await clientRef.current?.addFavorite({
+            content_type: m.contentType, content: m.content, caption: m.caption,
+            file_name: m.fileName, file_size: m.fileSize, duration: m.duration, thumb: m.thumb, poster: m.posterUrl,
+            media_w: m.mediaW, media_h: m.mediaH,
+            source_conv_id: m.convId, source_conv_seq: m.convSeq, source_from: m.from,
+          });
+          ok++;
+        } catch { /* 单条失败跳过，末尾汇总 */ }
+      }
+      setToast(ok === 0 ? "收藏失败" : ok === list.length ? (ok === 1 ? "已收藏" : `已收藏 ${ok} 条`) : `已收藏 ${ok}/${list.length} 条`);
+    })();
+    exitSelectMode();
+  }, [msgsByConv, selected, currentConvRef, exitSelectMode]);
   // 打开收藏列表弹窗（浏览态，账号卡入口）。
   const openFavorites = useCallback(() => {
     setFavPick(false);
@@ -89,7 +114,7 @@ export function useFavorites(d: FavoritesDeps) {
 
   return {
     favorites, setFavorites, favPick,
-    favoriteMessage, openFavorites, openFavoritesPick, closeFavorites, removeFavorite,
+    favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites, removeFavorite,
     forwardFavorite, copyFavorite, downloadFavorite, favoriteActions, sendFavoritesToCurrent,
   };
 }

@@ -7,7 +7,7 @@ import { videoFrameSrc } from "../messageContent";
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
-export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, onOpen, onMenu, onMediaError }: {
+export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, onOpen, onMenu, onMediaError, selectMode, isSelected, onToggleTile }: {
   members: ChatMessage[];
   timeLabel: string;
   progress: Record<string, { sent: number; total: number }>;
@@ -16,6 +16,9 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
   onOpen: (m: ChatMessage) => void;
   onMenu: (e: React.MouseEvent, m: ChatMessage) => void;
   onMediaError?: (m: ChatMessage) => void; // 原件 <img>/<video> 加载失败 → 复验 404 落失效标记（首屏即显失效）
+  selectMode?: boolean; // 多选态（2a）：每格右上角显勾选框，点格=切换该格选中，不进查看器
+  isSelected?: (m: ChatMessage) => boolean; // 该格是否已选（conv_seq ∈ 选择集）
+  onToggleTile?: (m: ChatMessage) => void; // 切换该格选中
 }) {
   const W = 240, GAP = 2;
   const pattern = albumRowPattern(members.length);
@@ -36,12 +39,15 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
               // 点门控格=就地下载（解门控），非进查看器（铁律③手动优先）。
               const gated = gateFor(m);
               const sizeText = formatFileSize(m.fileSize);
+              // 多选：该格可选=已入库(convSeq>0)未撤回；点格切换选中、不进查看器。
+              const tileSelectable = !!selectMode && m.convSeq > 0 && !m.recalledAt;
+              const tileOn = tileSelectable && !!isSelected && isSelected(m);
               return (
-              <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className="album-tile"
+              <div key={m.clientMsgId ?? m.serverMsgId ?? m.convSeq} className={`album-tile${selectMode ? " selecting" : ""}`}
                 data-album-seq={m.convSeq || undefined}
                 style={{ width: row.length === 1 ? W : tileW, height: tileH }}
-                onClick={() => onOpen(m)}
-                onContextMenu={(e) => onMenu(e, m)}>
+                onClick={(e) => { if (selectMode) { e.stopPropagation(); if (tileSelectable) { onToggleTile?.(m); } return; } onOpen(m); }}
+                onContextMenu={(e) => { if (selectMode) { e.preventDefault(); return; } onMenu(e, m); }}>
                 {gated
                   ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
                   : m.contentType === "video"
@@ -64,6 +70,8 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
                     那是整条消息的事，已由宫格左侧红❗+下方系统行表达，逐格再标一遍是噪声。
                     与 iOS 同语义：iOS 格内 ❗ 由 IMUploadProgress.failed 驱动，拒收时上传早已成功故不显示。 */}
                 {m.status === "failed" && !m.note && <span className="album-tile-dim"><span className="album-fail">!</span></span>}
+                {/* 多选逐格勾选框（2a）：右上角圆圈，选中显对勾。 */}
+                {tileSelectable && <span className={`album-sel${tileOn ? " on" : ""}`}>{tileOn ? "✓" : ""}</span>}
               </div>
               );
             })}

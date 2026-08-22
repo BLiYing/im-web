@@ -13,7 +13,7 @@ import type { ChatMessage } from "../sdk/protocol";
 function actions(over: Partial<ChatActions> = {}): ChatActions {
   return {
     setInput: vi.fn(), locateInChat: vi.fn(), jumpToBottom: vi.fn(), unblock: vi.fn(async () => {}),
-    setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), deleteSelected: vi.fn(),
+    setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), favoriteSelected: vi.fn(), deleteSelected: vi.fn(),
     removePastedImage: vi.fn(), cancelAttachClose: vi.fn(), scheduleAttachClose: vi.fn(), setAttachPanel: vi.fn(),
     pickFile: vi.fn(), openFavoritesPick: vi.fn(), onFilePicked: vi.fn(), setMentionFilter: vi.fn(), pickMention: vi.fn(),
     setMentionActive: vi.fn(), onInputChange: vi.fn(), onComposerPaste: vi.fn(), send: vi.fn(),
@@ -73,16 +73,19 @@ describe("Composer", () => {
     fireEvent.click(getByTitle("取消编辑"));
     expect(a.setEditingMsg).toHaveBeenCalledWith(null); expect(a.setInput).toHaveBeenCalledWith("");
   });
-  it("多选态：替换为工具栏（已选 N）；转发/删除接线；0 选中时禁用", () => {
+  it("多选态：替换为工具栏（已选 N）；转发/收藏/删除接线（圆形玻璃图标钮，用 aria-label 命中）；0 选中时禁用", () => {
     const a = actions();
-    const { getByText, queryByPlaceholderText, rerender } = mount(base({ selectMode: true, selected: new Set([1, 2]) }), a);
+    const { getByText, getByLabelText, queryByPlaceholderText, rerender } = mount(base({ selectMode: true, selected: new Set([1, 2]) }), a);
     expect(queryByPlaceholderText(/输入消息/)).toBeNull();
     expect(getByText("已选 2")).toBeTruthy();
-    fireEvent.click(getByText("转发")); expect(a.forwardSelected).toHaveBeenCalled();
-    fireEvent.click(getByText("删除")); expect(a.deleteSelected).toHaveBeenCalled();
+    fireEvent.click(getByLabelText("转发")); expect(a.forwardSelected).toHaveBeenCalled();
+    fireEvent.click(getByLabelText("收藏")); expect(a.favoriteSelected).toHaveBeenCalled();
+    // 删除是两步：点删除钮弹「仅为我删除」确认气泡，点它才真正删。
+    fireEvent.click(getByLabelText("删除")); expect(a.deleteSelected).not.toHaveBeenCalled();
+    fireEvent.click(getByText("仅为我删除")); expect(a.deleteSelected).toHaveBeenCalled();
     fireEvent.click(getByText("取消")); expect(a.exitSelectMode).toHaveBeenCalled();
     rerender(<ChatActionsProvider value={a}><Composer {...base({ selectMode: true, selected: new Set() })} /></ChatActionsProvider>);
-    expect((getByText("转发") as HTMLButtonElement).disabled).toBe(true);
+    expect((getByLabelText("转发") as HTMLButtonElement).disabled).toBe(true);
   });
   it("粘贴预览条：图片缩略 + 文件名；✕ → removePastedImage(i)", () => {
     const a = actions();

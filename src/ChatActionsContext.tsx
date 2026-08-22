@@ -36,6 +36,7 @@ export interface ChatActions {
   exitSelectMode: () => void;
   forwardSelected: () => void;
   deleteSelected: () => void;
+  favoriteSelected: () => void; // 多选批量收藏（与 iOS 拉齐）
   removePastedImage: (i: number) => void;
   cancelAttachClose: () => void;
   scheduleAttachClose: () => void;
