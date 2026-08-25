@@ -126,7 +126,8 @@ export default function App() {
   const [presence, setPresence] = useState<Record<string, Presence>>({}); // user -> 在线态（租约模型，见 sdk/presence.ts）
   const [, setPresenceTick] = useState(0); // 仅用于驱动在线态重算的心跳，见下方 useEffect
   const [peerReadSeq, setPeerReadSeq] = useState<Record<string, number>>({}); // convId -> 对端已读位点
-  const [typingConv, setTypingConv] = useState<string | null>(null);
+  // 覆盖式（不管几人同时打字，只记最新一位）：{convId,uid} → 副标题拼「{昵称} 正在输入」；单聊时 uid 冗余但保留统一形状。
+  const [typingConv, setTypingConv] = useState<{ convId: string; uid: string } | null>(null);
   const [entryUnread, setEntryUnread] = useState(0); // 进会话时的未读数（红点/↓N 计数，服务端 cap 999）
   const [entryReadSeq, setEntryReadSeq] = useState(0); // 进会话时的已读位点（精确定位未读分割线，CHAT_UX §4）
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
@@ -551,7 +552,7 @@ export default function App() {
       onPresence: (user, p) => setPresence((prev) => ({ ...prev, [user]: p })),
       onTyping: (convId, from) => {
         if (from === uid) return;
-        setTypingConv(convId);
+        setTypingConv({ convId, uid: from });
         if (typingTimer.current) clearTimeout(typingTimer.current);
         typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
       },
@@ -1686,6 +1687,10 @@ export default function App() {
     if (curMax > prevMaxSeqRef.current && curMax <= latestSeqRef.current && wasLoadingNewer) {
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
+      // 重新评估「跳底钮」：loadNewer 追加内容后若用户仍视觉贴底，隐藏按钮
+      //（早退不重算就会一直显示，即便用户已被自动带回底部）。
+      const nearBottomPx = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+      if (nearBottomPx) { setShowJump(false); setJumpCount(0); }
       return;
     }
 
@@ -1773,10 +1778,13 @@ export default function App() {
     const newest = maxSeqOf(list);
     const oldest = minSeqOf(list);
     const moreBelow = newest < latestSeqRef.current; // 下方还有未加载的更新历史
-    const atTrueBottom = nearBottomPx && !moreBelow;
-    wasNearBottomRef.current = atTrueBottom;
-    setShowJump(!atTrueBottom);
-    if (atTrueBottom) setJumpCount(0);
+    // 按钮显示只看「视觉贴底」（与 iOS updateJumpButton 对齐）——若 moreBelow=true 亦一并纳入
+    // 判定，会出现「用户视觉已在最底部，但按钮仍显」的伪 bug（未读多/大群/进会话瞬间 push 到达时高发）：
+    // 视觉贴底后 L1792 会自动 loadNewer 追齐，此时不必弹按钮打扰。
+    // wasNearBottomRef 语义同源：新内容到来时是否贴底跟随（onMediaLoad / layout effect 共用）。
+    wasNearBottomRef.current = nearBottomPx;
+    setShowJump(!nearBottomPx);
+    if (nearBottomPx) setJumpCount(0);
 
     const busy = loadingOlderRef.current || loadingNewerRef.current;
     if (nearBottomPx && moreBelow && !busy) {
@@ -1958,13 +1966,21 @@ export default function App() {
     ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员` : "群聊")
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
     : presenceText(presence[peer]);
-  const visibleChatSubtitle = convId && typingConv === convId ? "正在输入" : chatSubtitle;
   // 群成员昵称（气泡回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
   const memberNick = (cid: string, id: string): string => {
     const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
     // 群昵称优先（G1），回退全局昵称；都无返回空串让调用方回退 uid。
     return (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
   };
+  // 群 typing 显示昵称（对齐 iOS `IMChatViewController+Socket.m` `im_navigationSubtitle`）：
+  // 单聊固定"正在输入"；群里覆盖式记最新一位打字者，副标题拼「{昵称} 正在输入」，昵称找不到回退 uid。
+  // 声明放在 memberNick 之后：IIFE 立即执行，memberNick 必须先在作用域里初始化，否则命中 TDZ。
+  const visibleChatSubtitle = (() => {
+    if (!convId || !typingConv || typingConv.convId !== convId) return chatSubtitle;
+    if (!isGroupChat) return "正在输入";
+    const nick = memberNick(convId, typingConv.uid) || typingConv.uid;
+    return `${nick} 正在输入`;
+  })();
   const senderLabel = (m: ChatMessage): string => m.fromNickname || memberNick(m.convId, m.from) || m.from;
   // 发送者在本群的角色（群主/管理员气泡徽标用）：**优先本群成员表的当前角色**（晋升/降级后老消息随之变化，
   // 微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role（仅 owner/admin 冗余下发）兜底。
