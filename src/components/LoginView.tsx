@@ -43,8 +43,10 @@ export function LoginView({ restoring, uid, password, authErr, authBusy, loginTa
           <label>用户名<input value={uid} autoFocus onChange={(e) => onUid(e.target.value.trim())} /></label>
           <label>密码<input type="password" value={password} placeholder="≥ 6 位"
             onChange={(e) => onPassword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") onLogin(password); }} /></label>
-          <button className="login-submit" disabled={authBusy} onClick={() => onLogin(password)}>登录</button>
+            onKeyDown={(e) => { if (e.key === "Enter" && password) onLogin(password); }} /></label>
+          {/* 「登录」按钮强制要求密码非空——空密码只能走下方「免密登录」明示入口（且需后端 -dev-login），
+              避免开发期免密开关下点「登录」变成静默走免密（iOS 端登录页也是这样，密码不填直接走不通）。 */}
+          <button className="login-submit" disabled={authBusy || !password} onClick={() => onLogin(password)}>登录</button>
           <button className="login-submit secondary" disabled={authBusy} onClick={onRegister}>注册并登录</button>
           <p className="hint">
             真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
