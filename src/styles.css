@@ -1174,7 +1174,10 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* 文件 / 链接列表 */
 .detail-filelist { background: var(--card-bg); border-radius: var(--radius-card); overflow: hidden; }
 .detail-fileitem, .detail-linkitem { display: flex; align-items: center; gap: 10px; padding: 12px 14px; color: var(--text); text-decoration: none; cursor: pointer; }
-.detail-fileitem .file-type-icon { width: 34px; height: 34px; }
+/* flex 容器里内联 SVG 图标（链接 tab 的 <Link2/>、文件 tab 的类型图标）必须固定不被超长文本挤扁；
+   .file-type-icon 有固定宽高不受影响，兜底给两个容器下的直系 svg 加 flex-shrink:0（2026-08-25）。 */
+.detail-fileitem > svg, .detail-linkitem > svg { flex-shrink: 0; }
+.detail-fileitem .file-type-icon { width: 34px; height: 34px; flex-shrink: 0; }
 .detail-fileitem.failed .detail-file-size { color: var(--danger); }
 .detail-fileitem + .detail-fileitem, .detail-linkitem + .detail-linkitem { border-top: 1px solid var(--separator); }
 .detail-fileitem:hover, .detail-linkitem:hover { background: var(--surface-hover); }

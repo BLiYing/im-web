@@ -2592,7 +2592,13 @@ export default function App() {
               void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
             }
           }}
-          onForward={() => { const mm = viewer.m; setViewer(null); setGalleryOpen(false); setForwarding([mm]); }}
+          onForward={() => {
+            // 相册查看器视角看不到 caption/mentions（气泡下方那段附言不在视野内），转发时不带
+            // （对齐 iOS forwardMediaFromViewerMessage: 与本页详情文件 tab 转发的取舍）。
+            const mm = viewer.m;
+            setViewer(null); setGalleryOpen(false);
+            setForwarding([{ ...mm, caption: undefined, mentions: undefined, mentionAll: false }]);
+          }}
           onDelete={(x, y) => {
             // 统一走两档路由（对齐详情/聊天）：可为所有人删则弹子菜单 B，否则仅删自己；删成功后查看器由 onMessageRemoved 关闭。
             const m = viewer.m;
@@ -2736,7 +2742,13 @@ export default function App() {
         const downloading = dlStates[m.content]?.phase === "downloading";
         return (
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
-            <button onClick={() => { setFileMenu(null); setForwardMode("each"); setForwarding([m]); }}>
+            <button onClick={() => {
+              setFileMenu(null); setForwardMode("each");
+              // 资料页文件 tab 视角只显文件名，看不到源消息的 caption/mentions；若原样透传会把当年
+              // 原发件人挂在同一条文件上的「@xxx 附言」意外带到目标会话（对齐 iOS forwardFileMessage:
+              // stripCaption:YES）。主流长按/查看器/多选/收藏等看得到附言的入口不受影响，仍保留 caption。
+              setForwarding([{ ...m, caption: undefined, mentions: undefined, mentionAll: false }]);
+            }}>
               <Forward size={16} className="menu-icon" />转发</button>
             {/* 定位=回到聊天：只关会遮聊天的宿主（媒体库 / 查看器）；详情卡是右侧列不遮聊天，按用户要求保持不消失。 */}
             <button onClick={() => { setFileMenu(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>

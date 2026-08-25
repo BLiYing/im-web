@@ -101,11 +101,18 @@ export function DetailPanel(p: DetailPanelProps) {
     // 非好友（单聊）只保留头像 + 操作排（加好友/更多），隐藏设置·备注名·页签——尚未建立关系时这些设置无意义。
     // 仅隐藏，数据加载逻辑不动（加为好友后重新渲染即恢复）。与 iOS sectionLayout 同语义。
     const showDetailBody = d.isGroup || detailPeerIsFriend;
-    // 页签数据（本地历史）
-    const media = detailMsgs.filter((m) => m.contentType === "image" || m.contentType === "video")
+    // 页签数据（本地历史）—— 与 iOS IMChatDetailTabs.matchesKind: 对齐（2026-08-25）：
+    // ① 撤回墓碑 recalledAt>0 排除；② status==="failed" 未确认态排除；③ convSeq>0 挡未发出的占位；
+    // ④ 链接 tab 前置 contentType 校验（`text`/`link`），否则图片/视频/文件的 content 恰为 URL 时会漏进链接 tab
+    //   （曾造成"链接 tab 同一 URL 显示两遍"—— 一次是真链接消息，一次是同 URL 的图片消息误匹配）。
+    const isPresentable = (m: typeof detailMsgs[number]) =>
+      m.convSeq > 0 && !m.recalledAt && m.status !== "failed";
+    const media = detailMsgs.filter((m) => isPresentable(m) && (m.contentType === "image" || m.contentType === "video"))
       .sort((a, b) => b.convSeq - a.convSeq);
-    const files = detailMsgs.filter((m) => m.contentType === "file").sort((a, b) => b.convSeq - a.convSeq);
-    const links = detailMsgs.filter((m) => isUrlText(m.content)).sort((a, b) => b.convSeq - a.convSeq);
+    const files = detailMsgs.filter((m) => isPresentable(m) && m.contentType === "file").sort((a, b) => b.convSeq - a.convSeq);
+    const links = detailMsgs.filter((m) =>
+      isPresentable(m) && (m.contentType === "text" || m.contentType === "link") && isUrlText(m.content)
+    ).sort((a, b) => b.convSeq - a.convSeq);
     const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
       ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }]
       : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }];
