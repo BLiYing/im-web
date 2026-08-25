@@ -17,6 +17,7 @@ function actions(over: Partial<ChatActions> = {}): ChatActions {
     removePastedImage: vi.fn(), cancelAttachClose: vi.fn(), scheduleAttachClose: vi.fn(), setAttachPanel: vi.fn(),
     pickFile: vi.fn(), openFavoritesPick: vi.fn(), onFilePicked: vi.fn(), setMentionFilter: vi.fn(), pickMention: vi.fn(),
     setMentionActive: vi.fn(), onInputChange: vi.fn(), onComposerPaste: vi.fn(), send: vi.fn(),
+    sendVoice: vi.fn(() => Promise.resolve()),
     attachAnchorRef: createRef<HTMLDivElement>(), fileInputRef: createRef<HTMLInputElement>(),
     mentionPanelRef: createRef<HTMLDivElement>(), mentionActiveRef: createRef<HTMLButtonElement>(), composerRef: createRef<HTMLTextAreaElement>(),
     ...over,
@@ -39,9 +40,10 @@ function base(over: Partial<ComposerProps> = {}): ComposerProps {
 const mount = (p: ComposerProps, a: ChatActions) => render(<ChatActionsProvider value={a}><Composer {...p} /></ChatActionsProvider>);
 
 describe("Composer", () => {
-  it("默认：输入框可用、发送钮在；Enter → send()，Shift+Enter 不发", () => {
+  it("默认：输入框可用、发送钮在（有输入时）；Enter → send()，Shift+Enter 不发", () => {
     const a = actions();
-    const { getByPlaceholderText, getByText } = mount(base(), a);
+    // Web P1：空框显 mic、有输入才显发送——测试传 input 非空以走发送分支。
+    const { getByPlaceholderText, getByText } = mount(base({ input: "hello" }), a);
     const ta = getByPlaceholderText(/输入消息，回车发送/);
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
     expect(a.send).not.toHaveBeenCalled();

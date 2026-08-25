@@ -30,6 +30,8 @@ export interface MediaSendOptions {
   duration?: number;
   /** 极小模糊预览（~20px 缩略 JPEG 的 data URL，M4-7）：收端未下载时放大+模糊显占位。 */
   thumb?: string;
+  /** 语音振幅指纹（voice P1，base64，原始字节 ≤120）：收端不下载音频即可画气泡波形。 */
+  waveform?: string;
   /** 图文/视频文/文件文随附文本（Telegram 图说模型）：与媒体同生为一条消息。仅 image/video/file 有效；空=纯媒体。 */
   caption?: string;
   /** 配文里的 @提及（仅群聊）：被 @ 成员 uid 列表，随媒体消息上行，服务端据此做被@强提醒（与文本消息同口径）。 */
@@ -626,6 +628,22 @@ export class IMClient {
   }
 
   /**
+   * 上传语音（voice P1）：/api/v1/upload?as=voice——服务端切用 voice 白名单
+   * (.m4a/.aac/.caf/.opus/.ogg/.webm/.mp4) + 16MB 上限。返回 `/uploads/<id>.m4a` 相对 URL。
+   * 一次性 multipart（分片对 voice 显式拒绝，5min AAC ≈ 0.9MB 用不着）。
+   */
+  async uploadVoice(blob: Blob, fileName: string): Promise<{ url: string; size: number }> {
+    const fd = new FormData();
+    fd.append("file", blob, fileName);
+    const resp = await tracedFetch("/api/v1/upload?as=voice", {
+      method: "POST", headers: { Authorization: `Bearer ${this.token}` }, body: fd,
+    });
+    const body = await resp.json().catch(() => ({ code: -1, data: {} }));
+    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "语音上传失败"));
+    return { url: body.data.url as string, size: Number(body.data.size) || blob.size };
+  }
+
+  /**
    * 上传头像（方案 C）：走**专用端点** `/api/v1/avatar`，服务端内容寻址落 `uploads/avatars/`，
    * 返回 `/avatars/<hash>.jpg` 相对 URL。与聊天媒体分离、永不清理（见 docs/AVATAR_STORAGE_DESIGN.md）。
    * 入参为裁切并缩到 ≤256px 的 JPEG blob；头像小，一次性 multipart，无需分片/进度。
@@ -666,6 +684,7 @@ export class IMClient {
     if (opts?.groupId) { data.group_id = opts.groupId; }
     if (opts?.poster) { data.poster = opts.poster; }
     if (opts?.thumb) { data.thumb = opts.thumb; } // 极小模糊预览（M4-7），收端未下载时显模糊占位
+    if (opts?.waveform) { data.waveform = opts.waveform; } // voice 振幅指纹（P1），收端画气泡波形免下载音频
     // @提及（M4-8，仅群聊有意义）：服务端会按当时群成员集过滤/去重，并校验 @所有人 的群角色权限。
     if (opts?.mentions && opts.mentions.length > 0) { data.mentions = opts.mentions; }
     if (opts?.mentionAll) { data.mention_all = true; }

@@ -4,10 +4,11 @@
 // - 稳定动作与 ref（send/pickFile/onInputChange/composerRef…皆 useCallback/useRef，定义均在 login 早退前）走 ChatActionsContext；
 // - reactive 值（input/replyTo/editingMsg/selectMode/pastedImages/mentionRows…）走 props。
 // 护栏：Composer.test.tsx + App.smoke.test.tsx（发消息主链路）。
-import { useState, type KeyboardEvent } from "react";
-import { Bookmark, Forward, Trash2, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Bookmark, Forward, Mic, Trash2, type LucideIcon } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
+import { VoiceRecorder, voiceRecordingSupported } from "../voiceRecorder";
 import type { DownloadState } from "../download";
 import { replyPreviewOf } from "../messageContent";
 import { FileTypeIcon } from "../FileTypeIcon";
@@ -60,6 +61,68 @@ export function Composer(p: ComposerProps) {
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   } = useChatActions();
   const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」）
+  // Web P1 语音：AAC 兼容探测 → 麦克风入口置灰/激活；点击开录 → 输入栏 morph 成录制条。
+  // ChatActions.sendVoice 上传+发送；Space/Esc/Enter 快捷键在录制条 focus 时接管。
+  const voiceProbe = useMemo(() => voiceRecordingSupported(), []);
+  const recorderRef = useRef<VoiceRecorder | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recordElapsed, setRecordElapsed] = useState(0);
+  const [recordAmps, setRecordAmps] = useState<number[]>([]);
+  const [voicePaused, setVoicePaused] = useState(false);
+  const { sendVoice, setToast } = useChatActions();
+
+  const startVoiceRecord = useCallback(async () => {
+    if (recording || !voiceProbe.supported) return;
+    setRecording(true); setRecordElapsed(0); setRecordAmps([]); setVoicePaused(false);
+    const r = new VoiceRecorder();
+    recorderRef.current = r;
+    try {
+      await r.start({
+        onTick: (amp, elapsed) => {
+          setRecordElapsed(elapsed);
+          setRecordAmps((prev) => (prev.length >= 40 ? [...prev.slice(1), amp] : [...prev, amp]));
+        },
+        onDone: (res) => {
+          setRecording(false);
+          recorderRef.current = null;
+          const name = `voice-${Date.now()}${res.fileExtension}`;
+          void sendVoice(res.blob, name, res.waveformBase64, res.durationMs);
+        },
+        onCancel: (reason) => {
+          setRecording(false);
+          recorderRef.current = null;
+          if (reason === "tooShort") setToast("说话时间太短");
+          else if (reason === "error") setToast("录音失败，请重试");
+        },
+      });
+    } catch (e) {
+      setRecording(false);
+      recorderRef.current = null;
+      setToast((e as Error).message || "无法开始录音");
+    }
+  }, [recording, voiceProbe.supported, sendVoice, setToast]);
+
+  const stopVoiceSend = useCallback(() => { recorderRef.current?.stopAndSend(); }, []);
+  const cancelVoice = useCallback(() => { recorderRef.current?.cancel(); }, []);
+  const togglePauseVoice = useCallback(() => {
+    const r = recorderRef.current; if (!r) return;
+    if (r.isPaused()) { r.resume(); setVoicePaused(false); }
+    else { r.pause(); setVoicePaused(true); }
+  }, []);
+
+  // Space 暂停/继续、Esc 取消、Enter 发送（录制中生效，防冲突聊天列表滚动）。
+  useEffect(() => {
+    if (!recording) return;
+    const onKey: (e: Event) => void = (e) => {
+      const k = e as unknown as { key: string; code?: string; preventDefault(): void };
+      if (k.key === "Escape") { k.preventDefault(); cancelVoice(); }
+      else if (k.key === "Enter") { k.preventDefault(); stopVoiceSend(); }
+      else if (k.key === " " || k.code === "Space") { k.preventDefault(); togglePauseVoice(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [recording, cancelVoice, stopVoiceSend, togglePauseVoice]);
+
   return (
     <>
       {showJump && convId && (
@@ -216,8 +279,35 @@ export function Composer(p: ComposerProps) {
                 const shouldSend = sendKey === "cmd" ? (e.metaKey || e.ctrlKey) : !e.shiftKey;
                 if (shouldSend) { e.preventDefault(); send(); }
               }} />
-            <button onClick={send} disabled={!convId || composerMuteReason !== null}>发送</button>
+            {input.trim().length === 0 && pastedImages.length === 0 ? (
+              // 空框：显麦克风（P1）。不支持录制的浏览器（Chrome/Firefox 默认不支持 audio/mp4）→ 置灰 + tooltip。
+              <button className="mic-btn"
+                      disabled={!convId || composerMuteReason !== null || !voiceProbe.supported}
+                      title={voiceProbe.supported ? "点击开始录音" : "当前浏览器不支持录制语音，可在 App 内发送"}
+                      onClick={startVoiceRecord}>
+                <Mic size={18} aria-hidden="true" />
+              </button>
+            ) : (
+              <button onClick={send} disabled={!convId || composerMuteReason !== null}>发送</button>
+            )}
           </footer>
+          {recording && (
+            <div className="voice-recorder-bar" role="dialog" aria-label="录音中">
+              <span className="rd" />
+              <span className="rec-timer">{Math.floor(recordElapsed / 60000)}:{String(Math.floor(recordElapsed / 1000) % 60).padStart(2, "0")}</span>
+              <span className="rec-livewave" aria-hidden>
+                {recordAmps.map((a, i) => (
+                  <i key={i} style={{ height: `${Math.max(3, a * 20)}px` }} />
+                ))}
+              </span>
+              <button className="rec-btn cancel" type="button" onClick={cancelVoice}>取消</button>
+              <button className="rec-btn cancel" type="button" onClick={togglePauseVoice}>{voicePaused ? "继续" : "暂停"}</button>
+              <button className="rec-btn send" type="button" onClick={stopVoiceSend}>发送</button>
+              <span className="rec-hint" style={{ fontSize: 11, opacity: 0.7 }}>
+                <kbd>Space</kbd> 暂停 · <kbd>Esc</kbd> 取消 · <kbd>Enter</kbd> 发送
+              </span>
+            </div>
+          )}
         </>
       )}
     </>

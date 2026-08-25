@@ -50,6 +50,8 @@ export interface ChatActions {
   onInputChange: (val: string) => void;
   onComposerPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   send: () => void;
+  /** Web P1 语音：Composer 录制完毕后回调 App 走 uploadVoice + sendMedia contentType=voice。 */
+  sendVoice: (blob: Blob, fileName: string, waveformBase64: string, durationMs: number) => Promise<void>;
   attachAnchorRef: RefObject<HTMLDivElement>;
   fileInputRef: RefObject<HTMLInputElement>;
   mentionPanelRef: RefObject<HTMLDivElement>;

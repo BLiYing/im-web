@@ -1861,6 +1861,23 @@ export default function App() {
   const onInputChangeEv = useEvent(onInputChange);
   const onComposerPasteEv = useEvent(onComposerPaste);
   const sendEv = useEvent(send);
+  // Web P1 语音：上传 ?as=voice → sendMedia contentType=voice + waveform；本地暂无 pending echo，
+  // ack 后走 pendingSends → appendMsg 逻辑与图片同款（imSdk sendContent 的默认路径）。
+  const sendVoice = useCallback(async (blob: Blob, fileName: string, waveformBase64: string, durationMs: number) => {
+    const client = clientRef.current;
+    const cid = convId;
+    if (!client || !cid) return;
+    try {
+      const { url, size } = await client.uploadVoice(blob, fileName);
+      client.sendMedia(url, "voice", peer || "", cid, {
+        duration: durationMs, fileSize: size, waveform: waveformBase64,
+      });
+    } catch (e) {
+      setToast((e as Error).message || "语音发送失败");
+    }
+  }, [convId, peer]);
+  const sendVoiceEv = useEvent(sendVoice);
+
   const chatActions = useMemo<ChatActions>(() => ({
     setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat: locateInChatEv,
     onGateTap: onGateTapEv, onMediaBubbleTap: onMediaBubbleTapEv, openReadyFile: openReadyFileEv, onPassiveMediaError: onPassiveMediaErrorEv,
@@ -1871,6 +1888,7 @@ export default function App() {
     cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
     openFavoritesPick: openFavoritesPickEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
     setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, send: sendEv,
+    sendVoice: sendVoiceEv,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   // 全部成员身份恒定 → 依赖为空，Context 值只建一次。
   // eslint-disable-next-line react-hooks/exhaustive-deps

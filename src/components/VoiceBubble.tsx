@@ -64,6 +64,16 @@ interface VoiceBubbleProps {
   audioSrc: string;
 }
 
+/// 会话级倍速偏好（per convId，localStorage 持久，与 iOS 同策略）。
+function speedKey(convId: string): string { return `im.voice.rate.${convId || "na"}`; }
+function loadSpeed(convId: string): number {
+  try { const s = Number(localStorage.getItem(speedKey(convId))); if (s === 1.5 || s === 2) return s; } catch { /* 隐私模式 */ }
+  return 1;
+}
+function saveSpeed(convId: string, r: number): void {
+  try { localStorage.setItem(speedKey(convId), String(r)); } catch { /* ignore */ }
+}
+
 /** [语音] m:ss 时长格式化——与后端 hub_voice.go formatVoiceDuration 同口径。 */
 function fmt(ms: number): string {
   const s = Math.max(0, Math.floor((ms || 0) / 1000));
@@ -126,9 +136,44 @@ export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
     audio.src = audioSrc;
     currentSrc = audioSrc;
     audio.currentTime = 0;
+    audio.playbackRate = loadSpeed(m.convId); // 应用会话级倍速
     audio.play().catch(() => undefined);
     if (!played && mid) { markPlayed(uid, m.convId, mid); setPlayed(true); }
     notify();
+  }
+
+  /** scrub 拖拽：>=4pt 阈值避免与列表滚动打架；用 pointerdown/move/up 支持鼠标+触摸。 */
+  const [scrubbing, setScrubbing] = useState(false);
+  const [scrubHint, setScrubHint] = useState<{ x: number; text: string } | null>(null);
+  function onWavePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!isCurrent || audio.duration <= 0) return;
+    const el = waveRef.current; if (!el) return;
+    el.setPointerCapture(e.pointerId);
+    setScrubbing(true);
+    updateScrub(e);
+  }
+  function updateScrub(e: React.PointerEvent<HTMLDivElement>) {
+    if (!isCurrent) return;
+    const el = waveRef.current; if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const p = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    audio.currentTime = p * audio.duration;
+    setScrubHint({ x: e.clientX - rect.left, text: `${fmt(p * dur)} / ${fmt(dur)}` });
+    notify();
+  }
+  function endScrub(e: React.PointerEvent<HTMLDivElement>) {
+    if (!scrubbing) return;
+    const el = waveRef.current; if (el) { try { el.releasePointerCapture(e.pointerId); } catch { /* not captured */ } }
+    setScrubbing(false);
+    setScrubHint(null);
+  }
+
+  /** 倍速胶囊：1x → 1.5x → 2x → 1x 循环，会话级记忆。 */
+  const [speed, setSpeed] = useState(loadSpeed(m.convId));
+  function cycleSpeed() {
+    const next = speed === 1 ? 1.5 : speed === 1.5 ? 2 : 1;
+    setSpeed(next); saveSpeed(m.convId, next);
+    if (isCurrent) audio.playbackRate = next;
   }
 
   // 气泡宽度按 duration 线性延展（限 168~280px；tokens 与 iOS 一致 min(96+dur*3.6, 240)，Web 略宽 to fit menu）。
@@ -148,14 +193,30 @@ export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
               onClick={(e) => { e.stopPropagation(); toggle(); }}>
         {playing ? "❚❚" : "▶"}
       </button>
-      <div className="voice-wave" ref={waveRef} aria-hidden>
+      <div className={`voice-wave${scrubbing ? " scrubbing" : ""}`}
+           ref={waveRef}
+           style={{ position: "relative", touchAction: "none" }}
+           onPointerDown={(e) => { e.stopPropagation(); onWavePointerDown(e); }}
+           onPointerMove={(e) => { if (scrubbing) { e.stopPropagation(); updateScrub(e); } }}
+           onPointerUp={endScrub}
+           onPointerCancel={endScrub}>
         {bars.map((v, i) => (
           <span key={i} className={i < activeCount ? "on" : undefined}
                 style={{ height: `${Math.max(3, v * 22)}px` }} />
         ))}
+        {scrubHint && (
+          <span className="voice-scrub-tip" style={{ left: `${scrubHint.x}px` }}>{scrubHint.text}</span>
+        )}
       </div>
       <div className="voice-meta">
-        {!played && <span className="voice-unplayed" aria-label="未播放" />}
+        {isCurrent && (
+          <button className={`voice-speed${mine ? " mine" : ""}`}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); cycleSpeed(); }}>
+            {speed === 1.5 ? "1.5x" : speed === 2 ? "2x" : "1x"}
+          </button>
+        )}
+        {!played && !isCurrent && <span className="voice-unplayed" aria-label="未播放" />}
         <span className="voice-dur">{durLabel}</span>
       </div>
     </div>
