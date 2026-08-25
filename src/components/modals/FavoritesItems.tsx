@@ -1,15 +1,17 @@
-import { Check, ChevronRight, Link as LinkIcon, MessageSquareQuote, MessagesSquare } from "lucide-react";
+import { Check, ChevronRight, MessageSquareQuote, MessagesSquare } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { ChatMessage, Conversation, Favorite } from "../../sdk/protocol";
 import type { DownloadState } from "../../download";
 import { downloadText } from "../../download";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, favoriteToMessage, isPreviewableFile, isUrlText, looksLikeChatRecordJSON, parseChatRecord } from "../../messageContent";
+import { fileNameFromContent, favoriteToMessage, isPreviewableFile, looksLikeChatRecordJSON, parseChatRecord, firstURLInText } from "../../messageContent";
 import { formatFileSize } from "../../fileMetadata";
 import { favoritePreviewText, sourceGroupName, type FavoriteSourceGroup } from "../../favoritesGrouping";
 import { MediaTile } from "../MediaTile";
 import { FileGateIcon } from "../FileGateIcon";
 import { Avatar } from "../Avatar";
+import { DetailLinkItem } from "../DetailLinkItem";
+import type { LinkPreview } from "../LinkCard";
 
 /**
  * 收藏弹窗的各展示件（B 方案，FAVORITES_DESIGN §14 ③）：
@@ -34,7 +36,8 @@ export function favKind(f: Favorite): FavKind {
   if (ct === "file" || ct === "audio" || ct === "voice") return "file";
   // 合并转发「聊天记录」：内容是 JSON，须在 link/text 前拦下——否则会当纯文本显 JSON 串。
   if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return "record";
-  if (ct === "link" || (ct === "text" && isUrlText(f.content))) return "link";
+  // 草图 §D：text 只要含 URL 就归"链接"分类（与聊天页/详情页 §C 视图口径一致）。
+  if (ct === "link" || (ct === "text" && firstURLInText(f.content) !== null)) return "link";
   return "text";
 }
 
@@ -128,14 +131,35 @@ export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onMen
   );
 }
 
-/** 链接 / 文本 / 聊天记录 chip：v1 统一左图标行（lucide on --accent-soft）。 */
-export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onMenu, onDelete }: RowCommon) {
+/** 链接 / 文本 / 聊天记录 chip：v1 统一左图标行（lucide on --accent-soft）；链接走草图 §D 的 URL 卡（DetailLinkItem）。 */
+export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onMenu, onDelete, fetchLinkPreview }: RowCommon & {
+  fetchLinkPreview?: (u: string) => Promise<LinkPreview>; // link kind 时必传（其它 kind 忽略）
+}) {
   const k = favKind(f);
+  if (k === "link" && fetchLinkPreview) {
+    // 链接分类：草图 §D——URL 卡（favicon + og:title + host+path + 时间）+ 原文引用（有正文时）+ 来源。
+    // 首个 URL 起卡（多 URL 消息=一条收藏，其它 URL 保留在原文引用里）。
+    const url = firstURLInText(f.content) || f.content;
+    // "多 URL 混排文本"的原文引用：正文与 URL 不相等时补一行引用（草图 §D "「先扔这里：… ——晚上聊」"）。
+    const originalText = f.content.trim() !== url.trim() ? f.content : null;
+    return (
+      <div className={`fav-item link${pickMulti && on ? " on" : ""}`} onClick={onClick} onContextMenu={onMenu}>
+        <div className="fav-linkbody">
+          <DetailLinkItem url={url} timeText="" fetchPreview={fetchLinkPreview}
+            source={sourceLabel(f)}
+            onOpen={onClick} onContextMenu={onMenu} />
+          {originalText && <div className="fav-linkquote">「{originalText}」</div>}
+          <div className="fav-meta">
+            <span className="fav-src">来自{sourceLabel(f)}</span>
+            {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
+          </div>
+        </div>
+        <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
+      </div>
+    );
+  }
   let icon: ReactNode, body: ReactNode;
-  if (k === "link") {
-    icon = <LinkIcon size={22} />;
-    body = <div className="fav-content link">{f.content}</div>;
-  } else if (k === "record") {
+  if (k === "record") {
     const r = parseChatRecord(f.content);
     icon = <MessagesSquare size={22} />;
     body = <div className="fav-content">{r.t || "聊天记录"}<span className="fav-record-count"> · {r.items.length} 条消息</span></div>;

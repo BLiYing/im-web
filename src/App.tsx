@@ -33,6 +33,7 @@ import {
   replyPreviewOf,
   parseChatRecord, copyImageToClipboard,
   syntheticViewerMessage, minSeqOf, type ChatRecord,
+  splitTextByURL,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { HomeSearchResults } from "./components/HomeSearchResults";
@@ -1113,14 +1114,24 @@ export default function App() {
   // 命中词高亮 highlightText 已抽到 ./searchHighlight（纯函数，与首页聊天记录摘要共用）。
   const highlightSearch = (text: string, keyBase: string): ReactNode =>
     searchOpen ? highlightText(text, searchQuery, keyBase) : text;
+  // 一段"非提及"文本里的 URL 切成蓝色下划线可点 <a>；无 URL 直接走搜索高亮（原行为）。
+  // 搜索态命中词高亮**不进入** URL 子串（避免 <a> 里嵌 <mark> 的选中/复制怪异）——搜索是临时态，可接受。
+  const renderLinkifiedText = (text: string, keyBase: string): ReactNode => {
+    const parts = splitTextByURL(text);
+    if (parts.length === 1 && parts[0].kind === "t") return highlightSearch(text, keyBase);
+    return parts.map((p, i) => p.kind === "u"
+      ? <a key={`${keyBase}-u${i}`} href={p.text} target="_blank" rel="noopener noreferrer"
+           className="msg-link" onClick={(e) => e.stopPropagation()}>{p.text}</a>
+      : <Fragment key={`${keyBase}-t${i}`}>{highlightSearch(p.text, `${keyBase}-h${i}`)}</Fragment>);
+  };
   // 把一段文本渲染为高亮 @提及的节点：命中的 `@昵称` token 上色；有 uid 且非多选态时可点 → 跳该成员资料页。
-  // @所有人 无 uid 只高亮不可点。无提及时直接返回字符串（叠加会话内搜索命中词高亮）。
+  // @所有人 无 uid 只高亮不可点。无提及时叠加会话内搜索命中词高亮 + URL 高亮（http(s) → 蓝色下划线可点）。
   const renderMentionText = (m: ChatMessage, text: string) => {
     const entries = mentionEntriesFor(m);
-    if (entries.length === 0) return highlightSearch(text, "sh");
+    if (entries.length === 0) return renderLinkifiedText(text, "sh");
     const uidByName = new Map(entries.map((e) => [e.name, e.uid]));
     return segmentMentions(text, entries.map((e) => e.name)).map((s, i) => {
-      if (!s.mention) return <Fragment key={i}>{highlightSearch(s.text, `sh${i}`)}</Fragment>;
+      if (!s.mention) return <Fragment key={i}>{renderLinkifiedText(s.text, `sh${i}`)}</Fragment>;
       const uid = uidByName.get(s.text.slice(1)); // 去掉 @ 取昵称查 uid
       if (selectMode || !uid) return <span key={i} className="mention-hl">{s.text}</span>;
       return <span key={i} className="mention-hl mention-tap"
@@ -2669,6 +2680,7 @@ export default function App() {
           onOpenRecord={(f) => setRecordStack([parseChatRecord(f.content)])}
           onPick={sendFavoritesToCurrent}
           onClose={closeFavorites}
+          fetchLinkPreview={fetchLinkPreview}
         />
       )}
 

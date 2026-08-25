@@ -58,6 +58,7 @@ describe("DetailTabs", () => {
     canManageMember: () => true, onMemberMenu: vi.fn(),
     mediaGate: () => undefined, onGateTap: vi.fn(), onOpenViewer: vi.fn(),
     onFileMenu: vi.fn(), onMediaError: vi.fn(), onOpenFile: vi.fn(),
+    fetchLinkPreview: async (u: string) => ({ url: u }), // 测试桩：不出卡（返回空 og），仅让类型对齐
   };
   it("成员页签：渲染成员行；添加成员 → onAddMember(convId)；⋯ → onMemberMenu", () => {
     const onAddMember = vi.fn(), onMemberMenu = vi.fn();

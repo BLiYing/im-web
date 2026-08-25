@@ -26,7 +26,7 @@ import {
  */
 export function FavoritesModal({
   favorites, mode = "browse", sourceLabel, actions, glue, myUid, conversations, convDisplayLabel, convAvatarUrl,
-  onOpenMedia, onOpenLink, onOpenRecord, onPick, onClose,
+  onOpenMedia, onOpenLink, onOpenRecord, onPick, onClose, fetchLinkPreview,
 }: {
   favorites: Favorite[];
   mode?: "browse" | "pick";
@@ -42,6 +42,7 @@ export function FavoritesModal({
   onOpenRecord: (fav: Favorite) => void;   // 聊天记录 → 打开记录查看器（recordStack）
   onPick?: (favs: Favorite[]) => void;     // pick 模式：发送选中项到当前会话
   onClose: () => void;
+  fetchLinkPreview: (u: string) => Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }>;
 }) {
   const isPick = mode === "pick";
   const [viewMode, setViewMode] = useState<FavoritesViewMode>(() => (isPick ? "messages" : loadFavoritesViewMode()));
@@ -200,7 +201,8 @@ export function FavoritesModal({
             <div className="fav-list">
               {shown.map((f) => (
                 <FavRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel}
-                  onClick={onRowClick(f)} onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
+                  onClick={onRowClick(f)} onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)}
+                  fetchLinkPreview={fetchLinkPreview} />
               ))}
             </div>
           )}

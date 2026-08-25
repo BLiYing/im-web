@@ -6,9 +6,11 @@ export const linkPreviewCache = new Map<string, LinkPreview | null>(); // 进程
 const inflight = new Map<string, Promise<LinkPreview | null>>(); // 同一 URL 并发挂载时共享同一次请求，避免 N 次重复抓取
 
 /** URL 消息渲染：始终显示可点击的 URL 文本，其下方叠加 OG 富预览卡片（拉到 OG 才显示卡片，否则仅链接）。
- *  层3：onOpenInvite 非空且 url 是本站邀请链接（/q/u、/q/g）→ 拦截点击走站内 resolve 流程（不开新标签页）。 */
-export function LinkCard({ url, fetchPreview, onMediaLoad, onOpenInvite }: {
+ *  层3：onOpenInvite 非空且 url 是本站邀请链接（/q/u、/q/g）→ 拦截点击走站内 resolve 流程（不开新标签页）。
+ *  cardOnly=true（文本气泡内混排 URL 时用）：省掉顶部的 URL 文本行，正文里已经有 <a> 高亮的 URL，避免重复。 */
+export function LinkCard({ url, fetchPreview, onMediaLoad, onOpenInvite, cardOnly }: {
   url: string; fetchPreview: (u: string) => Promise<LinkPreview>; onMediaLoad?: () => void; onOpenInvite?: (u: string) => void;
+  cardOnly?: boolean;
 }) {
   const [p, setP] = useState<LinkPreview | null | undefined>(linkPreviewCache.get(url));
   useEffect(() => {
@@ -30,6 +32,20 @@ export function LinkCard({ url, fetchPreview, onMediaLoad, onOpenInvite }: {
   const intercept = onOpenInvite && isOwnInviteLink(url, location.origin)
     ? (e: React.MouseEvent) => { e.preventDefault(); onOpenInvite(url); }
     : undefined;
+  // cardOnly：只出卡片本体、没有 URL 文本；抓不到 og 就返回 null（正文里的高亮 <a> 已承载点击）。
+  if (cardOnly) {
+    if (!hasCard) return null;
+    return (
+      <a className="link-card" href={url} target="_blank" rel="noreferrer" onClick={intercept}>
+        {p!.image && <img className="link-card-img" src={p!.image} alt="" onLoad={onMediaLoad} />}
+        <div className="link-card-body">
+          <div className="link-card-title">{p!.title || url}</div>
+          {p!.description && <div className="link-card-desc">{p!.description}</div>}
+          <div className="link-card-site">{p!.site_name || host}</div>
+        </div>
+      </a>
+    );
+  }
   return (
     <span className="url-msg">
       <a className="btext msg-link" href={url} target="_blank" rel="noreferrer" onClick={intercept}>{url}</a>

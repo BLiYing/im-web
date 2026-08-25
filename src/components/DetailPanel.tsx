@@ -77,7 +77,7 @@ export function DetailPanel(p: DetailPanelProps) {
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail,
   } = p;
   const { clientRef, setToast, comingSoon } = useAppServices();
-  const { setViewer, onGateTap, onPassiveMediaError, openReadyFile } = useChatActions();
+  const { setViewer, onGateTap, onPassiveMediaError, openReadyFile, fetchLinkPreview } = useChatActions();
     const d = detail;
     const conv = conversations.find((c) => c.conv_id === d.convId);
     const gp = d.isGroup ? groupInfos[d.convId] : undefined;
@@ -275,6 +275,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 onOpenViewer={(m) => setViewer({ m, fromGallery: true })}
                 onFileMenu={(e, m) => setFileMenu({ x: e.clientX, y: e.clientY, m })}
                 onMediaError={(m) => void onPassiveMediaError(m)} onOpenFile={openReadyFile}
+                fetchLinkPreview={fetchLinkPreview}
               />
               </>)}
             </>

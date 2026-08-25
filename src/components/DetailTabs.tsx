@@ -1,5 +1,5 @@
 import type { MouseEvent } from "react";
-import { UserPlus, Link2 } from "lucide-react";
+import { UserPlus } from "lucide-react";
 import type { ChatMessage, GroupInfo, GroupMember } from "../sdk/protocol";
 import type { DownloadState } from "../download";
 import { downloadText } from "../download";
@@ -10,6 +10,24 @@ import { Avatar } from "./Avatar";
 import { MediaTile } from "./MediaTile";
 import { FileGateIcon } from "./FileGateIcon";
 import { FileTypeIcon } from "../FileTypeIcon";
+import { DetailLinkItem } from "./DetailLinkItem";
+import type { LinkPreview } from "./LinkCard";
+
+// 详情页链接 tab 的时间格式（草图 §C：HH:mm / 昨天 HH:mm / M月d日）——先用最小实现：
+// 今日→HH:mm；昨日→"昨天 HH:mm"；更早→"M月d日"（跨年不特殊，年份不显）。iOS 侧沿用 IMFormatFileDateTime 完整时间，
+// 视觉略有出入但语义一致（快速迭代，等收藏页 §E 统一改造再对齐）。
+function detailLinkTimeText(ts: number): string {
+  if (!ts || ts <= 0) return "";
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  if (sameDay) return hm;
+  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${hm}`;
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
 
 export type DetailTab = "members" | "media" | "files" | "links";
 
@@ -19,6 +37,7 @@ export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, links,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu,
   mediaGate, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
+  fetchLinkPreview,
 }: {
   tabs: Array<{ k: DetailTab; label: string }>;
   activeTab: DetailTab;
@@ -39,6 +58,7 @@ export function DetailTabs({
   onFileMenu: (e: MouseEvent, m: ChatMessage) => void;
   onMediaError: (m: ChatMessage) => void;
   onOpenFile: (m: ChatMessage) => void;
+  fetchLinkPreview: (u: string) => Promise<LinkPreview>;
 }) {
   return (
     <>
@@ -125,12 +145,14 @@ export function DetailTabs({
         )}
         {activeTab === "links" && (
           links.length === 0 ? <div className="detail-empty">暂无链接</div> : (
+            // 详情页链接 tab（草图 §C）：36×36 favicon + t1 og:title(host 兜底) + t2 host+path(mono) + t3 时间。
+            // 无来源、无原文预览（收藏页 §E 才有 source）；点整行=打开链接。
             <div className="detail-filelist">
               {links.map((m) => (
-                <a key={msgKey(m)} className="detail-linkitem" href={m.content} target="_blank" rel="noreferrer"
-                   onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
-                  <Link2 size={16} /><span className="detail-file-name">{m.content}</span>
-                </a>
+                <DetailLinkItem key={msgKey(m)} url={m.content}
+                  timeText={detailLinkTimeText(m.timestamp)}
+                  fetchPreview={fetchLinkPreview}
+                  onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }} />
               ))}
             </div>
           )

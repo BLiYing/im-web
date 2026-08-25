@@ -15,7 +15,7 @@ import { formatMediaDuration, formatUploadProgress } from "../media";
 import { downloadGlyph, downloadText, type DownloadState, type MediaKind } from "../download";
 import {
   isUrlText, localizeSnippet, selectableInMultiSelect, parseChatRecord, recordItemPreview,
-  fileNameFromContent, mediaBoxProps, isPreviewableFile, videoFrameSrc,
+  fileNameFromContent, mediaBoxProps, isPreviewableFile, videoFrameSrc, firstURLInText,
 } from "../messageContent";
 import { Avatar } from "./Avatar";
 import { AlbumGrid } from "./AlbumGrid";
@@ -356,7 +356,16 @@ export function MessageList(p: MessageListProps) {
                   <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad}
                             onOpenInvite={(u) => void handleScanRaw(u)} />
                 ) : (
-                  renderMessageText(m)
+                  // 文本气泡：正文（含 URL 高亮 <a>）+ 若首个 URL 存在则挂 preview 卡（cardOnly=不再重复 URL 文本行）。
+                  // 抓不到 og 时 LinkCard 内部返回 null 静默隐藏（负缓存），只留正文里的高亮 —— 与 iOS 一致。
+                  <>
+                    {renderMessageText(m)}
+                    {(() => {
+                      const u = firstURLInText(m.content);
+                      return u ? <LinkCard url={u} cardOnly fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad}
+                                          onOpenInvite={(u2) => void handleScanRaw(u2)} /> : null;
+                    })()}
+                  </>
                 )}
                 {/* 图说 caption（Telegram 模型）：图文/视频文/文件文的随附文本，渲染在媒体/文件卡下方、同一气泡内。
                     媒体气泡时间压在图上（media-badge-br），故 caption 只出纯文字；文件气泡时间仍在下方 bmeta。 */}

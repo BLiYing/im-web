@@ -28,11 +28,14 @@ describe("matchesCategory", () => {
     expect(matchesCategory(fav({ content_type: "image" }), "file")).toBe(false);
   });
 
-  it("链接 = link 类型 或 text 且整段是 URL（与详情页 isUrlText 对齐）", () => {
+  it("链接 = link 类型 或 text 且含 URL（草图 §D：text 混排 URL 也归链接）", () => {
     expect(matchesCategory(fav({ content_type: "link", content: "https://a.com" }), "link")).toBe(true);
     expect(matchesCategory(fav({ content_type: "text", content: "https://a.com/x" }), "link")).toBe(true);
-    expect(matchesCategory(fav({ content_type: "text", content: "看看 https://a.com" }), "link")).toBe(false);
+    expect(matchesCategory(fav({ content_type: "text", content: "看看 https://a.com" }), "link")).toBe(true);
     expect(matchesCategory(fav({ content_type: "text", content: "普通文本" }), "link")).toBe(false);
+    // "text 混排 URL"归链接 → 文本分类不再包含它（避免重复计入）。
+    expect(matchesCategory(fav({ content_type: "text", content: "看看 https://a.com" }), "text")).toBe(false);
+    expect(matchesCategory(fav({ content_type: "text", content: "普通文本" }), "text")).toBe(true);
   });
 
   it("语音 = audio|voice", () => {

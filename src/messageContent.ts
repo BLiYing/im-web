@@ -7,6 +7,33 @@ import { mediaDisplaySize } from "./media";
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
 export const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
 
+/** 匹配文本里的 http(s) URL。末尾常见标点 .,;:!?)]}' 单独回吐，避免把句末标点吃进 URL。
+ *  与 Preview 抓取端契约一致：只识别显式 http(s)，不做裸域猜测（避 example.com 误识 + 后端 SSRF 面）。 */
+export const URL_REGEX = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?)\]}]/g;
+
+/** 抽出文本里第一个 URL；无 → null。用于文本气泡下方 preview 卡（首个 URL 起卡，其余仅正文高亮）。 */
+export function firstURLInText(text: string | undefined | null): string | null {
+  if (!text) return null;
+  URL_REGEX.lastIndex = 0;
+  const m = URL_REGEX.exec(text);
+  return m ? m[0] : null;
+}
+
+/** 文本切片：{kind:"t",text} 普通段 / {kind:"u",url} URL 段。渲染层按 kind 分支包 <a>。
+ *  一段文本混排多个 URL 时全部识别；纯 URL 消息由上游 isUrlText 判定不走此函数。 */
+export function splitTextByURL(text: string): Array<{ kind: "t" | "u"; text: string }> {
+  const out: Array<{ kind: "t" | "u"; text: string }> = [];
+  URL_REGEX.lastIndex = 0;
+  let last = 0;
+  for (let m = URL_REGEX.exec(text); m; m = URL_REGEX.exec(text)) {
+    if (m.index > last) out.push({ kind: "t", text: text.slice(last, m.index) });
+    out.push({ kind: "u", text: m[0] });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push({ kind: "t", text: text.slice(last) });
+  return out.length > 0 ? out : [{ kind: "t", text }];
+}
+
 /** 合并转发卡片的引用快照：`[聊天记录] 标题`。兼容存量截断快照（旧引用把 JSON 截 60 字入库，
  *  解析不出时正则抠 "t":"…" 标题）；全失败回落 `[聊天记录]`。与 iOS IMChatRecordSnippet 同语义。 */
 export function chatRecordSnippet(json: string): string {

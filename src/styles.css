@@ -1187,6 +1187,49 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-file-size { color: var(--text-secondary); font-size: 12px; }
 .detail-empty { text-align: center; color: var(--text-secondary); padding: 32px 0; font-size: 14px; }
 
+/* 详情页 / 收藏页链接 tab 的 URL 卡（草图 §C/§D）：36×36 favicon + t1/t2/t3。
+   与 .detail-fileitem 同一容器 gap（.detail-filelist）；hover 描边同款。收藏页额外 .detail-linkitem-source。 */
+.detail-linkitem-v2 {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 9px 16px; color: var(--text); text-decoration: none; cursor: pointer;
+}
+.detail-linkitem-v2 + .detail-linkitem-v2 { border-top: 1px solid var(--separator); }
+.detail-linkitem-v2:hover { background: var(--surface-hover); }
+.detail-linkitem-favicon {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; font-weight: 700;
+  background: var(--accent-soft, rgba(47, 85, 164, 0.14)); color: var(--accent);
+  margin-top: 1px;
+}
+.detail-linkitem-body { min-width: 0; flex: 1; }
+.detail-linkitem-t1 {
+  font-size: 16px; color: var(--text); line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detail-linkitem-t2 {
+  font-size: 12px; color: var(--text-secondary); margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.detail-linkitem-source {
+  font-size: 11px; color: var(--accent); margin-top: 2px;
+}
+.detail-linkitem-t3 {
+  font-size: 12px; color: var(--text-tertiary, var(--text-secondary)); margin-top: 2px;
+}
+
+/* 收藏页链接分类：URL 卡（DetailLinkItem）嵌在 .fav-item link 里，下方补一行原文引用（有正文时）。 */
+.fav-item.link { padding: 0; overflow: hidden; }
+.fav-item.link .fav-linkbody { flex: 1; min-width: 0; }
+.fav-item.link .fav-linkbody .detail-linkitem-v2 { padding: 10px 14px 6px; }
+.fav-item.link .fav-linkbody .fav-linkquote {
+  margin: 4px 14px 4px 62px; padding: 6px 10px; font-size: 12.5px; color: var(--text-secondary);
+  background: var(--panel-2, rgba(0, 0, 0, 0.03)); border-left: 2px solid var(--separator); border-radius: 0 6px 6px 0;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.fav-item.link .fav-linkbody .fav-meta { padding: 0 14px 10px 62px; }
+
 /* 群管理二级视图 */
 .detail-manage-head { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 8px; padding: 14px 16px; font-weight: 600; font-size: 17px; color: var(--text); background: var(--page-bg); border-bottom: 1px solid var(--separator); }
 .detail-manage-avatar { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 0; background: var(--page-bg); }

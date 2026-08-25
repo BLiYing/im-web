@@ -3,7 +3,7 @@
 // 归类判定与详情页对齐：链接 = content_type==='link' 或 text 且整体形如 URL（isUrlText）；
 // 聊天记录 = content_type==='chat_record' 或内容形如合并转发 JSON（老收藏兜底），且**文本段排除记录**。
 import type { Favorite } from "./sdk/protocol";
-import { isUrlText, looksLikeChatRecordJSON } from "./messageContent";
+import { looksLikeChatRecordJSON, firstURLInText } from "./messageContent";
 
 /** 分类种类。all 仅 v1/兼容用；B 方案页签不含 all。 */
 export type FavoriteKind = "all" | "media" | "file" | "link" | "voice" | "text" | "record";
@@ -28,11 +28,12 @@ export function matchesCategory(f: Favorite, kind: FavoriteKind): boolean {
     case "all": return true;
     case "media": return ct === "image" || ct === "video";
     case "file": return ct === "file";
-    // 链接 = 显式 link 类型，或整段就是一个 URL 的文本（与详情页/iOS IMLooksLikeURL 对齐）。
-    case "link": return ct === "link" || (ct === "text" && isUrlText(f.content));
+    // 链接 = 显式 link 类型，或 text 且**含 URL**（草图 §D：混排文本"看看 https://xxx"也进链接分类；
+    // 与聊天页/详情页 §C 视图口径一致——数据不重分类、视图按需过滤）。
+    case "link": return ct === "link" || (ct === "text" && firstURLInText(f.content) !== null);
     case "voice": return ct === "audio" || ct === "voice";
-    // 文本 = 纯 text 且不是 URL、不是聊天记录 JSON（各归链接/记录，不重复计入）。
-    case "text": return ct === "text" && !isUrlText(f.content) && !isRecord(f);
+    // 文本 = 纯 text 且不含 URL、不是聊天记录 JSON（各归链接/记录，不重复计入）。
+    case "text": return ct === "text" && firstURLInText(f.content) === null && !isRecord(f);
     case "record": return isRecord(f);
   }
 }
