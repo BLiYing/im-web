@@ -4,7 +4,7 @@ import type { ChatMessage, GroupInfo, GroupMember } from "../sdk/protocol";
 import type { DownloadState } from "../download";
 import { downloadText } from "../download";
 import { formatFileSize } from "../fileMetadata";
-import { fileNameFromContent, isPreviewableFile } from "../messageContent";
+import { fileNameFromContent, isPreviewableFile, firstURLInText } from "../messageContent";
 import { msgKey } from "../album";
 import { Avatar } from "./Avatar";
 import { MediaTile } from "./MediaTile";
@@ -151,12 +151,16 @@ export function DetailTabs({
             // 详情页链接 tab（草图 §C）：36×36 favicon + t1 og:title(host 兜底) + t2 host+path(mono) + t3 时间。
             // 无来源、无原文预览（收藏页 §E 才有 source）；点整行=打开链接。
             <div className="detail-filelist">
-              {links.map((m) => (
-                <DetailLinkItem key={msgKey(m)} url={m.content}
-                  timeText={detailLinkTimeText(m.timestamp)}
-                  fetchPreview={fetchLinkPreview}
-                  onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }} />
-              ))}
+              {links.map((m) => {
+                // 混排文本 "看看 https://foo.com 好"：url 只取首个 URL，否则把整段中文喂给 preview API → 404。
+                const url = firstURLInText(m.content) || m.content;
+                return (
+                  <DetailLinkItem key={msgKey(m)} url={url}
+                    timeText={detailLinkTimeText(m.timestamp)}
+                    fetchPreview={fetchLinkPreview}
+                    onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }} />
+                );
+              })}
             </div>
           )
         )}

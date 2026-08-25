@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, GroupMember } from "../sdk/protocol";
 import type { DownloadState } from "../download";
-import { isUrlText } from "../messageContent";
+import { firstURLInText } from "../messageContent";
 import { useAppServices } from "../AppServicesContext";
 import { useChatActions } from "../ChatActionsContext";
 import { Avatar } from "./Avatar";
@@ -114,7 +114,9 @@ export function DetailPanel(p: DetailPanelProps) {
       .sort((a, b) => b.convSeq - a.convSeq);
     const files = detailMsgs.filter((m) => isPresentable(m) && m.contentType === "file").sort((a, b) => b.convSeq - a.convSeq);
     const links = detailMsgs.filter((m) =>
-      isPresentable(m) && (m.contentType === "text" || m.contentType === "link") && isUrlText(m.content)
+      // 与 iOS IMChatDetailTabs.matchesKind: 同款口径：text 只要**含 URL** 就进链接 tab（草图 §D），
+      // 老的 isUrlText 只认整段 = URL，会漏掉"看看 https://xxx"这类混排消息。
+      isPresentable(m) && (m.contentType === "text" || m.contentType === "link") && firstURLInText(m.content) !== null
     ).sort((a, b) => b.convSeq - a.convSeq);
     const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
       ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }]

@@ -1200,7 +1200,7 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-linkitem-favicon {
   width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 15px; font-weight: 700;
+  /* 统一 <Link2> 图标（accent 色 on accent-soft 底），非按 host 生成的伪 favicon */
   background: var(--accent-soft, rgba(47, 85, 164, 0.14)); color: var(--accent);
   margin-top: 1px;
 }

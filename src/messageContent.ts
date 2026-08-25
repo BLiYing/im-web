@@ -7,9 +7,10 @@ import { mediaDisplaySize } from "./media";
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
 export const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
 
-/** 匹配文本里的 http(s) URL。末尾常见标点 .,;:!?)]}' 单独回吐，避免把句末标点吃进 URL。
+/** 匹配文本里的 http(s) URL。末尾常见标点回吐（ASCII: .,;:!?)]}" 中文全角: ，。！？；：、）】》」』""''… 顿号等），
+ *  避免把句末标点/中文标点吃进 URL（否则"看 https://foo.com/，好文"→ URL 会吸到"https://foo.com/，好文"→ preview 404）。
  *  与 Preview 抓取端契约一致：只识别显式 http(s)，不做裸域猜测（避 example.com 误识 + 后端 SSRF 面）。 */
-export const URL_REGEX = /https?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?)\]}]/g;
+export const URL_REGEX = /https?:\/\/[^\s<>()"'（【《「『“‘]+[^\s<>()"'.,;:!?)\]}，。！？；：、）】》」』“”‘’…]/g;
 
 /** 抽出文本里第一个 URL；无 → null。用于文本气泡下方 preview 卡（首个 URL 起卡，其余仅正文高亮）。 */
 export function firstURLInText(text: string | undefined | null): string | null {
