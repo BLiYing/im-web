@@ -7,10 +7,15 @@ import { mediaDisplaySize } from "./media";
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
 export const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
 
-/** 匹配文本里的 http(s) URL。末尾常见标点回吐（ASCII: .,;:!?)]}" 中文全角: ，。！？；：、）】》」』""''… 顿号等），
- *  避免把句末标点/中文标点吃进 URL（否则"看 https://foo.com/，好文"→ URL 会吸到"https://foo.com/，好文"→ preview 404）。
- *  与 Preview 抓取端契约一致：只识别显式 http(s)，不做裸域猜测（避 example.com 误识 + 后端 SSRF 面）。 */
-export const URL_REGEX = /https?:\/\/[^\s<>()"'（【《「『“‘]+[^\s<>()"'.,;:!?)\]}，。！？；：、）】》」』“”‘’…]/g;
+/** 匹配文本里的 http(s) URL。
+ *  中部只允许 URL 合法字符（RFC 3986 unreserved + reserved + pct-encoded 的 ASCII 子集，
+ *  即 A-Z a-z 0-9 - . _ ~ : / ? # [ ] @ ! $ & ' ( ) * + , ; = %）——遇任何非 URL 字符（空白 /
+ *  中文汉字 / 中文标点 / <>"' 等）自然作为边界。末尾再回吐句末标点 .,;:!?)]}"' 避免"看 https://foo.com."
+ *  把句号吃进 URL；中文标点无需单列，因为它们已经不在中部合法字符集里。
+ *  与 Preview 抓取端契约一致：只识别显式 http(s)，不做裸域猜测（避 example.com 误识 + 后端 SSRF 面）。
+ *  修 bug：老正则用 `[^\s<>()"'【...]` 反向排除，中文汉字都通过 → "分身乏术，https://foo.com，好文"
+ *  被吸成整段（中文都在中部集合内），preview API 拿到含中文的 URL 直接 404。 */
+export const URL_REGEX = /https?:\/\/[-A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%]+[-A-Za-z0-9_~/#\[\]@!$&'*+=%]/g;
 
 /** 抽出文本里第一个 URL；无 → null。用于文本气泡下方 preview 卡（首个 URL 起卡，其余仅正文高亮）。 */
 export function firstURLInText(text: string | undefined | null): string | null {
