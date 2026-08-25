@@ -24,6 +24,17 @@ export function Avatar({ url, label, seed, cls = "avatar", children, onClick }: 
   // 回退首字母色圈，与 iOS 一致；否则浏览器会画自带的「破图问号」。url 变更（换头像/切账号）后重试。
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [url]);
+  // 系统通知会话（seed=system）：头像走应用 logo（/im-logo.png）——服务端 avatar_url 恒空。
+  // 见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §2.1。
+  if (seed === "system") {
+    return (
+      <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
+           style={{ ...(onClick ? { cursor: "pointer" } : null), background: "#fff" }}>
+        <img className="avatar-img" src="/im-logo.png" alt="系统通知" />
+        {children}
+      </div>
+    );
+  }
   const showImg = !!url && !failed;
   const bg = showImg ? undefined : avatarColor(seed ?? label);
   return (

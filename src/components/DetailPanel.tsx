@@ -98,6 +98,9 @@ export function DetailPanel(p: DetailPanelProps) {
     // 好友准入（微信式，任务一 P0）：非好友不显示「消息/呼叫/视频」，改显「加好友」。
     // 拉黑的好友 status 仍 accepted（仍算好友，可发消息），故只看 status 不看 blocked。
     const detailPeerIsFriend = !d.isGroup && !!d.peer && friends.some((f) => f.user_id === d.peer && f.status === "accepted");
+    // 系统通知会话（peer=system）：资料页精简版——不显加好友/消息/呼叫/视频/搜索/拉黑，
+    // 只保留头像+说明+清空聊天。见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §5.3 / §7 权限矩阵。
+    const isSystemPeer = !d.isGroup && d.peer === "system";
     // 非好友（单聊）只保留头像 + 操作排（加好友/更多），隐藏设置·备注名·页签——尚未建立关系时这些设置无意义。
     // 仅隐藏，数据加载逻辑不动（加为好友后重新渲染即恢复）。与 iOS sectionLayout 同语义。
     const showDetailBody = d.isGroup || detailPeerIsFriend;
@@ -149,7 +152,7 @@ export function DetailPanel(p: DetailPanelProps) {
 
               {/* ---- 操作排 pills ---- */}
               <div className="detail-pills">
-                {!d.isGroup && !detailPeerIsFriend && (
+                {!isSystemPeer && !d.isGroup && !detailPeerIsFriend && (
                   <button className="detail-pill" onClick={() => void doFriendAction(d.peer!, async () => {
                     // 已直接成为好友（我曾单向删除对方而对方仍视我为好友）→ 不吐司，doFriendAction 的
                     // refreshFriends 会让操作排/卡片立即恢复；说「已发送申请」反而误导要等对方通过。
@@ -157,18 +160,18 @@ export function DetailPanel(p: DetailPanelProps) {
                     if (!becameFriend) { setToast("已发送好友申请"); }
                   })}><UserPlus size={20} /><span>加好友</span></button>
                 )}
-                {!d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
                   <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
                 )}
-                {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
-                {!d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                {showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
+                {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
                 <div className="detail-pill-anchor">
                   <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                   {detailMore && (
                     <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
                       <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
-                      {!d.isGroup && (
+                      {!isSystemPeer && !d.isGroup && (
                         <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
                       )}
                       {d.isGroup && (
@@ -181,6 +184,12 @@ export function DetailPanel(p: DetailPanelProps) {
                   )}
                 </div>
               </div>
+              {/* 系统通知会话：一段说明卡替代普通用户资料页的备注/设置/页签。 */}
+              {isSystemPeer && (
+                <div className="detail-card" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: "var(--muted, #666)" }}>
+                  这是官方通知会话，用于发送<b style={{ color: "var(--fg, #222)" }}>登录提醒、账号安全</b>等系统事件。你不能回复此会话。
+                </div>
+              )}
 
               {showDetailBody && (<>
               {/* ---- 群公告 / 群简介卡（决策 17，Pills 下第一卡，全员只读；一行预览 + 点开全文视图） ---- */}

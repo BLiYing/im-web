@@ -1933,6 +1933,9 @@ export default function App() {
   // G2 输入栏禁言锁：成员级禁言（my_mute_until）或全员禁言（且我是普通成员）→ 禁用输入并改占位。
   // 服务端仍是权威（发上来照样拒 300208/300206），这里只提前告知、不给试错。
   const composerMuteReason: string | null = (() => {
+    // 系统通知会话（peer=system）：不能回复——同一锁机制统一到 composer disabled + 占位。
+    // 见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
+    if (!isGroupChat && peer === "system") return "此会话不支持回复";
     if (!isGroupChat || !activeGroupInfo) return null;
     if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return "你已被管理员禁言";
     if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return "本群已开启全员禁言";
