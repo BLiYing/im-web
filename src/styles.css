@@ -1049,6 +1049,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .role-badge { margin-left: 6px; padding: 1px 6px; border-radius: 8px; font-size: 11px; background: var(--surface); color: var(--text-secondary); border: 1px solid var(--separator); vertical-align: 1px; }
 /* 群主：实色绿底 + 白字，与绿色文字/管理员灰标拉开区分度（原绿底绿字对比度不足）。 */
 .role-badge.owner { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+/* G2 「禁言中」徽标：与角色徽章同排，橙色调不与绿/灰冲突；与 iOS IMDetailMemberCell 视觉对齐。 */
+.role-badge.mute { background: rgba(255,149,0,0.15); color: #ff9500; border-color: transparent; }
 .me-tag { margin-left: 6px; font-size: 11px; color: var(--text-secondary); }
 /* 群资料弹窗 */
 .group-modal { width: 360px; max-height: min(560px, calc(100vh - 64px)); }

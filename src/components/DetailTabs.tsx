@@ -84,6 +84,9 @@ export function DetailTabs({
                   <div className="detail-member-name">{m.group_nickname || m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
                   <div className="detail-member-sub">{m.user_id}</div>
                 </div>
+                {/* G2 被禁言标签：服务端把「永久」归一为大正数（MutePermanent = 1<<62），直接 >now 判定。
+                    与 role 徽标同排、居右紧挨（role 左侧），未禁言时不渲染，不占位。 */}
+                {(m.mute_until ?? 0) > Date.now() && <span className="role-badge mute">禁言中</span>}
                 {m.role === "owner" && <span className="role-badge owner">群主</span>}
                 {m.role === "admin" && <span className="role-badge">管理员</span>}
                 {canManageMember(gp, m) && (
