@@ -22,6 +22,7 @@ import { AlbumGrid } from "./AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./QuoteThumb";
 import { FileGateIcon } from "./FileGateIcon";
 import { LinkCard } from "./LinkCard";
+import { VoiceBubble } from "./VoiceBubble";
 import { useChatActions } from "../ChatActionsContext";
 
 export interface MessageListProps {
@@ -298,6 +299,10 @@ export function MessageList(p: MessageListProps) {
                       <div className="record-foot">聊天记录</div>
                     </div>
                   ); })()
+                ) : m.contentType === "voice" ? (
+                  // 语音气泡（P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §10）：
+                  // ▶ + 波形 + m:ss + 未播红点；单例 audio 同页面一次只播一条。
+                  <VoiceBubble m={m} mine={mine} uid={uid} audioSrc={m.content} />
                 ) : m.contentType === "file" ? (
                   // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。
                   uploading || !m.content ? (

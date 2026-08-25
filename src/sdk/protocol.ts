@@ -82,6 +82,8 @@ export interface ChatMessage {
   duration?: number;
   /** M4-7 极小模糊预览（~20px JPEG 的 data URI，image/video 带）：**未下载**卡片的模糊占位。空=回退中性占位。 */
   thumb?: string;
+  /** voice 振幅指纹（base64，原始字节 ≤120，每字节 0~100 振幅百分比）：收端不下载音频即可画气泡波形；空=退化等高条纹。P0。 */
+  waveform?: string;
   /** M4-8 被 @ 的成员 uid（仅群聊，服务端已按当时成员集过滤）：收端据此高亮气泡内 @昵称。 */
   mentions?: string[];
   /** M4-8 @所有人（发送时服务端已校验发送者为群主/管理员）。 */
@@ -144,6 +146,7 @@ export interface ConvLastMessage {
   content_type: string;
   content: string;
   caption?: string; // 图文/视频文/文件文随附文本：预览"有字显字"（有 caption 显 caption，否则显 [图片]/[视频]/[文件]）
+  duration?: number; // 语音/视频时长毫秒：voice 客户端预览 "[语音] m:ss"；video 显时长角标；其他类型 0
   conv_seq: number;
   timestamp: number;
   recalled_at?: number; // >0=最后一条是撤回消息（预览显示"撤回了一条消息"，原文已脱敏）

@@ -1152,6 +1152,8 @@ export class IMClient {
       // 未下载卡片的模糊占位（M4-7）：**只认内联 data:image/ 的 JPEG/PNG**。门控的意义就是"用户点之前绝不碰网络"，
       // 若放行远程 URL，渲染 <img src> 时会在用户未下载前就去拉对端内容（追踪像素 / 泄漏 IP）——必须挡掉。
       thumb: typeof d.thumb === "string" && /^data:image\//.test(d.thumb) ? d.thumb : undefined,
+      // voice 振幅指纹（P0，base64）：服务端已校验解码后 ≤120 字节；本地只做类型收口，不再验长度。
+      waveform: typeof d.waveform === "string" ? d.waveform : undefined,
       // @提及（M4-8）：脏数据安全——只收字符串数组，非数组一律按"未 @ 任何人"。
       mentions: Array.isArray(d.mentions) ? (d.mentions as unknown[]).filter((x): x is string => typeof x === "string") : undefined,
       mentionAll: d.mention_all === true || undefined,

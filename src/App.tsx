@@ -2030,8 +2030,18 @@ export default function App() {
     if (fr) return friendLabel(fr);
     return memberNick(f.source_conv_id, f.source_from) || f.source_from;
   };
-  const mediaPreview = (ct: string): string | null =>
-    ct === "image" ? "[图片]" : ct === "video" ? "[视频]" : ct === "file" ? "[文件]" : ct === "chat_record" ? "[聊天记录]" : null;
+  const mediaPreview = (ct: string, extra?: { duration?: number }): string | null => {
+    if (ct === "image") return "[图片]";
+    if (ct === "video") return "[视频]";
+    if (ct === "file") return "[文件]";
+    if (ct === "chat_record") return "[聊天记录]";
+    if (ct === "voice") {
+      const ms = extra?.duration ?? 0;
+      const s = Math.max(0, Math.floor(ms / 1000));
+      return `[语音] ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    }
+    return null;
+  };
   const convPreview = (c: Conversation): string => {
     if (!c.last_message) return "（无消息）";
     // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
@@ -2039,7 +2049,7 @@ export default function App() {
       const who = c.last_message.from === uid ? "你" : (c.is_group ? (c.last_message.from_nickname || c.last_message.from) : "对方");
       return `${who}撤回了一条消息`;
     }
-    const media = mediaPreview(c.last_message.content_type); // 图片/视频/文件 → [图片] 等
+    const media = mediaPreview(c.last_message.content_type, { duration: c.last_message.duration }); // 图片/视频/文件/语音 → [图片]/... voice 带 m:ss
     // 图说 caption「有字显字」（Telegram 模型）：图文/视频文/文件文带 caption 时预览直接显 caption，否则回退 [图片]/[视频]/[文件]。
     const text = c.last_message.caption || media || c.last_message.content;
     if (!c.is_group) return text;

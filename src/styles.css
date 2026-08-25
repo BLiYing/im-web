@@ -1681,3 +1681,29 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .devices-revoke-all { display: block; width: 100%; margin-top: var(--space-2); padding: 12px; border: 0; background: var(--card-bg); border-radius: var(--radius-card); color: var(--danger); font-size: 14px; cursor: pointer; }
 .devices-revoke-all:hover { background: var(--surface-hover); }
 .devices-revoke-all:disabled { opacity: 0.6; cursor: default; }
+
+/* ============ voice bubble (P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §6.1) ============ */
+.voice-bubble { display: flex; align-items: center; gap: 10px; padding: 4px 4px; cursor: pointer; user-select: none; }
+.voice-play { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 0;
+  background: linear-gradient(155deg, #4EA9FF, #0A6BE0); color: #fff;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700; cursor: pointer;
+  box-shadow: 0 3px 10px rgba(10, 107, 224, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.voice-play.mine { background: linear-gradient(155deg, #35A24A, #14601F);
+  box-shadow: 0 3px 10px rgba(20, 96, 31, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.voice-play:active { transform: scale(0.94); }
+.voice-wave { flex: 1; min-width: 0; height: 28px; display: flex; align-items: center; gap: 2.5px; overflow: hidden; }
+.voice-wave span { width: 3px; border-radius: 2px; background: color-mix(in srgb, currentColor 32%, transparent);
+  transition: background 0.12s linear; }
+.voice-wave span.on { background: var(--accent); }
+.bubble.me .voice-wave span.on { background: rgba(20, 96, 31, 0.9); }
+.voice-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 32px; }
+.voice-dur { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-secondary); }
+.bubble.me .voice-dur { color: rgba(6, 44, 12, 0.55); }
+.voice-unplayed { width: 7px; height: 7px; border-radius: 50%; background: var(--danger);
+  box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--danger) 18%, transparent);
+  animation: voice-unplayed-pulse 2.4s infinite; }
+@keyframes voice-unplayed-pulse {
+  0%, 100% { box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--danger) 18%, transparent); }
+  55% { box-shadow: 0 0 0 7px transparent; }
+}
