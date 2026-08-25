@@ -52,8 +52,8 @@ export function useForward(d: ForwardDeps) {
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
     const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
-    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean, groupId?: string) =>
-      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}) });
+    const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean, groupId?: string, extra?: Partial<ChatMessage>) =>
+      appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}), ...(extra ?? {}) });
 
     if (mode === "merged" && msgs.length > 0) {
       const items: RecordItem[] = msgs
@@ -101,6 +101,7 @@ export function useForward(d: ForwardDeps) {
           : client.sendMedia(m.content, ct, to, target.conv_id, {
               forwardFrom: origin, fileName: m.fileName, fileSize: m.fileSize,
               mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration,
+              waveform: m.waveform, // 语音转发：波形指纹随包走（duration 服务端对 voice 强校验，缺则拒发）
               poster: m.posterUrl, thumb: m.thumb, caption: m.caption, // 图说随转发跟随（Telegram 模型）
               groupId, // 整体转发：同册共享新 group_id，收端聚簇成宫格
               // 配文 @ 随转发保留高亮+可点：mentions 服务端按目标群成员再过滤（非成员自动落普通文字）。
@@ -108,7 +109,8 @@ export function useForward(d: ForwardDeps) {
               // 且转发不该再次全员强提醒。丢 mention_all 后 "@所有人" 字样退化为普通文字（正确）。
               mentions: m.mentions,
             });
-        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb, m.caption, m.mentions, false, groupId);
+        pushOptimistic(clientMsgId, m.content, ct, origin, m.fileName, m.fileSize, m.posterUrl, m.thumb, m.caption, m.mentions, false, groupId,
+          { duration: m.duration, waveform: m.waveform }); // 语音/视频回显行带时长与波形（否则语音气泡显 0:00 + 退化条纹）
       }
     }
   }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);

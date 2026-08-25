@@ -100,7 +100,7 @@ export class IMClient {
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string; waveform?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -498,7 +498,7 @@ export class IMClient {
   // ---- 收藏（M4-4）----
 
   /** 收藏一条内容（快照）：POST /api/v1/favorites。 */
-  async addFavorite(f: { content_type?: string; content: string; caption?: string; file_name?: string; file_size?: number; duration?: number; thumb?: string; poster?: string; media_w?: number; media_h?: number; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
+  async addFavorite(f: { content_type?: string; content: string; caption?: string; file_name?: string; file_size?: number; duration?: number; waveform?: string; thumb?: string; poster?: string; media_w?: number; media_h?: number; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
     await this.api("/api/v1/favorites", { method: "POST", body: JSON.stringify(f) });
   }
   /** 我的收藏列表：GET /api/v1/favorites。 */
@@ -666,7 +666,7 @@ export class IMClient {
       fileName: opts?.fileName, fileSize: opts?.fileSize, caption: opts?.caption,
       mentions: opts?.mentions, mentionAll: opts?.mentionAll, // 落库供刷新后 @ 高亮与转发重发（强提醒）
       replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, replyToFrom: opts?.replyTo?.from, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster,
-      mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration, thumb: opts?.thumb });
+      mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration, thumb: opts?.thumb, waveform: opts?.waveform });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
       this.sendTimers.delete(clientMsgId);
       this.pendingSends.delete(clientMsgId);
@@ -982,7 +982,7 @@ export class IMClient {
             mentions: pend.mentions, mentionAll: pend.mentionAll,
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
             groupId: pend.groupId, posterUrl: pend.poster,
-            mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb,
+            mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb, waveform: pend.waveform,
           });
           this.pendingSends.delete(d.client_msg_id);
         }

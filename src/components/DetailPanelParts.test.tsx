@@ -53,7 +53,7 @@ describe("DetailTabs", () => {
   const base = {
     tabs: [{ k: "members" as DetailTab, label: "成员" }, { k: "links" as DetailTab, label: "链接" }],
     activeTab: "members" as DetailTab, uid: "u1", canInvite: true,
-    media: [] as ChatMessage[], files: [] as ChatMessage[], links: [] as ChatMessage[],
+    media: [] as ChatMessage[], files: [] as ChatMessage[], voices: [] as ChatMessage[], links: [] as ChatMessage[],
     onSelectTab: vi.fn(), onAddMember: vi.fn(), onOpenMember: vi.fn(),
     canManageMember: () => true, onMemberMenu: vi.fn(),
     mediaGate: () => undefined, onGateTap: vi.fn(), onOpenViewer: vi.fn(),

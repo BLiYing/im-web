@@ -11,6 +11,7 @@ import { MediaTile } from "./MediaTile";
 import { FileGateIcon } from "./FileGateIcon";
 import { FileTypeIcon } from "../FileTypeIcon";
 import { DetailLinkItem } from "./DetailLinkItem";
+import { VoiceBubble } from "./VoiceBubble";
 import type { LinkPreview } from "./LinkCard";
 
 // 详情页链接 tab 的时间格式（草图 §C：HH:mm / 昨天 HH:mm / M月d日）——先用最小实现：
@@ -29,12 +30,12 @@ function detailLinkTimeText(ts: number): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-export type DetailTab = "members" | "media" | "files" | "links";
+export type DetailTab = "members" | "media" | "files" | "voice" | "links";
 
 // 会话详情抽屉的页签区（成员 / 媒体 / 文件 / 链接）。纯展示：数据与动作全经 props 注入。
 // DOM/className/结构与原 App 内联逐字一致（行为等价）。媒体/文件门控与聊天气泡共用 MediaTile/FileGateIcon。
 export function DetailTabs({
-  tabs, activeTab, onSelectTab, gp, uid, media, files, links,
+  tabs, activeTab, onSelectTab, gp, uid, media, files, voices, links,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu,
   mediaGate, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
@@ -46,6 +47,7 @@ export function DetailTabs({
   uid: string;
   media: ChatMessage[];
   files: ChatMessage[];
+  voices: ChatMessage[]; // 语音 tab（2026-08-26）：voice/audio 消息，VoiceBubble 就地播放
   links: ChatMessage[];
   canInvite: boolean;
   onAddMember: (cid: string) => void;
@@ -143,6 +145,21 @@ export function DetailTabs({
                   </div>
                 );
               })}
+            </div>
+          )
+        )}
+        {activeTab === "voice" && (
+          voices.length === 0 ? <div className="detail-empty">暂无语音</div> : (
+            // 语音 tab（2026-08-26）：复用聊天气泡 VoiceBubble（波形 + scrub + 倍速 + 就地播放）；
+            // 右侧补时间；右键=转发/定位菜单（与文件行同一注入面 onFileMenu）。
+            <div className="detail-filelist detail-voicelist">
+              {voices.map((m) => (
+                <div key={msgKey(m)} className="detail-voiceitem"
+                     onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
+                  <VoiceBubble m={m} mine={false} uid={uid} audioSrc={m.content} />
+                  <span className="detail-voice-time">{detailLinkTimeText(m.timestamp)}</span>
+                </div>
+              ))}
             </div>
           )
         )}

@@ -1748,3 +1748,12 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
   background: transparent; color: var(--text-secondary); display: grid; place-items: center; cursor: pointer; }
 .chat footer .mic-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--accent); }
 .chat footer .mic-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── 语音：详情页语音 tab + 收藏语音迷你播放器行（2026-08-26） ── */
+.detail-voicelist { display: flex; flex-direction: column; gap: 8px; }
+.detail-voiceitem { display: flex; align-items: center; gap: 10px; }
+.detail-voiceitem .voice-bubble { flex: 1; min-width: 0; }
+.detail-voice-time { font-size: 11px; color: var(--muted, #888); white-space: nowrap; }
+.fav-voices .fav-item.voice { align-items: center; }
+.fav-item.voice .fav-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.fav-item.voice .voice-bubble { background: var(--bubble-them, rgba(120, 120, 128, 0.08)); border-radius: 14px; }

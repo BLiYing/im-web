@@ -14,7 +14,7 @@ import {
 import { Modal } from "../Modal";
 import { AnchoredMenu } from "../AnchoredMenu";
 import {
-  FavFileRow, FavMediaGrid, FavRow, FavSourceList, favDate, favFileName, favKind, sourceNameOf, type FavoritesMediaGlue,
+  FavFileRow, FavMediaGrid, FavRow, FavSourceList, FavVoiceRow, favDate, favFileName, favKind, sourceNameOf, type FavoritesMediaGlue,
 } from "./FavoritesItems";
 
 /**
@@ -190,7 +190,16 @@ export function FavoritesModal({
             <div className="fav-list">
               <FavMediaGrid favs={shown} glue={glue} pickMulti={pickMulti} selected={selected} onTileClick={onTileClick} onMenu={openMenu} />
             </div>
-          ) : kind === "file" || kind === "voice" ? (
+          ) : kind === "voice" ? (
+            // 语音分类（2026-08-26 拍板）：内嵌迷你波形播放器行（曾按文件三态行兜底）。
+            <div className="fav-list fav-voices">
+              {shown.map((f) => (
+                <FavVoiceRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel}
+                  uid={myUid} pick={() => pickIfNeeded(f)}
+                  onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
+              ))}
+            </div>
+          ) : kind === "file" ? (
             <div className="fav-list detail-filelist fav-files">
               {shown.map((f) => (
                 <FavFileRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel} glue={glue}

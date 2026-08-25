@@ -113,14 +113,18 @@ export function DetailPanel(p: DetailPanelProps) {
     const media = detailMsgs.filter((m) => isPresentable(m) && (m.contentType === "image" || m.contentType === "video"))
       .sort((a, b) => b.convSeq - a.convSeq);
     const files = detailMsgs.filter((m) => isPresentable(m) && m.contentType === "file").sort((a, b) => b.convSeq - a.convSeq);
+    const voices = detailMsgs.filter((m) => isPresentable(m) && (m.contentType === "voice" || m.contentType === "audio"))
+      .sort((a, b) => b.convSeq - a.convSeq); // 语音 tab（2026-08-26，与 iOS IMDetailTabKindVoice 同口径）
     const links = detailMsgs.filter((m) =>
       // 与 iOS IMChatDetailTabs.matchesKind: 同款口径：text 只要**含 URL** 就进链接 tab（草图 §D），
       // 老的 isUrlText 只认整段 = URL，会漏掉"看看 https://xxx"这类混排消息。
       isPresentable(m) && (m.contentType === "text" || m.contentType === "link") && firstURLInText(m.content) !== null
     ).sort((a, b) => b.convSeq - a.convSeq);
+    // 语音 tab 与 iOS 对齐：有语音消息才出现（其余 tab 维持恒显的既有 Web 行为）。
+    const voiceTabs: Array<{ k: typeof detailTab; label: string }> = voices.length > 0 ? [{ k: "voice", label: "语音" }] : [];
     const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
-      ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }]
-      : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, { k: "links", label: "链接" }];
+      ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }]
+      : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }];
     const activeTab = tabs.some((t) => t.k === detailTab) ? detailTab : tabs[0].k;
 
     return (
@@ -268,7 +272,7 @@ export function DetailPanel(p: DetailPanelProps) {
               {/* ---- 页签 ---- */}
               <DetailTabs
                 tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
-                gp={gp} uid={uid} media={media} files={files} links={links}
+                gp={gp} uid={uid} media={media} files={files} voices={voices} links={links}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}

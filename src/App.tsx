@@ -208,7 +208,7 @@ export default function App() {
   // fromOwnChat：从「当前正在聊的这个人」的聊天页顶栏头像进来的——此时不显示「消息」入口
   // （你已经在这个会话里了，点它等于原地不动）。与 iOS 的 showsMessagePill 取反同义。
   const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean } | null>(null);
-  const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "links">("media");
+  const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "voice" | "links">("media"); // voice tab 2026-08-26
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
   const [deleteMenu, setDeleteMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 删除两档子菜单 B（为所有人删除/仅删除自己）——由菜单 A 的「删除」展开，对齐 iOS 子菜单
@@ -1861,21 +1861,27 @@ export default function App() {
   const onInputChangeEv = useEvent(onInputChange);
   const onComposerPasteEv = useEvent(onComposerPaste);
   const sendEv = useEvent(send);
-  // Web P1 语音：上传 ?as=voice → sendMedia contentType=voice + waveform；本地暂无 pending echo，
-  // ack 后走 pendingSends → appendMsg 逻辑与图片同款（imSdk sendContent 的默认路径）。
+  // Web P1 语音：上传 ?as=voice → sendMedia contentType=voice + waveform，**发出即乐观回显一行**
+  // （status=sending，applyAck 按 clientMsgId 转 sent/failed）。此前没有回显行，ack patch 落空，
+  // 发送后要刷新页面才看得到（2026-08-26 修）。
   const sendVoice = useCallback(async (blob: Blob, fileName: string, waveformBase64: string, durationMs: number) => {
     const client = clientRef.current;
     const cid = convId;
     if (!client || !cid) return;
     try {
       const { url, size } = await client.uploadVoice(blob, fileName);
-      client.sendMedia(url, "voice", peer || "", cid, {
+      const clientMsgId = client.sendMedia(url, "voice", peer || "", cid, {
         duration: durationMs, fileSize: size, waveform: waveformBase64,
+      });
+      appendMsg(cid, {
+        clientMsgId, convId: cid, from: uid, content: url, contentType: "voice",
+        duration: durationMs, waveform: waveformBase64, fileSize: size,
+        convSeq: 0, timestamp: Date.now(), status: "sending",
       });
     } catch (e) {
       setToast((e as Error).message || "语音发送失败");
     }
-  }, [convId, peer]);
+  }, [convId, peer, uid, appendMsg]);
   const sendVoiceEv = useEvent(sendVoice);
 
   const chatActions = useMemo<ChatActions>(() => ({

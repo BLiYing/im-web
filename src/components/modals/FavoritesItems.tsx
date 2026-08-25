@@ -11,6 +11,7 @@ import { MediaTile } from "../MediaTile";
 import { FileGateIcon } from "../FileGateIcon";
 import { Avatar } from "../Avatar";
 import { DetailLinkItem } from "../DetailLinkItem";
+import { VoiceBubble } from "../VoiceBubble";
 import type { LinkPreview } from "../LinkCard";
 
 /**
@@ -27,13 +28,14 @@ export interface FavoritesMediaGlue {
   onMediaError: (m: ChatMessage) => void;                // 缩略加载失败 → 失效/不支持标记
 }
 
-/** 收藏项渲染类型（决定展示件）。语音落地前 audio/voice 暂按文件三态行兜底。 */
-export type FavKind = "image" | "video" | "file" | "link" | "record" | "text";
+/** 收藏项渲染类型（决定展示件）。 */
+export type FavKind = "image" | "video" | "file" | "link" | "record" | "text" | "voice";
 export function favKind(f: Favorite): FavKind {
   const ct = f.content_type;
   if (ct === "image") return "image";
   if (ct === "video") return "video";
-  if (ct === "file" || ct === "audio" || ct === "voice") return "file";
+  if (ct === "audio" || ct === "voice") return "voice"; // 语音：内嵌迷你播放器行（2026-08-26 拍板，曾按文件行兜底）
+  if (ct === "file") return "file";
   // 合并转发「聊天记录」：内容是 JSON，须在 link/text 前拦下——否则会当纯文本显 JSON 串。
   if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return "record";
   // 草图 §D：text 只要含 URL 就归"链接"分类（与聊天页/详情页 §C 视图口径一致）。
@@ -126,6 +128,28 @@ export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onMen
         {meta && <span className="detail-file-size">{meta}</span>}
         <span className="fav-src">来自{sourceLabel(f)}{favDate(f.created_at) && ` · ${favDate(f.created_at)}`}</span>
       </span>
+      <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
+    </div>
+  );
+}
+
+/** 语音 chip：内嵌迷你波形播放器（复用聊天气泡 VoiceBubble，点即播/暂停；2026-08-26 拍板）。
+ *  pick 模式下点击被 pick 消化（capture 阶段拦截，阻断播放）；波形/时长来自收藏快照 waveform/duration。 */
+export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, pick, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
+  uid: string;
+  pick?: () => boolean; // 返回 true = 已被 pick 消化（多选勾选 / 单选即发）
+}) {
+  const m = favoriteToMessage(f);
+  return (
+    <div className={`fav-item voice${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}
+         onClickCapture={(e) => { if (pick?.()) { e.stopPropagation(); e.preventDefault(); } }}>
+      <div className="fav-main">
+        <VoiceBubble m={m} mine={false} uid={uid} audioSrc={m.content} />
+        <div className="fav-meta">
+          <span className="fav-src">来自{sourceLabel(f)}</span>
+          {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
+        </div>
+      </div>
       <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
     </div>
   );

@@ -57,7 +57,7 @@ export function useFavorites(d: FavoritesDeps) {
         try {
           await clientRef.current?.addFavorite({
             content_type: m.contentType, content: m.content, caption: m.caption,
-            file_name: m.fileName, file_size: m.fileSize, duration: m.duration, thumb: m.thumb, poster: m.posterUrl,
+            file_name: m.fileName, file_size: m.fileSize, duration: m.duration, waveform: m.waveform, thumb: m.thumb, poster: m.posterUrl,
             media_w: m.mediaW, media_h: m.mediaH,
             source_conv_id: m.convId, source_conv_seq: m.convSeq, source_from: m.from,
           });

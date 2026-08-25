@@ -166,7 +166,7 @@ export function favoriteToMessage(f: Favorite): ChatMessage {
   return {
     clientMsgId: `fav-${f.id}`, convId: f.source_conv_id, from: f.source_from,
     content: f.content, contentType: f.content_type,
-    fileName: f.file_name, fileSize: f.file_size, duration: f.duration ?? 0, thumb: f.thumb, posterUrl: f.poster,
+    fileName: f.file_name, fileSize: f.file_size, duration: f.duration ?? 0, waveform: f.waveform, thumb: f.thumb, posterUrl: f.poster,
     mediaW: f.media_w, mediaH: f.media_h, caption: f.caption,
     convSeq: 1, timestamp: f.created_at || Date.now(), status: "sent",
   };

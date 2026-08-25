@@ -15,11 +15,16 @@
 >
 > **无待手测活跃项**：收藏 B 方案 / App.tsx 拆分收口 / msgKey 收敛 / 体检整改 / 详情抽屉解耦地基 / Phase A / HEIC 禁选 / 粘贴视频修复 / 设置·壁纸·弹窗打磨 / QR + 群 G0–G3 / 下载门控全链路 / 四大任务 均已手测通过并提交，细节转入 `current_task.archive.md`（归档于 2026-08-22）。
 >
-> **下一里程碑 = 语音消息 P0**（设计定稿于 `../IMServer/docs/VOICE_MESSAGE_DESIGN.md` v2，后端未动代码）。Web 侧承载：单行录制条（三态同构，按住/锁定/播放）+ 波形气泡；**坑（已排期）**：Chrome/Firefox 录 `webm/opus` iOS 解不了 → 录制要探测 `audio/mp4`，不支持就禁入口。等后端 `send_msg` 协议/`waveform` 列落定后开工。
+> **语音 P0+P1 已落地 + 2026-08-26 修复批（tsc + vitest 519 绿，待浏览器手测）**：
+> ① **发送不显示根因修复**——`sendVoice` 曾无乐观回显行，ack 按 clientMsgId patch 落空 → 刷新才显示；现 append 回显行（status=sending，applyAck 转 sent）；`imSdk.pendingSends` 补 `waveform`（刷新后自己发的语音波形不再退化条纹）。
+> ② 转发链带 `waveform`（`useForward` opts + 回显行 extra 带 duration/waveform）。
+> ③ 详情页新增「语音」tab（有语音消息才出现，`DetailTabs` VoiceBubble 行 + 右键菜单）。
+> ④ 收藏语音 = 内嵌迷你播放器 `FavVoiceRow`（复用 VoiceBubble；曾按文件三态行兜底）；收藏快照带 `waveform`（后端 `im_favorite` 新列）；从收藏发送经 `favoriteToMessage` 透传 duration/waveform（曾被服务端拒发）。
+> **Web 转文字留 P2**：SpeechRecognition 只吃 mic 流，不吃 URL/文件——需 Whisper.wasm 或服务端 ASR，调研中。
 
 ## 下一步
-1. **接下一里程碑：语音消息 P0**（后端排队最前，见 `../IMServer/current_task.md` 与 `docs/ROADMAP.md`）——等后端协议/DB 列落定后做 Web 录制条 + 波形气泡（先探测 `audio/mp4`）。
-2. 语音落地后，收藏页 `content_type` 分类把 `voice` 一起做进去（B 方案已留位）。
+1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
+2. Web 转文字 P2 方案调研（Whisper.wasm on-device vs 服务端 ASR）。
 3. 网络恢复秒连：听 `online` 事件跳过退避立即重连。
 4. 群内已读细化（随主线）。
 5. 消息列表虚拟化；测试债：Playwright E2E。
