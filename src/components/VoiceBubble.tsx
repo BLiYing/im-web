@@ -62,6 +62,12 @@ interface VoiceBubbleProps {
   uid: string;
   /** 拼绝对 URL（同 App fullMediaURL：host + content）。 */
   audioSrc: string;
+  /** 迷你形态（资料页/收藏行）：关气泡背景，仅留 ▶+波形+时长横排（sketch §10/§11）。 */
+  variant?: "bubble" | "mini";
+  /** 对端已读位点（用户 2026-08-27 拍板波形下方显 ✓/✓✓；单聊；群聊/mini 传 0=只显 ✓）。 */
+  peerReadSeq?: number;
+  /** 群聊场景：只显 ✓ 不显 ✓✓（与 IMBubbleCell 已读语义同口径）。 */
+  isGroup?: boolean;
 }
 
 /// 会话级倍速偏好（per convId，localStorage 持久，与 iOS 同策略）。
@@ -80,7 +86,7 @@ function fmt(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
+export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", peerReadSeq = 0, isGroup = false }: VoiceBubbleProps) {
   const [tick, setTick] = useState(0);
   const waveRef = useRef<HTMLDivElement | null>(null);
   const [barCount, setBarCount] = useState(28);
@@ -194,44 +200,69 @@ export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
 
   void tick; // 订阅音频事件后强制重绘
 
+  // 消息时间/勾（2026-08-27 用户拍板：**独立一行**右对齐，iOS/Web 拉齐；时长行只留时长+倍速）。
+  // mini 变体（收藏/详情页语音 tab）不显时间行——外层行本就有独立时间戳，重复即噪音。
+  const timeStr = variant !== "mini" && m.timestamp > 0 ? (() => {
+    const d = new Date(m.timestamp);
+    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+  })() : "";
+  const readByPeer = mine && m.convSeq > 0 && !isGroup && m.convSeq <= peerReadSeq;
+  const showsTicks = variant !== "mini" && mine && m.convSeq > 0 && m.status !== "sending" && m.status !== "failed";
+
   return (
-    <div className="voice-bubble" style={{ width }} onClick={toggle} role="button">
+    <div className={`voice-bubble${variant === "mini" ? " variant-mini" : ""}`}
+         style={variant === "mini" ? undefined : { width }}
+         onClick={toggle} role="button">
+      {/* 播放器行：▶ 与「波形 + 时长行」垂直居中。时间行在这一行**之外**——
+          曾放进 .voice-center 里，把居中轴往下拽，视觉上 ▶ 比波形低一截（2026-08-27 修）。 */}
+      <div className="voice-player-row">
       <button className={`voice-play${mine ? " mine" : ""}`}
               type="button"
               aria-label={playing ? "暂停" : "播放"}
               onClick={(e) => { e.stopPropagation(); toggle(); }}>
         {playing ? "❚❚" : "▶"}
       </button>
-      <div className={`voice-wave${scrubbing ? " scrubbing" : ""}`}
-           ref={waveRef}
-           style={{ position: "relative", touchAction: "none" }}
-           onPointerDown={(e) => { e.stopPropagation(); onWavePointerDown(e); }}
-           onPointerMove={(e) => { if (scrubbing) { e.stopPropagation(); updateScrub(e); } }}
-           onPointerUp={endScrub}
-           onPointerCancel={endScrub}>
-        {bars.map((v, i) => (
-          <span key={i} className={i < activeCount ? "on" : undefined}
-                style={{ height: `${Math.max(3, v * 22)}px` }} />
-        ))}
-        {scrubHint && (
-          <span className="voice-scrub-tip" style={{ left: `${scrubHint.x}px` }}>{scrubHint.text}</span>
-        )}
+      <div className="voice-center">
+        <div className={`voice-wave${scrubbing ? " scrubbing" : ""}`}
+             ref={waveRef}
+             style={{ position: "relative", touchAction: "none" }}
+             onPointerDown={(e) => { e.stopPropagation(); onWavePointerDown(e); }}
+             onPointerMove={(e) => { if (scrubbing) { e.stopPropagation(); updateScrub(e); } }}
+             onPointerUp={endScrub}
+             onPointerCancel={endScrub}>
+          {bars.map((v, i) => (
+            <span key={i} className={i < activeCount ? "on" : undefined}
+                  style={{ height: `${Math.max(3, v * 22)}px` }} />
+          ))}
+          {scrubHint && (
+            <span className="voice-scrub-tip" style={{ left: `${scrubHint.x}px` }}>{scrubHint.text}</span>
+          )}
+        </div>
+        <div className="voice-meta-row">
+          {!played && !isCurrent && <span className="voice-unplayed" aria-label="未播放" />}
+          <span className="voice-meta-text">{durLabel}</span>
+          {isCurrent ? (
+            <button className={`voice-speed${mine ? " mine" : ""}`}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); cycleSpeed(); }}>
+              {speed === 1.5 ? "1.5x" : speed === 2 ? "2x" : "1x"}
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="voice-meta">
-        {isCurrent ? (
-          // 播放中：倍速胶囊代替时长（同一列/同一高度，气泡整体不再抖，2026-08-27 修）。
-          <button className={`voice-speed${mine ? " mine" : ""}`}
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); cycleSpeed(); }}>
-            {speed === 1.5 ? "1.5x" : speed === 2 ? "2x" : "1x"}
-          </button>
-        ) : (
-          <>
-            {!played && <span className="voice-unplayed" aria-label="未播放" />}
-            <span className="voice-dur">{durLabel}</span>
-          </>
-        )}
       </div>
+      {(timeStr || showsTicks) && (
+        <div className="voice-time-row">
+          <span className="voice-meta-text">
+            {mine && m.status === "sending" ? "发送中…"
+              : mine && m.status === "failed" ? "未发送 ✗"
+              : timeStr}
+            {showsTicks && (
+              <span className={readByPeer ? "voice-tick read" : "voice-tick"}>{" "}{readByPeer ? "✓✓" : "✓"}</span>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -210,6 +210,10 @@ export function MessageList(p: MessageListProps) {
         }
         // 媒体气泡：时间/已读压在图上（右下角），故不再渲染气泡下方的 .bmeta 行。
         const isMediaBubble = m.contentType === "image" || m.contentType === "video";
+        // voice 内部 VoiceBubble 自带 meta（时长·HH:mm·✓/✓✓），外层 bmeta 再画一遍就会双时间叠印
+        // （2026-08-27 修）。不并入 isMediaBubble（那会带来 .bubble.media 的 padding:0/overflow:hidden，
+        // 语音气泡内部另有自己的 padding，会挤成一坨）——只让外层 bmeta 跳过 voice。
+        const isVoiceBubble = m.contentType === "voice";
         const uploading = uploadProgress[m.clientMsgId ?? ""];
         // 暂停态唯一真相=分片任务（toggleUploadPause bump 进度对象触发重渲染）；小文件无任务恒 false。
         const uploadPaused = !!chunkedTaskFor(m.clientMsgId ?? "")?.paused;
@@ -302,7 +306,8 @@ export function MessageList(p: MessageListProps) {
                 ) : m.contentType === "voice" ? (
                   // 语音气泡（P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §10）：
                   // ▶ + 波形 + m:ss + 未播红点；单例 audio 同页面一次只播一条。
-                  <VoiceBubble m={m} mine={mine} uid={uid} audioSrc={mediaSrc(m)} />
+                  <VoiceBubble m={m} mine={mine} uid={uid} audioSrc={mediaSrc(m)}
+                               peerReadSeq={readSeq} isGroup={isGroupChat} />
                 ) : m.contentType === "file" ? (
                   // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。
                   uploading || !m.content ? (
@@ -377,7 +382,7 @@ export function MessageList(p: MessageListProps) {
                 {m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? (
                   <div className={`msg-caption${m.contentType === "file" ? " file" : ""}`}>{renderMentionText(m, m.caption)}</div>
                 ) : null}
-                {!isMediaBubble && (
+                {!isMediaBubble && !isVoiceBubble && (
                   <span className="bmeta">
                     {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
                     {mine ? (

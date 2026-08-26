@@ -160,23 +160,20 @@ export function DetailTabs({
         )}
         {activeTab === "voice" && (
           voices.length === 0 ? <div className="detail-empty">暂无语音</div> : (
-            // 语音 tab（2026-08-27 三行格式：发送者 / 语音·m:ss / 年月日时分）。
-            // VoiceBubble 保留在下方（可就地播放）；上方三行文本为主展示，与 iOS 三行对齐。
+            // 语音 tab（2026-08-27 sketch §10 三行格式）：发送者 / 迷你播放器（含波形进度=声纹）/ 年月日时分。
             <div className="detail-filelist detail-voicelist">
               {voices.map((m) => {
                 const mine = m.from === uid;
                 const senderText = mine ? "你自己" : (voiceSenderLabel ? voiceSenderLabel(m) : (m.fromNickname || m.from));
-                const durSec = Math.max(0, Math.floor((m.duration || 0) / 1000));
-                const dur = `${Math.floor(durSec / 60)}:${String(durSec % 60).padStart(2, "0")}`;
                 return (
-                  <div key={msgKey(m)} className="detail-voiceitem detail-voice-row3"
+                  <div key={msgKey(m)} className="detail-voice-row3"
                        onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
-                    <div className="detail-voice-lines">
-                      <div className="detail-voice-sender">{senderText}</div>
-                      <div className="detail-voice-sub">语音 {dur}</div>
-                      <div className="detail-voice-time">{detailFullDateTime(m.timestamp)}</div>
+                    <div className="detail-voice-sender">{senderText}</div>
+                    <div className="detail-voice-mini">
+                      {/* variant=mini：关背景/内 padding，仅留 ▶ + 波形 + 时长横排（与 IMVoiceMiniPlayerView 同款） */}
+                      <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} variant="mini" />
                     </div>
-                    <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} />
+                    <div className="detail-voice-time">{detailFullDateTime(m.timestamp)}</div>
                   </div>
                 );
               })}

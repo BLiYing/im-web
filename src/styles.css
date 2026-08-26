@@ -1683,7 +1683,20 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .devices-revoke-all:disabled { opacity: 0.6; cursor: default; }
 
 /* ============ voice bubble (P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §6.1) ============ */
-.voice-bubble { display: flex; align-items: center; gap: 10px; padding: 4px 4px; cursor: pointer; user-select: none; }
+/* 新布局（用户 2026-08-27 拍板）：▶ 左侧居中；中间 vertical stack（波形 + meta 行：时长·时间·勾）。 */
+/* 外层改列向：[播放器行(▶ + 波形/时长)] + [时间行]。时间行独立在播放器行之外，
+   否则它会把 ▶ 的垂直居中轴往下拽（2026-08-27 修：用户报"波形和时长和左边 logo 不居中"）。 */
+.voice-bubble { display: flex; flex-direction: column; padding: 4px 4px; cursor: pointer; user-select: none; }
+.voice-player-row { display: flex; align-items: center; gap: 10px; }
+.voice-center { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.voice-meta-row { display: flex; align-items: center; gap: 6px; }
+/* 消息时间独立一行右对齐（2026-08-27 用户拍板，与 iOS 拉齐）；mini 变体不渲染此行。 */
+.voice-time-row { display: flex; justify-content: flex-end; margin-top: 1px; }
+.voice-meta-text { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
+  font-size: 11px; color: var(--text-secondary); }
+.bubble.me .voice-meta-text { color: rgba(6, 44, 12, 0.6); }
+.voice-tick { font-weight: 600; color: var(--text-secondary); margin-left: 2px; }
+.voice-tick.read { color: var(--accent); }
 .voice-play { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 0;
   background: linear-gradient(155deg, #4EA9FF, #0A6BE0); color: #fff;
   display: grid; place-items: center; font-size: 12px; font-weight: 700; cursor: pointer;
@@ -1696,11 +1709,9 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
   transition: background 0.12s linear; }
 .voice-wave span.on { background: var(--accent); }
 .bubble.me .voice-wave span.on { background: rgba(20, 96, 31, 0.9); }
-/* voice-meta：右列布局锁定高度=34（≈ 波形高 + 上下 3pt 余量），倍速胶囊出现不再挤气泡高度
-   （2026-08-27 修：曾 speed 显示时高度 +20，气泡整体抖）。speed 与 dur 同槽绝对定位，speed
-   显示时 dur 隐藏——同一位置显示"1x/1.5x/2x"或时长。 */
-.voice-meta { flex: none; position: relative; align-self: stretch;
-  display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 44px; height: 34px; }
+/* voice-meta（旧右列）已由 .voice-center + .voice-meta-row 取代（2026-08-27 布局重整）。
+   保留兼容类名——如果任何旧引用仍存在，也不占位。 */
+.voice-meta { display: none; }
 .voice-dur { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
   font-size: 11px; color: var(--text-secondary); }
 .bubble.me .voice-dur { color: rgba(6, 44, 12, 0.55); }
@@ -1735,6 +1746,8 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 @keyframes voice-rec-pulse { 50% { opacity: 0.3; } }
 .voice-recorder-bar .rec-timer { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
   font-size: 13px; font-weight: 700; color: var(--text-primary); min-width: 40px; }
+.voice-recorder-bar .rec-timer.over { color: var(--danger); }
+.voice-recorder-bar .rec-countdown { margin-left: 4px; font-weight: 500; font-size: 11px; opacity: 0.85; }
 .voice-recorder-bar .rec-hint { flex: 1; text-align: center; font-size: 12px; color: var(--text-secondary); }
 .voice-recorder-bar .rec-livewave { flex: 1; height: 22px; display: flex; align-items: center; gap: 2px; overflow: hidden;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 20%); mask-image: linear-gradient(90deg, transparent, #000 20%); }
@@ -1753,17 +1766,18 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .chat footer .mic-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--accent); }
 .chat footer .mic-btn:disabled { opacity: .4; cursor: not-allowed; }
 
-/* ── 语音：详情页语音 tab + 收藏语音迷你播放器行（2026-08-26） ── */
-.detail-voicelist { display: flex; flex-direction: column; gap: 12px; }
-.detail-voiceitem { display: flex; align-items: center; gap: 10px; }
-.detail-voiceitem .voice-bubble { flex: 1; min-width: 0; }
-.detail-voice-time { font-size: 11px; color: var(--muted, #888); white-space: nowrap; }
-/* 三行格式（2026-08-27 拍板：发送者 / 语音·m:ss / 年月日时分） */
-.detail-voice-row3 { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
-.detail-voice-lines { display: flex; flex-direction: column; gap: 3px; }
+/* ── 语音：详情页语音 tab + 收藏语音迷你播放器行（sketch §10 三行格式，2026-08-27） ── */
+.detail-voicelist { display: flex; flex-direction: column; gap: 14px; }
+.detail-voice-row3 { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
+  border-radius: 12px; background: var(--card-bg, transparent); }
 .detail-voice-sender { font-size: 14px; font-weight: 500; color: var(--text-primary, #222); }
-.detail-voice-sub { font-size: 13px; color: var(--text-primary, #222); }
-.detail-voice-row3 .detail-voice-time { font-size: 11px; }
+.detail-voice-mini { display: flex; align-items: center; }
+.detail-voice-time { font-size: 11px; color: var(--muted, #888); }
+/* variant=mini：关气泡背景/圆角/宽度约束，仅留 ▶+波形+时长横排（与 IMVoiceMiniPlayerView 视觉对齐）。 */
+.voice-bubble.variant-mini { width: 100% !important; background: transparent; padding: 0; }
+.voice-bubble.variant-mini .voice-play { box-shadow: none; }
 .fav-voices .fav-item.voice { align-items: center; }
 .fav-item.voice .fav-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-.fav-item.voice .voice-bubble { background: var(--bubble-them, rgba(120, 120, 128, 0.08)); border-radius: 14px; }
+/* 只对非 mini 变体加背景/圆角——sketch §11 mini 应扁平无框（code-review 2026-08-27 CSS specificity 修）。
+   :not(.variant-mini) 与父串联总 specificity 0-4-0 > .voice-bubble.variant-mini 的 0-2-0，覆盖成立。 */
+.fav-item.voice .voice-bubble:not(.variant-mini) { background: var(--bubble-them, rgba(120, 120, 128, 0.08)); border-radius: 14px; }

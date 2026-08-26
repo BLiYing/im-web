@@ -147,7 +147,7 @@ export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, pick
     <div className={`fav-item voice${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}
          onClickCapture={(e) => { if (pick?.()) { e.stopPropagation(); e.preventDefault(); } }}>
       <div className="fav-main">
-        <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} />
+        <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} variant="mini" />
         <div className="fav-meta">
           <span className="fav-src">来自{sourceLabel(f)}</span>
           {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}

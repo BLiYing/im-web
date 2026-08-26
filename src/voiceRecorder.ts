@@ -9,6 +9,10 @@
 
 const VOICE_MAX_MS = 5 * 60 * 1000;
 const VOICE_MIN_MS = 600;
+/** 4:50 起 UI 应显倒数 10s 提示上限逼近（sketch §12）。 */
+export const VOICE_COUNTDOWN_START_MS = VOICE_MAX_MS - 10 * 1000;
+/** 允许业务层读硬闸值（配合 sketch §12 的锁定态自动 stopAndSend / 按住态转锁定 pause）。 */
+export const VOICE_MAX_DURATION_MS = VOICE_MAX_MS;
 const VOICE_MAX_WAVEFORM_BYTES = 120;
 const VOICE_SAMPLE_INTERVAL_MS = 100;
 
@@ -39,6 +43,8 @@ export interface RecorderCallbacks {
   onTick?(amplitude: number, elapsedMs: number): void;
   onDone?(result: VoiceRecordingResult): void;
   onCancel?(reason: "user" | "tooShort" | "error"): void;
+  /** 达 5min 上限硬闸（sketch §12）：Web 桌面无"按住/锁定"区分，直接 stopAndSend 送出即可。 */
+  onMaxReached?(): void;
 }
 
 /** 单例句柄：一次只允许一个录制会话。 */
@@ -101,6 +107,9 @@ export class VoiceRecorder {
     // ondataavailable，chunks 变非空 → handleStop 走 send 分支即"取消也发出去"，2026-08-27 修）。
     this.stopReason = "cancelled";
     this.chunks = [];
+    // **立刻停 tickTimer**——否则 4:59.9x 点取消后 100ms 内 tick 到点抢跑，把 stopReason 从 'cancelled'
+    // 覆盖回 'user' → 又走 send 分支，"取消也发送"回归（code-review 2026-08-27 CONFIRMED）。
+    if (this.tickTimer !== null) { window.clearInterval(this.tickTimer); this.tickTimer = null; }
     this.recorder.stop();
   }
 
@@ -146,7 +155,13 @@ export class VoiceRecorder {
     const elapsed = this.elapsedMs();
     this.cbs.onTick?.(amp, elapsed);
     if (elapsed >= VOICE_MAX_MS) {
+      // §12 UI 硬闸：Web 端桌面天然锁定，直接自动送出（等价 sketch §12 "锁定态到点=stopAndSend"）。
+      // 通知 UI 关录制条 + toast 提示。stopReason=reachedMax 让 handleStop 走 send 分支。
+      // 防抖：stopReason 已设过就早退（下一 tick 若在 recorder.stop 完成前跑，避免二发 onMaxReached / toast）。
+      if (this.stopReason) { return; }
       this.stopReason = "reachedMax";
+      if (this.tickTimer !== null) { window.clearInterval(this.tickTimer); this.tickTimer = null; }
+      this.cbs.onMaxReached?.();
       this.recorder?.stop();
     }
   }
@@ -165,6 +180,7 @@ export class VoiceRecorder {
       this.cbs.onCancel?.("user");
       return;
     }
+    // reachedMax 与 user 都走 send 分支；类型显式区分让上层日志/遥测能分辨"用户主动停"vs"到点自动停"。
     // 下采到 60 帧再 base64（服务端上限 120 字节，留一半余量）。
     const N = Math.min(60, this.amplitudes.length);
     const bucketSize = this.amplitudes.length / N;
