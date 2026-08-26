@@ -3,13 +3,14 @@
 // 用法：`vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));`
 import type { MutableRefObject } from "react";
 import type { IMClient } from "../sdk/imSdk";
-import type { Conversation, ChatMessage } from "../sdk/protocol";
+import type { Conversation, ChatMessage, PinnedMessage } from "../sdk/protocol";
 
 type Handlers = Record<string, ((...a: unknown[]) => void) | undefined>;
 
 export class FakeIMClient {
   static last: FakeIMClient | null = null;
   static conversations: Conversation[] = [];
+  static pinned: PinnedMessage[] = []; // 置顶集合（G0 横幅数据源）：测试可就地改，模拟服务端剔除撤回/取消置顶
   handlers: Handlers;
   calls: Record<string, unknown[][]> = {}; // 方法名 → 各次调用实参（断言用）
   private seq = 0;
@@ -50,7 +51,7 @@ export class FakeIMClient {
   loadOlder() {}
   loadNewer() {}
   async fetchUserPresence() { return { onlineUntil: 0, lastSeen: 0 }; }
-  async fetchPinned() { return []; }
+  async fetchPinned() { this.rec("fetchPinned"); return FakeIMClient.pinned; }
   sendText(content: string, to: string, convId: string): string {
     this.rec("sendText", content, to, convId);
     return `cmid-${++this.seq}`;
@@ -61,6 +62,7 @@ export class FakeIMClient {
 export type Fake = {
   last: { handlers: Record<string, (...a: unknown[]) => void>; calls: Record<string, unknown[][]> } | null;
   conversations: Conversation[];
+  pinned: PinnedMessage[];
 };
 
 /** hook 测试：把部分实现的假客户端包成 clientRef。 */

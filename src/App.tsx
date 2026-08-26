@@ -256,6 +256,9 @@ export default function App() {
   // 会话置顶消息（G0）：conv_id -> 置顶集合（服务端按 pinned_at 倒序）。进会话拉一次，
   // 之后靠实时 msg_op{op:pin} 帧触发重拉——置顶是低频操作，重拉比在本地拼装列表更不容易错。
   const [pinnedByConv, setPinnedByConv] = useState<Record<string, PinnedMessage[]>>({});
+  // 置顶集合镜像：WS 回调是登录那一刻建的闭包（见 enterApp），读不到后续的 state——
+  // onMsgOp 要判断「被撤回/编辑的这条是不是横幅里的置顶项」，只能经 ref 取当前值（同 messagesRef 套路）。
+  const pinnedRef = useRef<Record<string, PinnedMessage[]>>({});
   const [pinnedIdx, setPinnedIdx] = useState(0);          // 多条置顶时横幅显示第几条（点条轮转）
   const [pinnedListOpen, setPinnedListOpen] = useState(false);
   // 顶部横幅本地收起（✕）：按「账号 + 会话 + 内容签名」记，仅隐藏视图、不动服务端置顶/公告。
@@ -595,7 +598,12 @@ export default function App() {
       onMsgOp: (cid, targetSeq, patch) => {
         applyOp(cid, targetSeq, patch); // 按 conv_seq 就地打补丁（撤回→墓碑/编辑→改文本/置顶）
         // 置顶态变化（G0）：重拉该会话置顶集合刷新顶部横幅（含别人置顶/取消置顶的实时同步）。
-        if (patch.pinnedAt !== undefined) void refreshPinned(cid);
+        // 撤回/编辑若命中横幅里的置顶项**也要重拉**：服务端置顶列表已剔除撤回消息（PinnedMessages
+        // 带 recalled_at = 0）、编辑则改了文案；不刷会留一条指向墓碑/旧文案的横幅——点它只会滚到
+        // 一条「撤回了一条消息」的系统行并高亮，用户看不出原消息已经没了（与 iOS +SendService 同口径）。
+        const touchesPinnedBanner = (patch.recalledAt !== undefined || patch.editedAt !== undefined)
+          && (pinnedRef.current[cid] ?? []).some((pm) => pm.convSeq === targetSeq);
+        if (patch.pinnedAt !== undefined || touchesPinnedBanner) void refreshPinned(cid);
         // 全屏阅读器持有的是 ChatMessage 快照：被读的这条一旦撤回/编辑，快照即失真（撤回内容仍可读可复制）→ 关闭，让用户回到会话看最新态。
         setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r));
         scheduleListRefresh(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
@@ -1202,6 +1210,19 @@ export default function App() {
     }
   }, []);
 
+  // 点置顶横幅/置顶列表行的跳转（G0）：先判目标是不是**已被撤回**。服务端置顶列表本就剔除撤回消息，
+  // 但横幅是快照——重拉失败（best-effort）、msg_op 帧还没到、重拉在飞时点击，都可能停在旧集合上。
+  // 这时直接 jumpToSeq 会滚到一条「撤回了一条消息」的系统行并高亮，用户看不出原消息已经没了。
+  // 故显式提示 + 顺手重拉一次让横幅收敛（iOS 同口径，见 +PinnedBanner 的 didRequestJumpToConvSeq）。
+  const jumpToPinned = useCallback((seq: number) => {
+    if (messagesRef.current.some((m) => m.convSeq === seq && m.recalledAt)) {
+      setToast("原消息已被撤回");
+      void refreshPinned(currentConvRef.current);
+      return;
+    }
+    jumpToSeq(seq);
+  }, [jumpToSeq, refreshPinned, setToast]);
+
   // 置顶 / 取消置顶（G0）：发 msg_op，成功由服务端广播回 msg_op 帧（onMsgOp 里重拉横幅），
   // 越权/失效由 onMsgOpFailed toast。乐观更新交给帧回来那一下，避免本地先亮再被打回。
   const pinMessage = useCallback((m: ChatMessage, pinned: boolean) => {
@@ -1651,6 +1672,7 @@ export default function App() {
     .slice()
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
+  pinnedRef.current = pinnedByConv; // 同上：WS 回调（onMsgOp）判断撤回/编辑是否命中置顶项要读当前集合
 
   // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
   // searchOpen/searchQuery 受控注入（见上）；副作用依赖（jumpToSeq/locateInChat/setToast/各 ref/客户端）注入进去。=====
@@ -2643,7 +2665,7 @@ export default function App() {
             pinnedShown={pinnedShown} pinnedShownIdx={pinnedShownIdx} activePinned={activePinned}
             onOpenJoinRequests={() => void openJoinRequests(groupConvId)}
             onOpenAnnouncement={() => openGroupText("announcement", groupConvId)}
-            onJumpPinned={() => { jumpToSeq(pinnedShown!.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}
+            onJumpPinned={() => { jumpToPinned(pinnedShown!.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}
             onOpenPinnedList={() => setPinnedListOpen(true)}
           />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
@@ -2828,7 +2850,7 @@ export default function App() {
       {pinnedListOpen && (
         <PinnedListModal
           pinned={activePinned} isGroupChat={isGroupChat} timeFormat={timeFormat} canPin={canPinHere}
-          onJump={jumpToSeq}
+          onJump={jumpToPinned}
           onUnpin={(seq) => clientRef.current?.pinMessage(convId, seq, false)}
           onClose={() => setPinnedListOpen(false)}
         />
