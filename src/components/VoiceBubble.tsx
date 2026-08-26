@@ -54,7 +54,37 @@ function notify() { for (const fn of listeners) fn(); }
 audio.addEventListener("timeupdate", notify);
 audio.addEventListener("play", notify);
 audio.addEventListener("pause", notify);
-audio.addEventListener("ended", () => { currentSrc = ""; notify(); });
+
+/** 接力连播（§6.4，对齐 iOS）：一条播完自动接同会话下一条未播语音，遇非语音消息即停。
+ *  数据源由 MessageList 注入——模块级单例 audio 的 ended 回调拿不到 React 树里的消息列表。
+ *  返回 null / 未注册 → 播完即停（与此前行为一致）。 */
+export interface VoiceRelayNext { mid: string; src: string; convId: string; }
+/** 入参是刚播完那条的**消息 id**而非 URL：同一条语音转发多次时 URL 相同，按 URL 定位会落到错的位置。 */
+export type VoiceRelayResolver = (finishedMid: string) => VoiceRelayNext | null;
+let relayResolver: VoiceRelayResolver | null = null;
+let currentMid = "";
+export function setVoiceRelayResolver(fn: VoiceRelayResolver | null): void { relayResolver = fn; }
+
+/** 供 MessageList 的 resolver 复用同一份"已播集合"判定（localStorage per-uid+per-conv）。 */
+export function voiceHasPlayed(uid: string, convId: string, mid: string): boolean {
+  return hasPlayed(uid, convId, mid);
+}
+
+audio.addEventListener("ended", () => {
+  const finishedMid = currentMid;
+  currentSrc = ""; currentMid = "";
+  let next: VoiceRelayNext | null = null;
+  try { next = relayResolver ? relayResolver(finishedMid) : null; } catch { next = null; }
+  if (next) {
+    audio.src = next.src;
+    currentSrc = next.src; currentMid = next.mid;
+    audio.currentTime = 0;
+    audio.playbackRate = loadSpeed(next.convId); // 倍速是会话级偏好，接力沿用
+    // 播不动（404/编解码失败）时复位到"无当前条"，否则整条会话卡在幽灵播放态。
+    audio.play().catch(() => { currentSrc = ""; currentMid = ""; notify(); });
+  }
+  notify();
+});
 
 interface VoiceBubbleProps {
   m: ChatMessage;
@@ -110,6 +140,12 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", peerRe
     return () => { listeners.delete(fn); };
   }, [audioSrc]);
 
+  // 成为"当前播放条"即记已播——手动点击与**接力自动切过来**两条路径统一在这里收口
+  // （接力由模块级 ended 回调驱动，切不到组件的 toggle）。markPlayed 幂等。
+  useEffect(() => {
+    if (isCurrent && !played && mid) { markPlayed(uid, m.convId, mid); setPlayed(true); }
+  }, [isCurrent, played, mid, uid, m.convId]);
+
   useEffect(() => {
     const el = waveRef.current;
     if (!el) return;
@@ -150,6 +186,7 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", peerRe
     audio.pause();
     audio.src = audioSrc;
     currentSrc = audioSrc;
+    currentMid = mid; // 接力定位用（见 VoiceRelayResolver：按消息 id 而非 URL）
     audio.currentTime = 0;
     audio.playbackRate = loadSpeed(m.convId); // 应用会话级倍速
     audio.play().catch(() => undefined);

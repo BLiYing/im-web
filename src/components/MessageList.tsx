@@ -4,8 +4,9 @@
 // - **reactive 值与 App 内闭包**（messages/selectMode/mediaGate/senderLabel/renderMessageText/...）走 props；
 // - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
-import type { ReactNode, RefObject } from "react";
+import { useEffect, type ReactNode, type RefObject } from "react";
 import type { ChatMessage } from "../sdk/protocol";
+import { pickNextVoiceRelay, voiceRelayMid } from "../voiceRelay";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
 import { albumMembers, isAlbumLeader, isAlbumMember, msgKey } from "../album";
 import { formatTime, isSameDay, dayHeader, type TimeFormat } from "../time";
@@ -22,7 +23,7 @@ import { AlbumGrid } from "./AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./QuoteThumb";
 import { FileGateIcon } from "./FileGateIcon";
 import { LinkCard } from "./LinkCard";
-import { VoiceBubble } from "./VoiceBubble";
+import { VoiceBubble, setVoiceRelayResolver, voiceHasPlayed } from "./VoiceBubble";
 import { useChatActions } from "../ChatActionsContext";
 
 export interface MessageListProps {
@@ -66,6 +67,21 @@ export function MessageList(p: MessageListProps) {
     onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause,
     toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
   } = useChatActions();
+  // 语音接力连播（§6.4，对齐 iOS）：把"下一条该播谁"的数据源注入 VoiceBubble 的模块级单例 audio。
+  // 规则本身在 pickNextVoiceRelay（纯函数，voice.test.ts 护栏）；这里只负责 finishedSrc→索引 的定位
+  // 与 src 拼装。卸载（切会话）即注销 → 接力自然停在本会话内。
+  useEffect(() => {
+    setVoiceRelayResolver((finishedMid) => {
+      const idx = messages.findIndex((m) => m.contentType === "voice" && voiceRelayMid(m) === finishedMid);
+      const next = pickNextVoiceRelay(messages, idx, uid,
+        (convId, mid) => voiceHasPlayed(uid, convId, mid));
+      if (!next) return null;
+      const src = mediaSrc(next);
+      return src ? { mid: voiceRelayMid(next), src, convId: next.convId } : null;
+    });
+    return () => setVoiceRelayResolver(null);
+  }, [messages, uid, mediaSrc]);
+
   // 相册左侧框=整组全选/全不选：全在→把在的逐个翻掉、否则把不在的逐个翻上（复用 toggleSelected，全有/全无语义）。
   const toggleAlbumGroup = (seqs: number[]) => {
     const allIn = seqs.length > 0 && seqs.every((s) => selected.has(s));
