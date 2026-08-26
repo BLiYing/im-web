@@ -14,6 +14,14 @@ import { DetailLinkItem } from "./DetailLinkItem";
 import { VoiceBubble } from "./VoiceBubble";
 import type { LinkPreview } from "./LinkCard";
 
+/** 语音 tab 完整时间（2026-08-27 拍板："年月日 时:分"，与 iOS IMFormatFileDateTime 对齐）。 */
+function detailFullDateTime(ts: number): string {
+  if (!ts || ts <= 0) return "";
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 // 详情页链接 tab 的时间格式（草图 §C：HH:mm / 昨天 HH:mm / M月d日）——先用最小实现：
 // 今日→HH:mm；昨日→"昨天 HH:mm"；更早→"M月d日"（跨年不特殊，年份不显）。iOS 侧沿用 IMFormatFileDateTime 完整时间，
 // 视觉略有出入但语义一致（快速迭代，等收藏页 §E 统一改造再对齐）。
@@ -35,7 +43,7 @@ export type DetailTab = "members" | "media" | "files" | "voice" | "links";
 // 会话详情抽屉的页签区（成员 / 媒体 / 文件 / 链接）。纯展示：数据与动作全经 props 注入。
 // DOM/className/结构与原 App 内联逐字一致（行为等价）。媒体/文件门控与聊天气泡共用 MediaTile/FileGateIcon。
 export function DetailTabs({
-  tabs, activeTab, onSelectTab, gp, uid, media, files, voices, links,
+  tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
@@ -48,6 +56,7 @@ export function DetailTabs({
   media: ChatMessage[];
   files: ChatMessage[];
   voices: ChatMessage[]; // 语音 tab（2026-08-26）：voice/audio 消息，VoiceBubble 就地播放
+  voiceSenderLabel?: (m: ChatMessage) => string; // 三行行头「发送者」显名（"你自己" / 昵称 / uid），2026-08-27
   links: ChatMessage[];
   canInvite: boolean;
   onAddMember: (cid: string) => void;
@@ -151,16 +160,26 @@ export function DetailTabs({
         )}
         {activeTab === "voice" && (
           voices.length === 0 ? <div className="detail-empty">暂无语音</div> : (
-            // 语音 tab（2026-08-26）：复用聊天气泡 VoiceBubble（波形 + scrub + 倍速 + 就地播放）；
-            // 右侧补时间；右键=转发/定位菜单（与文件行同一注入面 onFileMenu）。
+            // 语音 tab（2026-08-27 三行格式：发送者 / 语音·m:ss / 年月日时分）。
+            // VoiceBubble 保留在下方（可就地播放）；上方三行文本为主展示，与 iOS 三行对齐。
             <div className="detail-filelist detail-voicelist">
-              {voices.map((m) => (
-                <div key={msgKey(m)} className="detail-voiceitem"
-                     onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
-                  <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} />
-                  <span className="detail-voice-time">{detailLinkTimeText(m.timestamp)}</span>
-                </div>
-              ))}
+              {voices.map((m) => {
+                const mine = m.from === uid;
+                const senderText = mine ? "你自己" : (voiceSenderLabel ? voiceSenderLabel(m) : (m.fromNickname || m.from));
+                const durSec = Math.max(0, Math.floor((m.duration || 0) / 1000));
+                const dur = `${Math.floor(durSec / 60)}:${String(durSec % 60).padStart(2, "0")}`;
+                return (
+                  <div key={msgKey(m)} className="detail-voiceitem detail-voice-row3"
+                       onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
+                    <div className="detail-voice-lines">
+                      <div className="detail-voice-sender">{senderText}</div>
+                      <div className="detail-voice-sub">语音 {dur}</div>
+                      <div className="detail-voice-time">{detailFullDateTime(m.timestamp)}</div>
+                    </div>
+                    <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} />
+                  </div>
+                );
+              })}
             </div>
           )
         )}

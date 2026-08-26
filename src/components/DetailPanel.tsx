@@ -273,7 +273,13 @@ export function DetailPanel(p: DetailPanelProps) {
               {/* ---- 页签 ---- */}
               <DetailTabs
                 tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
-                gp={gp} uid={uid} media={media} files={files} voices={voices} links={links}
+                gp={gp} uid={uid} media={media} files={files} voices={voices}
+                voiceSenderLabel={(m) => {
+                  // 单聊：peer 备注/昵称；群聊：群成员昵称（peerNick 已封装成员表 → 昵称回退 uid）。
+                  const label = peerNick?.(m.from);
+                  return label || m.fromNickname || m.from;
+                }}
+                links={links}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}

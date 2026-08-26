@@ -1754,10 +1754,16 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .chat footer .mic-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ── 语音：详情页语音 tab + 收藏语音迷你播放器行（2026-08-26） ── */
-.detail-voicelist { display: flex; flex-direction: column; gap: 8px; }
+.detail-voicelist { display: flex; flex-direction: column; gap: 12px; }
 .detail-voiceitem { display: flex; align-items: center; gap: 10px; }
 .detail-voiceitem .voice-bubble { flex: 1; min-width: 0; }
 .detail-voice-time { font-size: 11px; color: var(--muted, #888); white-space: nowrap; }
+/* 三行格式（2026-08-27 拍板：发送者 / 语音·m:ss / 年月日时分） */
+.detail-voice-row3 { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.detail-voice-lines { display: flex; flex-direction: column; gap: 3px; }
+.detail-voice-sender { font-size: 14px; font-weight: 500; color: var(--text-primary, #222); }
+.detail-voice-sub { font-size: 13px; color: var(--text-primary, #222); }
+.detail-voice-row3 .detail-voice-time { font-size: 11px; }
 .fav-voices .fav-item.voice { align-items: center; }
 .fav-item.voice .fav-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .fav-item.voice .voice-bubble { background: var(--bubble-them, rgba(120, 120, 128, 0.08)); border-radius: 14px; }
