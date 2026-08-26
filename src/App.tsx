@@ -74,7 +74,7 @@ import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
 import { GroupTextModal } from "./components/modals/GroupTextModal";
-import { FavoritesModal } from "./components/modals/FavoritesModal";
+import { FavoritesModal, FAV_PICK_MAX } from "./components/modals/FavoritesModal";
 import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
@@ -2713,6 +2713,7 @@ export default function App() {
           myUid={uid} conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl}
           onOpenRecord={(f) => setRecordStack([parseChatRecord(f.content)])}
           onPick={sendFavoritesToCurrent}
+          onPickLimit={() => setToast(`最多选择 ${FAV_PICK_MAX} 项`)}
           onClose={closeFavorites}
           fetchLinkPreview={fetchLinkPreview}
         />

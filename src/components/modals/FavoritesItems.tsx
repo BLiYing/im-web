@@ -58,9 +58,20 @@ export function favDate(ts: number): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
-/** 行右槽：pick 多选=勾选圈；browse=删除 ✕ 快捷。 */
-export function FavTrailing({ pickMulti, on, onDelete }: { pickMulti: boolean; on: boolean; onDelete?: () => void }) {
-  if (pickMulti) return <span className={`checkbox fav-check${on ? " on" : ""}`}>{on && <Check size={13} />}</span>;
+/** 行右槽：pick 模式=可点勾选框（独立触发，不冒泡给行 onClick）；browse=删除 ✕ 快捷。
+ *  勾选框 onClick 必带 stopPropagation——否则外层行 onClick（打开预览/播放/链接）会同时触发。 */
+export function FavTrailing({ pickMulti, on, onCheck, onDelete }: {
+  pickMulti: boolean; on: boolean; onCheck?: () => void; onDelete?: () => void;
+}) {
+  if (pickMulti) {
+    return (
+      <button type="button" className={`checkbox fav-check${on ? " on" : ""}`}
+        title={on ? "取消选择" : "选择"} aria-pressed={on}
+        onClick={(e) => { e.stopPropagation(); onCheck?.(); }}>
+        {on && <Check size={13} />}
+      </button>
+    );
+  }
   if (!onDelete) return null;
   return (
     <button className="fav-del" title="删除收藏" onClick={(e) => { e.stopPropagation(); onDelete(); }}>✕</button>
@@ -73,17 +84,20 @@ interface RowCommon {
   pickMulti: boolean;
   sourceLabel: (f: Favorite) => string;
   onClick: () => void;
+  onCheck?: () => void;        // pick 模式勾选框回调（不冒泡给 onClick）
   onMenu?: (e: MouseEvent) => void;
   onDelete?: () => void;
 }
 
-/** 媒体 chip：3 列宫格，逐格门控（复用详情页 MediaTile variant=detail）。视频时长角标（未下载也预显）。 */
-export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onMenu }: {
+/** 媒体 chip：3 列宫格，逐格门控（复用详情页 MediaTile variant=detail）。视频时长角标（未下载也预显）。
+ *  pick 模式下右上角勾选框独立可点（button + stopPropagation），tile 主体点击照常打开预览。 */
+export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onCheckToggle, onMenu }: {
   favs: Favorite[];
   glue: FavoritesMediaGlue;
   pickMulti: boolean;
   selected: Set<number>;
   onTileClick: (f: Favorite, m: ChatMessage, gate: DownloadState | undefined) => void;
+  onCheckToggle?: (f: Favorite) => void;
   onMenu?: (e: MouseEvent, f: Favorite) => void;
 }) {
   return (
@@ -98,7 +112,13 @@ export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onM
               onClick={() => onTileClick(f, m, gate)}
               onMenu={(e) => onMenu?.(e, f)}
               onMediaError={glue.onMediaError} />
-            {pickMulti && <span className={`checkbox fav-tile-check${on ? " on" : ""}`}>{on && <Check size={13} />}</span>}
+            {pickMulti && (
+              <button type="button" className={`checkbox fav-tile-check${on ? " on" : ""}`}
+                title={on ? "取消选择" : "选择"} aria-pressed={on}
+                onClick={(e) => { e.stopPropagation(); onCheckToggle?.(f); }}>
+                {on && <Check size={13} />}
+              </button>
+            )}
           </div>
         );
       })}
@@ -107,7 +127,7 @@ export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onM
 }
 
 /** 文件 chip：三态行（未下载 ↓ / 下载中环 / 已下载类型图标 / 失败 ↻），DOM 与详情页 detail-fileitem 同款。 */
-export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
+export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onCheck, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
   glue: FavoritesMediaGlue;
   onClick: (m: ChatMessage, gate: DownloadState | undefined) => void;
 }) {
@@ -130,22 +150,21 @@ export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onMen
         {meta && <span className="detail-file-size">{meta}</span>}
         <span className="fav-src">来自{sourceLabel(f)}{favDate(f.created_at) && ` · ${favDate(f.created_at)}`}</span>
       </span>
-      <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
+      <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
     </div>
   );
 }
 
 /** 语音 chip：内嵌迷你波形播放器（复用聊天气泡 VoiceBubble，点即播/暂停；2026-08-26 拍板）。
- *  pick 模式下点击被 pick 消化（capture 阶段拦截，阻断播放）；波形/时长来自收藏快照 waveform/duration。 */
-export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, pick, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
+ *  pick 模式下**主体点击照常播放**，选中只走右侧勾选框——曾用 onClickCapture 把整行吞成"选中"，
+ *  用户听不了收藏语音就要盲发；与"点击其他位置=打开相关消息"的通用规则一致。 */
+export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, onCheck, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
   uid: string;
   mediaSrc: (m: ChatMessage) => string; // blob 缓存优先（与聊天气泡同口径，曾传裸 content）
-  pick?: () => boolean; // 返回 true = 已被 pick 消化（多选勾选 / 单选即发）
 }) {
   const m = useMemo(() => favoriteToMessage(f), [f]); // 弹窗任意 state 变化不再逐行重建消息对象
   return (
-    <div className={`fav-item voice${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}
-         onClickCapture={(e) => { if (pick?.()) { e.stopPropagation(); e.preventDefault(); } }}>
+    <div className={`fav-item voice${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}>
       <div className="fav-main">
         <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} variant="mini" />
         <div className="fav-meta">
@@ -153,13 +172,13 @@ export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, pick
           {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
         </div>
       </div>
-      <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
+      <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
     </div>
   );
 }
 
 /** 链接 / 文本 / 聊天记录 chip：v1 统一左图标行（lucide on --accent-soft）；链接走草图 §D 的 URL 卡（DetailLinkItem）。 */
-export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onMenu, onDelete, fetchLinkPreview }: RowCommon & {
+export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onCheck, onMenu, onDelete, fetchLinkPreview }: RowCommon & {
   fetchLinkPreview?: (u: string) => Promise<LinkPreview>; // link kind 时必传（其它 kind 忽略）
 }) {
   const k = favKind(f);
@@ -181,7 +200,7 @@ export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onMenu, onDelet
             {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
           </div>
         </div>
-        <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
+        <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
       </div>
     );
   }

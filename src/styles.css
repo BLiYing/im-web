@@ -457,7 +457,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-meta .fav-src { color: var(--text-secondary); }
 .fav-caption { font-size: 13px; color: var(--text-secondary); } /* 图说整体收藏：快照下方随附文字 */
 .fav-del { align-self: center; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; flex-shrink: 0; }
-.fav-check { align-self: center; flex-shrink: 0; }
+/* pick 勾选框：button + stopPropagation 独立触发；`checkbox` 基类由 shared 提供圆边+选中态。 */
+.fav-check { align-self: center; flex-shrink: 0; cursor: pointer; padding: 0; }
+button.fav-check { background: transparent; }
+button.fav-check.on { background: var(--accent); border-color: var(--accent); color: var(--on-media); }
 /* 收藏阅读器（点文本 → 只读全文）：可选中复制、滚动。 */
 .fav-reader-text { white-space: pre-wrap; word-break: break-word; font-size: 17px; line-height: 1.6; color: var(--text); user-select: text; overflow-y: auto; max-height: 60vh; }
 /* ── 收藏 B 方案（FAVORITES_DESIGN §14）：头部副行/⋯、媒体宫格、文件三态行、来源分组行、模式菜单 ── */
@@ -474,8 +477,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-tile { position: relative; }
 .fav-tile .detail-media-tile { width: 100%; }
 .fav-tile.on .detail-media-tile { outline: 2px solid var(--accent); outline-offset: -2px; }
-.fav-tile-check { position: absolute; top: 6px; right: 6px; background: var(--overlay); border-color: var(--on-media); pointer-events: none; }
-.fav-tile-check.on { background: var(--accent); border-color: var(--accent); }
+/* 媒体 tile 右上角勾选框：button + stopPropagation 让主体点击照常打开预览；pointer-events: auto 恢复可点。
+ * 未选中态半透明黑底 + 白描边（保证在深/浅缩略图上都清晰），选中态 accent 实心 + 白 ✓。 */
+.fav-tile-check { position: absolute; top: 6px; right: 6px; padding: 0; cursor: pointer;
+  background: var(--overlay); border-color: var(--on-media); pointer-events: auto; }
+.fav-tile-check.on { background: var(--accent); border-color: var(--accent); color: var(--on-media); }
 /* 文件 chip：行复用详情页 .detail-fileitem；pick 选中微染 accent-soft。 */
 .fav-files { gap: 0; }
 .fav-fileitem.on { background: var(--accent-soft); }

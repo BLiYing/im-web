@@ -18,6 +18,12 @@ import {
 } from "./FavoritesItems";
 
 /**
+ * pick 模式一次最多可选条数——**独立常量，随时可调**；与 iOS `kIMFavoritesPickMaxSelection` 拉齐。
+ * 不区分类型（媒体/文件/语音/文本/链接/记录同池），超限时点勾选框吐司提示。
+ */
+export const FAV_PICK_MAX = 9;
+
+/**
  * 收藏弹窗（B 方案，FAVORITES_DESIGN §14）：
  * - 消息模式 = 无「全部」的分签视图：媒体宫格 / 文件三态行 / 链接·文本·记录统一行；范围 token 恒=当前签。
  * - 聊天模式 = 按 source_conv_id 分组的来源会话列表 → 点进同一分签页按来源过滤（标题「来自 X · N 条」）。
@@ -26,7 +32,7 @@ import {
  */
 export function FavoritesModal({
   favorites, mode = "browse", sourceLabel, actions, glue, myUid, conversations, convDisplayLabel, convAvatarUrl,
-  onOpenMedia, onOpenLink, onOpenRecord, onPick, onClose, fetchLinkPreview,
+  onOpenMedia, onOpenLink, onOpenRecord, onPick, onPickLimit, onClose, fetchLinkPreview,
 }: {
   favorites: Favorite[];
   mode?: "browse" | "pick";
@@ -41,6 +47,7 @@ export function FavoritesModal({
   onOpenLink: (url: string) => void;
   onOpenRecord: (fav: Favorite) => void;   // 聊天记录 → 打开记录查看器（recordStack）
   onPick?: (favs: Favorite[]) => void;     // pick 模式：发送选中项到当前会话
+  onPickLimit?: () => void;                // pick 模式勾选超 FAV_PICK_MAX 时的提示回调（一般 = setToast）
   onClose: () => void;
   fetchLinkPreview: (u: string) => Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }>;
 }) {
@@ -52,10 +59,9 @@ export function FavoritesModal({
   const [query, setQuery] = useState("");
   const [ctx, setCtx] = useState<{ x: number; y: number; f: Favorite } | null>(null);
   const [reader, setReader] = useState<Favorite | null>(null);
-  // pick 模式：多选态与选中集（对齐 ForwardPicker：默认单点即发，「多选」切勾选 + 发送(N)）。
-  const [multi, setMulti] = useState(false);
+  // pick 模式：**常驻多选**（对齐 iOS，勾选框独立触发；曾用「多选」toggle 切单点即发，与 iOS 语义不一致）。
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const pickMulti = isPick && multi;
+  const pickMulti = isPick;
 
   // 来源过滤态下，收藏列表变化（删除）要同步刷新该组；组被删空则退回来源列表。
   const groups = useMemo(() => groupFavoritesBySource(favorites, myUid), [favorites, myUid]);
@@ -95,27 +101,29 @@ export function FavoritesModal({
   }, [ctx, modeMenu]);
 
   const delAction = actions.find((a) => a.id === "delete");
-  const toggleSelect = (id: number) =>
-    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  /** 勾选框独立触发：加入前查上限，超限调 onPickLimit 提示、不写入。已选可无限取消。 */
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      if (prev.has(id)) { const n = new Set(prev); n.delete(id); return n; }
+      if (prev.size >= FAV_PICK_MAX) { onPickLimit?.(); return prev; }
+      const n = new Set(prev); n.add(id); return n;
+    });
+  };
   const openMenu = isPick ? undefined : (e: MouseEvent, f: Favorite) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, f }); };
   const deleteOf = isPick || !delAction ? undefined : (f: Favorite) => () => delAction.run({ f });
 
-  /** pick 语义统一：多选=勾选；单选=单点即发。返回 true 表示已被 pick 消化。 */
-  const pickIfNeeded = (f: Favorite): boolean => {
-    if (!isPick) return false;
-    if (multi) toggleSelect(f.id); else onPick?.([f]);
-    return true;
-  };
+  /** pick 勾选框回调（tile 覆盖层 / 行右槽 checkbox 均走这条）。**只**由勾选框触发，行/tile 主体点击不消化。 */
+  const onCheckToggle = (f: Favorite): void => { toggleSelect(f.id); };
+  // 点媒体格恒开预览（图片=viewer/视频=video player）——即使 pick 模式；选中只走右上角勾选框。
   const onTileClick = (f: Favorite, m: ChatMessage, gate: DownloadState | undefined) => {
-    if (pickIfNeeded(f)) return;
     if (gate) glue.onGateTap(m); else onOpenMedia(f, f.content_type === "video" ? "video" : "image");
   };
-  const onFileClick = (f: Favorite) => (m: ChatMessage, gate: DownloadState | undefined) => {
-    if (pickIfNeeded(f)) return;
+  // 点文件行恒预览/下载；选中只走行右侧勾选框。
+  const onFileClick = (_f: Favorite) => (m: ChatMessage, gate: DownloadState | undefined) => {
     if (gate) glue.onGateTap(m); else glue.onOpenFile(m);
   };
+  // 点非媒体行恒打开该项（链接/记录/文本阅读器）；语音行主体点击=播放（VoiceBubble 自带）；选中走勾选框。
   const onRowClick = (f: Favorite) => () => {
-    if (pickIfNeeded(f)) return;
     const k = favKind(f);
     if (k === "link") onOpenLink(f.content);
     else if (k === "record") onOpenRecord(f);
@@ -144,11 +152,7 @@ export function FavoritesModal({
             {!isPick && <span className="fav-subtitle">{VIEW_MODE_LABELS[viewMode]}</span>}
           </span>
         </span>
-        {isPick ? (
-          <button className="section-action" onClick={() => { setMulti((v) => !v); setSelected(new Set()); }}>
-            {multi ? "取消多选" : "多选"}
-          </button>
-        ) : (
+        {isPick ? null : (
           <button className="fav-more" title="查看方式"
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setModeMenu({ x: r.right - 180, y: r.bottom + 4 }); }}>
             <MoreHorizontal size={18} />
@@ -190,14 +194,16 @@ export function FavoritesModal({
             <div className="fav-list"><div className="fwd-empty">{emptyText}</div></div>
           ) : kind === "media" ? (
             <div className="fav-list">
-              <FavMediaGrid favs={shown} glue={glue} pickMulti={pickMulti} selected={selected} onTileClick={onTileClick} onMenu={openMenu} />
+              <FavMediaGrid favs={shown} glue={glue} pickMulti={pickMulti} selected={selected}
+                onTileClick={onTileClick} onCheckToggle={onCheckToggle} onMenu={openMenu} />
             </div>
           ) : kind === "voice" ? (
             // 语音分类（2026-08-26 拍板）：内嵌迷你波形播放器行（曾按文件三态行兜底）。
             <div className="fav-list fav-voices">
               {shown.map((f) => (
                 <FavVoiceRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel}
-                  uid={myUid} mediaSrc={glue.mediaSrc} pick={() => pickIfNeeded(f)}
+                  uid={myUid} mediaSrc={glue.mediaSrc}
+                  onCheck={pickMulti ? () => onCheckToggle(f) : undefined}
                   onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
               ))}
             </div>
@@ -205,14 +211,18 @@ export function FavoritesModal({
             <div className="fav-list detail-filelist fav-files">
               {shown.map((f) => (
                 <FavFileRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel} glue={glue}
-                  onClick={onFileClick(f)} onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
+                  onClick={onFileClick(f)}
+                  onCheck={pickMulti ? () => onCheckToggle(f) : undefined}
+                  onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
               ))}
             </div>
           ) : (
             <div className="fav-list">
               {shown.map((f) => (
                 <FavRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel}
-                  onClick={onRowClick(f)} onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)}
+                  onClick={onRowClick(f)}
+                  onCheck={pickMulti ? () => onCheckToggle(f) : undefined}
+                  onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)}
                   fetchLinkPreview={fetchLinkPreview} />
               ))}
             </div>
