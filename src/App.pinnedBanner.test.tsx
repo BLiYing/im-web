@@ -8,27 +8,19 @@
  * 与 conversation/pinned.go（再排除 caller「仅为我删除」）——客户端只需在撤回帧到达时重拉一次。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import type { Conversation, ChatMessage, PinnedMessage } from "./sdk/protocol";
+import type { ChatMessage, PinnedMessage } from "./sdk/protocol";
 
 vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));
 
 import { IMClient } from "./sdk/imSdk";
-import App from "./App";
 
 import type { Fake } from "./testing/fakeIMClient";
+import { PEER, CID, makeConv as conv, installJsdomShims, enterChat } from "./testing/appHarness";
 const Fake = IMClient as unknown as Fake;
 
-const UID = "1001", PEER = "2002";
-const CID = `u_${UID}_u_${PEER}`;
 const SEQ = 7; // 被置顶又被撤回的那条
-
-const conv = (): Conversation => ({
-  conv_id: CID, peer: PEER, peer_nickname: "小明",
-  last_message: { server_msg_id: "s1", from: PEER, content_type: "text", content: "在吗", conv_seq: 0, timestamp: Date.now() },
-  latest_conv_seq: 0, unread: 0, read_seq: 0, peer_read_seq: 0,
-});
 
 const pin = (convSeq = SEQ): PinnedMessage => ({
   convSeq, serverMsgId: `s${convSeq}`, from: PEER, contentType: "text",
@@ -44,21 +36,14 @@ beforeEach(() => {
   localStorage.clear();
   Fake.conversations = [conv()];
   Fake.pinned = [];
-  Element.prototype.scrollTo ??= () => {};
-  Element.prototype.scrollIntoView ??= () => {};
-  URL.createObjectURL ??= (() => "blob:fake") as typeof URL.createObjectURL;
-  URL.revokeObjectURL ??= () => {};
+  installJsdomShims();
 });
 afterEach(() => { cleanup(); Fake.pinned = []; vi.restoreAllMocks(); });
 
 /** 免密登录 → 进单聊 → 等置顶横幅上屏（Fake.pinned 已预置）。 */
 async function enterChatWithPinned() {
   Fake.pinned = [pin()];
-  render(<App />);
-  fireEvent.click(screen.getByText("免密登录"));
-  await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));
-  fireEvent.click(document.querySelector(".convitem")!);
-  await waitFor(() => expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument());
+  await enterChat();
   await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
   await waitFor(() => { Fake.last!.handlers.onMessage!(msg()); });
   // 横幅与气泡显同一段文字 → 两处都在（用 getAllByText，findByText 会因命中多个而抛）。

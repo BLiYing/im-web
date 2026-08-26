@@ -6,6 +6,8 @@
 // "已播过"集合走 localStorage per-uid+per-conv（与 iOS 同策略：不跨端）。
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../sdk/protocol";
+import { voiceRelayMid } from "../voiceRelay";
+import { formatTime, type TimeFormat } from "../time";
 
 /// 波形柱数：按可绘制宽度动态定；这里按 ~5.5px pitch 估算，实际下采见组件内。
 const WAVE_MIN_BARS = 20;
@@ -30,9 +32,17 @@ function amplitudesFromBase64(b64?: string): number[] | null {
 /** 已播集合：per-uid + per-conv 存 localStorage；set 5000 封顶按 FIFO 剔除。 */
 const PLAYED_CAP = 5000;
 function playedKey(uid: string, convId: string): string { return `im.voice.played.${uid || "anon"}.${convId || "na"}`; }
+/**
+ * 取整份"已播"集合（一次 getItem + 一次 JSON.parse）。
+ * 供接力 resolver **在扫描前取一次**复用——曾对每个候选消息各调一次 hasPlayed，
+ * 一段 N 条连续语音就是 N 次 parse（数组上限 5000 条 id），且全压在 ended 回调里。
+ */
+export function voicePlayedSet(uid: string, convId: string): ReadonlySet<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(playedKey(uid, convId)) || "[]") as string[]); }
+  catch { return new Set(); }
+}
 function hasPlayed(uid: string, convId: string, mid: string): boolean {
-  if (!mid) return false;
-  try { const arr = JSON.parse(localStorage.getItem(playedKey(uid, convId)) || "[]") as string[]; return arr.includes(mid); } catch { return false; }
+  return !!mid && voicePlayedSet(uid, convId).has(mid);
 }
 function markPlayed(uid: string, convId: string, mid: string): void {
   if (!mid) return;
@@ -63,25 +73,25 @@ export interface VoiceRelayNext { mid: string; src: string; convId: string; }
 export type VoiceRelayResolver = (finishedMid: string) => VoiceRelayNext | null;
 let relayResolver: VoiceRelayResolver | null = null;
 let currentMid = "";
+// 当前这条是不是**从聊天列表**点播的。resolver 全局只有一个（挂在聊天列表上），而收藏弹窗/资料页
+// 语音 tab 用同一个单例 audio 播 mini 气泡——不设这道闸，从收藏播一条同会话的语音，播完会顺着聊天
+// 列表接力念下去（用户还停在收藏弹窗里）。mini 一律不接力，播完即停。
+let currentRelayable = false;
 export function setVoiceRelayResolver(fn: VoiceRelayResolver | null): void { relayResolver = fn; }
-
-/** 供 MessageList 的 resolver 复用同一份"已播集合"判定（localStorage per-uid+per-conv）。 */
-export function voiceHasPlayed(uid: string, convId: string, mid: string): boolean {
-  return hasPlayed(uid, convId, mid);
-}
 
 audio.addEventListener("ended", () => {
   const finishedMid = currentMid;
-  currentSrc = ""; currentMid = "";
+  const relayable = currentRelayable;
+  currentSrc = ""; currentMid = ""; currentRelayable = false;
   let next: VoiceRelayNext | null = null;
-  try { next = relayResolver ? relayResolver(finishedMid) : null; } catch { next = null; }
+  try { next = relayable && relayResolver ? relayResolver(finishedMid) : null; } catch { next = null; }
   if (next) {
     audio.src = next.src;
-    currentSrc = next.src; currentMid = next.mid;
+    currentSrc = next.src; currentMid = next.mid; currentRelayable = true; // 接力仍在聊天列表内，可继续
     audio.currentTime = 0;
     audio.playbackRate = loadSpeed(next.convId); // 倍速是会话级偏好，接力沿用
     // 播不动（404/编解码失败）时复位到"无当前条"，否则整条会话卡在幽灵播放态。
-    audio.play().catch(() => { currentSrc = ""; currentMid = ""; notify(); });
+    audio.play().catch(() => { currentSrc = ""; currentMid = ""; currentRelayable = false; notify(); });
   }
   notify();
 });
@@ -94,10 +104,12 @@ interface VoiceBubbleProps {
   audioSrc: string;
   /** 迷你形态（资料页/收藏行）：关气泡背景，仅留 ▶+波形+时长横排（sketch §10/§11）。 */
   variant?: "bubble" | "mini";
-  /** 对端已读位点（用户 2026-08-27 拍板波形下方显 ✓/✓✓；单聊；群聊/mini 传 0=只显 ✓）。 */
-  peerReadSeq?: number;
-  /** 群聊场景：只显 ✓ 不显 ✓✓（与 IMBubbleCell 已读语义同口径）。 */
-  isGroup?: boolean;
+  /** 对端是否已读（波形下方显 ✓/✓✓，2026-08-27 拍板）。**由 MessageList 算好传入**——
+   *  与 .bmeta 共用同一判定（群聊用 group_read_seq「全员已读」播种，见 App.openConversation），
+   *  别在气泡里另算一套：曾多带一个 !isGroup 条件，把群里的全员已读 ✓✓ 压成 ✓。 */
+  readByPeer?: boolean;
+  /** 12/24 小时制（通用设置）；与其它气泡共用 time.ts 的 formatTime，勿手写时分。 */
+  timeFormat?: TimeFormat;
 }
 
 /// 会话级倍速偏好（per convId，localStorage 持久，与 iOS 同策略）。
@@ -116,17 +128,17 @@ function fmt(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", peerReadSeq = 0, isGroup = false }: VoiceBubbleProps) {
+export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readByPeer = false, timeFormat = "24" }: VoiceBubbleProps) {
   const [tick, setTick] = useState(0);
   const waveRef = useRef<HTMLDivElement | null>(null);
   const [barCount, setBarCount] = useState(28);
-  const mid = m.serverMsgId || m.clientMsgId || "";
+  const mid = voiceRelayMid(m); // 与接力选取同一份身份定义（voiceRelay.ts 唯一来源）
   const dur = m.duration || 0;
   const isCurrent = currentSrc && audioSrc && currentSrc === audioSrc;
   const playing = isCurrent && !audio.paused && !audio.ended;
   const progress = isCurrent && audio.duration > 0 ? audio.currentTime / audio.duration : 0;
-  const initiallyPlayed = mine || hasPlayed(uid, m.convId, mid);
-  const [played, setPlayed] = useState(initiallyPlayed);
+  // 惰性初值：hasPlayed 要读 localStorage，只在首渲染求一次（曾每渲染都算，聊天页有几十个语音气泡）。
+  const [played, setPlayed] = useState(() => mine || hasPlayed(uid, m.convId, mid));
 
   const wasCurrentRef = useRef(false);
   useEffect(() => {
@@ -187,11 +199,11 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", peerRe
     audio.src = audioSrc;
     currentSrc = audioSrc;
     currentMid = mid; // 接力定位用（见 VoiceRelayResolver：按消息 id 而非 URL）
+    currentRelayable = variant === "bubble"; // 只有聊天列表里的气泡参与接力，mini（收藏/资料页）播完即停
     audio.currentTime = 0;
     audio.playbackRate = loadSpeed(m.convId); // 应用会话级倍速
     audio.play().catch(() => undefined);
-    if (!played && mid) { markPlayed(uid, m.convId, mid); setPlayed(true); }
-    notify();
+    notify(); // 记"已播"由 isCurrent 的 effect 统一收口（手动点击与接力自动切换同一条路径）
   }
 
   /** scrub 拖拽：>=4pt 阈值避免与列表滚动打架；用 pointerdown/move/up 支持鼠标+触摸。 */
@@ -239,11 +251,7 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", peerRe
 
   // 消息时间/勾（2026-08-27 用户拍板：**独立一行**右对齐，iOS/Web 拉齐；时长行只留时长+倍速）。
   // mini 变体（收藏/详情页语音 tab）不显时间行——外层行本就有独立时间戳，重复即噪音。
-  const timeStr = variant !== "mini" && m.timestamp > 0 ? (() => {
-    const d = new Date(m.timestamp);
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-  })() : "";
-  const readByPeer = mine && m.convSeq > 0 && !isGroup && m.convSeq <= peerReadSeq;
+  const timeStr = variant === "mini" ? "" : formatTime(m.timestamp, timeFormat);
   const showsTicks = variant !== "mini" && mine && m.convSeq > 0 && m.status !== "sending" && m.status !== "failed";
 
   return (

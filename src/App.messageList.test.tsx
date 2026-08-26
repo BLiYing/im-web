@@ -12,27 +12,19 @@
  * 不覆盖（jsdom 无真实布局，留手动验证）：loadOlder 滚动锚定保位。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import type { Conversation, ChatMessage } from "./sdk/protocol";
 
 vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));
 
 import { IMClient } from "./sdk/imSdk";
-import App from "./App";
 
 import type { Fake } from "./testing/fakeIMClient";
+import {
+  UID, PEER, CID, makeConv as conv, installJsdomShims, enterChat as enterChatDefault,
+} from "./testing/appHarness";
 const Fake = IMClient as unknown as Fake;
-
-const UID = "1001", PEER = "2002";
-const CID = `u_${UID}_u_${PEER}`;
-
-const conv = (over: Partial<Conversation> = {}): Conversation => ({
-  conv_id: CID, peer: PEER, peer_nickname: "小明",
-  last_message: { server_msg_id: "s1", from: PEER, content_type: "text", content: "在吗", conv_seq: 0, timestamp: Date.now() },
-  latest_conv_seq: 0, unread: 0, read_seq: 0, peer_read_seq: 0,
-  ...over,
-});
 
 let seqCounter = 0;
 /** 造一条消息（默认对端文本）；传 over 覆盖任意字段。convSeq 缺省自增避免去重撞车。 */
@@ -53,20 +45,14 @@ beforeEach(() => {
   localStorage.clear();
   seqCounter = 0;
   Fake.conversations = [conv()];
-  Element.prototype.scrollTo ??= () => {};
-  Element.prototype.scrollIntoView ??= () => {};
-  URL.createObjectURL ??= (() => "blob:fake") as typeof URL.createObjectURL;
-  URL.revokeObjectURL ??= () => {};
+  installJsdomShims();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
+/** 登录进单聊；convOver 非空时先改掉会话行字段（如 peer_read_seq，用于已读双勾用例）。 */
 async function enterChat(convOver: Partial<Conversation> = {}) {
   if (Object.keys(convOver).length) Fake.conversations = [conv(convOver)];
-  render(<App />);
-  fireEvent.click(screen.getByText("免密登录"));
-  await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));
-  fireEvent.click(document.querySelector(".convitem")!);
-  await waitFor(() => expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument());
+  await enterChatDefault();
 }
 
 describe("消息列表：系统/撤回墓碑", () => {
@@ -158,6 +144,21 @@ describe("消息列表：状态标记", () => {
     await enterChat({ peer_read_seq: 5 });
     await push(recv({ from: UID, contentType: "text", content: "在的", convSeq: 1 }));
     await waitFor(() => expect(msgs().querySelector(".ck.read")).toBeInTheDocument());
+  });
+
+  // 语音气泡的时间/勾曾在组件内另算一套（多带一个 !isGroup），把 .bmeta 的判定复制成了第二份，
+  // 结果单聊也好群聊也好都只显 ✓。现在由 MessageList 算好 readByPeer 一并传下去，两者恒同口径。
+  it("本人语音被对端读过 → 语音气泡也显 ✓✓（与文本气泡同口径）", async () => {
+    await enterChat({ peer_read_seq: 5 });
+    await push(recv({ from: UID, contentType: "voice", content: "/uploads/a.m4a", duration: 3000, convSeq: 1 }));
+    await waitFor(() => expect(msgs().querySelector(".voice-tick.read")).toBeInTheDocument());
+  });
+
+  it("本人语音未被读过 → 单勾（.voice-tick 不带 .read）", async () => {
+    await enterChat({ peer_read_seq: 0 });
+    await push(recv({ from: UID, contentType: "voice", content: "/uploads/b.m4a", duration: 3000, convSeq: 1 }));
+    await waitFor(() => expect(msgs().querySelector(".voice-tick")).toBeInTheDocument());
+    expect(msgs().querySelector(".voice-tick.read")).not.toBeInTheDocument();
   });
 
   it("已编辑消息标「已编辑」.edited-tag", async () => {

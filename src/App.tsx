@@ -74,7 +74,7 @@ import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
 import { GroupTextModal } from "./components/modals/GroupTextModal";
-import { FavoritesModal, FAV_PICK_MAX } from "./components/modals/FavoritesModal";
+import { FavoritesModal } from "./components/modals/FavoritesModal";
 import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
@@ -101,6 +101,13 @@ const MAX_INITIAL_MEMBERS = MAX_GROUP_MEMBERS - 1;
 // 转发目标会话上限：一次最多转给 9 个会话，与 iOS kIMForwardMaxSelection / 微信一致。
 
 // 收藏 → 合成 ChatMessage：转发/从收藏发送统一走 sendForwardToTarget（§6，媒体/文件透传 URL 不重传）。
+
+/** convSeq→文本 表的两个通用改法（转写面板用）：删一项 / 仅当该项仍展开时写入。 */
+const omitSeq = (r: Record<number, string>, seq: number): Record<number, string> => {
+  const n = { ...r }; delete n[seq]; return n;
+};
+const setIfOpen = (r: Record<number, string>, seq: number, text: string): Record<number, string> =>
+  (r[seq] === undefined ? r : { ...r, [seq]: text }); // 未展开（用户已取消）就别把面板又拉回来
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -140,6 +147,7 @@ export default function App() {
   // convSeq -> 转写文本（服务端识别）。空串 = 识别中；未定义 = 未展开。
   // 与 translations 分开：翻译是文本消息的译文，转写是语音的文字，两者可同时存在。
   const [transcripts, setTranscripts] = useState<Record<number, string>>({});
+  const transcriptsRef = useRef<Record<number, string>>({}); // 同 messagesRef/pinnedRef：稳定回调读当前展开态
   // 合并转发详情弹窗：栈式，支持嵌套「套娃」下钻/返回（栈顶=当前展示层，空=关闭）。
   const [recordStack, setRecordStack] = useState<ChatRecord[]>([]);
   const recordView = recordStack.length > 0 ? recordStack[recordStack.length - 1] : null;
@@ -626,15 +634,10 @@ export default function App() {
       onVoiceTranscript: (convId, convSeq, status, text) => {
         // 只在该条仍处于展开态时落文本——用户可能在等结果期间点了「取消转文字」。
         if (status === "done" && text) {
-          setTranscripts((prev) => (prev[convSeq] === undefined ? prev : { ...prev, [convSeq]: text }));
+          setTranscripts((prev) => setIfOpen(prev, convSeq, text));
         } else if (status === "failed") {
           setToast("识别失败，请稍后重试");
-          setTranscripts((prev) => {
-            if (prev[convSeq] === undefined) return prev;
-            const next = { ...prev };
-            delete next[convSeq];
-            return next;
-          });
+          setTranscripts((prev) => (prev[convSeq] === undefined ? prev : omitSeq(prev, convSeq)));
         }
         void convId;
       },
@@ -1262,39 +1265,25 @@ export default function App() {
   const transcribeMessage = useCallback((m: ChatMessage) => {
     setMenu(null);
     if (m.convSeq <= 0) return;
-    setTranscripts((prev) => {
-      if (prev[m.convSeq] !== undefined) {
-        const next = { ...prev };
-        delete next[m.convSeq];
-        return next;
-      }
-      return { ...prev, [m.convSeq]: "" }; // 空串=识别中
-    });
-    // 收起分支不发请求：上面已把该 seq 删掉，这里据删前的状态判断。
-    if (transcripts[m.convSeq] !== undefined) return;
+    if (transcriptsRef.current[m.convSeq] !== undefined) { // 已展开 → 只收面板，不发请求
+      setTranscripts((prev) => omitSeq(prev, m.convSeq));
+      return;
+    }
+    setTranscripts((prev) => ({ ...prev, [m.convSeq]: "" })); // 空串=识别中
     void (async () => {
       try {
         const r = await clientRef.current?.transcribeVoice(m.convId, m.convSeq);
-        if (r && r.status === "done" && r.text) {
-          setTranscripts((prev) => (prev[m.convSeq] === undefined ? prev : { ...prev, [m.convSeq]: r.text }));
-        }
+        if (r && r.status === "done" && r.text) setTranscripts((prev) => setIfOpen(prev, m.convSeq, r.text));
         // pending：维持"识别中…"，等 WS 帧。
       } catch (e) {
-        const code = errorCode(e);
-        const tip = code === 500101 ? "转文字暂未开启"
-          : code === 500102 ? "识别失败，请稍后重试"
-          : code === 500103 ? "转文字服务繁忙，请稍后再试"
-          : code === 100002 ? "操作过于频繁，请稍后再试"
-          : `转文字失败：${(e as Error).message}`;
-        setToast(tip);
-        setTranscripts((prev) => {
-          const next = { ...prev };
-          delete next[m.convSeq];
-          return next;
-        });
+        // 业务码文案统一在 FRIENDLY_MESSAGES（api() 已据码本地化 message）；只有非业务错误
+        // （网络/解析）才补前缀，否则会吐出裸的 "Failed to fetch"。
+        const msg = (e as Error).message;
+        setToast(errorCode(e) ? msg : `转文字失败：${msg}`);
+        setTranscripts((prev) => omitSeq(prev, m.convSeq));
       }
     })();
-  }, [transcripts]);
+  }, []);
 
   // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
@@ -1673,6 +1662,7 @@ export default function App() {
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
   pinnedRef.current = pinnedByConv; // 同上：WS 回调（onMsgOp）判断撤回/编辑是否命中置顶项要读当前集合
+  transcriptsRef.current = transcripts; // 同上：transcribeMessage 判断"已展开→收起"要读当前值
 
   // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
   // searchOpen/searchQuery 受控注入（见上）；副作用依赖（jumpToSeq/locateInChat/setToast/各 ref/客户端）注入进去。=====
@@ -2796,7 +2786,7 @@ export default function App() {
           myUid={uid} conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl}
           onOpenRecord={(f) => setRecordStack([parseChatRecord(f.content)])}
           onPick={sendFavoritesToCurrent}
-          onPickLimit={() => setToast(`最多选择 ${FAV_PICK_MAX} 项`)}
+          onPickLimit={setToast}
           onClose={closeFavorites}
           fetchLinkPreview={fetchLinkPreview}
         />

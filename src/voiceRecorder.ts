@@ -7,12 +7,11 @@
 //   - 采样：AnalyserNode 每 100ms 取 RMS → 0~100 百分比 → base64 waveform（≤120 字节）。
 //   - 时长上限 5min（超上限自动停并进入待发送态）；<0.6s 提示"说话时间太短"并丢弃。
 
-const VOICE_MAX_MS = 5 * 60 * 1000;
+/** 单条语音硬闸（sketch §12）：到点自动 stopAndSend；导出供 UI 显倒数/文案。 */
+export const VOICE_MAX_MS = 5 * 60 * 1000;
 const VOICE_MIN_MS = 600;
 /** 4:50 起 UI 应显倒数 10s 提示上限逼近（sketch §12）。 */
 export const VOICE_COUNTDOWN_START_MS = VOICE_MAX_MS - 10 * 1000;
-/** 允许业务层读硬闸值（配合 sketch §12 的锁定态自动 stopAndSend / 按住态转锁定 pause）。 */
-export const VOICE_MAX_DURATION_MS = VOICE_MAX_MS;
 const VOICE_MAX_WAVEFORM_BYTES = 120;
 const VOICE_SAMPLE_INTERVAL_MS = 100;
 

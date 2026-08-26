@@ -1,8 +1,10 @@
 // 语音相关的 REST 调用（voice 域）。从 imSdk.ts 拆出——见 scripts/check-file-size.sh 对
 // imSdk.ts 的建议「如拆按域分（auth/messages/groups/qr）」；与 qrLogin.ts 同一套做法。
 //
-// 这两个接口都只依赖「token + 一次 HTTP」，不碰 IMClient 的连接状态/本地库，
-// 所以适合做纯函数模块：IMClient 上的同名方法只是带上自己的 token 转调。
+// 两个接口都不碰 IMClient 的连接状态/本地库，只做「一次 HTTP + 解包」：
+//   uploadVoice   —— 自带 token，纯函数；
+//   transcribeVoice —— 需要 IMClient.api 的信封解包/鉴权重试，故由调用方注入该函数。
+// IMClient 上的同名方法只是转调。
 import { tracedFetch } from "./http";
 import { friendlyMessage } from "./imSdk";
 

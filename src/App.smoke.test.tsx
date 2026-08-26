@@ -8,28 +8,20 @@
  * 显式实现的仅限启动/聊天主链路所需；测试通过 (IMClient as any).last 拿到实例驱动服务端事件。
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import type { Conversation, ChatMessage } from "./sdk/protocol";
+import type { ChatMessage } from "./sdk/protocol";
 
 // ---- mock ./sdk/imSdk（vi.mock 提升到顶部，工厂内自包含）----
 vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));
 
 import { IMClient } from "./sdk/imSdk";
-import App from "./App";
 
 import type { Fake } from "./testing/fakeIMClient";
+import {
+  UID, PEER, CID, makeConv as conv, installJsdomShims, renderApp, loginAndWait, openChatWithPeer,
+} from "./testing/appHarness";
 const Fake = IMClient as unknown as Fake;
-
-const UID = "1001", PEER = "2002";
-const CID = `u_${UID}_u_${PEER}`; // convIdFor(1001,2002)
-
-const conv = (over: Partial<Conversation> = {}): Conversation => ({
-  conv_id: CID, peer: PEER, peer_nickname: "小明",
-  last_message: { server_msg_id: "s1", from: PEER, content_type: "text", content: "在吗", conv_seq: 0, timestamp: Date.now() },
-  latest_conv_seq: 0, unread: 0, read_seq: 0, peer_read_seq: 0,
-  ...over,
-});
 
 const incoming = (content: string, convSeq: number): ChatMessage => ({
   convId: CID, from: PEER, content, contentType: "text",
@@ -39,30 +31,13 @@ const incoming = (content: string, convSeq: number): ChatMessage => ({
 beforeEach(() => {
   localStorage.clear();
   Fake.conversations = [conv()];
-  // jsdom 缺失的浏览器 API（App 滚动定位/objectURL 用到）
-  Element.prototype.scrollTo ??= () => {};
-  Element.prototype.scrollIntoView ??= () => {};
-  URL.createObjectURL ??= (() => "blob:fake") as typeof URL.createObjectURL;
-  URL.revokeObjectURL ??= () => {};
+  installJsdomShims();
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-/** 免密登录进入主界面，等会话列表出现（「小明」同时出现在头像回退字与昵称里，用 AllByText）。 */
-async function loginAndWait() {
-  render(<App />);
-  fireEvent.click(screen.getByText("免密登录"));
-  await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));
-}
-
-/** 进入与小明的单聊（点会话行），等 composer 出现。 */
-async function openChatWithPeer() {
-  fireEvent.click(document.querySelector(".convitem")!);
-  await waitFor(() => expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument());
-}
-
 describe("App 冒烟：登录 → 会话 → 聊天主链路", () => {
   it("无会话缓存时渲染登录页；登录后进入主界面并列出会话", async () => {
-    render(<App />);
+    renderApp();
     expect(screen.getByText("IM Web 登录")).toBeInTheDocument();
     fireEvent.click(screen.getByText("免密登录"));
     await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));

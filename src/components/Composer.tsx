@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { Bookmark, Forward, Mic, Trash2, type LucideIcon } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
-import { VoiceRecorder, voiceRecordingSupported, VOICE_COUNTDOWN_START_MS, VOICE_MAX_DURATION_MS } from "../voiceRecorder";
+import { VoiceRecorder, voiceRecordingSupported, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
 import type { DownloadState } from "../download";
 import { replyPreviewOf } from "../messageContent";
 import { FileTypeIcon } from "../FileTypeIcon";
@@ -95,8 +95,8 @@ export function Composer(p: ComposerProps) {
           else if (reason === "error") setToast("录音失败，请重试");
         },
         onMaxReached: () => {
-          // §12 硬闸：桌面天然锁定 → 自动送出；toast 告知用户"到 5 分钟已自动发送"。
-          setToast("语音已达 5 分钟上限，自动发送");
+          // §12 硬闸：桌面天然锁定 → 自动送出；toast 告知用户"到点已自动发送"（分钟数由常量派生）。
+          setToast(`语音已达 ${VOICE_MAX_MS / 60000} 分钟上限，自动发送`);
         },
       });
     } catch (e) {
@@ -301,8 +301,8 @@ export function Composer(p: ComposerProps) {
               {/* §12 倒数：4:50 起 timer 变红 + 显"还剩 Ns"，到 5:00 自动送出（onMaxReached）。 */}
               <span className={`rec-timer${recordElapsed >= VOICE_COUNTDOWN_START_MS ? " over" : ""}`}>
                 {Math.floor(recordElapsed / 60000)}:{String(Math.floor(recordElapsed / 1000) % 60).padStart(2, "0")}
-                {recordElapsed >= VOICE_COUNTDOWN_START_MS && recordElapsed < VOICE_MAX_DURATION_MS &&
-                  <span className="rec-countdown"> · 还剩 {Math.max(0, Math.ceil((VOICE_MAX_DURATION_MS - recordElapsed) / 1000))}s</span>}
+                {recordElapsed >= VOICE_COUNTDOWN_START_MS && recordElapsed < VOICE_MAX_MS &&
+                  <span className="rec-countdown"> · 还剩 {Math.max(0, Math.ceil((VOICE_MAX_MS - recordElapsed) / 1000))}s</span>}
               </span>
               <span className="rec-livewave" aria-hidden>
                 {recordAmps.map((a, i) => (

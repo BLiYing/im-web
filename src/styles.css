@@ -1715,12 +1715,6 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
   transition: background 0.12s linear; }
 .voice-wave span.on { background: var(--accent); }
 .bubble.me .voice-wave span.on { background: rgba(20, 96, 31, 0.9); }
-/* voice-meta（旧右列）已由 .voice-center + .voice-meta-row 取代（2026-08-27 布局重整）。
-   保留兼容类名——如果任何旧引用仍存在，也不占位。 */
-.voice-meta { display: none; }
-.voice-dur { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
-  font-size: 11px; color: var(--text-secondary); }
-.bubble.me .voice-dur { color: rgba(6, 44, 12, 0.55); }
 .voice-unplayed { width: 7px; height: 7px; border-radius: 50%; background: var(--danger);
   box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--danger) 18%, transparent);
   animation: voice-unplayed-pulse 2.4s infinite; }
@@ -1779,14 +1773,12 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .detail-voice-sender { font-size: 14px; font-weight: 500; color: var(--text-primary, #222); }
 .detail-voice-mini { display: flex; align-items: center; }
 .detail-voice-time { font-size: 11px; color: var(--muted, #888); }
-/* variant=mini：关气泡背景/圆角/宽度约束，仅留 ▶+波形+时长横排（与 IMVoiceMiniPlayerView 视觉对齐）。 */
-.voice-bubble.variant-mini { width: 100% !important; background: transparent; padding: 0; }
+/* variant=mini：关气泡背景/圆角/宽度约束，仅留 ▶+波形+时长横排（与 IMVoiceMiniPlayerView 视觉对齐）。
+   mini 不再吃组件的内联 width（VoiceBubble 只在非 mini 时给 style.width），故无需 !important。 */
+.voice-bubble.variant-mini { width: 100%; background: transparent; padding: 0; }
 .voice-bubble.variant-mini .voice-play { box-shadow: none; }
 .fav-voices .fav-item.voice { align-items: center; }
 .fav-item.voice .fav-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-/* 只对非 mini 变体加背景/圆角——sketch §11 mini 应扁平无框（code-review 2026-08-27 CSS specificity 修）。
-   :not(.variant-mini) 与父串联总 specificity 0-4-0 > .voice-bubble.variant-mini 的 0-2-0，覆盖成立。 */
-.fav-item.voice .voice-bubble:not(.variant-mini) { background: var(--bubble-them, rgba(120, 120, 128, 0.08)); border-radius: 14px; }
 
 /* 语音转写面板（服务端识别，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md）：
    左侧引用线 + 文本 + 尾行隐私说明，与 iOS IMVoiceBubbleCell 的 transcriptPanel 同视觉语系。 */

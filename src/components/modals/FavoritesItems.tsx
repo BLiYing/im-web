@@ -59,13 +59,14 @@ export function favDate(ts: number): string {
 }
 
 /** 行右槽：pick 模式=可点勾选框（独立触发，不冒泡给行 onClick）；browse=删除 ✕ 快捷。
- *  勾选框 onClick 必带 stopPropagation——否则外层行 onClick（打开预览/播放/链接）会同时触发。 */
-export function FavTrailing({ pickMulti, on, onCheck, onDelete }: {
-  pickMulti: boolean; on: boolean; onCheck?: () => void; onDelete?: () => void;
+ *  勾选框 onClick 必带 stopPropagation——否则外层行 onClick（打开预览/播放/链接）会同时触发。
+ *  checkClass 让宫格覆盖层（fav-tile-check）复用同一个勾选框，勿再另写一份。 */
+export function FavTrailing({ pickMulti, on, onCheck, onDelete, checkClass = "fav-check" }: {
+  pickMulti: boolean; on: boolean; onCheck?: () => void; onDelete?: () => void; checkClass?: string;
 }) {
   if (pickMulti) {
     return (
-      <button type="button" className={`checkbox fav-check${on ? " on" : ""}`}
+      <button type="button" className={`checkbox ${checkClass}${on ? " on" : ""}`}
         title={on ? "取消选择" : "选择"} aria-pressed={on}
         onClick={(e) => { e.stopPropagation(); onCheck?.(); }}>
         {on && <Check size={13} />}
@@ -112,13 +113,8 @@ export function FavMediaGrid({ favs, glue, pickMulti, selected, onTileClick, onC
               onClick={() => onTileClick(f, m, gate)}
               onMenu={(e) => onMenu?.(e, f)}
               onMediaError={glue.onMediaError} />
-            {pickMulti && (
-              <button type="button" className={`checkbox fav-tile-check${on ? " on" : ""}`}
-                title={on ? "取消选择" : "选择"} aria-pressed={on}
-                onClick={(e) => { e.stopPropagation(); onCheckToggle?.(f); }}>
-                {on && <Check size={13} />}
-              </button>
-            )}
+            <FavTrailing pickMulti={pickMulti} on={on} checkClass="fav-tile-check"
+              onCheck={() => onCheckToggle?.(f)} />
           </div>
         );
       })}

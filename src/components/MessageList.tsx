@@ -4,7 +4,7 @@
 // - **reactive 值与 App 内闭包**（messages/selectMode/mediaGate/senderLabel/renderMessageText/...）走 props；
 // - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
-import { useEffect, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { ChatMessage } from "../sdk/protocol";
 import { pickNextVoiceRelay, voiceRelayMid } from "../voiceRelay";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
@@ -23,7 +23,7 @@ import { AlbumGrid } from "./AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./QuoteThumb";
 import { FileGateIcon } from "./FileGateIcon";
 import { LinkCard } from "./LinkCard";
-import { VoiceBubble, setVoiceRelayResolver, voiceHasPlayed } from "./VoiceBubble";
+import { VoiceBubble, setVoiceRelayResolver, voicePlayedSet } from "./VoiceBubble";
 import { useChatActions } from "../ChatActionsContext";
 
 export interface MessageListProps {
@@ -70,19 +70,27 @@ export function MessageList(p: MessageListProps) {
     toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
   } = useChatActions();
   // 语音接力连播（§6.4，对齐 iOS）：把"下一条该播谁"的数据源注入 VoiceBubble 的模块级单例 audio。
-  // 规则本身在 pickNextVoiceRelay（纯函数，voice.test.ts 护栏）；这里只负责 finishedSrc→索引 的定位
+  // 规则本身在 pickNextVoiceRelay（纯函数，voice.test.ts 护栏）；这里只负责 finishedMid→索引 的定位
   // 与 src 拼装。卸载（切会话）即注销 → 接力自然停在本会话内。
+  //
+  // 注册**只在挂载时做一次**，实时数据经 ref 取：messages 每次渲染都是新数组（App 里 slice().sort()），
+  // 挂依赖数组会导致每次渲染重注册，且让模块级全局长期钉住整份消息数组与 mediaSrc（闭包含 blob 表）。
+  const relayEnv = useRef({ messages, uid, mediaSrc });
+  relayEnv.current = { messages, uid, mediaSrc };
   useEffect(() => {
     setVoiceRelayResolver((finishedMid) => {
-      const idx = messages.findIndex((m) => m.contentType === "voice" && voiceRelayMid(m) === finishedMid);
-      const next = pickNextVoiceRelay(messages, idx, uid,
-        (convId, mid) => voiceHasPlayed(uid, convId, mid));
+      const { messages: msgs, uid: myUid, mediaSrc: srcOf } = relayEnv.current;
+      const idx = msgs.findIndex((m) => m.contentType === "voice" && voiceRelayMid(m) === finishedMid);
+      if (idx < 0) return null;
+      // 已播集合按 (uid, 会话) 取一次即可：扫描期间不会变，逐条查会把整串 JSON 重复 parse N 遍。
+      const played = voicePlayedSet(myUid, msgs[idx].convId);
+      const next = pickNextVoiceRelay(msgs, idx, myUid, (_convId, mid) => played.has(mid));
       if (!next) return null;
-      const src = mediaSrc(next);
+      const src = srcOf(next);
       return src ? { mid: voiceRelayMid(next), src, convId: next.convId } : null;
     });
     return () => setVoiceRelayResolver(null);
-  }, [messages, uid, mediaSrc]);
+  }, []);
 
   // 相册左侧框=整组全选/全不选：全在→把在的逐个翻掉、否则把不在的逐个翻上（复用 toggleSelected，全有/全无语义）。
   const toggleAlbumGroup = (seqs: number[]) => {
@@ -325,7 +333,7 @@ export function MessageList(p: MessageListProps) {
                   // 语音气泡（P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §10）：
                   // ▶ + 波形 + m:ss + 未播红点；单例 audio 同页面一次只播一条。
                   <VoiceBubble m={m} mine={mine} uid={uid} audioSrc={mediaSrc(m)}
-                               peerReadSeq={readSeq} isGroup={isGroupChat} />
+                               readByPeer={readByPeer} timeFormat={timeFormat} />
                 ) : m.contentType === "file" ? (
                   // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。
                   uploading || !m.content ? (
