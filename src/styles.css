@@ -1696,7 +1696,11 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
   transition: background 0.12s linear; }
 .voice-wave span.on { background: var(--accent); }
 .bubble.me .voice-wave span.on { background: rgba(20, 96, 31, 0.9); }
-.voice-meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 32px; }
+/* voice-meta：右列布局锁定高度=34（≈ 波形高 + 上下 3pt 余量），倍速胶囊出现不再挤气泡高度
+   （2026-08-27 修：曾 speed 显示时高度 +20，气泡整体抖）。speed 与 dur 同槽绝对定位，speed
+   显示时 dur 隐藏——同一位置显示"1x/1.5x/2x"或时长。 */
+.voice-meta { flex: none; position: relative; align-self: stretch;
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 44px; height: 34px; }
 .voice-dur { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
   font-size: 11px; color: var(--text-secondary); }
 .bubble.me .voice-dur { color: rgba(6, 44, 12, 0.55); }

@@ -218,15 +218,19 @@ export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
         )}
       </div>
       <div className="voice-meta">
-        {isCurrent && (
+        {isCurrent ? (
+          // 播放中：倍速胶囊代替时长（同一列/同一高度，气泡整体不再抖，2026-08-27 修）。
           <button className={`voice-speed${mine ? " mine" : ""}`}
                   type="button"
                   onClick={(e) => { e.stopPropagation(); cycleSpeed(); }}>
             {speed === 1.5 ? "1.5x" : speed === 2 ? "2x" : "1x"}
           </button>
+        ) : (
+          <>
+            {!played && <span className="voice-unplayed" aria-label="未播放" />}
+            <span className="voice-dur">{durLabel}</span>
+          </>
         )}
-        {!played && !isCurrent && <span className="voice-unplayed" aria-label="未播放" />}
-        <span className="voice-dur">{durLabel}</span>
       </div>
     </div>
   );

@@ -50,7 +50,7 @@ export class VoiceRecorder {
   private chunks: BlobPart[] = [];
   private startedAt = 0;
   private tickTimer: number | null = null;
-  private stopReason: "user" | "tooShort" | "error" | "reachedMax" | null = null;
+  private stopReason: "user" | "tooShort" | "error" | "reachedMax" | "cancelled" | null = null;
   private cbs: RecorderCallbacks = {};
   private amplitudes: number[] = [];
   private mime = "audio/mp4";
@@ -97,8 +97,9 @@ export class VoiceRecorder {
   /** 用户左滑取消（Esc / 关闭按钮）：丢弃音频与波形。 */
   cancel(): void {
     if (!this.recorder || this.recorder.state === "inactive") { this.cleanup(); return; }
-    this.stopReason = "user";
-    // MediaRecorder 没有原生 discard——stop 后在 onstop 里判 stopReason 丢弃。
+    // stopReason=cancelled 显式（曾用 "user" + chunks=[]：MediaRecorder.stop() 会 flush 最后一次
+    // ondataavailable，chunks 变非空 → handleStop 走 send 分支即"取消也发出去"，2026-08-27 修）。
+    this.stopReason = "cancelled";
     this.chunks = [];
     this.recorder.stop();
   }
@@ -159,8 +160,7 @@ export class VoiceRecorder {
       this.cbs.onCancel?.("tooShort");
       return;
     }
-    if (reason === "user" && this.chunks.length === 0) {
-      // cancel 分支：chunks 已被清空
+    if (reason === "cancelled") {
       this.cleanup();
       this.cbs.onCancel?.("user");
       return;
