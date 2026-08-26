@@ -56,7 +56,7 @@ describe("DetailTabs", () => {
     media: [] as ChatMessage[], files: [] as ChatMessage[], voices: [] as ChatMessage[], links: [] as ChatMessage[],
     onSelectTab: vi.fn(), onAddMember: vi.fn(), onOpenMember: vi.fn(),
     canManageMember: () => true, onMemberMenu: vi.fn(),
-    mediaGate: () => undefined, onGateTap: vi.fn(), onOpenViewer: vi.fn(),
+    mediaGate: () => undefined, mediaSrc: (m: ChatMessage) => m.content, onGateTap: vi.fn(), onOpenViewer: vi.fn(),
     onFileMenu: vi.fn(), onMediaError: vi.fn(), onOpenFile: vi.fn(),
     fetchLinkPreview: async (u: string) => ({ url: u }), // 测试桩：不出卡（返回空 og），仅让类型对齐
   };

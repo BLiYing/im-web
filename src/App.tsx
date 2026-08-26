@@ -2709,7 +2709,7 @@ export default function App() {
             setViewer({ m: syntheticViewerMessage(`fav-${f.id}`, f.content, kind), fromGallery: true });
           }}
           onOpenLink={(url) => window.open(url, "_blank", "noreferrer")}
-          glue={{ gateOf: mediaGate, onGateTap, onOpenFile: (m) => void openReadyFile(m), onMediaError: (m) => void onPassiveMediaError(m) }}
+          glue={{ gateOf: mediaGate, mediaSrc, onGateTap, onOpenFile: (m) => void openReadyFile(m), onMediaError: (m) => void onPassiveMediaError(m) }}
           myUid={uid} conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl}
           onOpenRecord={(f) => setRecordStack([parseChatRecord(f.content)])}
           onPick={sendFavoritesToCurrent}
@@ -2919,7 +2919,7 @@ export default function App() {
         <DetailPanel detail={detail}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
-          groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} mediaGate={mediaGate} canManageMember={canManageMember}
+          groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}

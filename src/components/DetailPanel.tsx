@@ -37,6 +37,7 @@ export interface DetailPanelProps {
   peerNick: (id: string) => string | undefined;
   peerAvatar: (id: string) => string | undefined;
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
+  mediaSrc: (m: ChatMessage) => string; // blob 缓存优先解析（语音 tab）
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
   // —— 抽屉自身 UI 态 ——
   onClose: () => void;
@@ -70,7 +71,7 @@ export interface DetailPanelProps {
 export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
-    groupRemark, peerNick, peerAvatar, mediaGate, canManageMember,
+    groupRemark, peerNick, peerAvatar, mediaGate, mediaSrc, canManageMember,
     onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
@@ -277,7 +278,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}
                 onMemberMenu={(e, cid, m) => setMemberMenu({ x: e.clientX, y: e.clientY, convId: cid, m })}
-                mediaGate={mediaGate} onGateTap={onGateTap}
+                mediaGate={mediaGate} mediaSrc={mediaSrc} onGateTap={onGateTap}
                 onOpenViewer={(m) => setViewer({ m, fromGallery: true })}
                 onFileMenu={(e, m) => setFileMenu({ x: e.clientX, y: e.clientY, m })}
                 onMediaError={(m) => void onPassiveMediaError(m)} onOpenFile={openReadyFile}

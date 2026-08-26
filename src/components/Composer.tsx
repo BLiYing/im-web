@@ -58,6 +58,7 @@ export function Composer(p: ComposerProps) {
     setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, deleteSelected,
     removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, onFilePicked,
     setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, send,
+    sendVoice, setToast,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   } = useChatActions();
   const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」）
@@ -69,7 +70,6 @@ export function Composer(p: ComposerProps) {
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [recordAmps, setRecordAmps] = useState<number[]>([]);
   const [voicePaused, setVoicePaused] = useState(false);
-  const { sendVoice, setToast } = useChatActions();
 
   const startVoiceRecord = useCallback(async () => {
     if (recording || !voiceProbe.supported) return;

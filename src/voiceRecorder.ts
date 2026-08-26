@@ -56,6 +56,7 @@ export class VoiceRecorder {
   private mime = "audio/mp4";
   private ext = ".m4a";
   private paused = false;
+  private pausedAt = 0; // 暂停时刻：resume 时把暂停区间补回 startedAt，暂停中 elapsed 以它为基准
 
   /** 请求麦克风权限并开始录制。resolve 表示已开始（recorder 处于 recording 态）。 */
   async start(cbs: RecorderCallbacks): Promise<void> {
@@ -87,7 +88,7 @@ export class VoiceRecorder {
   /** 用户主动停并送出。<0.6s 会走 tooShort 分支自动丢弃。 */
   stopAndSend(): void {
     if (!this.recorder || this.recorder.state === "inactive") return;
-    const dur = performance.now() - this.startedAt;
+    const dur = this.elapsedMs();
     if (dur < VOICE_MIN_MS) { this.stopReason = "tooShort"; }
     else { this.stopReason = "user"; }
     this.recorder.stop();
@@ -106,6 +107,7 @@ export class VoiceRecorder {
     if (this.recorder && this.recorder.state === "recording") {
       this.recorder.pause();
       this.paused = true;
+      this.pausedAt = performance.now();
       if (this.tickTimer !== null) { window.clearInterval(this.tickTimer); this.tickTimer = null; }
     }
   }
@@ -114,11 +116,17 @@ export class VoiceRecorder {
     if (this.recorder && this.recorder.state === "paused") {
       this.recorder.resume();
       this.paused = false;
-      // startedAt 用挂钟差算，暂停期间的 elapsed 会算进去——修正：调整 startedAt 补回暂停时长。
-      // 简化：pause 时记 pausedAt，resume 时 startedAt += (now - pausedAt)。
-      // 这里 pauseAt/resume 前只做 UI 暂停即可（webView demo 用户主要看录制条动效）。
+      // 把暂停区间补回 startedAt——否则 durationMs / 0.6s tooShort 门 / 5min 自动停全都把
+      // 暂停挂钟时间算进去（暂停 1 分钟再发送，气泡与服务端 duration 凭空多 1 分钟；2026-08-26 修，
+      // iOS 同款 bug 同批已修）。
+      this.startedAt += performance.now() - this.pausedAt;
       this.tickTimer = window.setInterval(() => this.tick(), VOICE_SAMPLE_INTERVAL_MS);
     }
+  }
+
+  /** 已录音时长 ms（不含暂停区间：暂停中以 pausedAt 为基准冻结）。 */
+  private elapsedMs(): number {
+    return (this.paused ? this.pausedAt : performance.now()) - this.startedAt;
   }
 
   isRecording(): boolean { return this.recorder?.state === "recording"; }
@@ -134,7 +142,7 @@ export class VoiceRecorder {
     const rms = Math.sqrt(sum / buf.length);
     const amp = Math.max(0, Math.min(1, rms * 2)); // ×2 提升低音量可见性
     if (this.amplitudes.length < 4096) this.amplitudes.push(Math.round(amp * 100));
-    const elapsed = performance.now() - this.startedAt;
+    const elapsed = this.elapsedMs();
     this.cbs.onTick?.(amp, elapsed);
     if (elapsed >= VOICE_MAX_MS) {
       this.stopReason = "reachedMax";
@@ -144,7 +152,7 @@ export class VoiceRecorder {
 
   private handleStop(): void {
     if (this.tickTimer !== null) { window.clearInterval(this.tickTimer); this.tickTimer = null; }
-    const dur = performance.now() - this.startedAt;
+    const dur = this.elapsedMs();
     const reason = this.stopReason ?? "user";
     if (reason === "tooShort") {
       this.cleanup();

@@ -1,4 +1,5 @@
 import { Check, ChevronRight, MessageSquareQuote, MessagesSquare } from "lucide-react";
+import { useMemo } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import type { ChatMessage, Conversation, Favorite } from "../../sdk/protocol";
 import type { DownloadState } from "../../download";
@@ -23,6 +24,7 @@ import type { LinkPreview } from "../LinkCard";
 /** 门控与打开的注入面：与聊天页/详情页同一套 useMediaDownload 机制（合成 ChatMessage 喂入，三页共享状态）。 */
 export interface FavoritesMediaGlue {
   gateOf: (m: ChatMessage) => DownloadState | undefined; // undefined = 就绪
+  mediaSrc: (m: ChatMessage) => string;                  // blob 缓存优先解析（语音行播放源；与聊天气泡同口径）
   onGateTap: (m: ChatMessage) => void;                   // 未下载→下载 / 下载中→取消 / 失败→重试
   onOpenFile: (m: ChatMessage) => void;                  // 就绪文件：预览或另存（openReadyFile）
   onMediaError: (m: ChatMessage) => void;                // 缩略加载失败 → 失效/不支持标记
@@ -135,16 +137,17 @@ export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onMen
 
 /** 语音 chip：内嵌迷你波形播放器（复用聊天气泡 VoiceBubble，点即播/暂停；2026-08-26 拍板）。
  *  pick 模式下点击被 pick 消化（capture 阶段拦截，阻断播放）；波形/时长来自收藏快照 waveform/duration。 */
-export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, pick, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
+export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, pick, onMenu, onDelete }: Omit<RowCommon, "onClick"> & {
   uid: string;
+  mediaSrc: (m: ChatMessage) => string; // blob 缓存优先（与聊天气泡同口径，曾传裸 content）
   pick?: () => boolean; // 返回 true = 已被 pick 消化（多选勾选 / 单选即发）
 }) {
-  const m = favoriteToMessage(f);
+  const m = useMemo(() => favoriteToMessage(f), [f]); // 弹窗任意 state 变化不再逐行重建消息对象
   return (
     <div className={`fav-item voice${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}
          onClickCapture={(e) => { if (pick?.()) { e.stopPropagation(); e.preventDefault(); } }}>
       <div className="fav-main">
-        <VoiceBubble m={m} mine={false} uid={uid} audioSrc={m.content} />
+        <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} />
         <div className="fav-meta">
           <span className="fav-src">来自{sourceLabel(f)}</span>
           {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}

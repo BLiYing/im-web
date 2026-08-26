@@ -73,7 +73,9 @@ export function FavoritesModal({
     const q = query.trim().toLowerCase();
     return scoped.filter((f) => matchesCategory(f, kind)).filter((f) => {
       if (!q) return true;
-      const name = favKind(f) === "file" ? favFileName(f) : "";
+      // voice 也按 file_name 搜（语音收藏的 content 是 URL、无 caption，file_name 是唯一可读检索字段；
+      // 曾随 favKind 拆分把 voice 移出 "file" 后搜索静默失效）。
+      const name = ["file", "voice"].includes(favKind(f)) ? favFileName(f) : "";
       return [f.content, f.caption || "", name, sourceLabel(f)].some((s) => s.toLowerCase().includes(q));
     });
   }, [scoped, kind, query, sourceLabel]);
@@ -195,7 +197,7 @@ export function FavoritesModal({
             <div className="fav-list fav-voices">
               {shown.map((f) => (
                 <FavVoiceRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={pickMulti} sourceLabel={sourceLabel}
-                  uid={myUid} pick={() => pickIfNeeded(f)}
+                  uid={myUid} mediaSrc={glue.mediaSrc} pick={() => pickIfNeeded(f)}
                   onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
               ))}
             </div>

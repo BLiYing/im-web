@@ -37,7 +37,7 @@ export type DetailTab = "members" | "media" | "files" | "voice" | "links";
 export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, links,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu,
-  mediaGate, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
+  mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
   tabs: Array<{ k: DetailTab; label: string }>;
@@ -55,6 +55,7 @@ export function DetailTabs({
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
   onMemberMenu: (e: MouseEvent, cid: string, m: GroupMember) => void;
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
+  mediaSrc: (m: ChatMessage) => string; // blob 缓存优先解析（语音 tab 用；与聊天气泡同口径）
   onGateTap: (m: ChatMessage) => void;
   onOpenViewer: (m: ChatMessage) => void;
   onFileMenu: (e: MouseEvent, m: ChatMessage) => void;
@@ -156,7 +157,7 @@ export function DetailTabs({
               {voices.map((m) => (
                 <div key={msgKey(m)} className="detail-voiceitem"
                      onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
-                  <VoiceBubble m={m} mine={false} uid={uid} audioSrc={m.content} />
+                  <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} />
                   <span className="detail-voice-time">{detailLinkTimeText(m.timestamp)}</span>
                 </div>
               ))}

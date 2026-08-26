@@ -4,7 +4,7 @@
 //
 // 播放单例：本组件模块内维护一个 HTMLAudioElement，同页面一次只播一条；
 // "已播过"集合走 localStorage per-uid+per-conv（与 iOS 同策略：不跨端）。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../sdk/protocol";
 
 /// 波形柱数：按可绘制宽度动态定；这里按 ~5.5px pitch 估算，实际下采见组件内。
@@ -92,11 +92,17 @@ export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
   const initiallyPlayed = mine || hasPlayed(uid, m.convId, mid);
   const [played, setPlayed] = useState(initiallyPlayed);
 
+  const wasCurrentRef = useRef(false);
   useEffect(() => {
-    const fn = () => setTick((t) => t + 1);
+    const fn = () => {
+      // 只在"与本气泡相关"时才重渲：当前正是本条，或刚从本条切走（需一次刷新复位 UI）。
+      // 曾无条件 setTick——聊天列表+详情语音 tab+收藏弹窗同开时，播任何一条都以 ~4Hz 全量重渲全部实例。
+      const cur = !!audioSrc && currentSrc === audioSrc;
+      if (cur || wasCurrentRef.current) { wasCurrentRef.current = cur; setTick((t) => t + 1); }
+    };
     listeners.add(fn);
     return () => { listeners.delete(fn); };
-  }, []);
+  }, [audioSrc]);
 
   useEffect(() => {
     const el = waveRef.current;
@@ -110,18 +116,21 @@ export function VoiceBubble({ m, mine, uid, audioSrc }: VoiceBubbleProps) {
     return () => ro.disconnect();
   }, []);
 
-  const amps = amplitudesFromBase64(m.waveform);
+  // 解码/下采 memo 化：每次进度 tick 重渲不再重复 atob+逐字节循环（下采按 bucket 取最大值保峰形，与后端一致）。
+  const amps = useMemo(() => amplitudesFromBase64(m.waveform), [m.waveform]);
   const N = barCount;
-  // 下采：按 bucket 取最大值保峰形（与后端下采策略一致）。
-  const bars: number[] = new Array(N);
-  for (let i = 0; i < N; i++) {
-    if (!amps || amps.length === 0) { bars[i] = 0.35; continue; }
-    const lo = Math.floor((i * amps.length) / N);
-    const hi = Math.max(lo + 1, Math.floor(((i + 1) * amps.length) / N));
-    let v = 0;
-    for (let j = lo; j < Math.min(amps.length, hi); j++) { if (amps[j] > v) v = amps[j]; }
-    bars[i] = v;
-  }
+  const bars = useMemo(() => {
+    const out: number[] = new Array<number>(N);
+    for (let i = 0; i < N; i++) {
+      if (!amps || amps.length === 0) { out[i] = 0.35; continue; }
+      const lo = Math.floor((i * amps.length) / N);
+      const hi = Math.max(lo + 1, Math.floor(((i + 1) * amps.length) / N));
+      let v = 0;
+      for (let j = lo; j < Math.min(amps.length, hi); j++) { if (amps[j] > v) v = amps[j]; }
+      out[i] = v;
+    }
+    return out;
+  }, [amps, N]);
 
   const activeCount = Math.round(progress * N);
 
