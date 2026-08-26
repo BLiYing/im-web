@@ -1787,3 +1787,12 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 /* 只对非 mini 变体加背景/圆角——sketch §11 mini 应扁平无框（code-review 2026-08-27 CSS specificity 修）。
    :not(.variant-mini) 与父串联总 specificity 0-4-0 > .voice-bubble.variant-mini 的 0-2-0，覆盖成立。 */
 .fav-item.voice .voice-bubble:not(.variant-mini) { background: var(--bubble-them, rgba(120, 120, 128, 0.08)); border-radius: 14px; }
+
+/* 语音转写面板（服务端识别，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md）：
+   左侧引用线 + 文本 + 尾行隐私说明，与 iOS IMVoiceBubbleCell 的 transcriptPanel 同视觉语系。 */
+.voice-transcript { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0 0;
+  padding-left: 9px; border-left: 2.5px solid var(--accent); border-radius: 2px;
+  max-width: min(420px, 72%); align-self: flex-start; }
+.voice-transcript.mine { align-self: flex-end; }
+.voice-transcript-text { font-size: 14px; color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
+.voice-transcript-foot { font-size: 10px; color: var(--text-secondary); }

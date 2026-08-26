@@ -1,5 +1,6 @@
 // voice.test.ts —— 语音消息 P0 的纯函数护栏。
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { buildMessageActions } from "./menus";
 import { pickNextVoiceRelay, voiceRelayMid, type VoiceRelayMessage } from "./voiceRelay";
 
 /** 与 App.tsx mediaPreview(voice) 同口径的辅助——护住"[语音] m:ss"格式不被改坏。 */
@@ -105,5 +106,49 @@ describe("voice relay: pickNextVoiceRelay", () => {
     expect(voiceRelayMid({ contentType: "voice", from: "p", convId: "c1", serverMsgId: "s", clientMsgId: "c" })).toBe("s");
     expect(voiceRelayMid({ contentType: "voice", from: "p", convId: "c1", clientMsgId: "c" })).toBe("c");
     expect(voiceRelayMid({ contentType: "voice", from: "p", convId: "c1" })).toBe("");
+  });
+});
+
+// ---- 转文字菜单项二态（服务端识别，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md） ----
+describe("voice transcribe menu action", () => {
+  const voiceMsg = {
+    convId: "c1", from: "peer", contentType: "voice", content: "/uploads/a.m4a",
+    convSeq: 5, timestamp: 1, status: "sent",
+  } as unknown as Parameters<typeof buildMessageActions>[0] extends never ? never : any;
+
+  const handlers = () => ({
+    copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(),
+    edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), pin: vi.fn(),
+    delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(),
+    transcribe: vi.fn(), readReceipts: vi.fn(), comingSoon: vi.fn(),
+  });
+
+  const idsFor = (ctx: Record<string, unknown>) =>
+    buildMessageActions(handlers())
+      .filter((a) => a.visible(ctx as never))
+      .map((a) => a.id);
+
+  it("未展开时显「转文字」，不显「取消转文字」", () => {
+    const ids = idsFor({ m: voiceMsg, uid: "me", hasTranscript: false });
+    expect(ids).toContain("transcribe");
+    expect(ids).not.toContain("transcribeOff");
+  });
+  it("已展开时显「取消转文字」，不显「转文字」", () => {
+    const ids = idsFor({ m: voiceMsg, uid: "me", hasTranscript: true });
+    expect(ids).toContain("transcribeOff");
+    expect(ids).not.toContain("transcribe");
+  });
+  it("非语音消息不显转文字", () => {
+    const ids = idsFor({ m: { ...voiceMsg, contentType: "text" }, uid: "me" });
+    expect(ids).not.toContain("transcribe");
+    expect(ids).not.toContain("transcribeOff");
+  });
+  it("未发出（convSeq=0）不显——服务端按消息坐标反查，没有坐标无从查起", () => {
+    const ids = idsFor({ m: { ...voiceMsg, convSeq: 0 }, uid: "me" });
+    expect(ids).not.toContain("transcribe");
+  });
+  it("已撤回不显", () => {
+    const ids = idsFor({ m: { ...voiceMsg, recalledAt: 123 }, uid: "me" });
+    expect(ids).not.toContain("transcribe");
   });
 });

@@ -137,6 +137,9 @@ export default function App() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
   const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null); // 正在编辑的消息（M4-5，编辑态）
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
+  // convSeq -> 转写文本（服务端识别）。空串 = 识别中；未定义 = 未展开。
+  // 与 translations 分开：翻译是文本消息的译文，转写是语音的文字，两者可同时存在。
+  const [transcripts, setTranscripts] = useState<Record<number, string>>({});
   // 合并转发详情弹窗：栈式，支持嵌套「套娃」下钻/返回（栈顶=当前展示层，空=关闭）。
   const [recordStack, setRecordStack] = useState<ChatRecord[]>([]);
   const recordView = recordStack.length > 0 ? recordStack[recordStack.length - 1] : null;
@@ -612,6 +615,21 @@ export default function App() {
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
       onConvUpdate: () => { scheduleListRefresh(); },
       // 账号级配置变更（M4-7）：另一端改了自动下载策略 → 重拉（零新链路的多端同步）。
+      onVoiceTranscript: (convId, convSeq, status, text) => {
+        // 只在该条仍处于展开态时落文本——用户可能在等结果期间点了「取消转文字」。
+        if (status === "done" && text) {
+          setTranscripts((prev) => (prev[convSeq] === undefined ? prev : { ...prev, [convSeq]: text }));
+        } else if (status === "failed") {
+          setToast("识别失败，请稍后重试");
+          setTranscripts((prev) => {
+            if (prev[convSeq] === undefined) return prev;
+            const next = { ...prev };
+            delete next[convSeq];
+            return next;
+          });
+        }
+        void convId;
+      },
       onCapabilitiesUpdate: (version) => {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
@@ -1215,6 +1233,48 @@ export default function App() {
     })();
   }, []);
 
+  /**
+   * 语音转文字（服务端识别）。已展开 → 收起（**只收本地面板，不删服务端结果**：
+   * 服务端按音频内容缓存、会话内共享，一个人"取消"不该把别人也能看到的结果删掉）。
+   * 未展开 → 请求：命中缓存立刻出文本；否则先显"识别中…"，结果经 WS voice_transcript 帧到达。
+   */
+  const transcribeMessage = useCallback((m: ChatMessage) => {
+    setMenu(null);
+    if (m.convSeq <= 0) return;
+    setTranscripts((prev) => {
+      if (prev[m.convSeq] !== undefined) {
+        const next = { ...prev };
+        delete next[m.convSeq];
+        return next;
+      }
+      return { ...prev, [m.convSeq]: "" }; // 空串=识别中
+    });
+    // 收起分支不发请求：上面已把该 seq 删掉，这里据删前的状态判断。
+    if (transcripts[m.convSeq] !== undefined) return;
+    void (async () => {
+      try {
+        const r = await clientRef.current?.transcribeVoice(m.convId, m.convSeq);
+        if (r && r.status === "done" && r.text) {
+          setTranscripts((prev) => (prev[m.convSeq] === undefined ? prev : { ...prev, [m.convSeq]: r.text }));
+        }
+        // pending：维持"识别中…"，等 WS 帧。
+      } catch (e) {
+        const code = errorCode(e);
+        const tip = code === 500101 ? "转文字暂未开启"
+          : code === 500102 ? "识别失败，请稍后重试"
+          : code === 500103 ? "转文字服务繁忙，请稍后再试"
+          : code === 100002 ? "操作过于频繁，请稍后再试"
+          : `转文字失败：${(e as Error).message}`;
+        setToast(tip);
+        setTranscripts((prev) => {
+          const next = { ...prev };
+          delete next[m.convSeq];
+          return next;
+        });
+      }
+    })();
+  }, [transcripts]);
+
   // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
     setMenu(null);
@@ -1391,9 +1451,10 @@ export default function App() {
       reportMsg: (m) => void reportMessage(m, "message"),
       reportUser: (m) => void reportMessage(m, "user"),
       cancelSend: cancelSendMessage,
+      transcribe: transcribeMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMessage, cancelSendMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMessage, cancelSendMessage, transcribeMessage, comingSoon],
   );
 
   // 全屏文本阅读器：Esc 关闭（点蒙层/✕ 已在 JSX 处理）。
@@ -2589,7 +2650,7 @@ export default function App() {
             <MessageList
                 messages={messages} peer={peer} isGroupChat={isGroupChat} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
-                timeFormat={timeFormat} translations={translations} uploadProgress={uploadProgress} dividerRef={dividerRef}
+                timeFormat={timeFormat} translations={translations} transcripts={transcripts} uploadProgress={uploadProgress} dividerRef={dividerRef}
                 mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} senderRole={senderRole} senderAvatar={senderAvatar}
                 memberNick={memberNick} renderMentionText={renderMentionText} renderMessageText={renderMessageText}
                 openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
@@ -2776,13 +2837,13 @@ export default function App() {
       {menu && (
         <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
           {messageActions
-            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere }))
+            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
                 onClick={() => {
                   // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
                   if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
-                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere }); setMenu(null);
+                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }); setMenu(null);
                 }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}

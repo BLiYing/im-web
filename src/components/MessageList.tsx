@@ -38,6 +38,8 @@ export interface MessageListProps {
   firstUnreadIdx: number;
   timeFormat: TimeFormat;
   translations: Record<number, string>;
+  /** convSeq -> 语音转写文本；空串=识别中，undefined=未展开。 */
+  transcripts?: Record<number, string>;
   uploadProgress: Record<string, { sent: number; total: number }>;
   dividerRef: RefObject<HTMLDivElement>;
   // App 内闭包（随 groupInfos/dlBlobs/搜索态等变化，不能进 context）
@@ -58,7 +60,7 @@ export interface MessageListProps {
 export function MessageList(p: MessageListProps) {
   const {
     messages, peer, isGroupChat, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
-    timeFormat, translations, uploadProgress, dividerRef,
+    timeFormat, translations, transcripts, uploadProgress, dividerRef,
     mediaGate, mediaSrc, senderLabel, senderRole, senderAvatar, memberNick, renderMentionText, renderMessageText,
     openPeerDetail, handleScanRaw, requestFriendFromNote,
   } = p;
@@ -414,6 +416,17 @@ export function MessageList(p: MessageListProps) {
             </div>
             {m.convSeq > 0 && translations[m.convSeq] && (
               <div className="translation"><span>{translations[m.convSeq]}</span></div>
+            )}
+            {/* 语音转写面板（服务端识别）：空串=识别中。左侧引用线 + 文本 + 尾行隐私说明，与 iOS 同视觉语系。 */}
+            {m.convSeq > 0 && transcripts?.[m.convSeq] !== undefined && (
+              <div className={`voice-transcript${mine ? " mine" : ""}`}>
+                <span className="voice-transcript-text">
+                  {transcripts[m.convSeq] || "识别中…"}
+                </span>
+                {transcripts[m.convSeq] && (
+                  <span className="voice-transcript-foot">📝 由服务器识别，结果可能不完全准确</span>
+                )}
+              </div>
             )}
           </>
         );

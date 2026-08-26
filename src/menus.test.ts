@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), pin: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), readReceipts: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), pin: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), transcribe: vi.fn(), readReceipts: vi.fn(),
     comingSoon: vi.fn(),
 };
 const convHandlers = { setPinned: vi.fn(), setMuted: vi.fn(), markRead: vi.fn(), markUnread: vi.fn(), delete: vi.fn() };
@@ -30,7 +30,7 @@ describe("buildMessageActions", () => {
   it("返回固定顺序的全部 id", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
-      "readReceipts", "copy", "reply", "forward", "favorite", "download", "recall", "pin", "unpin", "edit",
+      "readReceipts", "transcribe", "transcribeOff", "copy", "reply", "forward", "favorite", "download", "recall", "pin", "unpin", "edit",
       "multiSelect", "translate", "reportMsg", "reportUser", "cancelSend", "delete",
     ]);
   });

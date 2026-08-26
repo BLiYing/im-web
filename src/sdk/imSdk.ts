@@ -8,6 +8,7 @@ import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, type UploadProgressHandler } from "./http";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
+import * as voiceApi from "./voiceApi";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -74,6 +75,8 @@ export interface IMClientHandlers {
   onConvUpdate?: (u: ConvUpdate) => void;
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
+  /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
+  onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
 
 /** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
@@ -627,20 +630,9 @@ export class IMClient {
     };
   }
 
-  /**
-   * 上传语音（voice P1）：/api/v1/upload?as=voice——服务端切用 voice 白名单
-   * (.m4a/.aac/.caf/.opus/.ogg/.webm/.mp4) + 16MB 上限。返回 `/uploads/<id>.m4a` 相对 URL。
-   * 一次性 multipart（分片对 voice 显式拒绝，5min AAC ≈ 0.9MB 用不着）。
-   */
+  /** 上传语音（voice P1）。实现在 sdk/voiceApi.ts（voice 域已拆出）。 */
   async uploadVoice(blob: Blob, fileName: string): Promise<{ url: string; size: number }> {
-    const fd = new FormData();
-    fd.append("file", blob, fileName);
-    const resp = await tracedFetch("/api/v1/upload?as=voice", {
-      method: "POST", headers: { Authorization: `Bearer ${this.token}` }, body: fd,
-    });
-    const body = await resp.json().catch(() => ({ code: -1, data: {} }));
-    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "语音上传失败"));
-    return { url: body.data.url as string, size: Number(body.data.size) || blob.size };
+    return voiceApi.uploadVoice(this.token, blob, fileName);
   }
 
   /**
@@ -747,6 +739,11 @@ export class IMClient {
       timestamp: it.timestamp ?? 0,
       pinnedAt: it.pinned_at ?? 0,
     }));
+  }
+
+  /** 语音转文字（服务端识别）。实现在 sdk/voiceApi.ts（voice 域已拆出）。 */
+  async transcribeVoice(convId: string, convSeq: number): Promise<{ status: string; text: string }> {
+    return voiceApi.transcribeVoice((p, i) => this.api(p, i), convId, convSeq);
   }
 
   /** 仅为我删除（任务2）：走 REST 落 per-user 隐藏表 → 本端立即物理移除 → 服务端推 msg_hidden 同步本人其它设备。 */
@@ -1043,6 +1040,10 @@ export class IMClient {
         break;
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶/为所有人删除）：应用到本地
         this.applyMsgOp(d);
+        break;
+      case T.VOICE_TRANSCRIPT: // 语音转文字结果（服务端识别完成）：交给 UI 展开面板
+        this.handlers.onVoiceTranscript?.(String(d.conv_id ?? ""), Number(d.conv_seq) || 0,
+          String(d.status ?? ""), String(d.text ?? ""));
         break;
       case T.MSG_HIDDEN: // 「仅为我删除」多设备同步（任务2）：本人另一端删了 → 本端物理移除
         if (d.conv_id && d.conv_seq) void this.removeMessageLocal(d.conv_id, Number(d.conv_seq), 0);

@@ -23,6 +23,7 @@ export const T = {
   CAPS_UPDATE: "capabilities_update",
   /** 「仅为我删除」多设备同步（任务2）：本人另一端删了某条 → 本端物理移除该 (conv_id, conv_seq)。 */
   MSG_HIDDEN: "msg_hidden",
+  VOICE_TRANSCRIPT: "voice_transcript", // 语音转文字结果（服务端识别，只推给请求者）
   ERROR: "error",
 } as const;
 
