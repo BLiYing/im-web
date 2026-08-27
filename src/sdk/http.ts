@@ -1,5 +1,6 @@
 import { LOG_TAG, logger } from "../logging/logger";
 import { formatRequestBody, formatResponseText } from "../logging/sanitize";
+import { friendlyMessage } from "./errcode";
 
 const includeBusinessContent = import.meta.env.DEV;
 
@@ -122,4 +123,41 @@ export async function tracedFetch(input: RequestInfo | URL, init: RequestInit = 
   if (response.ok) logger.info(LOG_TAG.http, "response", fields);
   else logger.warn(LOG_TAG.http, "response", fields);
   return response;
+}
+
+/** 统一响应信封（后端 errcode 契约）。 */
+export type Envelope<T = unknown> = { code: number; message?: string; data?: T };
+
+/**
+ * tracedFetch + 解析 JSON，把"连不上 / 空响应"这类传输层失败转成友好中文（区别于业务错误码）。
+ * 返回**原始信封**（含 code / message / data），调用方自己按 code 分支。用于罕见的"探活"场景
+ * （如 fetchToken 中的 /devices 校验，要区分 code=100101 吊销 vs code=0 有效 vs 其它）。
+ */
+export async function fetchEnvelope<T = any>(input: RequestInfo | URL, init?: RequestInit): Promise<Envelope<T>> {
+  let resp: Response;
+  try {
+    resp = await tracedFetch(input, init);
+  } catch {
+    throw new Error("无法连接服务器，请确认后端已启动"); // fetch reject：网络/连接失败
+  }
+  try {
+    return await resp.json();
+  } catch {
+    throw new Error("服务器无响应，请确认后端已启动"); // 空/非 JSON：原"Unexpected end of JSON input"
+  }
+}
+
+/**
+ * fetchEnvelope + 信封解包：`code!==0` 抛带业务码的 Error（`.code` 挂在 error 上供调用方按码分支，
+ * 如 100002 限流、200110 二维码失效、300210 入群待审），`.message` 已本地化为中文（走 friendlyMessage
+ * 码表 → 未收录码回退服务端原文）。这是 SDK 调用点的默认解包方式。
+ */
+export async function callJson(input: RequestInfo | URL, init?: RequestInit): Promise<any> {
+  const body = await fetchEnvelope(input, init);
+  if (body.code !== 0) {
+    const err = new Error(friendlyMessage(body.code, body.message ?? "")) as Error & { code?: number };
+    err.code = body.code;
+    throw err;
+  }
+  return body.data;
 }

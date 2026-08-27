@@ -6,8 +6,9 @@ import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpd
 import { presenceFromFrame, type Presence } from "./presence";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
-import { tracedFetch, tracedUpload, type UploadProgressHandler } from "./http";
+import { tracedFetch, tracedUpload, fetchEnvelope, callJson, type UploadProgressHandler } from "./http";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
+import { friendlyMessage } from "./errcode";
 import * as voiceApi from "./voiceApi";
 
 const PING_INTERVAL_MS = 25_000;
@@ -202,19 +203,14 @@ export class IMClient {
     return (body.data?.conversations ?? []) as Conversation[];
   }
 
-  /** 带 Bearer 的 HTTP 调用，统一解析 errcode 信封（code!=0 抛错）。 */
+  /** 带 Bearer 的 HTTP 调用，统一解析 errcode 信封（code!=0 抛带 .code 的 Error）。
+   *  信封解包 / 业务码 → 中文文案 / 传输层友好文案由 sdk/http.ts 的 callJson 统一负责；这里只贴
+   *  client 状态（token 头、body 时的 Content-Type）。 */
   private async api(path: string, init?: RequestInit): Promise<any> {
-    const body = await fetchJSON(path, {
+    return await callJson(path, {
       ...init,
       headers: { Authorization: `Bearer ${this.token}`, ...(init?.body ? { "Content-Type": "application/json" } : {}), ...(init?.headers ?? {}) },
     });
-    if (body.code !== 0) {
-      // 保留业务码：调用方需据码分支（如 300210 入群待审、200110 码失效），message 已本地化。
-      const err = new Error(friendlyMessage(body.code, body.message)) as Error & { code?: number };
-      err.code = body.code;
-      throw err;
-    }
-    return body.data;
   }
 
   /** 拉账号级自动下载策略（M4-7）。返回 `{version, settings}`；未设置过时后端回出厂默认。 */
@@ -743,7 +739,7 @@ export class IMClient {
 
   /** 语音转文字（服务端识别）。实现在 sdk/voiceApi.ts（voice 域已拆出）。 */
   async transcribeVoice(convId: string, convSeq: number): Promise<{ status: string; text: string }> {
-    return voiceApi.transcribeVoice((p, i) => this.api(p, i), convId, convSeq);
+    return voiceApi.transcribeVoice(this.token, convId, convSeq);
   }
 
   /** 仅为我删除（任务2）：走 REST 落 per-user 隐藏表 → 本端立即物理移除 → 服务端推 msg_hidden 同步本人其它设备。 */
@@ -924,7 +920,7 @@ export class IMClient {
    *  抛出的 auth 码由 openSocket 现有分支路由到 onAuthError；网络失败抛非 auth 错，继续重连。 */
   private async fetchToken(uid: string, password: string): Promise<string> {
     if (this.token) {
-      const probe = await fetchJSON("/api/v1/devices", {
+      const probe = await fetchEnvelope("/api/v1/devices", {
         headers: { Authorization: `Bearer ${this.token}` },
       });
       if (probe.code === 0) return this.token; // 仍有效，复用
@@ -936,7 +932,7 @@ export class IMClient {
       }
       // 密码会话 + 非吊销（如 100102 过期）→ 落下去用 /login 重新签发（自愈）。
     }
-    const body = await fetchJSON("/api/v1/login", {
+    const body = await fetchEnvelope<{ token?: string }>("/api/v1/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: uid, password, platform: "web", device_id: webDeviceId(), device_name: webDeviceName() }),
@@ -946,7 +942,7 @@ export class IMClient {
       e.code = body.code; // 带上业务码，供重连区分 鉴权失败 vs 网络失败
       throw e;
     }
-    return body.data.token as string;
+    return body.data.token;
   }
 
   private onFrame(raw: string): void {
@@ -1348,28 +1344,13 @@ export function nextSyncCursor(before: number, covered: number): number {
 /** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。
  *  独立于连接（注册时还没建 IMClient/socket），故为模块级函数。 */
 export async function registerAccount(username: string, password: string): Promise<void> {
-  const body = await fetchJSON("/api/v1/register", {
+  const body = await fetchEnvelope("/api/v1/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
   if (body.code !== 0) {
     throw new Error(friendlyMessage(body.code, body.message || "注册失败"));
-  }
-}
-
-/** fetch + 解析 JSON，把"连不上 / 空响应"这类传输层失败转成友好中文（区别于业务错误码）。 */
-async function fetchJSON(path: string, init?: RequestInit): Promise<any> {
-  let resp: Response;
-  try {
-    resp = await tracedFetch(path, init);
-  } catch {
-    throw new Error("无法连接服务器，请确认后端已启动"); // fetch reject：网络/连接失败
-  }
-  try {
-    return await resp.json();
-  } catch {
-    throw new Error("服务器无响应，请确认后端已启动"); // 空/非 JSON：原"Unexpected end of JSON input"
   }
 }
 
@@ -1406,45 +1387,3 @@ export function webDeviceId(): string {
   }
 }
 
-/**
- * 业务错误码 → 友好中文（对齐 iOS IMFriendlyMessageForCode）。**码表权威来源：后端
- * `../IMServer/internal/errcode/errcode.go`**——那里一经发布永不复用/改含义。这里的每个键都必须是
- * 该文件中现存的 Code；后端新增码这里不映射只回退英文原文（可接受降级），但**映射了一个已作废/改义的码
- * 会显示错误中文**，故 `imSdk.test.ts` 有对齐测试断言本表键 ⊆ 后端码集（见 CODING_STYLE §九）。
- * 隐私：被拉黑/密码错误等用模糊文案，不暴露"你被对方拉黑了"。
- */
-export const FRIENDLY_MESSAGES: Record<number, string> = {
-  100101: "登录已失效，请重新登录",
-  100102: "登录已失效，请重新登录",
-  200001: "用户不存在",
-  200002: "密码错误",
-  200003: "账号已被封禁",
-  200004: "用户名已被注册",
-  200101: "你们已经是好友了",
-  200102: "暂时无法添加对方为好友", // 被拉黑：不暴露
-  200103: "对方不是你的好友",
-  200104: "不能添加自己为好友",
-  200105: "申请已发出，等待对方同意",
-  200106: "没有待处理的好友申请",
-  200110: "二维码已失效，请向对方索取新的",
-  300201: "群不存在",
-  300202: "群名不能为空且不超过 30 字",
-  300203: "你不在该群中",
-  // 300204 不映射：服务端会带具体原因（如"群主需先转让群主再退群"），透传更有用。
-  300205: "群成员已达上限",
-  300207: "你已被移出该群，暂时或永久不可加入",
-  300208: "你已被管理员禁言",
-  // 300210 不映射：入群申请已提交，UI 走"待审批"提示分支而非错误 toast。
-  300211: "你的入群申请刚被拒绝，请稍后再试", // 拒后再扫码入群冷却期（语义单一，安全映射）
-  300212: "该群已改为仅管理员可邀请，此邀请已失效", // GroupInviteRevoked（perm_invite 下非管理员旧码失效）
-  100002: "操作过于频繁，请稍后再试",
-  // 语音转文字 5001xx：这三个码只由 /voice/transcripts 产出，文案可直接写死在总表里。
-  500101: "转文字暂未开启",
-  500102: "识别失败，请稍后重试", // 预留码：当前失败经 WS voice_transcript status=failed 送达
-  500103: "转文字服务繁忙，请稍后再试",
-};
-
-/** 未收录回退服务端原文。导出供单测。 */
-export function friendlyMessage(code: number, fallback: string): string {
-  return FRIENDLY_MESSAGES[code] || fallback || `请求失败(${code})`;
-}

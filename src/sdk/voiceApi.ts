@@ -1,12 +1,10 @@
 // 语音相关的 REST 调用（voice 域）。从 imSdk.ts 拆出——见 scripts/check-file-size.sh 对
 // imSdk.ts 的建议「如拆按域分（auth/messages/groups/qr）」；与 qrLogin.ts 同一套做法。
 //
-// 两个接口都不碰 IMClient 的连接状态/本地库，只做「一次 HTTP + 解包」：
-//   uploadVoice   —— 自带 token，纯函数；
-//   transcribeVoice —— 需要 IMClient.api 的信封解包/鉴权重试，故由调用方注入该函数。
-// IMClient 上的同名方法只是转调。
-import { tracedFetch } from "./http";
-import { friendlyMessage } from "./imSdk";
+// 两个接口都不碰 IMClient 的连接状态/本地库，只做「一次 HTTP + 解包」——纯函数模块：token 由
+// IMClient 的转调方法就地传入，信封解包统一走 sdk/http.ts 的 callJson。
+import { callJson } from "./http";
+import { friendlyMessage } from "./errcode";
 
 /**
  * 上传语音（voice P1）：/api/v1/upload?as=voice——服务端切用 voice 白名单
@@ -16,12 +14,11 @@ import { friendlyMessage } from "./imSdk";
 export async function uploadVoice(token: string, blob: Blob, fileName: string): Promise<{ url: string; size: number }> {
   const fd = new FormData();
   fd.append("file", blob, fileName);
-  const resp = await tracedFetch("/api/v1/upload?as=voice", {
+  const data = await callJson("/api/v1/upload?as=voice", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
   });
-  const body = await resp.json().catch(() => ({ code: -1, data: {} }));
-  if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "语音上传失败"));
-  return { url: body.data.url as string, size: Number(body.data.size) || blob.size };
+  if (!data) throw new Error(friendlyMessage(0, "语音上传失败")); // code=0 但无 data（服务端异常）：给明确文案
+  return { url: String(data.url), size: Number(data.size) || blob.size };
 }
 
 /**
@@ -33,11 +30,11 @@ export async function uploadVoice(token: string, blob: Blob, fileName: string): 
  * 见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md §3。
  */
 export async function transcribeVoice(
-  api: (path: string, init?: RequestInit) => Promise<any>,
-  convId: string, convSeq: number,
+  token: string, convId: string, convSeq: number,
 ): Promise<{ status: string; text: string }> {
-  const d = await api("/api/v1/voice/transcripts", {
+  const d = await callJson("/api/v1/voice/transcripts", {
     method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ conv_id: convId, conv_seq: convSeq }),
   });
   return { status: String(d?.status ?? ""), text: String(d?.text ?? "") };

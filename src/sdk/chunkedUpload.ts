@@ -15,7 +15,7 @@
  * 不能像 iOS 那样杀进程后凭旁挂 upload_id 自动续传。
  */
 import { tracedFetch } from "./http";
-import { friendlyMessage } from "./imSdk";
+import { friendlyMessage } from "./errcode";
 import { logger, LOG_TAG } from "../logging/logger";
 
 /** 单片大小 = 服务端 init 响应建议值与其单片上限（8MB）。 */

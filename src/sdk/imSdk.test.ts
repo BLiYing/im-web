@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { friendlyMessage, FRIENDLY_MESSAGES, shouldHealGap, nextSyncCursor } from "./imSdk";
+import { shouldHealGap, nextSyncCursor } from "./imSdk";
+import { friendlyMessage, FRIENDLY_MESSAGES } from "./errcode";
 
 // 后端 errcode 权威码集镜像——**唯一来源 `../IMServer/internal/errcode/errcode.go`**。
 // 后端加/删码时同步此集；下面的对齐测试据此断言前端 FRIENDLY_MESSAGES 没有映射到已作废/拼错的码。
