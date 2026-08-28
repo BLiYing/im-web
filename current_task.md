@@ -5,6 +5,16 @@
 
 ## 当前焦点
 
+> **登录页「请求在途」可见反馈（2026-08-28，`LoginView.tsx` + `styles.css`，tsc + 555 vitest 绿）**：
+> 用户反馈点登录看不到转圈。原来 `authBusy` 只把三个按钮 `disabled`，没有任何可见的进行中态——
+> 弱网/后端连不上时就是"点了没反应"。现在被点的那个入口显示内联菊花 + 文案切「登录中…／注册中…」，
+> 另外两个仍只禁用。
+> - `LoginView` 加**组件内** `busyAction` 记来源（三个入口共用一个 `authBusy`，不记来源会三个一起转）；
+>   hooks 声明在 `restoring` 早退**之前**（Hook 顺序不能被早退打断）。回车提交同样置 busyAction。
+> - 新 `.btn-spinner` 复用已有 `album-spin` 关键帧，`currentColor` 描边跟随按钮文字色，不另起动画。
+> - 新 `src/components/LoginView.test.tsx`（4 例）：空闲无菊花 / 点登录只有登录转 / 免密入口转而登录键不转 / authBusy 落回收掉。
+> - iOS 端同批做了等价改动（`UIButtonConfiguration.showsActivityIndicator`）。
+
 > **刷新常需重登「被自己上一次登录踢」根因修复 ✅（2026-08-22，`App.tsx`，tsc+build+504 vitest 绿 + 浏览器实测）** — 08-18 device_id 去重修复（`3d70253`/`87c0d27`/web `37e3c7f`）激活的客户端重连竞态：`enterApp` 建新 `IMClient` 前未断开旧 client → 本次登录同 device_id 被后端 upsert 顶替、踢掉旧连接（WS 1005）→ 旧 client 自排重连、拿已撤销 token 探活 `/devices` 得 100101 → 触发共享 `onAuthError→logout`，把健康新会话也踢回登录页。日志证据：`login_failed 100101` 全集中在 08-21/22。修：①`enterApp` 开头 `clientRef.current?.disconnect()`（manualClose+清重连定时器+bump generation，令旧 client 在途/待发重连全静默作废）；②`onAuthError` 加 `if (client !== clientRef.current) return` 兜底（被顶替的旧 client 鉴权失效不得代表新会话踢 app）。实测：单标签连刷 3 次 0 次 login_failed/1005/100101（修前必现）。**已知边界（非本次修）**：多标签同账号——后一个标签登录会顶替前一个（稳定 device_id 单会话语义），被顶替标签仍回登录页；要多标签共存需跨标签会话协调（BroadcastChannel）或每标签独立 device_id，属更大设计，留待定夺。
 
 > **详情开合动画 + 详情定位 + UI 一致性（2026-08-22，`styles.css`+`App.tsx`，tsc+build+504 vitest 绿 + 浏览器实测）**：

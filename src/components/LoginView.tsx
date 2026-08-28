@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { QRLoginTab } from "../QRUI";
 
 /**
@@ -18,6 +19,14 @@ export function LoginView({ restoring, uid, password, authErr, authBusy, loginTa
   onRegister: () => void;
   onQRLogin: (uid: string, token: string) => void;
 }) {
+  // 哪个入口在转圈。三个按钮共用 App 的 authBusy，不记来源就会三个一起转。
+  // **必须声明在 restoring 早退之前**——Hook 顺序不能被早退打断。
+  const [busyAction, setBusyAction] = useState<"login" | "register" | "dev" | null>(null);
+  useEffect(() => { if (!authBusy) setBusyAction(null); }, [authBusy]);
+  const spinning = (action: "login" | "register" | "dev") => authBusy && busyAction === action;
+  const label = (action: "login" | "register" | "dev", idle: string, busy: string) =>
+    spinning(action) ? <><span className="btn-spinner" aria-hidden="true" />{busy}</> : <>{idle}</>;
+
   if (restoring) {
     // 恢复登录过渡态（Web #4）：有已存会话时不闪登录表单，静默重登成功直达主界面。
     return (
@@ -43,14 +52,17 @@ export function LoginView({ restoring, uid, password, authErr, authBusy, loginTa
           <label>用户名<input value={uid} autoFocus onChange={(e) => onUid(e.target.value.trim())} /></label>
           <label>密码<input type="password" value={password} placeholder="≥ 6 位"
             onChange={(e) => onPassword(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && password) onLogin(password); }} /></label>
+            onKeyDown={(e) => { if (e.key === "Enter" && password && !authBusy) { setBusyAction("login"); onLogin(password); } }} /></label>
           {/* 「登录」按钮强制要求密码非空——空密码只能走下方「免密登录」明示入口（且需后端 -dev-login），
               避免开发期免密开关下点「登录」变成静默走免密（iOS 端登录页也是这样，密码不填直接走不通）。 */}
-          <button className="login-submit" disabled={authBusy || !password} onClick={() => onLogin(password)}>登录</button>
-          <button className="login-submit secondary" disabled={authBusy} onClick={onRegister}>注册并登录</button>
+          <button className="login-submit" disabled={authBusy || !password}
+            onClick={() => { setBusyAction("login"); onLogin(password); }}>{label("login", "登录", "登录中…")}</button>
+          <button className="login-submit secondary" disabled={authBusy}
+            onClick={() => { setBusyAction("register"); onRegister(); }}>{label("register", "注册并登录", "注册中…")}</button>
           <p className="hint">
             真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
-            仅调试：<button className="link-inline" disabled={authBusy} onClick={() => onLogin("")}>免密登录</button>（需后端开启 dev-login）。
+            仅调试：<button className="link-inline" disabled={authBusy}
+              onClick={() => { setBusyAction("dev"); onLogin(""); }}>{label("dev", "免密登录", "登录中…")}</button>（需后端开启 dev-login）。
           </p>
         </>
       ) : (
