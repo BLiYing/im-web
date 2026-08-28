@@ -62,6 +62,9 @@ import { SettingsPanel } from "./components/settings/SettingsPanel";
 import { DataStoragePanel } from "./components/settings/DataStoragePanel";
 import { EditProfilePanel } from "./components/settings/EditProfilePanel";
 import { DevicesPanel } from "./components/settings/DevicesPanel";
+import { PrivacySecurityPanel } from "./components/settings/PrivacySecurityPanel";
+import { BlockedListPanel } from "./components/settings/BlockedListPanel";
+import { ChangePasswordPanel } from "./components/settings/ChangePasswordPanel";
 import { GeneralPanel } from "./components/settings/GeneralPanel";
 import { WallpaperPanel } from "./components/settings/WallpaperPanel";
 import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
@@ -194,6 +197,9 @@ export default function App() {
   const [fullTextModal, setFullTextModal] = useState<{ kind: "announcement" | "intro"; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
+  const [privacyOpen, setPrivacyOpen] = useState(false); // 隐私与安全容器页（拉齐 iOS）
+  const [blockedOpen, setBlockedOpen] = useState(false); // 已屏蔽的用户子面板（从隐私页进入）
+  const [changePwdOpen, setChangePwdOpen] = useState(false); // 修改密码子面板（从隐私页进入）
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
   // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
   // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
@@ -514,7 +520,7 @@ export default function App() {
   }, [conversations, groupConvId]);
 
   // 找人/好友动作/黑名单 → useFriendOps；本人资料 → useProfileEdit（阶段 8b）。须在 refreshFriends/clientRef/setToast 之后。
-  const { searchQ, setSearchQ, searchResults, setSearchResults, busyUser, blockedList, setBlockedList, doSearch, doFriendAction, openBlacklist, unblock } =
+  const { searchQ, setSearchQ, searchResults, setSearchResults, busyUser, blockedList, doSearch, doFriendAction, openBlacklist, unblock } =
     useFriendOps({ clientRef, setToast, refreshFriends });
   const { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq, loadMyInfo, openProfile, saveProfile, onPickAvatar } =
     useProfileEdit({ clientRef, setToast });
@@ -2417,7 +2423,7 @@ export default function App() {
       { id: "animations", label: "动画与性能", icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon("动画与性能") },
       { id: "notifications", label: "通知", icon: Bell, iconTint: "red", chevron: true, onClick: () => comingSoon("通知") },
       { id: "data", label: "数据与存储", icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
-      { id: "privacy", label: "隐私与安全", icon: Lock, iconTint: "indigo", chevron: true, onClick: () => void openBlacklist() },
+      { id: "privacy", label: "隐私与安全", icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
       { id: "folders", label: "聊天文件夹", icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon("聊天文件夹") },
       { id: "devices", label: "已登录设备", icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
       { id: "language", label: "语言", icon: Languages, iconTint: "purple", value: "简体中文", chevron: true, onClick: () => comingSoon("语言") },
@@ -2600,6 +2606,37 @@ export default function App() {
             onRevoke={(d) => void revokeDevice(d)}
             onRevokeOthers={() => void revokeOtherDevices()}
             onBack={() => setDevicesOpen(false)}
+          />
+        )}
+
+        {/* 隐私与安全容器页（拉齐 iOS）：黑名单 / 修改密码 + B~E 灰置占位。 */}
+        {privacyOpen && (
+          <PrivacySecurityPanel
+            blockedCount={blockedList ? blockedList.length : null}
+            onOpenBlocked={() => setBlockedOpen(true)}
+            onOpenChangePwd={() => setChangePwdOpen(true)}
+            onComingSoon={comingSoon}
+            onBack={() => setPrivacyOpen(false)}
+          />
+        )}
+
+        {/* 已屏蔽的用户子面板（从隐私页进入；数据/解除来自 useFriendOps）。 */}
+        {blockedOpen && (
+          <BlockedListPanel
+            list={blockedList}
+            busyUser={busyUser}
+            friendLabel={friendLabel}
+            onUnblock={(id) => void unblock(id)}
+            onBack={() => setBlockedOpen(false)}
+          />
+        )}
+
+        {/* 修改密码子面板（从隐私页进入）：成功后服务端自动下线其它设备。 */}
+        {changePwdOpen && (
+          <ChangePasswordPanel
+            onSubmit={async (o, n) => { const c = clientRef.current; if (!c) throw new Error("未连接"); await c.changePassword(o, n); }}
+            onDone={() => { setChangePwdOpen(false); setToast("✓ 密码已修改，其它设备已下线"); void loadDevices(); }}
+            onBack={() => setChangePwdOpen(false)}
           />
         )}
 
@@ -2944,29 +2981,7 @@ export default function App() {
         </div>
       )}
 
-      {blockedList !== null && (
-        <div className="modal-mask" onClick={() => setBlockedList(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>黑名单（{blockedList.length}）</h3>
-            {blockedList.length === 0 && <div className="empty">没有拉黑的用户</div>}
-            {blockedList.map((f) => (
-              <div key={f.user_id} className="convitem static">
-                <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
-                <div className="convbody">
-                  <div className="convpeer">{friendLabel(f)}</div>
-                  <div className="convlast">{f.user_id}</div>
-                </div>
-                <div className="row-actions">
-                  <button className="mini-btn ghost" disabled={busyUser === f.user_id} onClick={() => void unblock(f.user_id)}>解除</button>
-                </div>
-              </div>
-            ))}
-            <div className="modal-actions">
-              <button className="link" onClick={() => setBlockedList(null)}>关闭</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 黑名单已从独立 Modal 收编为「隐私与安全 → 已屏蔽的用户」子面板（BlockedListPanel），此处不再渲染。 */}
 
       {/* 「群聊」列表 / 建群弹窗：见 components/modals/GroupsModal · CreateGroupModal。 */}
       {groupsModal !== null && (

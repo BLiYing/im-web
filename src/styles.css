@@ -1306,6 +1306,17 @@ button.detail-row:hover { background: var(--surface-hover); }
 .settings-row.static { cursor: default; }
 /* 说明文字：加大字号 + 行高 + 上下留白，别再挤成一行灰糊（用户反馈「看不太清」）。 */
 .settings-foot { padding: 8px 14px 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+
+/* ===== 隐私与安全 / 修改密码（拉齐 iOS）===== */
+/* 灰置占位行：标题与右值半档灰（图标保留全彩，与 iOS §2.5 一致）。 */
+.settings-row.muted { color: var(--text-tertiary); }
+.settings-row.muted .row-value { color: var(--text-tertiary); }
+/* 修改密码表单：错误红字 + 底部按钮留白。 */
+.pwd-error { padding: 8px 14px 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
+.pwd-actions { padding: var(--space-3) var(--space-4); }
+/* 层叠：隐私页盖在设置页(30)之上；黑名单/修改密码是从隐私页再进一层，盖在隐私页之上。 */
+.privacy-panel { z-index: 40; }
+.blocked-panel, .changepwd-panel { z-index: 50; }
 .switch-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: 12px 14px; font-size: 15.5px; cursor: pointer; }
 .switch-row:hover { background: var(--surface-hover); }

@@ -4,11 +4,11 @@ import { Avatar } from "./Avatar";
 
 // 通用菜单行：图标可选、右侧值/箭头可选、danger 红色。account card / settings / contacts entries 共用。
 // iconTint：设置 iOS 风格圆角色块（对齐 IMSettingsViewController 的 systemColor 分色）；不给则渲染裸图标（账号气泡卡沿用旧样式）。
-export type Row = { id: string; label: string; icon?: LucideIcon; iconTint?: string; value?: string; danger?: boolean; chevron?: boolean; onClick: () => void };
+export type Row = { id: string; label: string; icon?: LucideIcon; iconTint?: string; value?: string; danger?: boolean; muted?: boolean; chevron?: boolean; onClick: () => void };
 
-// 通用行渲染（cls 区分容器样式）。
+// 通用行渲染（cls 区分容器样式）。muted=灰置占位（标题/右值半档灰，图标保留全彩）。
 export const renderRow = (r: Row, cls: string) => (
-  <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}`} onClick={r.onClick}>
+  <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}${r.muted ? " muted" : ""}`} onClick={r.onClick}>
     {r.icon && (r.iconTint
       ? <span className={`row-icon-tile ${r.iconTint}`}><r.icon size={17} /></span>
       : <r.icon size={20} className="row-icon" />)}

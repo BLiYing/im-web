@@ -249,6 +249,16 @@ export class IMClient {
     await this.api("/api/v1/devices/revoke-others", { method: "POST" });
   }
 
+  /** 修改密码：POST /api/v1/users/me/password {old_password,new_password}。
+   *  成功后服务端会**自动下线本账号其它全部设备**（只保留当前，安全默认），无需前端再调 revoke-others。
+   *  失败抛带 .code 的 Error（200002=旧密码错，100001/参数类=强度不足等），文案已本地化。 */
+  async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    await this.api("/api/v1/users/me/password", {
+      method: "POST",
+      body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
+    });
+  }
+
   /** 链接富预览：抓取 URL 的 OG 元信息（后端带 SSRF 防护 + 缓存）。失败抛错，调用方回退纯链接。 */
   async linkPreview(url: string): Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }> {
     return await this.api(`/api/v1/link-preview?url=${encodeURIComponent(url)}`);
