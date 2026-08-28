@@ -35,6 +35,8 @@ export interface DetailPanelProps {
   // —— 解析/判定（App 内闭包）——
   groupRemark: (cid: string) => string;
   peerNick: (id: string) => string | undefined;
+  /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 昵称 > uid（透传给 DetailTabs）。 */
+  memberLabel: (m: GroupMember) => string;
   peerAvatar: (id: string) => string | undefined;
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
   mediaSrc: (m: ChatMessage) => string; // blob 缓存优先解析（语音 tab）
@@ -71,7 +73,7 @@ export interface DetailPanelProps {
 export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
-    groupRemark, peerNick, peerAvatar, mediaGate, mediaSrc, canManageMember,
+    groupRemark, peerNick, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember,
     onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
@@ -273,7 +275,7 @@ export function DetailPanel(p: DetailPanelProps) {
               {/* ---- 页签 ---- */}
               <DetailTabs
                 tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
-                gp={gp} uid={uid} media={media} files={files} voices={voices}
+                gp={gp} uid={uid} memberLabel={memberLabel} media={media} files={files} voices={voices}
                 voiceSenderLabel={(m) => {
                   // 单聊：peer 备注/昵称；群聊：群成员昵称（peerNick 已封装成员表 → 昵称回退 uid）。
                   const label = peerNick?.(m.from);

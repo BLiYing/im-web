@@ -1415,7 +1415,11 @@ button.detail-row:hover { background: var(--surface-hover); }
    **不写 :hover** —— 鼠标移入由 onMouseEnter 改 .active，再挂 :hover 会与键盘高亮出现两行同亮。 */
 .mention-panel .mention-row.active { background: var(--selection-bg); }
 .mention-avatar { width: 26px; height: 26px; font-size: 11px; flex: none; }
-.mention-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 名字 + 备注一组，整组吃掉剩余宽度（角色徽标因此仍靠右）；名字过长先省略，备注不被挤没。 */
+.mention-label { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.mention-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「备注: 老王」——次要信息，紧挨名字右侧。仅本人可见，且**不是**选中后插进消息的那个名字。 */
+.mention-note { flex: 0 0 auto; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
 /* 角色标直接复用群成员列表的 .role-badge（群主=绿底绿字），同一含义不做第二套样式。
    它为行内文字流设计、自带 margin-left + vertical-align；这里是 flex 行，两者都要归零。 */
 .mention-panel .role-badge, .readby-row .role-badge { margin-left: 0; vertical-align: 0; flex: none; }

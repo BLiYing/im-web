@@ -166,6 +166,8 @@ export interface ConvLastMessage {
   conv_seq: number;
   timestamp: number;
   recalled_at?: number; // >0=最后一条是撤回消息（预览显示"撤回了一条消息"，原文已脱敏）
+  /** 仅系统消息：与消息流同一份分段，列表预览据此把名字换成本机显示名（不挂点击）。空=历史消息，回退 content。 */
+  sys_segments?: SysSegment[];
 }
 
 /** 会话列表项（对齐后端 conversation.Summary）。 */

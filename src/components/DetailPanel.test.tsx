@@ -7,7 +7,7 @@ afterEach(cleanup);
 import { AppServicesProvider, type AppServices } from "../AppServicesContext";
 import { ChatActionsProvider, type ChatActions } from "../ChatActionsContext";
 import { DetailPanel, type DetailPanelProps } from "./DetailPanel";
-import type { Conversation, FriendEntry, GroupInfo } from "../sdk/protocol";
+import type { Conversation, FriendEntry, GroupInfo, GroupMember } from "../sdk/protocol";
 
 const services = {
   clientRef: { current: { requestFriend: vi.fn(async () => false) } },
@@ -37,7 +37,8 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     detail: { convId: "u_u1_u_u2", isGroup: false, peer: "u2" },
     conversations: [peerConv()], groupInfos: { g1: gp() }, friends: [friendOf("u2")], uid: "u1",
     detailTab: "media", detailMsgs: [], detailMore: false, manageOpen: false, groupBans: null,
-    groupRemark: () => "", peerNick: () => "小明", peerAvatar: () => undefined, mediaGate: () => undefined,
+    groupRemark: () => "", peerNick: () => "小明", peerAvatar: () => undefined,
+    memberLabel: (m: GroupMember) => m.group_nickname || m.nickname || m.user_id, mediaGate: () => undefined,
     mediaSrc: (m: { content: string }) => m.content, canManageMember: () => true,
     onClose: vi.fn(), setDetailTab: vi.fn(), setDetailMore: vi.fn(), setManageOpen: vi.fn(),
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),

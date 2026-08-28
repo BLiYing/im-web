@@ -56,6 +56,7 @@ describe("DetailTabs", () => {
     media: [] as ChatMessage[], files: [] as ChatMessage[], voices: [] as ChatMessage[], links: [] as ChatMessage[],
     onSelectTab: vi.fn(), onAddMember: vi.fn(), onOpenMember: vi.fn(),
     canManageMember: () => true, onMemberMenu: vi.fn(),
+    memberLabel: (m: GroupMember) => m.group_nickname || m.nickname || m.user_id,
     mediaGate: () => undefined, mediaSrc: (m: ChatMessage) => m.content, onGateTap: vi.fn(), onOpenViewer: vi.fn(),
     onFileMenu: vi.fn(), onMediaError: vi.fn(), onOpenFile: vi.fn(),
     fetchLinkPreview: async (u: string) => ({ url: u }), // 测试桩：不出卡（返回空 og），仅让类型对齐
@@ -92,7 +93,8 @@ describe("MemberMenu", () => {
     const { getByText } = withServices(makeServices(),
       <MemberMenu menu={{ x: 10, y: 10, convId: "g1", m: member() }} gp={gp({ my_role: "owner" })}
         uid="u1" friends={friends} menuRef={createRef<HTMLDivElement>()}
-        onClose={onClose} onOpenChat={onOpenChat} onFriendAction={vi.fn()} onMutePick={vi.fn()} />);
+        onClose={onClose} onOpenChat={onOpenChat} onFriendAction={vi.fn()} onMutePick={vi.fn()}
+        memberLabel={(m) => m.group_nickname || m.nickname || m.user_id} />);
     expect(getByText("发送消息")).toBeTruthy();
     expect(getByText("设为管理员")).toBeTruthy();
     expect(getByText("移出群聊")).toBeTruthy();
@@ -104,7 +106,8 @@ describe("MemberMenu", () => {
     const { getByText, queryByText } = withServices(makeServices(),
       <MemberMenu menu={{ x: 10, y: 10, convId: "g1", m: member({ user_id: "u3" }) }} gp={gp()}
         uid="u1" friends={friends} menuRef={createRef<HTMLDivElement>()}
-        onClose={vi.fn()} onOpenChat={vi.fn()} onFriendAction={vi.fn()} onMutePick={vi.fn()} />);
+        onClose={vi.fn()} onOpenChat={vi.fn()} onFriendAction={vi.fn()} onMutePick={vi.fn()}
+        memberLabel={(m) => m.group_nickname || m.nickname || m.user_id} />);
     expect(getByText("添加好友")).toBeTruthy();
     expect(queryByText("发送消息")).toBeNull();
   });

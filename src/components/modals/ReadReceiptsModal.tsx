@@ -5,9 +5,11 @@ import { Modal } from "../Modal";
 export type ReadReceipts = { read: string[]; unread: string[]; tab: "read" | "unread" };
 
 /** 已读名单（M4-8）：已读/未读两栏切换，**不显读取时刻**（位点语义给不出可靠单条时间）。 */
-export function ReadReceiptsModal({ data, lookupMember, onTab, onClose }: {
+export function ReadReceiptsModal({ data, lookupMember, memberLabel, onTab, onClose }: {
   data: ReadReceipts;
   lookupMember: (id: string) => GroupMember | undefined;
+  /** 成员在本机列表里的显示名：备注 > 群昵称 > 昵称 > uid。 */
+  memberLabel: (m: GroupMember) => string;
   onTab: (tab: "read" | "unread") => void;
   onClose: () => void;
 }) {
@@ -26,7 +28,7 @@ export function ReadReceiptsModal({ data, lookupMember, onTab, onClose }: {
         <div className="readby-list">
           {ids.map((memberId) => {
             const gm = lookupMember(memberId);
-            const label = gm?.nickname || memberId;
+            const label = gm ? memberLabel(gm) : memberId; // 备注 > 群昵称 > 昵称（本机显示）
             return (
               <div key={memberId} className="readby-row">
                 <Avatar label={label} seed={memberId} url={gm?.avatar_url} cls="avatar mention-avatar" />

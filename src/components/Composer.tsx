@@ -263,8 +263,14 @@ export function Composer(p: ComposerProps) {
                     {r.userId
                       ? <Avatar label={r.label} seed={r.userId} url={r.avatarUrl} cls="avatar mention-avatar" />
                       : <span className="mention-all-ic">@</span>}
-                    <span className="mention-name">{r.label}</span>
-                    {r.note && <span className="role-badge">{r.note}</span>}
+                    {/* 名字与备注同处一个 flex:1 的容器里，备注**紧挨**名字右侧；
+                        角色徽标留在容器外，仍靠右。（备注单独一个 span 会被 .mention-name 的
+                        flex:1 顶到行尾，离名字十万八千里。）
+                        主名恒为**群内公开名**——选中后插进消息的就是它，不能拿备注当主名。 */}
+                    <span className="mention-label">
+                      <span className="mention-name">{r.label}</span>
+                      {r.note && <span className="mention-note">{r.note}</span>}
+                    </span>
                     {r.role === "owner" && <span className="role-badge owner">群主</span>}
                     {r.role === "admin" && <span className="role-badge">管理员</span>}
                   </button>

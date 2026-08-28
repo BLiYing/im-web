@@ -6,7 +6,7 @@ import { useGroupActions } from "../useGroupActions";
 // 群成员管理 ⋯ 菜单（按角色矩阵显隐；服务端仍二次校验）。从 App 抽出的展示组件。
 // 群写操作走 useAppServices()+useGroupActions（doGroupAction 骨架）；发消息/加好友/禁言时长弹窗等碰 App 态的
 // 动作由 props 注入。DOM/className/定位逐字一致（行为等价）。
-export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenChat, onFriendAction, onMutePick }: {
+export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenChat, onFriendAction, onMutePick, memberLabel }: {
   menu: { x: number; y: number; convId: string; m: GroupMember };
   gp: GroupInfo;
   uid: string;
@@ -15,6 +15,8 @@ export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenCha
   onClose: () => void;
   onOpenChat: (userId: string) => void;
   onFriendAction: (userId: string, fn: () => Promise<void>) => void;
+  /** 成员在本机确认文案里的显示名：备注 > 群昵称 > 昵称 > uid。 */
+  memberLabel: (m: GroupMember) => string;
   onMutePick: (sel: { convId: string; m: GroupMember }) => void;
 }) {
   const services = useAppServices();
@@ -48,7 +50,7 @@ export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenCha
       {gp.my_role === "owner" && (
         <button onClick={() => {
           onClose();
-          void askConfirm(`确定把群主转让给 ${m.nickname || m.user_id}？你将变为普通成员。`, { okText: "转让", danger: true }).then((ok) => {
+          void askConfirm(`确定把群主转让给 ${memberLabel(m)}？你将变为普通成员。`, { okText: "转让", danger: true }).then((ok) => {
             if (ok) void doGroupAction(cid, () => clientRef.current!.transferGroup(cid, m.user_id));
           });
         }}>转让群主</button>
@@ -61,13 +63,13 @@ export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenCha
       )}
       <button className="danger" onClick={() => {
         onClose();
-        void askConfirm(`确定把 ${m.nickname || m.user_id} 移出群聊？24 小时内不可再被邀请。`, { okText: "移出", danger: true }).then((ok) => {
+        void askConfirm(`确定把 ${memberLabel(m)} 移出群聊？24 小时内不可再被邀请。`, { okText: "移出", danger: true }).then((ok) => {
           if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMemberWithBan(cid, m.user_id, "cooldown"));
         });
       }}>移出群聊</button>
       <button className="danger" onClick={() => {
         onClose();
-        void askConfirm(`确定把 ${m.nickname || m.user_id} 移出并不再允许加入？`, { okText: "移出并拉黑", danger: true }).then((ok) => {
+        void askConfirm(`确定把 ${memberLabel(m)} 移出并不再允许加入？`, { okText: "移出并拉黑", danger: true }).then((ok) => {
           if (ok) void doGroupAction(cid, () => clientRef.current!.removeGroupMemberWithBan(cid, m.user_id, "forever"));
         });
       }}>移出并不再允许加入</button>

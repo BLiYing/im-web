@@ -46,11 +46,10 @@ export interface MessageListProps {
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
   mediaSrc: (m: ChatMessage) => string;
   senderLabel: (m: ChatMessage) => string;
-  /** 系统消息里某 uid 的本机显示名（备注 > 群昵称 > 服务端字面）。 */
-  sysNameOf: (uid: string, convId: string, fallback: string) => string;
+  /** 某人在本机的显示名（备注 > 群昵称/昵称 > fallback > uid）：系统消息名字、引用条发送者共用。 */
+  localNameOf: (uid: string, convId: string, fallback?: string) => string;
   senderRole: (m: ChatMessage) => "owner" | "admin" | undefined;
   senderAvatar: (m: ChatMessage) => string | undefined;
-  memberNick: (cid: string, id: string) => string;
   renderMentionText: (m: ChatMessage, text: string) => ReactNode;
   renderMessageText: (m: ChatMessage) => ReactNode;
   // 定义在 App 的 login 早退之后（不能进 useMemo 化 context，否则 TDZ）
@@ -63,7 +62,7 @@ export function MessageList(p: MessageListProps) {
   const {
     messages, peer, isGroupChat, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
     timeFormat, translations, transcripts, uploadProgress, dividerRef,
-    mediaGate, mediaSrc, senderLabel, sysNameOf, senderRole, senderAvatar, memberNick, renderMentionText, renderMessageText,
+    mediaGate, mediaSrc, senderLabel, localNameOf, senderRole, senderAvatar, renderMentionText, renderMessageText,
     openPeerDetail, handleScanRaw, requestFriendFromNote,
   } = p;
   const {
@@ -140,7 +139,7 @@ export function MessageList(p: MessageListProps) {
               {i === firstUnreadIdx && (
                 <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
               )}
-              <div className="sys-line"><span>{renderSysLine(m, sysNameOf, openPeerDetail)}</span></div>
+              <div className="sys-line"><span>{renderSysLine(m, localNameOf, openPeerDetail)}</span></div>
             </div>
           );
         }
@@ -270,7 +269,7 @@ export function MessageList(p: MessageListProps) {
                       return q ? <QuoteThumb m={q} gated={!!mediaGate(q)} /> : <QuoteSnapshotIcon snapshot={m.replySnapshot} />; })()}
                     <span className="quote-lines">
                       {isGroupChat && m.replyToFrom && (
-                        <span className="quote-who">{m.replyToFrom === uid ? "你" : (memberNick(m.convId, m.replyToFrom) || m.replyToFrom)}</span>
+                        <span className="quote-who">{m.replyToFrom === uid ? "你" : localNameOf(m.replyToFrom, m.convId, m.replyToFrom)}</span>
                       )}
                       <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
                     </span>
@@ -495,14 +494,14 @@ export function MessageList(p: MessageListProps) {
  *  历史系统消息（服务端当时没存分段）走回退分支：名字仍是当时的昵称、不可点。 */
 function renderSysLine(
   m: ChatMessage,
-  sysNameOf: (uid: string, convId: string, fallback: string) => string,
+  localNameOf: (uid: string, convId: string, fallback?: string) => string,
   openPeerDetail: (uid: string) => void,
 ): ReactNode {
   if (!m.sysSegments?.length) return m.content;
   return m.sysSegments.map((seg, i) =>
     seg.uid ? (
       <button key={i} type="button" className="sys-name" onClick={() => openPeerDetail(seg.uid!)}>
-        {sysNameOf(seg.uid, m.convId, seg.text)}
+        {localNameOf(seg.uid, m.convId, seg.text)}
       </button>
     ) : (
       <Fragment key={i}>{seg.text}</Fragment>

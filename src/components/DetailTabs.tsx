@@ -44,7 +44,7 @@ export type DetailTab = "members" | "media" | "files" | "voice" | "links";
 // DOM/className/结构与原 App 内联逐字一致（行为等价）。媒体/文件门控与聊天气泡共用 MediaTile/FileGateIcon。
 export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
-  canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu,
+  canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
@@ -63,6 +63,8 @@ export function DetailTabs({
   onOpenMember: (userId: string) => void;
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
   onMemberMenu: (e: MouseEvent, cid: string, m: GroupMember) => void;
+  /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 全局昵称 > uid（会发出去的内容仍用公开名）。 */
+  memberLabel: (m: GroupMember) => string;
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
   mediaSrc: (m: ChatMessage) => string; // blob 缓存优先解析（语音 tab 用；与聊天气泡同口径）
   onGateTap: (m: ChatMessage) => void;
@@ -91,9 +93,9 @@ export function DetailTabs({
             {gp.members.map((m) => (
               <div key={m.user_id} className="detail-member"
                 onClick={() => m.user_id !== uid && onOpenMember(m.user_id)} role="button">
-                <Avatar url={m.avatar_url} label={m.group_nickname || m.nickname || m.user_id} seed={m.user_id} />
+                <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
                 <div className="detail-member-body">
-                  <div className="detail-member-name">{m.group_nickname || m.nickname || m.user_id}{m.user_id === uid && <span className="me-tag">我</span>}</div>
+                  <div className="detail-member-name">{memberLabel(m)}{m.user_id === uid && <span className="me-tag">我</span>}</div>
                   <div className="detail-member-sub">{m.user_id}</div>
                 </div>
                 {/* G2 被禁言标签：服务端把「永久」归一为大正数（MutePermanent = 1<<62），直接 >now 判定。

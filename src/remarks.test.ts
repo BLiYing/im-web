@@ -30,3 +30,20 @@ describe("displayNameOf", () => {
     expect(displayNameOf("1001", remarkMap([f("1001", "Alice")]), "Alice")).toBe("Alice");
   });
 });
+
+// 会话列表预览 / 系统消息 / 引用条 / typing 副标题都靠这一层把名字换成本机显示名。
+// 三处 fallback 链一致：备注 > 群昵称/昵称 > 服务端字面 > uid。
+describe("displayNameOf 在各展示位的 fallback 链", () => {
+  const remarks = remarkMap([f("1002", "李四", "二两肉")]);
+
+  it("系统消息分段：有备注显备注，没有则显服务端字面（公开昵称）", () => {
+    expect(displayNameOf("1002", remarks, "李四")).toBe("二两肉");
+    expect(displayNameOf("1001", remarks, "张三")).toBe("张三");
+  });
+
+  it("群昵称作 fallback 时同样被备注顶掉；都没有回落 uid", () => {
+    expect(displayNameOf("1002", remarks, "群里的李四")).toBe("二两肉");
+    expect(displayNameOf("1003", remarks, "群里的王五")).toBe("群里的王五");
+    expect(displayNameOf("1003", remarks, undefined)).toBe("1003");
+  });
+});

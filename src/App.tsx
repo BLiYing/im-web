@@ -2097,19 +2097,25 @@ export default function App() {
     return (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
   };
   // 群 typing 显示昵称（对齐 iOS `IMChatViewController+Socket.m` `im_navigationSubtitle`）：
+  /** 某人在**本机**的显示名：备注 > 群昵称/全局昵称 > fallback（一般是服务端字面）> uid。
+   *  系统消息里的名字、引用条发送者、typing 副标题共用；会发出去的内容一律不经过这里。 */
+  const localNameOf = (id: string, cid: string, fallback?: string): string =>
+    displayNameOf(id, remarks, memberNick(cid, id) || fallback);
+
   // 单聊固定"正在输入"；群里覆盖式记最新一位打字者，副标题拼「{昵称} 正在输入」，昵称找不到回退 uid。
-  // 声明放在 memberNick 之后：IIFE 立即执行，memberNick 必须先在作用域里初始化，否则命中 TDZ。
+  // 声明放在 memberNick / localNameOf 之后：IIFE 立即执行，二者必须先在作用域里初始化，否则命中 TDZ。
   const visibleChatSubtitle = (() => {
     if (!convId || !typingConv || typingConv.convId !== convId) return chatSubtitle;
     if (!isGroupChat) return "正在输入";
-    const nick = memberNick(convId, typingConv.uid) || typingConv.uid;
-    return `${nick} 正在输入`;
+    // 备注优先（本机显示）：列表/气泡都显备注了，副标题还显真名会显得是另一个人。
+    return `${localNameOf(typingConv.uid, convId, typingConv.uid)} 正在输入`;
   })();
   const senderLabel = (m: ChatMessage): string =>
     displayNameOf(m.from, remarks, m.fromNickname || memberNick(m.convId, m.from));
-  /** 系统消息里某个 uid 的显示名：备注 > 群昵称 > 服务端生成时的字面（公开昵称）。 */
-  const sysNameOf = (uid: string, convId: string, fallback: string): string =>
-    displayNameOf(uid, remarks, memberNick(convId, uid) || fallback);
+  /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 全局昵称 > uid。
+   *  成员列表/已读回执/成员菜单确认文案都用它；会发出去的内容（@token 等）仍用公开名。 */
+  const groupMemberLabel = (m: { user_id: string; group_nickname?: string; nickname?: string }): string =>
+    displayNameOf(m.user_id, remarks, m.group_nickname || m.nickname);
   // 发送者在本群的角色（群主/管理员气泡徽标用）：**优先本群成员表的当前角色**（晋升/降级后老消息随之变化，
   // 微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role（仅 owner/admin 冗余下发）兜底。
   const senderRole = (m: ChatMessage): "owner" | "admin" | undefined => {
@@ -2161,17 +2167,28 @@ export default function App() {
   };
   const convPreview = (c: Conversation): string => {
     if (!c.last_message) return "（无消息）";
+    // 预览里的人名也走本机显示名（备注 > 群昵称 > 昵称 > uid）——否则列表显真名、点进会话显备注，
+    // 同一句话两副面孔。这里只替换名字，不挂点击（预览是纯文本）。
+    const lastName = (fallback?: string) =>
+      displayNameOf(c.last_message!.from, remarks, fallback || memberNick(c.conv_id, c.last_message!.from));
     // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
     if (c.last_message.recalled_at) {
-      const who = c.last_message.from === uid ? "你" : (c.is_group ? (c.last_message.from_nickname || c.last_message.from) : "对方");
+      const who = c.last_message.from === uid ? "你" : (c.is_group ? lastName(c.last_message.from_nickname) : "对方");
       return `${who}撤回了一条消息`;
     }
     const media = mediaPreview(c.last_message.content_type, { duration: c.last_message.duration }); // 图片/视频/文件/语音 → [图片]/... voice 带 m:ss
+    // 系统消息：按分段拼，名字换成本机显示名；无分段（历史消息）回退整句。无发送者前缀。
+    if (c.last_message.content_type === "system") {
+      return c.last_message.sys_segments?.length
+        ? c.last_message.sys_segments
+            .map((seg) => (seg.uid ? displayNameOf(seg.uid, remarks, memberNick(c.conv_id, seg.uid) || seg.text) : seg.text))
+            .join("")
+        : c.last_message.content;
+    }
     // 图说 caption「有字显字」（Telegram 模型）：图文/视频文/文件文带 caption 时预览直接显 caption，否则回退 [图片]/[视频]/[文件]。
     const text = c.last_message.caption || media || c.last_message.content;
     if (!c.is_group) return text;
-    if (c.last_message.content_type === "system") return c.last_message.content; // 系统消息无发送者前缀
-    const who = c.last_message.from === uid ? "我" : (c.last_message.from_nickname || c.last_message.from);
+    const who = c.last_message.from === uid ? "我" : lastName(c.last_message.from_nickname);
     return `${who}: ${text}`;
   };
 
@@ -2714,8 +2731,8 @@ export default function App() {
                 messages={messages} peer={peer} isGroupChat={isGroupChat} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
                 timeFormat={timeFormat} translations={translations} transcripts={transcripts} uploadProgress={uploadProgress} dividerRef={dividerRef}
-                mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} sysNameOf={sysNameOf} senderRole={senderRole} senderAvatar={senderAvatar}
-                memberNick={memberNick} renderMentionText={renderMentionText} renderMessageText={renderMessageText}
+                mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} localNameOf={localNameOf} senderRole={senderRole} senderAvatar={senderAvatar}
+                renderMentionText={renderMentionText} renderMessageText={renderMessageText}
                 openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
               />
           </div>
@@ -2882,6 +2899,7 @@ export default function App() {
         <ReadReceiptsModal
           data={readReceipts}
           lookupMember={(id) => groupConvId ? groupInfos[groupConvId]?.members.find((x) => x.user_id === id) : undefined}
+          memberLabel={groupMemberLabel}
           onTab={(tab) => setReadReceipts((r) => (r ? { ...r, tab } : r))}
           onClose={() => setReadReceipts(null)}
         />
@@ -3022,7 +3040,7 @@ export default function App() {
         <DetailPanel detail={detail}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
-          groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
+          groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
@@ -3055,7 +3073,7 @@ export default function App() {
 
       {/* 群成员管理 ⋯ 菜单（按角色矩阵显隐；服务端仍会二次校验）。 */}
       {memberMenu && groupInfos[memberMenu.convId] && (
-        <MemberMenu menu={memberMenu} gp={groupInfos[memberMenu.convId]} uid={uid} friends={friends}
+        <MemberMenu menu={memberMenu} gp={groupInfos[memberMenu.convId]} uid={uid} friends={friends} memberLabel={groupMemberLabel}
           menuRef={memberMenuRef} onClose={() => setMemberMenu(null)} onOpenChat={openChat}
           onFriendAction={(userId, fn) => void doFriendAction(userId, fn)} onMutePick={setMuteDurationFor} />
       )}
