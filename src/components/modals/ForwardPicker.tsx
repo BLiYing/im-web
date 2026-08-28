@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import type { Conversation } from "../../sdk/protocol";
 import { Avatar } from "../Avatar";
+import { ListSearchInput, isSearching } from "../ListSearchInput";
+import { filterByQuery } from "../../listSearch";
 import { Modal } from "../Modal";
 
 /** 转发会话选择器（M4-3）：默认单选点一下即发；「多选」切换成勾选态，底部「发送(N)」批量转发（上限 9，对齐 iOS）。
@@ -27,12 +29,9 @@ export function ForwardPicker({
   const [q, setQ] = useState("");
   // 可见行 = 按显示名（会话备注 > 好友备注 > 昵称 > 群名）与单聊对端 uid 子串匹配。
   // 备注参与匹配是安全的：本选择器只在本机显示，转发出去的是消息本身、不含任何名字。
-  const visible = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return conversations;
-    return conversations.filter((c) =>
-      convDisplayLabel(c).toLowerCase().includes(needle) || (c.peer ?? "").toLowerCase().includes(needle));
-  }, [q, conversations, convDisplayLabel]);
+  const visible = useMemo(
+    () => filterByQuery(conversations, q, (c) => [convDisplayLabel(c), c.peer]),
+    [q, conversations, convDisplayLabel]);
 
   return (
     <Modal className="modal fwd-picker" onClose={onClose}>
@@ -48,10 +47,9 @@ export function ForwardPicker({
             <button className={mode === "merged" ? "on" : ""} onClick={() => onSetMode("merged")}>合并转发</button>
           </div>
         )}
-        <input className="fwd-search" value={q} placeholder="搜索会话" aria-label="搜索会话"
-          onChange={(e) => setQ(e.target.value)} />
+        <ListSearchInput value={q} onChange={setQ} placeholder="搜索会话" />
         <div className="fwd-list">
-          {visible.length === 0 && <div className="fwd-empty">{conversations.length === 0 ? "暂无会话" : "无匹配会话"}</div>}
+          {visible.length === 0 && <div className="fwd-empty">{isSearching(q) ? "无匹配会话" : "暂无会话"}</div>}
           {visible.map((c) => {
             const on = targets.includes(c.conv_id);
             return (

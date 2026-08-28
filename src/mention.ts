@@ -12,6 +12,8 @@
  */
 
 /** 触发提及的字符（半角 + 全角）。 */
+import { filterByQuery } from "./listSearch";
+
 const AT_CHARS = ["@", "＠"];
 
 /**
@@ -165,13 +167,7 @@ export interface MentionCandidateMember {
  * 说明：拼音首字母匹配需额外索引，本期先做子串——中文昵称直接键入汉字即可命中。
  */
 export function filterMentionMembers<T extends MentionCandidateMember>(members: T[], query: string): T[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return members;
-  return members.filter(
-    (m) => m.displayName.toLowerCase().includes(q) ||
-      (m.remark ?? "").toLowerCase().includes(q) ||
-      m.userId.toLowerCase().includes(q),
-  );
+  return filterByQuery(members, query, (m) => [m.displayName, m.remark, m.userId]);
 }
 
 /** 我能否 @所有人：仅群主/管理员（服务端另有校验，这里只决定面板是否渲染该行）。 */
