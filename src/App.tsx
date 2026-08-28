@@ -578,7 +578,12 @@ export default function App() {
         typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
       },
       // 好友关系实时变更：刷新通讯录（"新的朋友"红点/列表即时更新，无需切 Tab）。
-      onFriend: () => { void refreshFriends(); },
+      // event=remark 是备注名多端同步（本人在 iOS / 另一个浏览器改了备注，只推给本人各端）：
+      // 显示名取自会话行的 peer_remark，故必须连会话列表一起刷，否则聊天页/列表还挂着旧名字。
+      onFriend: (event) => {
+        void refreshFriends();
+        if (event === "remark") scheduleListRefresh();
+      },
       // 群成员/资料实时变更：刷新会话列表 + 该群资料缓存；自己被移出 → 提示并退出该会话。
       onGroup: (event, cid, _from, target, result) => {
         // G3 join_result 推给非成员申请人：审批结果只提示，不去拉群资料（被拒时非成员，会 403）。
