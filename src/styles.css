@@ -339,6 +339,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 群系统消息（邀请/移除/转让/禁言等留痕）：居中灰字胶囊，独立一行。 */
 .sys-line { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
 .sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); text-align: center; max-width: 80%; padding: 3px 12px; border-radius: 999px; } /* 999px：字号放大后仍保持胶囊形（写死 11px 会退化成方角） */
+/* 系统消息里的人名：强调色 + 可点进资料页。inline 按钮，不能带边框/内边距，否则会撑开胶囊。 */
+.sys-name { display: inline; padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; }
+.sys-name:hover { text-decoration: underline; }
 /* 撤回消息的"重新编辑"链接按钮（微信式，紧随撤回系统行）。 */
 .reedit-btn { background: none; border: none; color: var(--accent); font-size: var(--sys-font); cursor: pointer; padding: 0; } /* 跟撤回系统行同字号联动 */
 .reedit-btn:hover { text-decoration: underline; }

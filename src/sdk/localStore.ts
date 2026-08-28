@@ -2,7 +2,7 @@
 // 后台仅从独立连续游标增量追平。按 owner（本人 uid）隔离，避免同一浏览器多账号串库。
 // 失败记录 IM.STORE warn，但持久化是增强，绝不阻断收发主流程。
 
-import type { ChatMessage, Conversation } from "./protocol";
+import type { ChatMessage, Conversation, SysSegment } from "./protocol";
 import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
@@ -44,6 +44,8 @@ export interface MsgRecord {
   caption?: string; // 图文/视频文/文件文随附文本（Telegram 图说模型）：仅 image/video/file 有
   mentions?: string[]; // M4-8 被 @ 成员 uid：刷新后 caption/正文 @ 高亮可点 + 转发重发（强提醒）都靠它
   mentionAll?: boolean; // @所有人
+  // 系统消息分段：必须落库，否则刷新后系统消息退回"显真实昵称、名字不可点"，与刚收到时不一致。
+  sysSegments?: SysSegment[];
   timestamp: number;
   serverMsgId?: string; // 服务端真实消息 id（举报消息等需用真实 id，不能用复合键 id）
   // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。
@@ -135,7 +137,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     id: keyOf(owner, m.convId, m.convSeq),
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
-    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionAll: m.mentionAll, timestamp: m.timestamp,
+    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
@@ -341,6 +343,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
             convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
+            sysSegments: r.sysSegments,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,

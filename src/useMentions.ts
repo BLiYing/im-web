@@ -7,6 +7,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import type { FriendEntry, GroupInfo } from "./sdk/protocol";
 import type { MentionRow } from "./components/Composer";
 import { applyMentionToken, filterMentionMembers, canMentionAll, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
+import { remarkMap } from "./remarks";
 
 export interface MentionsDeps {
   convId: string;
@@ -35,7 +36,7 @@ export function useMentions(d: MentionsDeps) {
     if (!info) return [];
     // displayName 恒为群内**公开名**（选中后插进消息的就是它）；remark 只挂在候选项上参与匹配，
     // 绝不进 label——备注仅本人可见，写进消息文本等于把私房名发给全群。
-    const remarkOf = new Map(friends.filter((f) => f.remark?.trim()).map((f) => [f.user_id, f.remark!.trim()]));
+    const remarkOf = remarkMap(friends);
     const others = info.members
       .filter((m) => m.user_id !== uid)
       .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, remark: remarkOf.get(m.user_id),

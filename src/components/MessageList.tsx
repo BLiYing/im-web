@@ -4,7 +4,7 @@
 // - **reactive 值与 App 内闭包**（messages/selectMode/mediaGate/senderLabel/renderMessageText/...）走 props；
 // - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { ChatMessage } from "../sdk/protocol";
 import { pickNextVoiceRelay, voiceRelayMid } from "../voiceRelay";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
@@ -46,6 +46,8 @@ export interface MessageListProps {
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
   mediaSrc: (m: ChatMessage) => string;
   senderLabel: (m: ChatMessage) => string;
+  /** 系统消息里某 uid 的本机显示名（备注 > 群昵称 > 服务端字面）。 */
+  sysNameOf: (uid: string, convId: string, fallback: string) => string;
   senderRole: (m: ChatMessage) => "owner" | "admin" | undefined;
   senderAvatar: (m: ChatMessage) => string | undefined;
   memberNick: (cid: string, id: string) => string;
@@ -61,7 +63,7 @@ export function MessageList(p: MessageListProps) {
   const {
     messages, peer, isGroupChat, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
     timeFormat, translations, transcripts, uploadProgress, dividerRef,
-    mediaGate, mediaSrc, senderLabel, senderRole, senderAvatar, memberNick, renderMentionText, renderMessageText,
+    mediaGate, mediaSrc, senderLabel, sysNameOf, senderRole, senderAvatar, memberNick, renderMentionText, renderMessageText,
     openPeerDetail, handleScanRaw, requestFriendFromNote,
   } = p;
   const {
@@ -138,7 +140,7 @@ export function MessageList(p: MessageListProps) {
               {i === firstUnreadIdx && (
                 <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
               )}
-              <div className="sys-line"><span>{m.content}</span></div>
+              <div className="sys-line"><span>{renderSysLine(m, sysNameOf, openPeerDetail)}</span></div>
             </div>
           );
         }
@@ -486,5 +488,24 @@ export function MessageList(p: MessageListProps) {
         );
       })}
     </>
+  );
+}
+
+/** 系统消息一行：有分段就逐段渲染（名字换本地显示名、染色可点），没有就回退整句。
+ *  历史系统消息（服务端当时没存分段）走回退分支：名字仍是当时的昵称、不可点。 */
+function renderSysLine(
+  m: ChatMessage,
+  sysNameOf: (uid: string, convId: string, fallback: string) => string,
+  openPeerDetail: (uid: string) => void,
+): ReactNode {
+  if (!m.sysSegments?.length) return m.content;
+  return m.sysSegments.map((seg, i) =>
+    seg.uid ? (
+      <button key={i} type="button" className="sys-name" onClick={() => openPeerDetail(seg.uid!)}>
+        {sysNameOf(seg.uid, m.convId, seg.text)}
+      </button>
+    ) : (
+      <Fragment key={i}>{seg.text}</Fragment>
+    ),
   );
 }

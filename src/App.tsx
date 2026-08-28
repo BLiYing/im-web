@@ -9,6 +9,7 @@ import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type 
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL } from "./mention";
+import { remarkMap, displayNameOf } from "./remarks";
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
 import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
@@ -183,6 +184,10 @@ export default function App() {
   const contactsScrollRef = useRef<HTMLDivElement>(null); // 通讯录滚动容器（好友列表虚拟化的滚动父，见 VirtualList）
   const [contactFilter, setContactFilter] = useState(""); // 通讯录本地过滤（按备注/昵称/uid 即时筛已有好友；桌面端替代 iOS 的 A–Z 索引尺）
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
+  // 本机显示名用的备注表：我给他起的备注 > 群昵称/全局昵称 > uid。**只用于渲染**——
+  // 会被写进发出去的内容的地方（合并转发条目名 useForward.nameOf、@token）一律用公开名。
+  // **必须放在早退（登录页分支）之前**：hooks 数量每次渲染必须一致，放到下面 senderLabel 旁边会炸。
+  const remarks = useMemo(() => remarkMap(friends), [friends]);
   // 头像裁切请求（方案 C）：选好图后开裁切弹窗；确定拿到 blob 交给 onDone（个人/群各自上传落库）。
   const [friendMenu, setFriendMenu] = useState<{ x: number; y: number; userId: string } | null>(null); // 好友行 ⋯ 菜单
   const [convMenu, setConvMenu] = useState<{ x: number; y: number; c: Conversation } | null>(null); // 会话行右键菜单
@@ -2100,7 +2105,11 @@ export default function App() {
     const nick = memberNick(convId, typingConv.uid) || typingConv.uid;
     return `${nick} 正在输入`;
   })();
-  const senderLabel = (m: ChatMessage): string => m.fromNickname || memberNick(m.convId, m.from) || m.from;
+  const senderLabel = (m: ChatMessage): string =>
+    displayNameOf(m.from, remarks, m.fromNickname || memberNick(m.convId, m.from));
+  /** 系统消息里某个 uid 的显示名：备注 > 群昵称 > 服务端生成时的字面（公开昵称）。 */
+  const sysNameOf = (uid: string, convId: string, fallback: string): string =>
+    displayNameOf(uid, remarks, memberNick(convId, uid) || fallback);
   // 发送者在本群的角色（群主/管理员气泡徽标用）：**优先本群成员表的当前角色**（晋升/降级后老消息随之变化，
   // 微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role（仅 owner/admin 冗余下发）兜底。
   const senderRole = (m: ChatMessage): "owner" | "admin" | undefined => {
@@ -2705,7 +2714,7 @@ export default function App() {
                 messages={messages} peer={peer} isGroupChat={isGroupChat} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
                 timeFormat={timeFormat} translations={translations} transcripts={transcripts} uploadProgress={uploadProgress} dividerRef={dividerRef}
-                mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} senderRole={senderRole} senderAvatar={senderAvatar}
+                mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} sysNameOf={sysNameOf} senderRole={senderRole} senderAvatar={senderAvatar}
                 memberNick={memberNick} renderMentionText={renderMentionText} renderMessageText={renderMessageText}
                 openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
               />

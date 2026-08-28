@@ -4,6 +4,7 @@
 
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
+import { parseSysSegments } from "../sysSegments";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, type UploadProgressHandler } from "./http";
@@ -1183,6 +1184,9 @@ export class IMClient {
       // @提及（M4-8）：脏数据安全——只收字符串数组，非数组一律按"未 @ 任何人"。
       mentions: Array.isArray(d.mentions) ? (d.mentions as unknown[]).filter((x): x is string => typeof x === "string") : undefined,
       mentionAll: d.mention_all === true || undefined,
+      // 系统消息分段（名字可点 + 换本地显示名）：脏数据安全——非数组/无 text 的项一律丢弃，
+      // 一段都不剩就按"无分段"处理，渲染回退 content 整句（与历史系统消息同款）。
+      sysSegments: parseSysSegments(d.sys_segments),
     };
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，

@@ -89,6 +89,20 @@ export interface ChatMessage {
   mentions?: string[];
   /** M4-8 @所有人（发送时服务端已校验发送者为群主/管理员）。 */
   mentionAll?: boolean;
+  /**
+   * 系统消息（contentType==="system"）的结构化分段：把整句拆成「固定文案 / 某人的名字」。
+   * 服务端生成时只能填公开昵称，拿到 uid 后**本端**才能把名字换成我的备注、并挂点击跳资料页。
+   * 空 = 历史系统消息（服务端当时没存）或非系统消息 → 回退按 content 整句渲染。
+   */
+  sysSegments?: SysSegment[];
+}
+
+/** 系统消息的一个可渲染片段（对齐后端 protocol.SysSegment）。 */
+export interface SysSegment {
+  /** 非空 = 这段是某人的名字：按本地显示名重渲染 + 可点。空 = 固定文案，原样显示。 */
+  uid?: string;
+  /** 服务端生成时的字面（公开昵称/固定文案）。**不含任何人的私有备注**——这条消息全群可见。 */
+  text: string;
 }
 
 /** 引用回复定位（发送时上行只带 convSeq，preview 为本端即时预览；服务端会冻结权威快照）。 */
