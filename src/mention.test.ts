@@ -116,6 +116,27 @@ describe("filterMentionMembers", () => {
   it("空 query 返回全部", () => {
     expect(filterMentionMembers(members, "  ")).toHaveLength(3);
   });
+
+  // 备注是「我给他起的私房名」，只有我看得见。能搜到，但**绝不能进 displayName**——
+  // displayName 就是选中后插进消息文本的 token，混进备注等于把私房名发给全群。
+  it("按我给他起的备注也能命中，且 displayName 仍是群内公开名", () => {
+    const withRemark = [
+      { userId: "1002", displayName: "小美", remark: "老王" },
+      { userId: "1003", displayName: "小刚" },
+    ];
+    const hit = filterMentionMembers(withRemark, "老王");
+    expect(hit.map((m) => m.userId)).toEqual(["1002"]);
+    expect(hit[0].displayName).toBe("小美"); // 插进消息的是这个，不是"老王"
+  });
+
+  it("没设备注的人不受影响；备注为空串不会让所有人命中", () => {
+    const withRemark = [
+      { userId: "1002", displayName: "小美", remark: "" },
+      { userId: "1003", displayName: "小刚", remark: "老王" },
+    ];
+    expect(filterMentionMembers(withRemark, "老王").map((m) => m.userId)).toEqual(["1003"]);
+    expect(filterMentionMembers(withRemark, "小").map((m) => m.userId)).toEqual(["1002", "1003"]);
+  });
 });
 
 describe("canMentionAll", () => {

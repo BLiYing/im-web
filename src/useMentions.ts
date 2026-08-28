@@ -4,7 +4,7 @@
 // mentionEntriesFor（依赖早退后的 memberNick）留 App。依赖注入：convId/groupConvId/peer/uid/groupInfos/input/setInput/composerRef。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
-import type { GroupInfo } from "./sdk/protocol";
+import type { FriendEntry, GroupInfo } from "./sdk/protocol";
 import type { MentionRow } from "./components/Composer";
 import { applyMentionToken, filterMentionMembers, canMentionAll, MENTION_ALL_LABEL, type MentionCandidates } from "./mention";
 
@@ -14,13 +14,14 @@ export interface MentionsDeps {
   peer: string;
   uid: string;
   groupInfos: Record<string, GroupInfo>;
+  friends: FriendEntry[]; // 仅用于取"我给某人起的备注"参与匹配（备注不进消息，见下）
   input: string;
   setInput: (v: string) => void;
   composerRef: RefObject<HTMLTextAreaElement>;
 }
 
 export function useMentions(d: MentionsDeps) {
-  const { convId, groupConvId, peer, uid, groupInfos, input, setInput, composerRef } = d;
+  const { convId, groupConvId, peer, uid, groupInfos, friends, input, setInput, composerRef } = d;
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=面板关闭
   const [mentionFilter, setMentionFilter] = useState(""); // 面板顶部搜索框的**独立**搜索词（从空开始，不随消息框 @后文字回填；空时列表跟随 mentionQuery）
   const mentionCandidates = useRef<MentionCandidates>({});
@@ -32,20 +33,26 @@ export function useMentions(d: MentionsDeps) {
     if (mentionQuery === null || !groupConvId || peer) return [];
     const info = groupInfos[groupConvId];
     if (!info) return [];
+    // displayName 恒为群内**公开名**（选中后插进消息的就是它）；remark 只挂在候选项上参与匹配，
+    // 绝不进 label——备注仅本人可见，写进消息文本等于把私房名发给全群。
+    const remarkOf = new Map(friends.filter((f) => f.remark?.trim()).map((f) => [f.user_id, f.remark!.trim()]));
     const others = info.members
       .filter((m) => m.user_id !== uid)
-      .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, role: m.role, avatarUrl: m.avatar_url }));
+      .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, remark: remarkOf.get(m.user_id),
+                     role: m.role, avatarUrl: m.avatar_url }));
     // 生效过滤词：用户在面板搜索框主动打字时以搜索框为准（独立搜索）；否则跟随消息框 @后的字符（mentionQuery）。
     // 二者互不写入对方，故搜索框不会被 @文字自动回填；清空搜索框即回落到消息框驱动。
     const effQuery = mentionFilter.trim() !== "" ? mentionFilter : mentionQuery;
     const hits = filterMentionMembers(others, effQuery);
+    // note 显示备注：搜「老王」蹦出一行叫「王小二」的人，没有这行副标记就像是匹配错了。
     const rows: MentionRow[] =
-      hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl }));
+      hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl,
+                         ...(m.remark ? { note: `备注: ${m.remark}` } : {}) }));
     if (canMentionAll(info.my_role) && effQuery.trim() === "") {
       rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });
     }
     return rows;
-  }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, uid]);
+  }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, friends, uid]);
 
   // 面板关闭时清空搜索框：下次打开是干净的空框（搜索词不跨会话/跨次残留）。
   useEffect(() => { if (mentionQuery === null) setMentionFilter(""); }, [mentionQuery]);

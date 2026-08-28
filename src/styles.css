@@ -432,6 +432,15 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fwd-item:hover { background: var(--surface-hover); }
 .fwd-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .fwd-empty { padding: 16px; color: var(--text-secondary); text-align: center; }
+/* 转发选择器的搜索框：与 @面板搜索框同款圆角字段（全站输入框口径）。 */
+.fwd-search {
+  box-sizing: border-box; display: block; width: 100%; margin: 8px 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--separator); border-radius: var(--radius-card);
+  background: var(--page-bg); color: var(--text); font-size: 14px; line-height: 1.4; outline: none;
+}
+.fwd-search:focus { border-color: var(--accent); }
+.fwd-search::placeholder { color: var(--text-secondary); }
 /* 收藏列表（M4-4；收藏改造：分类 chips + 范围搜索 + 统一左图标列 + 右键菜单 + 阅读器）。 */
 .fav-modal { width: 400px; }
 /* 分类 chips：药丸横滚，选中染主色（对齐 iOS IMLiquidSegmentedControl 心智）。 */

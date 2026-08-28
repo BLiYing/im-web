@@ -48,6 +48,29 @@ describe("ForwardPicker 单选/多选与合并模式", () => {
     expect(onSetMode).toHaveBeenCalledWith("merged");
   });
 
+  it("搜索按显示名收窄可见行；无命中显「无匹配会话」，清空即恢复", () => {
+    render(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} />);
+    const box = screen.getByLabelText("搜索会话");
+    fireEvent.change(box, { target: { value: "b" } });
+    expect(screen.queryByText("a", { selector: ".fwd-item-label" })).toBeNull();
+    expect(screen.getByText("b", { selector: ".fwd-item-label" })).toBeTruthy();
+    fireEvent.change(box, { target: { value: "zzz" } });
+    expect(screen.getByText("无匹配会话")).toBeTruthy();
+    fireEvent.change(box, { target: { value: "" } });
+    expect(screen.getByText("a", { selector: ".fwd-item-label" })).toBeTruthy();
+  });
+
+  // 先勾选、再输入搜索词把它过滤掉——发送时**不能**少发它。
+  // 按可见行取选中项是这里最容易写错的一步，静默少发一个人还不报错。
+  it("多选态：已选中的会话被搜索过滤掉后，发送仍把它算进去", () => {
+    const onForward = vi.fn();
+    render(<ForwardPicker {...base} count={1} multi={true} mode="each" targets={["a", "c"]} onForward={onForward} />);
+    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: "c" } });
+    expect(screen.queryByText("a", { selector: ".fwd-item-label" })).toBeNull(); // a 已不可见
+    fireEvent.click(screen.getByText(/发送/));
+    expect(onForward).toHaveBeenCalledWith([expect.objectContaining({ conv_id: "a" }), expect.objectContaining({ conv_id: "c" })]);
+  });
+
   it("「多选」按钮回传 onToggleMulti", () => {
     const onToggleMulti = vi.fn();
     render(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} onToggleMulti={onToggleMulti} />);

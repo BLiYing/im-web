@@ -856,7 +856,7 @@ export default function App() {
   const {
     mentionQuery, setMentionQuery, mentionFilter, setMentionFilter, mentionActive, setMentionActive,
     mentionCandidates, mentionAllPending, mentionPanelRef, mentionActiveRef, mentionRows, pickMention, onMentionNavKey,
-  } = useMentions({ convId, groupConvId, peer, uid, groupInfos, input, setInput, composerRef });
+  } = useMentions({ convId, groupConvId, peer, uid, groupInfos, friends, input, setInput, composerRef });
   const send = useCallback(() => {
     const text = input.trim();
     const client = clientRef.current;

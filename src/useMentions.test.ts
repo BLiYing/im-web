@@ -10,7 +10,7 @@ afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §�
 const gi = (role = "owner"): GroupInfo => ({ conv_id: "g1", name: "群", my_role: role, members: [
   { user_id: "u1", role: "owner", nickname: "我" }, { user_id: "u2", role: "member", nickname: "小明" }, { user_id: "u3", role: "admin", nickname: "小红" }] } as unknown as GroupInfo);
 function mount(over: Partial<MentionsDeps> = {}) {
-  const deps: MentionsDeps = { convId: "g1", groupConvId: "g1", peer: "", uid: "u1", groupInfos: { g1: gi() }, input: "hi @", setInput: vi.fn(), composerRef: createRef<HTMLTextAreaElement>(), ...over };
+  const deps: MentionsDeps = { convId: "g1", groupConvId: "g1", peer: "", uid: "u1", groupInfos: { g1: gi() }, friends: [], input: "hi @", setInput: vi.fn(), composerRef: createRef<HTMLTextAreaElement>(), ...over };
   return { ...renderHook((p: MentionsDeps) => useMentions(p), { initialProps: deps }), deps };
 }
 describe("useMentions", () => {

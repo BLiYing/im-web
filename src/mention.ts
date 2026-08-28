@@ -150,19 +150,27 @@ export function resolveMentionAll(text: string, pending: boolean): boolean {
 /** 面板候选项（uid + 展示名 + 角色，角色用于「群主/管理员」标）。 */
 export interface MentionCandidateMember {
   userId: string;
+  /** 群内**公开名**（昵称/uid）。选中后插进消息的 token 就是它，故不能放我的私有备注。 */
   displayName: string;
+  /**
+   * 我给这人起的备注（仅本人可见）。**只参与匹配、不参与插入**——
+   * 备注写进消息文本就等于把私房名发给全群了。面板行把它作为副标记显示（见 Composer）。
+   */
+  remark?: string;
   role?: string;
 }
 
 /**
- * 按昵称/uid 子串过滤（大小写不敏感）。空 query 返回全部。
+ * 按「昵称 / 我给他起的备注 / uid」子串过滤（大小写不敏感）。空 query 返回全部。
  * 说明：拼音首字母匹配需额外索引，本期先做子串——中文昵称直接键入汉字即可命中。
  */
 export function filterMentionMembers<T extends MentionCandidateMember>(members: T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return members;
   return members.filter(
-    (m) => m.displayName.toLowerCase().includes(q) || m.userId.toLowerCase().includes(q),
+    (m) => m.displayName.toLowerCase().includes(q) ||
+      (m.remark ?? "").toLowerCase().includes(q) ||
+      m.userId.toLowerCase().includes(q),
   );
 }
 
