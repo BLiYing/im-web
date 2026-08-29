@@ -61,7 +61,9 @@ export function ContactsTab(p: ContactsTabProps) {
                   <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname)} seed={u.user_id} />
                   <div className="convbody">
                     <div className="convpeer">{labelOf(u.user_id, u.nickname)}</div>
-                    <div className="convlast">{u.user_id}{u.tags.length > 0 ? ` · ${u.tags.join(" ")}` : ""}</div>
+                    {/* 副标题 = @句柄（+ 标签）。绝不显示 user_id——那是 10 位随机数字内部 ID
+                        （docs/UI.md「用户标识」）。句柄缺失时只留标签。 */}
+                    <div className="convlast">{[u.username ? `@${u.username}` : "", u.tags.join(" ")].filter(Boolean).join(" · ")}</div>
                   </div>
                   <div className="row-actions">
                     {st === "accepted" ? (
@@ -127,7 +129,8 @@ export function ContactsTab(p: ContactsTabProps) {
               </Avatar>
               <div className="convbody">
                 <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
-                <div className="convlast">{f.user_id}</div>
+                {/* 同上：句柄而非内部 ID。没有句柄就留空行（不显示任何 ID）。 */}
+                <div className="convlast">{f.username ? `@${f.username}` : ""}</div>
               </div>
               <div className="row-actions">
                 <button className="mini-btn ghost" title="更多"

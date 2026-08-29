@@ -253,7 +253,10 @@ export type FriendStatus = "accepted" | "pending" | "requested" | "blocked";
 
 /** 好友/申请列表项（对齐后端 friend.Entry）。 */
 export interface FriendEntry {
+  /** 内部 ID（10 位数字）：接口参数与本地键，**不展示给用户**。 */
   user_id: string;
+  /** 公开句柄，通讯录副标题渲染成 @xxx，并作为本地搜索维度（2026-08-29 加）。 */
+  username?: string;
   nickname: string;
   remark?: string; // 我对该好友的私有备注名（显示优先级高于昵称）
   avatar_url: string;

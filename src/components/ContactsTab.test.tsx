@@ -24,6 +24,24 @@ function base(over: Partial<ContactsTabProps> = {}): ContactsTabProps {
 const mount = (p: ContactsTabProps) => render(<AppServicesProvider value={services}><ContactsTab {...p} /></AppServicesProvider>);
 
 describe("ContactsTab", () => {
+  // 内部 ID 零 UI 露出（docs/UI.md「用户标识」）：好友行副标题必须是 @句柄，
+  // 曾经显示的是 f.user_id——账号重构后那是 10 位随机数字。
+  it("好友行副标题显示 @username，不显示内部 ID", () => {
+    const p = base({ accepted: [friend({ user_id: "4820571639", username: "xiaoming", nickname: "小明" })],
+                     filteredAccepted: [friend({ user_id: "4820571639", username: "xiaoming", nickname: "小明" })] });
+    const { getByText, queryByText } = mount(p);
+    expect(getByText("@xiaoming")).toBeTruthy();
+    expect(queryByText("4820571639")).toBeNull();
+  });
+
+  // 没有句柄时副标题留空——不显示"未设置"，更不回退到内部 ID。
+  it("没有 username 时副标题不显示任何 ID", () => {
+    const p = base({ accepted: [friend({ user_id: "4820571639", nickname: "小明" })],
+                     filteredAccepted: [friend({ user_id: "4820571639", nickname: "小明" })] });
+    const { queryByText } = mount(p);
+    expect(queryByText("4820571639")).toBeNull();
+  });
+
   it("搜索框回车/按钮 → doSearch；扫一扫 → onScan", () => {
     const p = base();
     const { getByPlaceholderText, getByText, getByTitle } = mount(p);

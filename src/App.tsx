@@ -2067,6 +2067,10 @@ export default function App() {
     ? accepted.filter((f) =>
         (f.remark || "").toLowerCase().includes(contactFilterQ) ||
         (f.nickname || "").toLowerCase().includes(contactFilterQ) ||
+        // 按公开句柄搜：资料页显示 @zhangsan，用户回通讯录搜 zhangsan 就该能找到
+        //（这个一致性正是"好友列表下发 username"的主要理由，见 ACCOUNT_IDENTITY_REDESIGN §7.4）。
+        (f.username || "").toLowerCase().includes(contactFilterQ) ||
+        // 内部 ID 仍可搜（粘贴 ID 精准定位），但它不在任何地方展示，属兜底能力。
         f.user_id.toLowerCase().includes(contactFilterQ))
     : accepted;
   const incomingCount = incoming.length;
