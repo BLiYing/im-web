@@ -117,15 +117,19 @@ export function useForward(d: ForwardDeps) {
     }
   }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);
   // 执行转发到一个或多个目标：全部发出后关闭弹窗、退出多选、单条吐司汇总。
+  /** 吐司动词：默认「转发」；分享个人名片等复用本选择页但语义不是转发的入口置成「发送」
+   *  （与 iOS IMContactShare 的文案对齐——两端同一操作不该一个说"已转发"一个说"已发送"）。 */
+  const [forwardVerb, setForwardVerb] = useState("转发");
   const doForwardToTargets = useCallback((targets: Conversation[]) => {
     if (targets.length === 0) return;
     targets.forEach((t) => sendForwardToTarget(t)); // 不透传 forEach 的 index 作 msgsArg
     closeForwardPicker();
     exitSelectMode();
     setToast(targets.length === 1
-      ? `已转发到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
-      : `已转发到 ${targets.length} 个会话`);
-  }, [sendForwardToTarget, closeForwardPicker, exitSelectMode]);
+      ? `已${forwardVerb}到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
+      : `已${forwardVerb}到 ${targets.length} 个会话`);
+    setForwardVerb("转发"); // 用完复位，免得下一次真转发也说"已发送"
+  }, [sendForwardToTarget, closeForwardPicker, exitSelectMode, forwardVerb]);
   // 多选批量转发：收集选中的消息，打开选择器。
   const forwardSelected = useCallback(() => {
     const cid = peer ? convIdFor(uid, peer) : groupConvId;
@@ -136,5 +140,6 @@ export function useForward(d: ForwardDeps) {
   return {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
     forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected,
+    setForwardVerb,
   };
 }

@@ -1,6 +1,8 @@
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, IdCard } from "lucide-react";
 import { FileTypeIcon } from "../../FileTypeIcon";
 import { fileNameFromContent, parseChatRecord, recordItemPreview, type ChatRecord } from "../../messageContent";
+import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
+import { Avatar } from "../Avatar";
 import { formatFileSize } from "../../fileMetadata";
 import { Modal } from "../Modal";
 import { VideoThumb } from "../VideoThumb";
@@ -8,13 +10,15 @@ import { VideoThumb } from "../VideoThumb";
 /** 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器；
  *  嵌套合并转发条目 → 套娃 mini 卡片，点击入栈下钻（栈深 >1 时显返回）。
  *  纯展示：栈操作/打开查看器/子记录缓存由 App 注入。 */
-export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpenMedia, onClose }: {
+export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpenMedia, onOpenContact, onClose }: {
   view: ChatRecord; // 栈顶层
   canGoBack: boolean; // 栈深 > 1
   nestedAt: (index: number) => ChatRecord | undefined; // recordNested 缓存
   onBack: () => void;
   onDrill: (sub: ChatRecord) => void;
   onOpenMedia: (index: number, content: string, kind: "image" | "video") => void;
+  /** 名片条目 → 该人资料页（P1；与点聊天气泡同一落点）。 */
+  onOpenContact: (userId: string) => void;
   onClose: () => void;
 }) {
   return (
@@ -52,6 +56,25 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
                     <div className="record-foot">聊天记录 ›</div>
                   </div>
                 ); })()
+              ) : it.ct === CONTACT_CONTENT_TYPE ? (
+                // 名片条目（P1 补齐；此前不可点，只显一行预览文字）：mini 卡片，点进该人资料页。
+                // 脏名片解析不出 → 退化成灰字不可点，与气泡侧同口径。
+                (() => {
+                  const card = parseContactCard(it.c);
+                  if (!card) return <div className="contact-card dirty">[个人名片]</div>;
+                  return (
+                    <div className="contact-card" onClick={() => onOpenContact(card.userId)}>
+                      <div className="contact-card-head">
+                        <Avatar url={card.avatarUrl} label={card.nickname || card.userId} seed={card.userId} cls="avatar" />
+                        <div className="contact-card-body">
+                          <div className="contact-card-name">{card.nickname || card.userId}</div>
+                          <div className="contact-card-id">ID {card.userId}</div>
+                        </div>
+                      </div>
+                      <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="record-item-text">{it.c}</div>
               )}

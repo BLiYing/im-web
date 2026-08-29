@@ -15,6 +15,7 @@ function setup(over: Partial<Parameters<typeof useContactShare>[0]> = {}) {
   const appendMsg = vi.fn();
   const setForwarding = vi.fn();
   const setForwardMode = vi.fn();
+  const setForwardVerb = vi.fn();
   const setToast = vi.fn();
   const deps = {
     clientRef: { current: { sendMedia } } as never,
@@ -22,11 +23,11 @@ function setup(over: Partial<Parameters<typeof useContactShare>[0]> = {}) {
     friends: [friend("1002", "小明", "老王"), friend("1003", "小红")],
     conversations: [conv("u_1001_u_1002")],
     currentConvRef: { current: "u_1001_u_1002" },
-    appendMsg, setAttachPanel: vi.fn(), setForwardMode, setForwarding,
+    appendMsg, setAttachPanel: vi.fn(), setForwardMode, setForwarding, setForwardVerb,
     ...over,
   } as Parameters<typeof useContactShare>[0];
   const { result } = renderHook(() => useContactShare(deps));
-  return { result, sendMedia, appendMsg, setForwarding, setForwardMode, setToast };
+  return { result, sendMedia, appendMsg, setForwarding, setForwardMode, setForwardVerb, setToast };
 }
 
 describe("入口①：选好友 → 确认 → 发进当前会话", () => {
@@ -80,9 +81,11 @@ describe("入口②③：交给转发选择页", () => {
   // 回归护栏：曾把 from 填成 uid，收方卡片上方会出现「转发自 <10位内部ID>」——
   // 既是错的语义（分享名片不是转发），又把内部 ID 露到界面上。
   it("合成消息的 from 必须留空，否则会带出 forwardFrom", () => {
-    const { result, setForwarding, setForwardMode } = setup();
+    const { result, setForwarding, setForwardMode, setForwardVerb } = setup();
     act(() => result.current.shareContactCard({ userId: "1003", nickname: "小红" }));
     expect(setForwardMode).toHaveBeenCalledWith("each");
+    // 分享名片不是转发，吐司动词要置成「发送」（与 iOS IMContactShare 一致）。
+    expect(setForwardVerb).toHaveBeenCalledWith("发送");
     const [msgs] = setForwarding.mock.calls[0] as [ChatMessage[]];
     expect(msgs[0].from).toBe("");
     expect(msgs[0].forwardFrom).toBeUndefined();

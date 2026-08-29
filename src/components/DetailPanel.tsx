@@ -43,6 +43,13 @@ export interface DetailPanelProps {
   peerAvatar: (id: string) => string | undefined;
   /** 入口 ②「推荐给朋友」：把当前单聊对端做成名片，交给转发选择页选会话（见 useContactShare）。 */
   onShareContact: (card: { userId: string; nickname?: string; avatarUrl?: string }) => void;
+  /** 名片行显示名（**备注优先**）。由 App 注入——只有那里能拿到 remarks；
+   *  曾在此就地用 peerNick 拼，那个函数只查昵称不查备注，同一张名片在气泡显「老王」、
+   *  在本页名片签却显「王建国」（/code-review 2026-08-29）。 */
+  contactDisplayName: (userId: string, fallback?: string) => string;
+  /** 该 uid 经 GET /users/{id} 确认已注销（200001）→ 面板显空态（CONTACT_CARD_DESIGN §6 第四分支）。
+   *  名片卡是唯一能打开任意陌生/已注销 uid 的入口，没有这一支就会显示一个看似正常的空资料页。 */
+  peerDeleted?: boolean;
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
   mediaSrc: (m: ChatMessage) => string; // blob 缓存优先解析（语音 tab）
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
@@ -78,7 +85,7 @@ export interface DetailPanelProps {
 export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
-    groupRemark, peerNick, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact,
+    groupRemark, peerNick, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted,
     onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
@@ -116,7 +123,7 @@ export function DetailPanel(p: DetailPanelProps) {
     const isSystemPeer = !d.isGroup && d.peer === SYSTEM_UID;
     // 非好友（单聊）只保留头像 + 操作排（加好友/更多），隐藏设置·备注名·页签——尚未建立关系时这些设置无意义。
     // 仅隐藏，数据加载逻辑不动（加为好友后重新渲染即恢复）。与 iOS sectionLayout 同语义。
-    const showDetailBody = d.isGroup || detailPeerIsFriend;
+    const showDetailBody = (d.isGroup || detailPeerIsFriend) && !peerDeleted;
     // 页签数据（本地历史）—— 与 iOS IMChatDetailTabs.matchesKind: 对齐（2026-08-25）：
     // ① 撤回墓碑 recalledAt>0 排除；② status==="failed" 未确认态排除；③ convSeq>0 挡未发出的占位；
     // ④ 链接 tab 前置 contentType 校验（`text`/`link`），否则图片/视频/文件的 content 恰为 URL 时会漏进链接 tab
@@ -197,7 +204,7 @@ export function DetailPanel(p: DetailPanelProps) {
                     <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
                       {/* 入口 ②「推荐给朋友」（CONTACT_CARD_DESIGN §8.1）：把正在看的这个人推给别的会话。
                           选会话复用**已有的** ForwardPicker，零新组件。系统通知会话不给（推它没有意义）。 */}
-                      {!isSystemPeer && !d.isGroup && d.peer && (
+                      {!isSystemPeer && !d.isGroup && d.peer && !peerDeleted && (
                         <button className="menu-item" onClick={() => {
                           setDetailMore(false);
                           // 昵称取 peerNickname（服务端下发的真实昵称），**不是**页面标题——后者备注优先，
@@ -219,6 +226,11 @@ export function DetailPanel(p: DetailPanelProps) {
                   )}
                 </div>
               </div>
+              {/* 已注销用户：一段空态替代全部资料/页签（§6 第四分支）。头部头像+名字仍显快照，
+                  与「卡片本身仍显示快照、历史记录不该凭空变空」同口径。 */}
+              {peerDeleted && !d.isGroup && (
+                <div className="detail-card detail-empty" style={{ marginTop: 8 }}>该用户不存在或已注销</div>
+              )}
               {/* 系统通知会话：一段说明卡替代普通用户资料页的备注/设置/页签。 */}
               {isSystemPeer && (
                 <div className="detail-card" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: "var(--muted, #666)" }}>
@@ -309,12 +321,12 @@ export function DetailPanel(p: DetailPanelProps) {
                 }}
                 links={links}
                 contacts={contacts}
-                contactDisplayName={(userId, fallback) => peerNick?.(userId) || fallback || userId}
+                contactDisplayName={contactDisplayName}
                 contactSourceLabel={(m) => {
                   // 「由 X 分享」只在群聊显——单聊详情页里发送者只可能是我或对方，写出来纯冗余（与 iOS 一致）。
                   if (!d.isGroup) return undefined;
                   if (m.from === uid) return "你自己";
-                  return peerNick?.(m.from) || m.fromNickname || m.from;
+                  return contactDisplayName(m.from, m.fromNickname);
                 }}
                 onOpenContact={openPeerDetail}
                 canInvite={canInviteHere}

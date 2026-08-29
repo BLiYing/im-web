@@ -31,11 +31,13 @@ export interface ContactShareDeps {
   // 入口 ②③ 复用转发选择页（ForwardPicker）：与「转发一条消息」走完全相同的选会话 + 发送路径。
   setForwardMode: (m: "each" | "merged") => void;
   setForwarding: (m: ChatMessage[] | null) => void;
+  /** 转发选择页的吐司动词：分享名片置「发送」（默认是「转发」，语义不对）。 */
+  setForwardVerb: (v: string) => void;
 }
 
 export function useContactShare(d: ContactShareDeps) {
   const { clientRef, setToast, uid, friends, conversations, currentConvRef,
-          appendMsg, setAttachPanel, setForwardMode, setForwarding } = d;
+          appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb } = d;
 
   /** 入口 ① 的选人弹窗：null=关闭；selected 存 uid（与搜索过滤无关，见 FriendPickerModal）。 */
   const [cardPicker, setCardPicker] = useState<{ selected: string[] } | null>(null);
@@ -103,6 +105,7 @@ export function useContactShare(d: ContactShareDeps) {
     const content = buildContactCard(card.userId, card.nickname, card.avatarUrl);
     if (!content) { setToast("该用户资料不完整，无法分享名片"); return; }
     setForwardMode("each");
+    setForwardVerb("发送"); // 分享名片不是转发，吐司说「已发送到 X」（与 iOS 一致）
     setForwarding([{
       clientMsgId: `card-${card.userId}`, convId: "",
       // ⚠️ `from` 必须留空：转发路径取 `origin = m.forwardFrom || m.fromNickname || m.from`，
@@ -114,7 +117,7 @@ export function useContactShare(d: ContactShareDeps) {
       convSeq: 1,          // >0：转发路径按"已确认消息"处理（0 会被当成未发出的占位过滤掉）
       timestamp: Date.now(), status: "sent",
     }]);
-  }, [setForwardMode, setForwarding, setToast]);
+  }, [setForwardMode, setForwarding, setForwardVerb, setToast]);
 
   /** 入口 ① 的候选：全部好友（名片不排除任何人——推荐当前会话对端本身也是合理操作）。 */
   const contactCandidates = useMemo(

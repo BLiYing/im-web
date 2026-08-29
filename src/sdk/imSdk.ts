@@ -567,6 +567,14 @@ export class IMClient {
     return presenceFromFrame(data);
   }
 
+  /** 读取他人完整名片：GET /api/v1/users/{id}（与 fetchUserPresence 同端点，取资料而非在线态）。
+   *  资料面板据此把「入口透传的快照」换成服务端权威值——名片卡进来的就是一份冻结快照，
+   *  不拉这一次就永远显示旧昵称旧头像（CONTACT_CARD_DESIGN §6）。
+   *  已注销时 api() 抛出的 Error.code 为 200001，由调用方转空态。直接 as（同 searchUsers 口径）。 */
+  async userProfile(userId: string): Promise<UserCard> {
+    return (await this.api(`/api/v1/users/${encodeURIComponent(userId)}`)) as UserCard;
+  }
+
   /** 整体更新本人资料（PUT 语义）：PUT /api/v1/users/me。 */
   async updateMyProfile(p: { nickname: string; avatar_url: string; phone: string; tags: string[] }): Promise<MyProfile> {
     const data = await this.api("/api/v1/users/me", { method: "PUT", body: JSON.stringify(p) });

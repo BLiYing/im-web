@@ -5,7 +5,7 @@ import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL } from "./mention";
@@ -47,6 +47,7 @@ import { useMediaSend } from "./useMediaSend";
 import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
 import { useContactShare, CONTACT_MAX_SELECTION } from "./useContactShare";
+import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 import { useMentions } from "./useMentions";
 import { useQR } from "./useQR";
 import { useAppearanceSettings } from "./useAppearanceSettings";
@@ -241,6 +242,8 @@ export default function App() {
   // fromOwnChat：从「当前正在聊的这个人」的聊天页顶栏头像进来的——此时不显示「消息」入口
   // （你已经在这个会话里了，点它等于原地不动）。与 iOS 的 showsMessagePill 取反同义。
   const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean } | null>(null);
+  const [peerCards, setPeerCards] = useState<Record<string, UserCard>>({}); // uid → GET /users/{id} 的权威名片（资料面板拉）
+  const [deletedPeers, setDeletedPeers] = useState<Set<string>>(new Set());  // 确认已注销的 uid（资料面板显空态）
   const [detailTab, setDetailTab] = useState<DetailTab>("media"); // voice tab 2026-08-26；contacts tab 2026-08-29
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
@@ -1006,7 +1009,7 @@ export default function App() {
   // 转发簇 → useForward（阶段 6）：须在 exitSelectMode/setMenu/useMessageStore/selected/groupInfos 之后。
   const {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
-    forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected,
+    forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected, setForwardVerb,
   } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode });
   // 收藏簇 → useFavorites（阶段 6）：消费 useForward 的 setForwardMode/setForwarding/sendForwardToTarget。
   const {
@@ -1020,7 +1023,7 @@ export default function App() {
     cardPicker, cardConfirm, contactCandidates,
     openContactPicker, toggleContactPick, confirmContactPick, sendContactCards, shareContactCard,
     closeContactPicker, closeContactConfirm,
-  } = useContactShare({ clientRef, setToast, uid, friends, conversations, currentConvRef, appendMsg, setAttachPanel, setForwardMode, setForwarding });
+  } = useContactShare({ clientRef, setToast, uid, friends, conversations, currentConvRef, appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb });
 
   // 多选批量删除（仅本端）。
   const deleteSelected = useCallback(() => {
@@ -2078,7 +2081,12 @@ export default function App() {
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
   // 对端头像/昵称多来源兜底（会话 > 好友 > 任一群成员表 > 搜索结果）：从没聊过的群成员点开单聊/资料卡时
   // 没有会话行，头像/名字需从其它内存来源回退，否则只显示首字母圈/uid（群里气泡却正常）。
-  const peerSources = () => ({ conversations, friends, groups: Object.values(groupInfos), search: searchResults });
+  // 资料面板拉到的对端名片（uid → Card）：作为 peerSources 的**最高优先级**来源，
+  // 因为它是刚从服务端取的权威值，比会话行/好友表的缓存新。
+  const peerSources = () => ({
+    conversations, friends, groups: Object.values(groupInfos),
+    search: [...Object.values(peerCards), ...(searchResults ?? [])],
+  });
   const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
   const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
@@ -2191,11 +2199,15 @@ export default function App() {
     if (fr) return friendLabel(fr);
     return memberNick(f.source_conv_id, f.source_from) || f.source_from;
   };
-  const mediaPreview = (ct: string, extra?: { duration?: number }): string | null => {
+  // 会话列表预览的类型占位。**voice 与 contact 需要 content_type 之外的东西**（时长 / 名片快照里的昵称），
+  // 故 extra 带 content——曾漏给 contact 传 content，预览直接把 {"u":"1002",…} 整串 JSON 显在列表上
+  // （用户实测发现；iOS 侧当时已按 lastContent 处理，两端不一致）。
+  const mediaPreview = (ct: string, extra?: { duration?: number; content?: string }): string | null => {
     if (ct === "image") return "[图片]";
     if (ct === "video") return "[视频]";
     if (ct === "file") return "[文件]";
     if (ct === "chat_record") return "[聊天记录]";
+    if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(extra?.content);
     if (ct === "voice") {
       const ms = extra?.duration ?? 0;
       const s = Math.max(0, Math.floor(ms / 1000));
@@ -2214,7 +2226,8 @@ export default function App() {
       const who = c.last_message.from === uid ? "你" : (c.is_group ? lastName(c.last_message.from_nickname) : "对方");
       return `${who}撤回了一条消息`;
     }
-    const media = mediaPreview(c.last_message.content_type, { duration: c.last_message.duration }); // 图片/视频/文件/语音 → [图片]/... voice 带 m:ss
+    const media = mediaPreview(c.last_message.content_type,
+      { duration: c.last_message.duration, content: c.last_message.content }); // 图片/视频/文件 → [图片]/…；voice 带 m:ss；contact 带昵称
     // 系统消息：按分段拼，名字换成本机显示名；无分段（历史消息）回退整句。无发送者前缀。
     if (c.last_message.content_type === "system") {
       return c.last_message.sys_segments?.length
@@ -2258,11 +2271,32 @@ export default function App() {
   // fromOwnChat=true 表示从该会话自己的聊天页顶栏进来 → 不显示「消息」入口（已经在这个会话里了）。
   // 群成员列表 / 群聊气泡头像等外部入口保持 false，仍给「消息」发起单聊（与 iOS showsMessagePill 一致）。
   const openPeerDetail = (peer: string, fromOwnChat = false) => {
-    if (!peer || peer === uid) return;
+    if (!peer) return;
+    // §6 第四分支：点到的是我自己（分享我的名片后自己再点那张卡）→ 进**编辑资料**。
+    // 此前是 `peer === uid` 直接 return，点了毫无反应，用户以为卡坏了；iOS 侧同样已补此分支。
+    if (peer === uid) { void openProfile(); return; }
     const cid = convIdFor(uid, peer);
     setManageOpen(false); setDetailMore(false); setDetailTab("media");
     setDetail({ convId: cid, isGroup: false, peer, fromOwnChat });
     setDetailMsgs([]); loadDetailMsgs(cid);
+    void loadPeerCard(peer);
+  };
+
+  // 单聊资料面板的**对端权威资料**：进页拉一次 GET /users/{id}。
+  // 此前完全没拉——面板只显示打开它的那个入口透传的东西，所以从名片卡（冻结快照）进来
+  // 会永远停在旧昵称旧头像，设计 §6「先用快照填首屏、再拉最新覆盖」形同虚设（/code-review 2026-08-29）。
+  // 拉到的卡喂进 peerCards，由 peerSources 参与多源兜底；404（200001）标记该 uid 已注销，面板显空态。
+  const loadPeerCard = async (peer: string) => {
+    const client = clientRef.current;
+    if (!client || !peer || peer === uid) return;
+    try {
+      const card = await client.userProfile(peer);
+      setPeerCards((prev) => ({ ...prev, [peer]: card }));
+      setDeletedPeers((prev) => { const n = new Set(prev); n.delete(peer); return n; });
+    } catch (e) {
+      // 只有"确认不存在"才转空态；网络/5xx 保持快照可读（对显示 fail-open）。
+      if (errorCode(e) === 200001) setDeletedPeers((prev) => new Set(prev).add(peer));
+    }
   };
   openPeerDetailRef.current = openPeerDetail; // 供 useQR（早退前调用）在点击时取到早退后定义的函数
 
@@ -2938,6 +2972,8 @@ export default function App() {
             setViewer({ m: syntheticViewerMessage(`rec-${i}`, content, kind), fromGallery: true });
           }}
           onClose={() => setRecordStack([])}
+          // 名片条目 → 该人资料页；先关记录弹窗再开资料面板（Web 侧避免弹窗套弹窗）。
+          onOpenContact={(userId) => { setRecordStack([]); openPeerDetail(userId); }}
         />
       )}
 
@@ -3089,6 +3125,8 @@ export default function App() {
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
+          contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
+          peerDeleted={!!detail.peer && deletedPeers.has(detail.peer)}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
