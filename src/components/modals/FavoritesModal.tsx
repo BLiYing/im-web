@@ -32,10 +32,16 @@ const FAV_PICK_MAX = 9;
  * 纯展示：查看器 / 链接 / 记录 / 菜单动作 / 下载门控（glue）全部由 App 注入。
  */
 export function FavoritesModal({
-  favorites, mode = "browse", sourceLabel, actions, glue, myUid, conversations, convDisplayLabel, convAvatarUrl,
+  favorites, total, loadingMore, onLoadMore,
+  mode = "browse", sourceLabel, actions, glue, myUid, conversations, convDisplayLabel, convAvatarUrl,
   onOpenMedia, onOpenLink, onOpenRecord, onPick, onPickLimit, onClose, fetchLinkPreview,
 }: {
   favorites: Favorite[];
+  /** 服务端总条数（可能大于已加载的 favorites.length）。 */
+  total: number;
+  loadingMore: boolean;
+  /** 滚到底时调用，追加下一页。 */
+  onLoadMore: () => void;
   mode?: "browse" | "pick";
   sourceLabel: (f: Favorite) => string;
   actions: MenuAction<FavoriteCtx>[];      // buildFavoriteActions(...)，browse 右键菜单用
@@ -138,6 +144,18 @@ export function FavoritesModal({
   const label = kind ? CATEGORY_LABELS[kind] : "";
   const emptyText = query.trim() ? "未找到相关收藏" : categories.length === 0 ? "还没有收藏" : `暂无${label}`;
 
+  // 滚到底自动加载下一页。留 120px 余量提前触发，让加载发生在用户真正见底之前。
+  //
+  // **只在"未过滤的浏览态"下触发**：分类 chips / 搜索 / 来源分组都是对**已加载**集合做的客户端过滤，
+  // 过滤后列表变短、一开始就在底部，会立刻把剩余所有页拉光（用户没要求，还白等）。
+  const canAutoLoad = !liveSource && !kind && !query.trim() && favorites.length < total;
+  const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (!canAutoLoad || loadingMore) return;
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 120) onLoadMore();
+  };
+  const listProps = { onScroll: onListScroll };
+
   return (
     <Modal className="modal fav-modal" onClose={onClose}>
       <div className="modal-title fwd-title fav-head">
@@ -146,7 +164,8 @@ export function FavoritesModal({
             <button className="fav-back" title="返回来源列表" onClick={() => { setSource(null); setQuery(""); }}><ChevronLeft size={18} /></button>
           )}
           <span className="fav-head-titles">
-            <span>{liveSource ? sourceTitle : isPick ? "从收藏发送" : `我的收藏（${favorites.length}）`}</span>
+            {/* 显示**服务端总数**而非已加载条数：分页后 favorites.length 只是当前已拉到的部分。 */}
+            <span>{liveSource ? sourceTitle : isPick ? "从收藏发送" : `我的收藏（${total || favorites.length}）`}</span>
             {!isPick && <span className="fav-subtitle">{VIEW_MODE_LABELS[viewMode]}</span>}
           </span>
         </span>
@@ -189,15 +208,15 @@ export function FavoritesModal({
           )}
 
           {shown.length === 0 ? (
-            <div className="fav-list"><div className="fwd-empty">{emptyText}</div></div>
+            <div className="fav-list" {...listProps}><div className="fwd-empty">{emptyText}</div></div>
           ) : kind === "media" ? (
-            <div className="fav-list">
+            <div className="fav-list" {...listProps}>
               <FavMediaGrid favs={shown} glue={glue} pickMulti={isPick} selected={selected}
                 onTileClick={onTileClick} onCheckToggle={(f) => toggleSelect(f.id)} onMenu={openMenu} />
             </div>
           ) : kind === "voice" ? (
             // 语音分类（2026-08-26 拍板）：内嵌迷你波形播放器行（曾按文件三态行兜底）。
-            <div className="fav-list fav-voices">
+            <div className="fav-list fav-voices" {...listProps}>
               {shown.map((f) => (
                 <FavVoiceRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={isPick} sourceLabel={sourceLabel}
                   uid={myUid} mediaSrc={glue.mediaSrc} onCheck={() => toggleSelect(f.id)}
@@ -205,7 +224,7 @@ export function FavoritesModal({
               ))}
             </div>
           ) : kind === "file" ? (
-            <div className="fav-list detail-filelist fav-files">
+            <div className="fav-list detail-filelist fav-files" {...listProps}>
               {shown.map((f) => (
                 <FavFileRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={isPick} sourceLabel={sourceLabel} glue={glue}
                   onClick={onFileClick} onCheck={() => toggleSelect(f.id)}
@@ -213,7 +232,7 @@ export function FavoritesModal({
               ))}
             </div>
           ) : (
-            <div className="fav-list">
+            <div className="fav-list" {...listProps}>
               {shown.map((f) => (
                 <FavRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={isPick} sourceLabel={sourceLabel}
                   onClick={onRowClick(f)} onCheck={() => toggleSelect(f.id)}

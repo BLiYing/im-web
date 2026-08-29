@@ -86,6 +86,9 @@ function isAuthCode(code: number | undefined): boolean {
   return code === 200001 || code === 200002 || code === 200003 || code === 100101 || code === 100102;
 }
 
+/** 收藏列表每页条数。滚到底自动加载下一页（见 useFavorites）。 */
+export const FAVORITES_PAGE_SIZE = 60;
+
 export class IMClient {
   private ws: WebSocket | null = null;
   private seq = 0;
@@ -513,14 +516,22 @@ export class IMClient {
 
   // ---- 收藏（M4-4）----
 
+
   /** 收藏一条内容（快照）：POST /api/v1/favorites。 */
   async addFavorite(f: { content_type?: string; content: string; caption?: string; file_name?: string; file_size?: number; duration?: number; waveform?: string; thumb?: string; poster?: string; media_w?: number; media_h?: number; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
     await this.api("/api/v1/favorites", { method: "POST", body: JSON.stringify(f) });
   }
-  /** 我的收藏列表：GET /api/v1/favorites。 */
-  async listFavorites(): Promise<Favorite[]> {
-    const data = await this.api("/api/v1/favorites");
-    return (data?.favorites ?? []) as Favorite[];
+  /** 我的收藏列表：GET /api/v1/favorites?limit&offset。
+   *
+   *  返回 items 与**服务端总数** total。total 用来判断"还有没有下一页"与显示总条数——
+   *  只按 items.length 判断会在最后一页恰好装满时永远停不下来（多发一次空请求才知道到底了）。 */
+  async listFavorites(offset = 0, limit = FAVORITES_PAGE_SIZE): Promise<{ items: Favorite[]; total: number }> {
+    const data = await this.api(`/api/v1/favorites?limit=${limit}&offset=${offset}`);
+    return {
+      items: (data?.favorites ?? []) as Favorite[],
+      // 老服务端不返回 page 时退化成"就这一页"，UI 不会显示错的总数、也不会误以为还有更多。
+      total: typeof data?.page?.total === "number" ? data.page.total : (data?.favorites?.length ?? 0),
+    };
   }
   /** 删除收藏：DELETE /api/v1/favorites/{id}。 */
   async deleteFavorite(id: number): Promise<void> {

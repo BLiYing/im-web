@@ -3,7 +3,7 @@
 // 依赖注入：clientRef/setToast/setMenu/setAttachPanel（useMediaSend）/saveMessageToDisk（useMediaDownload）/
 // conversations/currentConvRef + 转发簇三件（setForwardMode/setForwarding/sendForwardToTarget，来自 useForward）。
 // favSourceLabel（来源显示名，依赖 friends/friendLabel/memberNick 等 App 派生）留在 App。
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
 import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
@@ -31,6 +31,12 @@ export function useFavorites(d: FavoritesDeps) {
   const { clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode } = d;
   const [favorites, setFavorites] = useState<Favorite[] | null>(null); // 收藏列表弹窗（null=关闭，M4-4）
   const [favPick, setFavPick] = useState(false); // 收藏弹窗模式：true=从附件面板进的「从收藏发送」pick 模式
+  // 分页（2026-08-29）：收藏可能上千条，一次全拉既慢又浪费。滚到底加载下一页。
+  // favTotal 是**服务端总数**，同时用于标题显示与"还有没有下一页"的判断——
+  // 只按 items.length 判断会在最后一页恰好装满时永远停不下来。
+  const [favTotal, setFavTotal] = useState(0);
+  const [favLoadingMore, setFavLoadingMore] = useState(false);
+  const favLoadingRef = useRef(false); // 防抖：滚动事件密集触发，在途时不得再发一轮
 
   // 收藏（M4-4）：内容快照到服务端（原消息撤回/删除后仍在），toast 反馈。
   const favoriteMessage = useCallback((m: ChatMessage) => {
@@ -68,28 +74,63 @@ export function useFavorites(d: FavoritesDeps) {
     })();
     exitSelectMode();
   }, [msgsByConv, selected, currentConvRef, exitSelectMode]);
+  // 拉第一页（两个入口共用）：重置累积列表与总数。
+  const loadFirstFavoritesPage = useCallback(async () => {
+    try {
+      const res = await clientRef.current?.listFavorites(0);
+      setFavorites(res?.items ?? []);
+      setFavTotal(res?.total ?? 0);
+    } catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
+  }, []);
+
+  /** 滚到底加载下一页：追加到已有列表尾部。
+   *
+   *  **按 favTotal 判断是否还有下一页**，不按"上一页是否装满"——后者在总数恰好是页大小整数倍时
+   *  会多发一次空请求才知道到底了。in-flight 用 ref 而非 state 挡：滚动事件在一帧内能触发多次，
+   *  等 state 更新已经晚了。 */
+  const loadMoreFavorites = useCallback(() => {
+    if (favLoadingRef.current) return;
+    setFavorites((prev) => {
+      if (!prev || prev.length >= favTotal) return prev; // 已到底
+      favLoadingRef.current = true;
+      setFavLoadingMore(true);
+      void (async () => {
+        try {
+          const res = await clientRef.current?.listFavorites(prev.length);
+          if (res) {
+            // 去重再追加：删除某条后 offset 会整体前移，重新翻页可能把同一条读两次，
+            // 而 React key 用的是 f.id，重复 key 会让整列渲染错位。
+            setFavorites((cur) => {
+              if (!cur) return cur;
+              const seen = new Set(cur.map((f) => f.id));
+              return [...cur, ...res.items.filter((f) => !seen.has(f.id))];
+            });
+            setFavTotal(res.total);
+          }
+        } catch (e) { setToast(`加载更多失败：${(e as Error).message}`); }
+        finally { favLoadingRef.current = false; setFavLoadingMore(false); }
+      })();
+      return prev;
+    });
+  }, [favTotal]);
+
   // 打开收藏列表弹窗（浏览态，账号卡入口）。
   const openFavorites = useCallback(() => {
     setFavPick(false);
-    void (async () => {
-      try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
-      catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
-    })();
-  }, []);
+    void loadFirstFavoritesPage();
+  }, [loadFirstFavoritesPage]);
   // 打开收藏弹窗（pick 态，聊天附件面板「从收藏发送」入口）。
   const openFavoritesPick = useCallback(() => {
     setAttachPanel(false); setFavPick(true);
-    void (async () => {
-      try { setFavorites(await clientRef.current?.listFavorites() ?? []); }
-      catch (e) { setToast(`加载收藏失败：${(e as Error).message}`); }
-    })();
-  }, []);
+    void loadFirstFavoritesPage();
+  }, [loadFirstFavoritesPage]);
   const closeFavorites = useCallback(() => { setFavorites(null); setFavPick(false); }, []);
   const removeFavorite = useCallback((id: number) => {
     void (async () => {
       try {
         await clientRef.current?.deleteFavorite(id);
         setFavorites((prev) => (prev ? prev.filter((f) => f.id !== id) : prev));
+        setFavTotal((n) => Math.max(0, n - 1)); // 标题里的总数要跟着减，否则显示"还有一条没加载"
       } catch (e) { setToast(`删除失败：${(e as Error).message}`); }
     })();
   }, []);
@@ -113,7 +154,7 @@ export function useFavorites(d: FavoritesDeps) {
   }, [conversations, sendForwardToTarget, closeFavorites]);
 
   return {
-    favorites, setFavorites, favPick,
+    favorites, setFavorites, favPick, favTotal, favLoadingMore, loadMoreFavorites,
     favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites, removeFavorite,
     forwardFavorite, copyFavorite, downloadFavorite, favoriteActions, sendFavoritesToCurrent,
   };

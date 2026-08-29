@@ -1008,7 +1008,7 @@ export default function App() {
   } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode });
   // 收藏簇 → useFavorites（阶段 6）：消费 useForward 的 setForwardMode/setForwarding/sendForwardToTarget。
   const {
-    favorites, setFavorites, favPick,
+    favorites, setFavorites, favPick, favTotal, favLoadingMore, loadMoreFavorites,
     favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites,
     favoriteActions, sendFavoritesToCurrent,
   } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode });
@@ -2871,6 +2871,7 @@ export default function App() {
       {favorites && (
         <FavoritesModal
           favorites={favorites}
+          total={favTotal} loadingMore={favLoadingMore} onLoadMore={loadMoreFavorites}
           mode={favPick ? "pick" : "browse"}
           sourceLabel={favSourceLabel}
           actions={favoriteActions}
