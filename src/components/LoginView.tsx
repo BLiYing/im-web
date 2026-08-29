@@ -5,14 +5,16 @@ import { QRLoginTab } from "../QRUI";
  * 登录页（含恢复登录过渡态 + 密码/扫码两页签）。从 App.tsx 抽出的纯展示组件：
  * 状态与动作全部由 App 注入，JSX 与原实现逐字一致。
  */
-export function LoginView({ restoring, uid, password, authErr, authBusy, loginTab, onUid, onPassword, onLoginTab, onLogin, onRegister, onQRLogin }: {
+export function LoginView({ restoring, uid, nickname, password, authErr, authBusy, loginTab, onUid, onNickname, onPassword, onLoginTab, onLogin, onRegister, onQRLogin }: {
   restoring: boolean;
-  uid: string;
+  uid: string;      // 这里的 uid 实为 **username**（公开句柄）——登录接口只认它
+  nickname: string; // 仅注册用：显示名
   password: string;
   authErr: string;
   authBusy: boolean;
   loginTab: "password" | "qr";
   onUid: (v: string) => void;
+  onNickname: (v: string) => void;
   onPassword: (v: string) => void;
   onLoginTab: (t: "password" | "qr") => void;
   onLogin: (pwd: string) => void; // 密码登录（空串=免密）
@@ -49,7 +51,11 @@ export function LoginView({ restoring, uid, password, authErr, authBusy, loginTa
       {authErr && <p className="auth-err">{authErr}</p>}
       {loginTab === "password" ? (
         <>
-          <label>用户名<input value={uid} autoFocus onChange={(e) => onUid(e.target.value.trim())} /></label>
+          <label>用户名<input value={uid} autoFocus placeholder="a-z、0-9、下划线，≥5 位"
+            onChange={(e) => onUid(e.target.value.trim())} /></label>
+          {/* 昵称只在注册时用得到：它是别人看到的名字，可中文/emoji，与用户名规则完全不同。 */}
+          <label>昵称<input value={nickname} placeholder="注册用，可中文，≤32 字"
+            onChange={(e) => onNickname(e.target.value)} /></label>
           <label>密码<input type="password" value={password} placeholder="≥ 6 位"
             onChange={(e) => onPassword(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && password && !authBusy) { setBusyAction("login"); onLogin(password); } }} /></label>

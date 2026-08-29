@@ -226,7 +226,10 @@ export interface ConvUpdate {
 
 /** 用户名片（对齐后端 profile.Card；搜索结果不含 phone）。 */
 export interface UserCard {
+  /** 内部 ID（10 位数字，服务端分配）：接口参数与本地键，**不展示给用户**。 */
   user_id: string;
+  /** 公开句柄，UI 上显示为 @xxx。仅 GET /users/{id} 与 /users/me 下发。 */
+  username?: string;
   nickname: string;
   avatar_url: string;
   tags: string[];
@@ -236,6 +239,8 @@ export interface UserCard {
 /** 本人完整资料（GET /api/v1/users/me，含 phone；对齐 profile.Card）。 */
 export interface MyProfile {
   user_id: string;
+  /** 公开句柄（可改，登录用它）。设置页显示为 @xxx。 */
+  username: string;
   nickname: string;
   avatar_url: string;
   phone: string;
@@ -401,3 +406,9 @@ export function convIdFor(a: string, b: string): string {
   const [x, y] = [String(a), String(b)].sort();
   return `u_${x}_u_${y}`;
 }
+
+/** 系统通知账号的**内部 ID**（Telegram 777000 同款取值；后端 store.SystemUserID）。
+ *
+ *  ⚠️ 别与消息类型 `content_type === "system"` 混淆——两者过去字面相同，账号侧已改为 "777000"，
+ *  消息类型侧保持不变。判断「这个会话/这个人是不是系统账号」一律用它，不要再写字面量。 */
+export const SYSTEM_UID = "777000";

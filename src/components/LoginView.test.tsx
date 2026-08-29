@@ -14,8 +14,8 @@ const noop = () => {};
 function renderLogin(props: Partial<Parameters<typeof LoginView>[0]> = {}) {
   return render(
     <LoginView
-      restoring={false} uid="1001" password="secret123" authErr="" authBusy={false} loginTab="password"
-      onUid={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
+      restoring={false} uid="user1001" nickname="小明" password="secret123" authErr="" authBusy={false} loginTab="password"
+      onUid={noop} onNickname={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
       {...props}
     />,
   );
@@ -41,8 +41,8 @@ describe("LoginView 登录中转圈", () => {
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
     rerender(
       <LoginView
-        restoring={false} uid="1001" password="secret123" authErr="" authBusy={true} loginTab="password"
-        onUid={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
+        restoring={false} uid="1001" nickname="小明" password="secret123" authErr="" authBusy={true} loginTab="password"
+        onUid={noop} onNickname={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
       />,
     );
     const busy = screen.getByRole("button", { name: "登录中…" });
@@ -57,8 +57,8 @@ describe("LoginView 登录中转圈", () => {
     fireEvent.click(screen.getByRole("button", { name: "免密登录" }));
     rerender(
       <LoginView
-        restoring={false} uid="1001" password="" authErr="" authBusy={true} loginTab="password"
-        onUid={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
+        restoring={false} uid="1001" nickname="小明" password="" authErr="" authBusy={true} loginTab="password"
+        onUid={noop} onNickname={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
       />,
     );
     expect(spinnerIn(screen.getByRole("button", { name: "登录中…" }))).not.toBeNull();
@@ -70,14 +70,14 @@ describe("LoginView 登录中转圈", () => {
     fireEvent.click(screen.getByRole("button", { name: "登录" }));
     rerender(
       <LoginView
-        restoring={false} uid="1001" password="secret123" authErr="" authBusy={true} loginTab="password"
-        onUid={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
+        restoring={false} uid="1001" nickname="小明" password="secret123" authErr="" authBusy={true} loginTab="password"
+        onUid={noop} onNickname={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
       />,
     );
     rerender(
       <LoginView
-        restoring={false} uid="1001" password="secret123" authErr="连接失败" authBusy={false} loginTab="password"
-        onUid={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
+        restoring={false} uid="1001" nickname="小明" password="secret123" authErr="连接失败" authBusy={false} loginTab="password"
+        onUid={noop} onNickname={noop} onPassword={noop} onLoginTab={noop} onLogin={noop} onRegister={noop} onQRLogin={noop}
       />,
     );
     const button = screen.getByRole("button", { name: "登录" });

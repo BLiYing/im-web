@@ -89,6 +89,8 @@ function isAuthCode(code: number | undefined): boolean {
 export class IMClient {
   private ws: WebSocket | null = null;
   private seq = 0;
+  /** 登录凭据（公开句柄）。重连要用它重新 /login——登录接口不认内部 ID。 */
+  private username = "";
   private uid = "";
   private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
   private sessionToken = ""; // 扫码登录标记（置位=本会话无密码可回退）：重连探活失效时无法 /login 自愈，一律回登录
@@ -124,9 +126,13 @@ export class IMClient {
   }
 
   /** 连接：先登录换 token，再用 ?token= 连 ws。password 为空走开发期免密直签。
-   *  首次登录失败（如密码错误）会抛错给调用方显示；之后的断线重连仍静默重试。 */
-  async connect(uid: string, password = ""): Promise<void> {
-    if (this.uid && this.uid !== uid) {
+   *  首次登录失败（如密码错误）会抛错给调用方显示；之后的断线重连仍静默重试。
+   *
+   *  **入参是 username（公开句柄），不是内部 ID**——登录接口只认前者。
+   *  真正的身份（10 位内部 ID）由登录响应带回并写进 this.uid，之后一切 conv_id 推导、
+   *  本地库分区、接口参数都用它。见 IMServer/docs/ACCOUNT_IDENTITY_REDESIGN.md。 */
+  async connect(username: string, password = ""): Promise<void> {
+    if (this.uid && this.username !== username) {
       // IMClient 是可复用 SDK；切换账号时绝不能沿用上个 uid 的会话游标。
       this.syncedSeq.clear();
       this.tracked.clear();
@@ -139,12 +145,12 @@ export class IMClient {
       this.pendingSends.clear();
       this.token = "";
     }
-    this.uid = uid;
+    this.username = username;
     this.password = password;
     this.sessionToken = ""; // 密码登录路径：清掉可能残留的扫码 token，避免重连误用旧会话
     this.manualClose = false;
     this.clearReconnectTimer();
-    logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid });
+    logger.info(LOG_TAG.ws, "connect_requested", { username });
     await this.openSocket(true);
   }
 
@@ -556,6 +562,16 @@ export class IMClient {
     return data as MyProfile;
   }
 
+  /** 修改公开句柄：POST /api/v1/users/me/username，回整张名片。
+   *
+   *  **不影响登录态**（服务端不吊销会话，JWT 带的是内部 ID + sid），但调用方须把新 username
+   *  写回本地会话，否则刷新后的静默重登会拿旧名去 /login。旧名立即释放、可被他人注册。 */
+  async updateMyUsername(username: string): Promise<MyProfile> {
+    const data = await this.api("/api/v1/users/me/username", { method: "POST", body: JSON.stringify({ username }) });
+    this.username = username; // 断线重连要用它重新 /login
+    return data as MyProfile;
+  }
+
   /** 进会话：建立重连基线 + 加载初始可视窗口（见 CHAT_UX §3）。
    *  - 有未读（latestSeq>readSeq）：从 readSeq-上下文 起一页，锚定到首条未读；
    *  - 无未读：加载最近一页，贴底。
@@ -834,7 +850,9 @@ export class IMClient {
 
   private async openSocket(throwOnLoginError = false): Promise<void> {
     const generation = ++this.connectionGeneration;
-    const uid = this.uid;
+    // 首次密码登录时 this.uid 还是空的（内部 ID 要等登录响应），故这里用 username 作日志与
+    // 竞态校验的身份标识；扫码路径 this.username 为空、this.uid 已知，两者取其一即可。
+    const identity = this.username || this.uid;
     const password = this.password;
     const previousSocket = this.ws;
     this.ws = null;
@@ -842,19 +860,21 @@ export class IMClient {
     this.stopPing();
     this.setState("connecting");
     logger.info(LOG_TAG.ws, "connecting", {
-      user_id: uid,
+      user_id: identity,
       attempt: this.reconnectAttempts + 1,
     });
     let token: string;
     try {
-      token = await this.fetchToken(uid, password);
-      if (generation !== this.connectionGeneration || this.manualClose || uid !== this.uid) return;
+      const got = await this.fetchToken(password);
+      if (generation !== this.connectionGeneration || this.manualClose || identity !== (this.username || this.uid)) return;
+      token = got.token;
+      this.uid = got.uid; // 权威身份：一切本地分区/conv_id 推导从此刻起用它
       this.token = token;
     } catch (e) {
-      if (generation !== this.connectionGeneration || this.manualClose || uid !== this.uid) return;
+      if (generation !== this.connectionGeneration || this.manualClose || identity !== (this.username || this.uid)) return;
       this.setState("disconnected");
       logger.warn(LOG_TAG.ws, "login_failed", {
-        user_id: uid,
+        user_id: identity,
         code: (e as { code?: number }).code,
         message: (e as Error).message,
       });
@@ -880,7 +900,7 @@ export class IMClient {
     ws.onopen = () => {
       if (ws !== this.ws || generation !== this.connectionGeneration) return;
       logger.info(LOG_TAG.ws, "connected", {
-        user_id: uid,
+        user_id: this.uid,
         tracked_conversations: this.tracked.size,
       });
       this.reconnectAttempts = 0;
@@ -901,7 +921,7 @@ export class IMClient {
       if (ws !== this.ws || generation !== this.connectionGeneration) return;
       this.ws = null;
       logger.warn(LOG_TAG.ws, "disconnected", {
-        user_id: uid,
+        user_id: this.uid,
         code: event.code,
         reason: event.reason || "-",
         clean: event.wasClean,
@@ -916,7 +936,7 @@ export class IMClient {
     };
     ws.onerror = () => {
       if (ws !== this.ws || generation !== this.connectionGeneration) return;
-      logger.warn(LOG_TAG.ws, "socket_error", { user_id: uid });
+      logger.warn(LOG_TAG.ws, "socket_error", { user_id: this.uid });
       ws.close();
     };
   }
@@ -929,12 +949,12 @@ export class IMClient {
    *   - code=100101 吊销：一律抛（两类会话都强制回登录）。
    *   - 其它失效（如 100102 过期）：扫码会话无密码救不了→抛回登录；**密码会话**才落到下面 /login 自愈。
    *  抛出的 auth 码由 openSocket 现有分支路由到 onAuthError；网络失败抛非 auth 错，继续重连。 */
-  private async fetchToken(uid: string, password: string): Promise<string> {
+  private async fetchToken(password: string): Promise<{ token: string; uid: string }> {
     if (this.token) {
       const probe = await fetchEnvelope("/api/v1/devices", {
         headers: { Authorization: `Bearer ${this.token}` },
       });
-      if (probe.code === 0) return this.token; // 仍有效，复用
+      if (probe.code === 0) return { token: this.token, uid: this.uid }; // 仍有效，复用（身份不变）
       if (probe.code === 100101 || this.sessionToken) {
         // 100101 吊销(两类会话)；或扫码会话无密码、任何失效都救不了 → 回登录。
         const e = new Error(friendlyMessage(probe.code, probe.message || "登录已失效")) as Error & { code?: number };
@@ -943,17 +963,18 @@ export class IMClient {
       }
       // 密码会话 + 非吊销（如 100102 过期）→ 落下去用 /login 重新签发（自愈）。
     }
-    const body = await fetchEnvelope<{ token?: string }>("/api/v1/login", {
+    const body = await fetchEnvelope<{ token?: string; uid?: string }>("/api/v1/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: uid, password, platform: "web", device_id: webDeviceId(), device_name: webDeviceName() }),
+      body: JSON.stringify({ username: this.username, password, platform: "web", device_id: webDeviceId(), device_name: webDeviceName() }),
     });
-    if (body.code !== 0 || !body.data?.token) {
+    if (body.code !== 0 || !body.data?.token || !body.data?.uid) {
       const e = new Error(friendlyMessage(body.code, body.message || "登录失败")) as Error & { code?: number };
       e.code = body.code; // 带上业务码，供重连区分 鉴权失败 vs 网络失败
       throw e;
     }
-    return body.data.token;
+    // data.uid 是服务端分配的内部 ID；首次登录前本端并不知道自己是谁。
+    return { token: body.data.token, uid: body.data.uid };
   }
 
   private onFrame(raw: string): void {
@@ -1355,13 +1376,16 @@ export function nextSyncCursor(before: number, covered: number): number {
   return covered > before ? covered : before;
 }
 
-/** 注册账号：POST /api/v1/register {username, password}。成功 resolve，失败抛带服务端文案的 Error。
- *  独立于连接（注册时还没建 IMClient/socket），故为模块级函数。 */
-export async function registerAccount(username: string, password: string): Promise<void> {
+/** 注册账号：POST /api/v1/register {username, password, nickname}。成功 resolve，失败抛带服务端文案的 Error。
+ *  独立于连接（注册时还没建 IMClient/socket），故为模块级函数。
+ *
+ *  三个字段各司其职：username 是公开句柄兼登录名（`^[a-z0-9_]{5,32}$`，大小写不敏感唯一）；
+ *  nickname 是显示名（必填，任意字符）。内部 ID 由服务端分配，客户端不能指定。 */
+export async function registerAccount(username: string, password: string, nickname: string): Promise<void> {
   const body = await fetchEnvelope("/api/v1/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ username, password, nickname }),
   });
   if (body.code !== 0) {
     throw new Error(friendlyMessage(body.code, body.message || "注册失败"));

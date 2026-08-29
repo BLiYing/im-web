@@ -19,5 +19,11 @@ export function remarkMap(friends: FriendEntry[]): Map<string, string> {
 
 /** 本机显示名：我给他起的备注 > fallback（群昵称/昵称）> uid。各处取显示名的统一入口。 */
 export function displayNameOf(uid: string, remarks: Map<string, string>, fallback?: string | null): string {
-  return remarks.get(uid) || (fallback?.trim() ? fallback.trim() : uid);
+  const remark = remarks.get(uid);
+  if (remark) return remark;
+  if (fallback?.trim()) return fallback.trim();
+  // **不再回退到 uid**：账号体系重构后 uid 是 10 位随机数字内部 ID，露在界面上对用户毫无意义
+  // （见 IMServer/docs/ACCOUNT_IDENTITY_REDESIGN.md §5.2）。nickname 在服务端是必填字段，
+  // 走到这里说明是脏数据/老数据，给占位比给一串数字好。
+  return "未命名用户";
 }

@@ -3,7 +3,9 @@ import { Check, SquarePen } from "lucide-react";
 import { Avatar } from "../Avatar";
 import { SubPanel } from "./SubPanel";
 
-export type ProfileDraft = { nickname: string; avatar_url: string; phone: string; tags: string };
+// username 是公开句柄（登录名 + 别人搜索到我的凭据，规则严格）；nickname 是显示名（随便填）。
+// 两者独立提交：改名走独立接口，见 useProfileEdit.saveProfile。
+export type ProfileDraft = { nickname: string; username: string; avatar_url: string; phone: string; tags: string };
 
 /** 编辑资料面板：经设置页铅笔进入，叠在设置面板之上（对齐 Telegram Web「Edit profile」）。
  *  纯展示：草稿状态与保存/选头像动作由 App 注入；隐藏 file input 的 ref 归本组件私有。 */
@@ -22,7 +24,7 @@ export function EditProfilePanel({ draft, uid, busy, onChange, onSave, onPickAva
       right={<button className="icon-btn save" title="保存" disabled={busy} onClick={onSave}><Check size={22} /></button>}>
         {/* 点头像 → 选本机图片（隐藏的 file input，浏览器自动用系统原生文件框，跨平台无需检测系统）。 */}
         <button className="edit-avatar" title="更换头像" onClick={() => avatarFileRef.current?.click()}>
-          <Avatar url={draft.avatar_url} label={draft.nickname || uid} seed={uid} cls="edit-avatar-inner" />
+          <Avatar url={draft.avatar_url} label={draft.nickname || draft.username} seed={uid} cls="edit-avatar-inner" />
           <span className="edit-cam"><SquarePen size={15} /></span>
         </button>
         <input ref={avatarFileRef} type="file" accept="image/*" hidden
@@ -31,6 +33,10 @@ export function EditProfilePanel({ draft, uid, busy, onChange, onSave, onPickAva
           <label className="edit-field"><span>昵称</span>
             <input value={draft.nickname} maxLength={32}
               onChange={(e) => onChange({ ...draft, nickname: e.target.value })} /></label>
+          <label className="edit-field"><span>用户名</span>
+            <input value={draft.username} maxLength={32} placeholder="a-z、0-9、下划线，≥5 位"
+              autoCapitalize="none" autoCorrect="off" spellCheck={false}
+              onChange={(e) => onChange({ ...draft, username: e.target.value.trim() })} /></label>
           <label className="edit-field"><span>手机号</span>
             <input value={draft.phone}
               onChange={(e) => onChange({ ...draft, phone: e.target.value })} /></label>

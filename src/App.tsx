@@ -54,7 +54,7 @@ import { ChatBanners } from "./components/ChatBanners";
 import { AnchoredMenu } from "./components/AnchoredMenu";
 import { type LinkPreview } from "./components/LinkCard";
 import { LoginView } from "./components/LoginView";
-import { SESSION_KEY, loadSession } from "./session";
+import { SESSION_KEY, loadSession, saveSession } from "./session";
 import { useDevices } from "./useDevices";
 import { useDialogs } from "./useDialogs";
 import { useToast } from "./useToast";
@@ -85,6 +85,7 @@ import { TextReader } from "./components/TextReader";
 import { MediaViewer } from "./components/MediaViewer";
 import { GalleryModal } from "./components/modals/GalleryModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
+import { SYSTEM_UID } from "./sdk/protocol";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
@@ -115,9 +116,17 @@ const setIfOpen = (r: Record<number, string>, seq: number, text: string): Record
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
-  const [uid, setUid] = useState(() => loadSession()?.uid || "1001");
+  // uid 恒为**内部 ID**（10 位数字，服务端分配）：本地库分区、conv_id 推导、接口参数都用它。
+  const [uid, setUid] = useState(() => loadSession()?.uid || "");
+  // loginName 是登录框里输入的 **username**（公开句柄）。登录接口只认它，内部 ID 由响应带回。
+  const [loginName, setLoginName] = useState(() => loadSession()?.username || "user1001");
+  const [nickname, setNickname] = useState(""); // 仅注册用：显示名，必填
+  // client 的事件回调在登录**之前**就已闭包捕获变量，而内部 ID 要等 /login 响应才知道——
+  // 回调里判断「这事件是不是我干的」必须读 ref 的当前值，捕获 uid state 会永远拿到登录前的空串。
+  const uidRef = useRef(uid);
+  useEffect(() => { uidRef.current = uid; }, [uid]);
   const [password, setPassword] = useState(""); // 登录密码（空=走开发期免密）
-  const restoreRef = useRef<{ uid: string; pwd: string; token?: string } | null>(loadSession()); // 待静默重登的已存会话
+  const restoreRef = useRef(loadSession()); // 待静默重登的已存会话（含 uid + username）
   const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
   const [authErr, setAuthErr] = useState(""); // 登录/注册错误文案
@@ -531,8 +540,9 @@ export default function App() {
     useProfileEdit({ clientRef, setToast });
 
   // token 非空=扫码登录路径（无密码，走 connectWithToken）；否则密码/免密登录。
-  const enterApp = useCallback(async (pwd: string, token?: string) => {
-    if (!uid) {
+  // name 是 **username**（登录凭据）；token 非空则走扫码会话（此时 knownUid 是票据带回的内部 ID）。
+  const enterApp = useCallback(async (name: string, pwd: string, token?: string, knownUid?: string) => {
+    if (!name && !knownUid) {
       setAuthErr("请填写用户名");
       return;
     }
@@ -566,7 +576,7 @@ export default function App() {
       },
       onReceipt: (convId, from, status, upToSeq) => {
         if (status !== "read") return;
-        if (from === uid) {
+        if (from === uidRef.current) {
           // 多端已读同步（M1）：我在另一端已读 → 本端列表未读清零（服务端已记位点，刷新即得）。
           scheduleListRefresh();
         } else {
@@ -577,7 +587,7 @@ export default function App() {
       },
       onPresence: (user, p) => setPresence((prev) => ({ ...prev, [user]: p })),
       onTyping: (convId, from) => {
-        if (from === uid) return;
+        if (from === uidRef.current) return;
         setTypingConv({ convId, uid: from });
         if (typingTimer.current) clearTimeout(typingTimer.current);
         typingTimer.current = window.setTimeout(() => setTypingConv(null), 3000);
@@ -607,7 +617,7 @@ export default function App() {
           return;
         }
         // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
-        if ((event === "remove" && target === uid) || event === "dissolve") {
+        if ((event === "remove" && target === uidRef.current) || event === "dissolve") {
           setToast(event === "dissolve" ? "该群已被解散" : "你已被移出群聊");
           setDetail((d) => (d?.convId === cid ? null : d));
           if (currentConvRef.current === cid) {
@@ -683,19 +693,20 @@ export default function App() {
       },
     });
     clientRef.current = client;
-    setLogContext(uid); // 让后续每条 dev 日志带上当前账号标签，便于多标签页/多账号汇聚时 grep 分离
+    setLogContext(name || knownUid || ""); // 让后续每条 dev 日志带上账号标签（登录后换成内部 ID）
     try {
-      if (token) await client.connectWithToken(uid, token); // 扫码登录：直接用已签发 JWT
-      else await client.connect(uid, pwd); // 首次登录失败（密码错误等）会抛错
+      if (token) await client.connectWithToken(knownUid || "", token); // 扫码登录：票据已带内部 ID
+      else await client.connect(name, pwd); // 首次登录失败（密码错误等）会抛错
     } catch (e) {
       const code = (e as { code?: number }).code;
       const cached = client.cachedConversations();
       if (code === undefined && cached.length > 0) {
         // 服务器不可达不是登录态失效：保留 client 的后台重连，直接进入本地会话页显示“未连接”。
+        // 注意此路径拿不到新的内部 ID（压根没连上），只能沿用已存会话里的那个。
         clientRef.current = client;
         setConversations(cached);
         await preloadLocal(cached);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(token ? { uid, token } : { uid, pwd }));
+        saveSession({ uid: knownUid || uid, username: name || loginName, pwd, token });
         setAuthBusy(false);
         setPhase("app");
         return;
@@ -706,6 +717,13 @@ export default function App() {
       setAuthErr((e as Error).message || "登录失败");
       return;
     }
+    // 连接成功：client.userId 是服务端分配的**内部 ID**（密码路径由 /login 响应带回，
+    // 扫码路径就是票据里的那个）。从这一刻起本地库分区、conv_id 推导、接口参数全部用它。
+    const myUID = client.userId;
+    uidRef.current = myUID;
+    setUid(myUID);
+    setLogContext(myUID);
+
     // 先用缓存的会话列表 + 本地消息秒显（刷新/弱网即时可见）。
     const cached = client.cachedConversations();
     if (cached.length) {
@@ -719,12 +737,13 @@ export default function App() {
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
-    void restoreDownloadState(uid); // 回灌解门控记录 / 失效标记 / Cache Storage 已下载文件（见 useMediaDownload）
+    void restoreDownloadState(myUID); // 回灌解门控记录 / 失效标记 / Cache Storage 已下载文件（见 useMediaDownload）
     // 保持登录：刷新后静默重登（Web #4）。扫码登录存 token（无密码，过期即回登录）。
-    localStorage.setItem(SESSION_KEY, JSON.stringify(token ? { uid, token } : { uid, pwd }));
+    // **username 必须一起存**：重登走 /login，而它只认 username。
+    saveSession({ uid: myUID, username: name || loginName, pwd, token });
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
+  }, [uid, loginName, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
 
   // 静默恢复登录（Web #4）：挂载后若有已存会话 → 直接用存储凭据重登（成功直达主界面；
   // 网络失败且有本地会话缓存时直接进入会话页显示“未连接”；鉴权失败或无缓存才回登录页。
@@ -732,8 +751,11 @@ export default function App() {
     const r = restoreRef.current;
     if (!r || phase !== "login") return;
     restoreRef.current = null;
-    if (r.token) setUid(r.uid); // 扫码会话恢复：确保处理器闭包用回该 uid
-    void enterApp(r.pwd, r.token).finally(() => setRestoring(false));
+    // 内部 ID 先落地（本地缓存按它分区，网络不可达时也要能显示本地会话）；username 供重登用。
+    setUid(r.uid);
+    uidRef.current = r.uid;
+    setLoginName(r.username);
+    void enterApp(r.username, r.pwd, r.token, r.uid).finally(() => setRestoring(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -742,26 +764,31 @@ export default function App() {
     const p = pendingQrRef.current;
     if (!p || phase !== "login" || uid !== p.uid) return;
     pendingQrRef.current = null;
-    void enterApp("", p.token);
+    void enterApp("", "", p.token, p.uid);
   }, [uid, phase, qrTrigger, enterApp]);
 
-  // 注册账号（用户名+密码，密码≥6位）→ 成功后直接登录。
+  // 注册账号（用户名 + 昵称 + 密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
-    if (!uid || password.length < 6) {
+    if (!loginName || password.length < 6) {
       setAuthErr("用户名必填，密码至少 6 位");
+      return;
+    }
+    // 昵称必填：全端显示名回退链止于它，留空会让界面露出 10 位数字内部 ID。后端也会拒，这里前置提示。
+    if (!nickname.trim()) {
+      setAuthErr("请填写昵称（这是别人看到的名字）");
       return;
     }
     setAuthBusy(true);
     setAuthErr("");
     try {
-      await registerAccount(uid, password);
+      await registerAccount(loginName, password, nickname.trim());
     } catch (e) {
       setAuthBusy(false);
       setAuthErr((e as Error).message || "注册失败");
       return;
     }
-    await enterApp(password); // 注册成功 → 直接用同一密码登录
-  }, [uid, password, enterApp]);
+    await enterApp(loginName, password); // 注册成功 → 直接用同一密码登录
+  }, [loginName, nickname, password, enterApp]);
 
   const openChat = useCallback((p: string) => {
     if (!p || p === uid) {
@@ -1998,9 +2025,10 @@ export default function App() {
   if (phase === "login") {
     return (
       <LoginView
-        restoring={restoring} uid={uid} password={password} authErr={authErr} authBusy={authBusy} loginTab={loginTab}
-        onUid={setUid} onPassword={setPassword} onLoginTab={setLoginTab}
-        onLogin={(pwd) => void enterApp(pwd)} onRegister={() => void doRegister()}
+        restoring={restoring} uid={loginName} nickname={nickname} password={password}
+        authErr={authErr} authBusy={authBusy} loginTab={loginTab}
+        onUid={setLoginName} onNickname={setNickname} onPassword={setPassword} onLoginTab={setLoginTab}
+        onLogin={(pwd) => void enterApp(loginName, pwd)} onRegister={() => void doRegister()}
         onQRLogin={(loginUid, token) => {
           pendingQrRef.current = { uid: loginUid, token };
           setUid(loginUid);
@@ -2067,7 +2095,7 @@ export default function App() {
   const composerMuteReason: string | null = (() => {
     // 系统通知会话（peer=system）：不能回复——同一锁机制统一到 composer disabled + 占位。
     // 见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
-    if (!isGroupChat && peer === "system") return "此会话不支持回复";
+    if (!isGroupChat && peer === SYSTEM_UID) return "此会话不支持回复";
     if (!isGroupChat || !activeGroupInfo) return null;
     if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return "你已被管理员禁言";
     if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return "本群已开启全员禁言";
@@ -2465,7 +2493,8 @@ export default function App() {
   // 设置页顶部名片下的资料卡（手机号/用户名）。
   const settingsInfoRows: Row[] = [
     { id: "phone", label: myInfo?.phone || "未设置", icon: Phone, iconTint: "green", value: "手机号", onClick: () => void openProfile() },
-    { id: "username", label: `@${uid}`, icon: AtSign, iconTint: "blue", value: "用户名", onClick: () => void openProfile() },
+    // 显示的是**公开句柄**而非 uid——后者是 10 位随机内部 ID，`@4820571639` 对用户毫无意义。
+    { id: "username", label: myInfo?.username ? `@${myInfo.username}` : "未设置", icon: AtSign, iconTint: "blue", value: "用户名", onClick: () => void openProfile() },
     { id: "qr", label: "我的二维码", icon: QrCode, iconTint: "gray", value: "", chevron: true, onClick: () => void openMyCard() },
   ];
 
@@ -2582,7 +2611,7 @@ export default function App() {
         {showSettings && (
           <SettingsPanel
             avatarUrl={myInfo?.avatar_url}
-            name={myInfo?.nickname || uid}
+            name={myInfo?.nickname || (myInfo?.username ? `@${myInfo.username}` : "未命名用户")}
             seed={uid}
             stateText={stateText}
             infoRows={settingsInfoRows}

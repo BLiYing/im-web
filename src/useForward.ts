@@ -51,7 +51,9 @@ export function useForward(d: ForwardDeps) {
     const mode = msgsArg ? "each" : forwardMode;
     const to = target.is_group ? "" : target.peer;
     // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
-    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? uid : (m.fromNickname || gm?.group_nickname || gm?.nickname || m.from); };
+    // 末级不落 m.from：那是 10 位随机内部 ID，出现在合并转发卡片里既难看也无意义。
+    // 自己的条目直接标「我」，与聊天搜索侧同口径。
+    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? "我" : (m.fromNickname || gm?.group_nickname || gm?.nickname || "未命名用户"); };
     const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean, groupId?: string, extra?: Partial<ChatMessage>) =>
       appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}), ...(extra ?? {}) });
 

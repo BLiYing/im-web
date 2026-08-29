@@ -330,7 +330,7 @@ function UserBranch({ card, actions, onClose }: { card: QRUserCard; actions: QRR
       <div className="qr-branch-head">
         <Avatar url={card.avatar_url} name={card.nickname} size={52} />
         <div>
-          <div className="qr-branch-title">{card.nickname || card.user_id}</div>
+          <div className="qr-branch-title">{card.nickname || "未命名用户"}</div>
           <div className="qr-branch-meta">ID {card.user_id} · 通过扫一扫</div>
         </div>
       </div>
@@ -564,7 +564,7 @@ export function JoinRequestsModal(props: {
             <div className="join-req-row" key={r.user_id}>
               <Avatar url={r.avatar_url} name={r.nickname} size={40} />
               <div className="join-req-info">
-                <div className="join-req-name">{r.nickname || r.user_id}</div>
+                <div className="join-req-name">{r.nickname || "未命名用户"}</div>
                 {r.hello && <div className="join-req-hello">{r.hello}</div>}
               </div>
               {tab === "pending" ? (

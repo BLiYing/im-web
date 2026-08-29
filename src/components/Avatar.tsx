@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SYSTEM_UID } from "../sdk/protocol";
 
 // 可复用头像组件与首字母底色算法。从 App.tsx 抽出（纯展示，无业务依赖）。
 
@@ -26,7 +27,7 @@ export function Avatar({ url, label, seed, cls = "avatar", children, onClick }: 
   useEffect(() => { setFailed(false); }, [url]);
   // 系统通知会话（seed=system）：头像走应用 logo（/im-logo.png）——服务端 avatar_url 恒空。
   // 见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §2.1。
-  if (seed === "system") {
+  if (seed === SYSTEM_UID) { // 系统账号回退渲染应用 logo
     return (
       <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
            style={{ ...(onClick ? { cursor: "pointer" } : null), background: "#fff" }}>

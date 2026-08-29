@@ -29,8 +29,14 @@ export class FakeIMClient {
   }
   private rec(name: string, ...a: unknown[]) { (this.calls[name] ??= []).push(a); }
   // —— 启动链路 ——
-  async connect(uid: string, pwd: string) { this.rec("connect", uid, pwd); }
-  async connectWithToken(uid: string, token: string) { this.rec("connectWithToken", uid, token); }
+  // 真实 SDK 的 connect 入参是 **username**，内部 ID 由 /login 响应带回并落到 userId 上。
+  // Fake 照搬这个语义：connect(username) 之后 userId 变成 FakeIMClient.internalUID，
+  // 否则测试会在「username 当内部 ID 用」的错误前提下全绿。
+  static internalUID = "1000001001";
+  private _uid = "";
+  get userId(): string { return this._uid; }
+  async connect(username: string, pwd: string) { this.rec("connect", username, pwd); this._uid = FakeIMClient.internalUID; }
+  async connectWithToken(uid: string, token: string) { this.rec("connectWithToken", uid, token); this._uid = uid; }
   disconnect() { this.rec("disconnect"); }
   cachedConversations(): Conversation[] { return []; }
   cacheConversations() {}

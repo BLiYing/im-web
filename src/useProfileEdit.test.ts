@@ -5,7 +5,7 @@ import { fakeClientRef } from "./testing/fakeIMClient";
 import { useProfileEdit, type ProfileEditDeps } from "./useProfileEdit";
 afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 function mount(client: Record<string, unknown> = {}) {
-  const c = { fetchMyProfile: vi.fn(async () => ({ nickname: "我", avatar_url: "a.png", tags: ["x", "y"] })), updateMyProfile: vi.fn(async (p: Record<string, unknown>) => ({ nickname: p.nickname, phone: p.phone, avatar_url: p.avatar_url })), uploadAvatar: vi.fn(async () => ({ url: "https://cdn/av.jpg" })), ...client };
+  const c = { fetchMyProfile: vi.fn(async () => ({ nickname: "我", username: "myhandle", avatar_url: "a.png", tags: ["x", "y"] })), updateMyProfile: vi.fn(async (p: Record<string, unknown>) => ({ nickname: p.nickname, username: "myhandle", phone: p.phone, avatar_url: p.avatar_url })), updateMyUsername: vi.fn(async (u: string) => ({ nickname: "新名", username: u, phone: "138", avatar_url: "a.png" })), uploadAvatar: vi.fn(async () => ({ url: "https://cdn/av.jpg" })), ...client };
   const deps: ProfileEditDeps = { clientRef: fakeClientRef(c), setToast: vi.fn() };
   return { ...renderHook(() => useProfileEdit(deps)), deps, c };
 }
@@ -13,17 +13,39 @@ describe("useProfileEdit", () => {
   it("loadMyInfo 填 myInfo（phone 缺省兜底 \"\"）；openProfile 填草稿（tags 空格连接）", async () => {
     const { result } = mount();
     await act(async () => { await result.current.loadMyInfo(); });
-    expect(result.current.myInfo).toEqual({ nickname: "我", phone: "", avatar_url: "a.png" });
+    expect(result.current.myInfo).toEqual({ nickname: "我", username: "myhandle", phone: "", avatar_url: "a.png" });
     await act(async () => { await result.current.openProfile(); });
-    expect(result.current.profileDraft).toEqual({ nickname: "我", avatar_url: "a.png", phone: "", tags: "x y" });
+    expect(result.current.profileDraft).toEqual({ nickname: "我", username: "myhandle", avatar_url: "a.png", phone: "", tags: "x y" });
   });
   it("saveProfile：tags 按空格/逗号切分去空 → updateMyProfile；成功后刷新 myInfo 并关草稿", async () => {
     const { result, c } = mount();
     await act(async () => { await result.current.openProfile(); });
-    act(() => result.current.setProfileDraft({ nickname: " 新名 ", avatar_url: "a.png", phone: "138", tags: "a, b  c" }));
+    act(() => result.current.setProfileDraft({ nickname: " 新名 ", username: "myhandle", avatar_url: "a.png", phone: "138", tags: "a, b  c" }));
     await act(async () => { await result.current.saveProfile(); });
     expect(c.updateMyProfile).toHaveBeenCalledWith({ nickname: "新名", avatar_url: "a.png", phone: "138", tags: ["a", "b", "c"] });
+    // username 与载入值相同 → **不**发改名请求（否则每次保存都可能撞「用户名已被占用」）。
+    expect(c.updateMyUsername).not.toHaveBeenCalled();
     expect(result.current.profileDraft).toBeNull(); expect(result.current.myInfo?.nickname).toBe("新名");
+  });
+
+  it("saveProfile：username 改了才发改名请求，并用它回的名片刷新 myInfo", async () => {
+    const { result, c } = mount();
+    await act(async () => { await result.current.openProfile(); });
+    act(() => result.current.setProfileDraft({ nickname: "新名", username: "newhandle", avatar_url: "a.png", phone: "138", tags: "" }));
+    await act(async () => { await result.current.saveProfile(); });
+    expect(c.updateMyUsername).toHaveBeenCalledWith("newhandle");
+    expect(result.current.myInfo?.username).toBe("newhandle");
+    expect(result.current.profileDraft).toBeNull();
+  });
+
+  it("saveProfile：昵称清空直接拒（回退链止于昵称，空了会露出内部 ID）", async () => {
+    const { result, c, deps } = mount();
+    await act(async () => { await result.current.openProfile(); });
+    act(() => result.current.setProfileDraft({ nickname: "   ", username: "myhandle", avatar_url: "a.png", phone: "", tags: "" }));
+    await act(async () => { await result.current.saveProfile(); });
+    expect(c.updateMyProfile).not.toHaveBeenCalled();
+    expect(deps.setToast).toHaveBeenCalledWith("昵称不能为空");
+    expect(result.current.profileDraft).not.toBeNull(); // 留在弹窗里让用户补
   });
   it("onPickAvatar：置 cropReq；裁切完成 → uploadAvatar → 草稿头像换成返回 URL + toast", async () => {
     const { result, deps, c } = mount();

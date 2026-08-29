@@ -8,9 +8,12 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { Conversation } from "../sdk/protocol";
 import App from "../App";
 
-export const UID = "1001";
-export const PEER = "2002";
-export const CID = `u_${UID}_u_${PEER}`; // convIdFor(1001,2002)
+// UID 是**内部 ID**（服务端分配，10 位数字）——与 FakeIMClient.internalUID 一致；
+// 登录框里填的是 username（见 loginAndWait），两者刻意不同，免得测试把它们当同一个东西。
+export const UID = "1000001001";
+export const USERNAME = "user1001";
+export const PEER = "2000002002";
+export const CID = `u_${UID}_u_${PEER}`; // convIdFor：两 uid 字典序排序（1000001001 < 2000002002）
 
 /** 与小明的单聊会话行；传 over 覆盖任意字段。 */
 export const makeConv = (over: Partial<Conversation> = {}): Conversation => ({
@@ -36,6 +39,7 @@ export function renderApp() { return render(<App />); }
 /** 免密登录进入主界面，等会话列表出现（「小明」同时出现在头像回退字与昵称里，故用 AllByText）。 */
 export async function loginAndWait(): Promise<void> {
   renderApp();
+  // 登录框预填的是默认 username；免密路径同样要经 /login 换内部 ID（Fake 直接给 internalUID）。
   fireEvent.click(screen.getByText("免密登录"));
   await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));
 }
