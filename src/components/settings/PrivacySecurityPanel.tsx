@@ -2,7 +2,7 @@ import { Ban, Key, ShieldCheck, KeyRound, Mail, Timer, Phone, Eye, CircleUserRou
 import { renderRow, type Row } from "../rows";
 import { SubPanel } from "./SubPanel";
 
-/** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/PRIVACY_SECURITY_DESIGN.md）：
+/** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/design/PRIVACY_SECURITY_DESIGN.md）：
  *  五组 A~E，仅 A 组两项（已屏蔽的用户 / 修改密码）为 P0 活行，B~E 为灰置 comingSoon 占位。
  *  「已登录设备」按设计不进本页（是设置页独立入口）。纯展示：动作与黑名单计数由 App 传入。 */
 export function PrivacySecurityPanel({ blockedCount, onOpenBlocked, onOpenChangePwd, onComingSoon, onBack }: {

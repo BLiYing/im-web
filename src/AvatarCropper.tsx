@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import type { PointerEvent as RPointerEvent } from "react";
 import { AVATAR_OUT, avatarBaseScale, clampTranslate, cropSourceRect } from "./avatarCrop";
 
-// 圆形头像裁切弹窗（方案 C · Web 端）。规格见 docs/UX_SKETCH.html §Web：
+// 圆形头像裁切弹窗（方案 C · Web 端）。规格见 docs/design/sketches/UX_SKETCH.html §Web：
 // 圆窗 ⌀180px、画布 328×236、遮罩 rgba(0,0,0,0.5)、缩放 1×–3×（滑杆 + 滚轮 + 捏合），
 // 输出圆的外接正方形 → 256×256 JPEG(q0.85)。存方图、显示时切圆（与 iOS 一致，走 JPEG 可去重）。
 // 坐标/尺寸换算抽到纯模块 avatarCrop.ts（可单测）。

@@ -26,7 +26,7 @@ export function Avatar({ url, label, seed, cls = "avatar", children, onClick }: 
   const [failed, setFailed] = useState(false);
   useEffect(() => { setFailed(false); }, [url]);
   // 系统通知会话（seed=system）：头像走应用 logo（/im-logo.png）——服务端 avatar_url 恒空。
-  // 见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §2.1。
+  // 见 docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §2.1。
   if (seed === SYSTEM_UID) { // 系统账号回退渲染应用 logo
     return (
       <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}

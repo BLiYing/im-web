@@ -77,7 +77,7 @@ export interface IMClientHandlers {
   onConvUpdate?: (u: ConvUpdate) => void;
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
-  /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
+  /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
 
@@ -679,7 +679,7 @@ export class IMClient {
 
   /**
    * 上传头像（方案 C）：走**专用端点** `/api/v1/avatar`，服务端内容寻址落 `uploads/avatars/`，
-   * 返回 `/avatars/<hash>.jpg` 相对 URL。与聊天媒体分离、永不清理（见 docs/AVATAR_STORAGE_DESIGN.md）。
+   * 返回 `/avatars/<hash>.jpg` 相对 URL。与聊天媒体分离、永不清理（见 docs/mechanism/AVATAR_STORAGE_DESIGN.md）。
    * 入参为裁切并缩到 ≤256px 的 JPEG blob；头像小，一次性 multipart，无需分片/进度。
    */
   async uploadAvatar(blob: Blob): Promise<{ url: string }> {

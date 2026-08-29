@@ -125,7 +125,7 @@ export function DetailPanel(p: DetailPanelProps) {
     // 拉黑的好友 status 仍 accepted（仍算好友，可发消息），故只看 status 不看 blocked。
     const detailPeerIsFriend = !d.isGroup && !!d.peer && friends.some((f) => f.user_id === d.peer && f.status === "accepted");
     // 系统通知会话（peer=system）：资料页精简版——不显加好友/消息/呼叫/视频/搜索/拉黑，
-    // 只保留头像+说明+清空聊天。见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §5.3 / §7 权限矩阵。
+    // 只保留头像+说明+清空聊天。见 docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §5.3 / §7 权限矩阵。
     const isSystemPeer = !d.isGroup && d.peer === SYSTEM_UID;
     // 非好友（单聊）只保留头像 + 操作排（加好友/更多），隐藏设置·备注名·页签——尚未建立关系时这些设置无意义。
     // 仅隐藏，数据加载逻辑不动（加为好友后重新渲染即恢复）。与 iOS sectionLayout 同语义。

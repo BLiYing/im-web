@@ -3,7 +3,7 @@
 // 契约与后端 `internal/downloadsettings` / iOS `IMDownloadSettings` 逐字段对齐；语义由三端各自解释，
 // 服务端只存原始 JSON + 单调版本（任一端改 → bump version → capabilities_update → 其它端重拉）。
 //
-// **Web 端的诚实差异**（见 docs/DOWNLOAD_UX_SKETCH.html §07）：浏览器无法可靠区分"移动数据 / Wi-Fi"，
+// **Web 端的诚实差异**（见 docs/design/sketches/DOWNLOAD_UX_SKETCH.html §07）：浏览器无法可靠区分"移动数据 / Wi-Fi"，
 // 桌面也没有流量焦虑 —— 所以 Web **只读取并遵守 Wi-Fi 这一档**，"移动数据"档在 Web 不生效；
 // 用户在 Web 改的策略仍会同步回移动端（改的就是 Wi-Fi 档）。Web 始终提供手动下载。
 

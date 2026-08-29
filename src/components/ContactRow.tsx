@@ -5,7 +5,7 @@ import type { ContactCard } from "../contactCard";
 /**
  * 个人名片的「列表行」——**会话详情页「名片」页签**与**收藏页「名片」分类共用同一个组件**
  * （即"收藏页复用资料详情页"的落地方式，镜像 iOS 的 IMDetailContactCell）。
- * 规格见 IMServer docs/CONTACT_CARD_DESIGN.md §7.1：44 头像、主行显示名、副行 `ID x[· 由 X 分享]`、右上时间。
+ * 规格见 IMServer docs/design/CONTACT_CARD_DESIGN.md §7.1：44 头像、主行显示名、副行 `ID x[· 由 X 分享]`、右上时间。
  *
  * 纯展示：显示名（备注优先）由调用方解析后注入，本组件不查任何 store。
  */

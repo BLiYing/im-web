@@ -1,4 +1,4 @@
-// VoiceBubble：语音气泡（voice P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN.md §10）。
+// VoiceBubble：语音气泡（voice P0，Web 只播不录，见 IMServer docs/design/VOICE_MESSAGE_DESIGN.md §10）。
 // 结构：[▶/⏸] [ 波形 (进度扫过部分变蓝) ] [ m:ss + 未播红点 ]
 // 波形来自协议 waveform（base64，每字节 0~100 振幅）；空则退化等高条纹。
 //

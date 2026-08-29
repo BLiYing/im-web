@@ -82,7 +82,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     // 放首位，对齐 iOS 长按菜单顶部的读者行。人数在弹出的名单里显示（菜单构建是同步的，不做异步取数）。
     { id: "readReceipts", label: "已读详情", icon: Eye,
       visible: (c) => !!c.isGroup && c.m.from === c.uid && c.m.convSeq > 0, run: (c) => h.readReceipts(c.m) },
-    // 语音转文字（服务端识别，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md）：只对已发出的 voice 可用。
+    // 语音转文字（服务端识别，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md）：只对已发出的 voice 可用。
     // 已展开 → 变「取消转文字」（只收起本地面板，不删服务端结果——缓存是会话共享的）。
     { id: "transcribe", label: "转文字", icon: FileText,
       visible: (c) => c.m.contentType === "voice" && c.m.convSeq > 0 && !c.m.recalledAt && !c.hasTranscript,

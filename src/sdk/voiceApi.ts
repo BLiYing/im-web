@@ -27,7 +27,7 @@ export async function uploadVoice(token: string, blob: Blob, fileName: string): 
  *
  * 返回 status：`done` 带 text；`pending` 表示已入队，结果随后经 WS voice_transcript 帧到达。
  * 失败时业务码挂在 Error.code（500101 未启用 / 500102 识别失败 / 500103 队列满 / 100002 限流）。
- * 见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md §3。
+ * 见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md §3。
  */
 export async function transcribeVoice(
   token: string, convId: string, convSeq: number,

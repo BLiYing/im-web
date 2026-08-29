@@ -109,7 +109,7 @@ describe("voice relay: pickNextVoiceRelay", () => {
   });
 });
 
-// ---- 转文字菜单项二态（服务端识别，见 IMServer docs/VOICE_TRANSCRIBE_DESIGN.md） ----
+// ---- 转文字菜单项二态（服务端识别，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md） ----
 describe("voice transcribe menu action", () => {
   const voiceMsg = {
     convId: "c1", from: "peer", contentType: "voice", content: "/uploads/a.m4a",

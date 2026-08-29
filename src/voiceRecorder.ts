@@ -1,6 +1,6 @@
 // voiceRecorder.ts —— Web 语音录制（P1，Telegram 布局：输入栏原地 morph 成录制条）。
 //
-// 设计参见 IMServer docs/VOICE_MESSAGE_DESIGN.md §4/§9：
+// 设计参见 IMServer docs/design/VOICE_MESSAGE_DESIGN.md §4/§9：
 //   - AAC 兼容探测：MediaRecorder.isTypeSupported('audio/mp4') → 支持才允许录制；
 //     不支持 → mic 按钮置灰 + tooltip"当前浏览器不支持录制语音，可在 App 内发送"。
 //     绝不产出 webm/opus——iOS AVFoundation 解不了。

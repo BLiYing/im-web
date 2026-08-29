@@ -2123,7 +2123,7 @@ export default function App() {
   // 服务端仍是权威（发上来照样拒 300208/300206），这里只提前告知、不给试错。
   const composerMuteReason: string | null = (() => {
     // 系统通知会话（peer=system）：不能回复——同一锁机制统一到 composer disabled + 占位。
-    // 见 docs/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
+    // 见 docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
     if (!isGroupChat && peer === SYSTEM_UID) return "此会话不支持回复";
     if (!isGroupChat || !activeGroupInfo) return null;
     if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return "你已被管理员禁言";
