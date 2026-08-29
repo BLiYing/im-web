@@ -37,7 +37,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     detail: { convId: "u_u1_u_u2", isGroup: false, peer: "u2" },
     conversations: [peerConv()], groupInfos: { g1: gp() }, friends: [friendOf("u2")], uid: "u1",
     detailTab: "media", detailMsgs: [], detailMore: false, manageOpen: false, groupBans: null,
-    groupRemark: () => "", peerNick: () => "小明", peerAvatar: () => undefined,
+    groupRemark: () => "", peerNick: () => "小明", peerUsername: () => "xiaoming", peerAvatar: () => undefined,
     memberLabel: (m: GroupMember) => m.group_nickname || m.nickname || m.user_id, mediaGate: () => undefined,
     mediaSrc: (m: { content: string }) => m.content, canManageMember: () => true,
     onShareContact: vi.fn(), contactDisplayName: (id: string, fb?: string) => fb || id,
@@ -66,6 +66,22 @@ describe("DetailPanel · 单聊", () => {
     fireEvent.click(getByTitle("关闭"));
     expect(p.onClose).toHaveBeenCalled();
   });
+  // 内部 ID 零 UI 露出（docs/UI.md「用户标识」）：这一行的标签是「用户名」，
+  // 值必须是公开句柄 @xxx；曾经显示的是 d.peer——10 位随机数字内部 ID，标签与内容完全对不上。
+  it("「用户名」行显示 @username，绝不显示内部 ID", () => {
+    const { getAllByText, queryByText } = mount(base({ peerUsername: () => "xiaoming" }));
+    // 两处：头像下的副标题 + 「用户名」行。两处都必须是句柄，都不能是内部 ID。
+    expect(getAllByText("@xiaoming").length).toBe(2);
+    expect(queryByText("u2")).toBeNull(); // u2 是内部 ID，不得出现在任何位置
+  });
+
+  // 拿不到句柄时整行隐藏——不显示"未设置"，更不回退到内部 ID。
+  it("没有 username 时「用户名」行整行不渲染", () => {
+    const { queryByText } = mount(base({ peerUsername: () => undefined }));
+    expect(queryByText("用户名")).toBeNull(); // 不显示"未设置"，更不回退到内部 ID
+    expect(queryByText("u2")).toBeNull();
+  });
+
   it("非好友：只显「加好友」，隐藏 消息/备注名/置顶", () => {
     const { getByText, queryByText } = mount(base({ friends: [] }));
     expect(getByText("加好友")).toBeTruthy();

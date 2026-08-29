@@ -2089,6 +2089,9 @@ export default function App() {
   });
   const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
   const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
+  // 公开句柄只有 GET /users/{id} 的权威名片带（好友/会话列表不下发，见 PROTOCOL「用户标识」）。
+  // 拿不到就返回 undefined，由调用方整行隐藏——绝不回退到内部 ID。
+  const peerUsername = (id: string) => peerCards[id]?.username || undefined;
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
   const peerConv = conversations.find((c) => c.peer === peer);
   const peerLabel = peerConv ? convLabel(peerConv) : (peerNick(peer) || peer);
@@ -2569,7 +2572,8 @@ export default function App() {
               </div>
             )}
           </div>
-          <span className="account-meta">{uid} · {stateText}</span>
+          {/* 显示公开句柄而非 uid（10 位随机内部 ID）。没有 username 时只留连接状态。 */}
+          <span className="account-meta">{myInfo?.username ? `@${myInfo.username} · ` : ""}{stateText}</span>
         </header>
         <div className="tabs">
           <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={() => setTab("chats")}>会话</button>
@@ -3123,7 +3127,7 @@ export default function App() {
         <DetailPanel detail={detail}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
-          groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
+          groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
           peerDeleted={!!detail.peer && deletedPeers.has(detail.peer)}

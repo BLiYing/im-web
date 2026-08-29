@@ -38,6 +38,9 @@ export interface DetailPanelProps {
   // —— 解析/判定（App 内闭包）——
   groupRemark: (cid: string) => string;
   peerNick: (id: string) => string | undefined;
+  /** 对端的**公开句柄**（GET /users/{id} 的 username），UI 显示为 @xxx。
+   *  「用户名」行显示它——绝不能显示 d.peer，那是 10 位随机数字内部 ID（见 docs/UI.md「用户标识」）。 */
+  peerUsername: (id: string) => string | undefined;
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 昵称 > uid（透传给 DetailTabs）。 */
   memberLabel: (m: GroupMember) => string;
   peerAvatar: (id: string) => string | undefined;
@@ -85,7 +88,7 @@ export interface DetailPanelProps {
 export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
-    groupRemark, peerNick, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted,
+    groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted,
     onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
@@ -111,7 +114,10 @@ export function DetailPanel(p: DetailPanelProps) {
       : (conv?.peer_nickname || (d.peer ? peerNick(d.peer) : undefined));
     const detailPeerAvatar = d.isGroup ? undefined
       : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
-    const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (d.peer ?? "");
+    // 单聊副标题显示**公开句柄**，不是 d.peer（10 位随机数字内部 ID）。
+    // 拿不到句柄就留空——头像下方多一串随机数字比什么都没有更糟。
+    const peerHandle = d.peer ? peerUsername(d.peer) : undefined;
+    const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (peerHandle ? `@${peerHandle}` : "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
     const muted = !!conv?.muted;
     const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
@@ -306,7 +312,11 @@ export function DetailPanel(p: DetailPanelProps) {
                     <span className="detail-row-ic"><SquarePen size={18} /></span><span>备注名</span>
                     <span className="detail-row-val">{conv?.peer_remark || "点击设置"}</span><ChevronRight size={16} className="detail-row-chev" />
                   </button>
-                  <div className="detail-row"><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">{d.peer}</span></div>
+                  {/* 显示公开句柄，不是 d.peer（内部 ID）。拿不到时整行不渲染——
+                      标签写着"用户名"却显示一串随机数字，是最刺眼的一处错配。 */}
+                  {d.peer && peerUsername(d.peer) && (
+                    <div className="detail-row"><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">@{peerUsername(d.peer)}</span></div>
+                  )}
                 </div>
               )}
 
