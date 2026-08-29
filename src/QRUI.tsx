@@ -331,7 +331,8 @@ function UserBranch({ card, actions, onClose }: { card: QRUserCard; actions: QRR
         <Avatar url={card.avatar_url} name={card.nickname} size={52} />
         <div>
           <div className="qr-branch-title">{card.nickname || "未命名用户"}</div>
-          <div className="qr-branch-meta">ID {card.user_id} · 通过扫一扫</div>
+          {/* 句柄而非内部 ID（10 位随机数字）；没有句柄就只说来源。 */}
+          <div className="qr-branch-meta">{card.username ? `@${card.username} · ` : ""}通过扫一扫</div>
         </div>
       </div>
       <div className="modal-actions qr-branch-actions">

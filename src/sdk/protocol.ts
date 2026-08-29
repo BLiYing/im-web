@@ -318,6 +318,8 @@ export interface QRCard {
 /** resolve kind=user 的 data（扫名片码后展示的对方资料）。 */
 export interface QRUserCard {
   user_id: string;
+  /** 公开句柄，扫码结果卡显示 @xxx（2026-08-29 加）。 */
+  username?: string;
   nickname: string;
   avatar_url: string;
   relation: "stranger" | "friend" | "self" | "blocked";

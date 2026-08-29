@@ -1343,7 +1343,8 @@ export default function App() {
   // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
     setMenu(null);
-    const what = kind === "message" ? "举报这条消息" : `举报用户 ${m.from}`;
+    // 举报确认文案用显示名，不用 m.from（内部 ID）——让用户确认"举报谁"时看到一串随机数字毫无意义。
+    const what = kind === "message" ? "举报这条消息" : `举报用户 ${displayNameOf(m.from, remarks, m.fromNickname)}`;
     const reason = await askPrompt(what, "", { placeholder: "请填写举报理由", okText: "提交举报" });
     if (reason === null) return; // 取消
     try {
@@ -2074,11 +2075,13 @@ export default function App() {
         f.user_id.toLowerCase().includes(contactFilterQ))
     : accepted;
   const incomingCount = incoming.length;
-  const labelOf = (id: string, nick: string) => (nick && nick.trim()) || id; // 有昵称显昵称，否则显 uid
+  // 四条显示名链统一走 displayNameOf（remarks.ts），末级不再落 uid。
+  const labelOf = (id: string, nick: string, username?: string) => displayNameOf(id, remarks, nick, username);
   // 好友显示名优先级：备注名 > 昵称 > uid（§头像/显示名规则）。
-  const friendLabel = (f: FriendEntry) => (f.remark && f.remark.trim()) || (f.nickname && f.nickname.trim()) || f.user_id;
+  const friendLabel = (f: FriendEntry) => displayNameOf(f.user_id, remarks, f.remark || f.nickname, f.username);
   // 会话对端显示名优先级：备注 > 昵称 > uid。
-  const convLabel = (c: Conversation) => (c.peer_remark && c.peer_remark.trim()) || (c.peer_nickname && c.peer_nickname.trim()) || c.peer;
+  // 会话列表不下发 username（§7.4），故末级只能到占位——但那也好过露出内部 ID。
+  const convLabel = (c: Conversation) => displayNameOf(c.peer, remarks, c.peer_remark || c.peer_nickname);
   // 会话列表项显示名/头像（群聊 vs 单聊）。**定义前置**：首页全局搜索派生（homeConvHits）在下方更早处引用，
   // 若留在原位置会 TDZ「Cannot access 'convDisplayLabel' before initialization」——有会话时输入搜索即白屏（2026-08-20 修）。
   const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
@@ -2098,7 +2101,7 @@ export default function App() {
   const peerUsername = (id: string) => peerCards[id]?.username || undefined;
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
   const peerConv = conversations.find((c) => c.peer === peer);
-  const peerLabel = peerConv ? convLabel(peerConv) : (peerNick(peer) || peer);
+  const peerLabel = peerConv ? convLabel(peerConv) : displayNameOf(peer, remarks, peerNick(peer), peerUsername(peer));
   const groupConv = conversations.find((c) => c.conv_id === groupConvId); // 当前群会话（供头部菜单静音/删除，M4.5）
 
   // ---- 群聊派生 + 动作（早退 return 之后：全部普通函数，禁用 Hook）----

@@ -17,13 +17,23 @@ export function remarkMap(friends: FriendEntry[]): Map<string, string> {
   return out;
 }
 
-/** 本机显示名：我给他起的备注 > fallback（群昵称/昵称）> uid。各处取显示名的统一入口。 */
-export function displayNameOf(uid: string, remarks: Map<string, string>, fallback?: string | null): string {
+/** 显示名兜底的**唯一口径**：`备注 → fallback（群昵称/昵称）→ @username → 「未命名用户」`。
+ *
+ *  **末级绝不是 uid**：账号体系重构后 uid 是 10 位随机数字内部 ID，露在界面上对用户毫无意义
+ *  （见 ../IMServer/docs/UI.md「用户标识」）。nickname 在服务端是必填字段，走到后两级说明是
+ *  脏数据/老数据，给句柄或占位都比给一串数字好。
+ *
+ *  ⚠️ 新增显示名逻辑一律走本函数。2026-08-29 排查曾发现 App.tsx 里另有 `labelOf`/`friendLabel`/
+ *  `convLabel`/`peerLabel` 四条**独立**的链各自回退到 uid——那正是"改了这条没改那条"的来源。 */
+export function displayNameOf(uid: string, remarks: Map<string, string>, fallback?: string | null, username?: string | null): string {
   const remark = remarks.get(uid);
   if (remark) return remark;
   if (fallback?.trim()) return fallback.trim();
-  // **不再回退到 uid**：账号体系重构后 uid 是 10 位随机数字内部 ID，露在界面上对用户毫无意义
-  // （见 IMServer/docs/ACCOUNT_IDENTITY_REDESIGN.md §5.2）。nickname 在服务端是必填字段，
-  // 走到这里说明是脏数据/老数据，给占位比给一串数字好。
+  if (username?.trim()) return `@${username.trim()}`;
   return "未命名用户";
+}
+
+/** 无备注语境下的显示名兜底（找人结果、群成员气泡等还没有备注表的地方）。 */
+export function displayNameNoRemark(fallback?: string | null, username?: string | null): string {
+  return displayNameOf("", new Map(), fallback, username);
 }

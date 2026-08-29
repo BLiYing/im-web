@@ -36,6 +36,33 @@ describe("displayNameOf", () => {
 // 会话列表预览 / 系统消息 / 引用条 / typing 副标题都靠这一层把名字换成本机显示名。
 // 三处 fallback 链一致：备注 > 群昵称/昵称 > 服务端字面 > 占位。
 // 末级刻意**不是** uid——它是 10 位随机内部 ID，露在界面上对用户毫无意义。
+// 统一兜底链的第三级：昵称缺席时退到 @username，而不是内部 ID。
+// P2 把 App.tsx 里四条独立的链（labelOf/friendLabel/convLabel/peerLabel）全并到这里，
+// 就是为了让"末级不是 uid"这条只需在一处保证。
+describe("displayNameOf 的 @username 兜底", () => {
+  const noRemarks = remarkMap([]);
+
+  it("昵称为空 → 退到 @username", () => {
+    expect(displayNameOf("4820571639", noRemarks, "", "xiaoming")).toBe("@xiaoming");
+    expect(displayNameOf("4820571639", noRemarks, null, "xiaoming")).toBe("@xiaoming");
+  });
+
+  it("昵称在时句柄不参与（昵称优先级更高）", () => {
+    expect(displayNameOf("4820571639", noRemarks, "小明", "xiaoming")).toBe("小明");
+  });
+
+  it("备注 > 昵称 > @username（三级都在时取备注）", () => {
+    const remarks = remarkMap([f("4820571639", "小明", "老王")]);
+    expect(displayNameOf("4820571639", remarks, "小明", "xiaoming")).toBe("老王");
+  });
+
+  it("三者皆空 → 占位，且**绝不等于内部 ID**", () => {
+    const got = displayNameOf("4820571639", noRemarks, "", "");
+    expect(got).toBe("未命名用户");
+    expect(got).not.toBe("4820571639");
+  });
+});
+
 describe("displayNameOf 在各展示位的 fallback 链", () => {
   const remarks = remarkMap([f("1002", "李四", "二两肉")]);
 

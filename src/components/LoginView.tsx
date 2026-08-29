@@ -35,7 +35,8 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
       <div className="login">
         <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
         <h1>IM Web</h1>
-        <p className="hint restoring-hint">正在恢复登录（{uid}）…</p>
+        {/* uid 这个 prop 实为 username（见类型注释）；即便如此也别在恢复提示里显身份，简洁即可。 */}
+        <p className="hint restoring-hint">正在恢复登录…</p>
       </div>
     );
   }
