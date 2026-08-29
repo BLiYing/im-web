@@ -19,14 +19,16 @@ export function ContactRow({ card, displayName, sourceName, timeText, onClick, o
   onClick?: () => void;
   onContextMenu?: (e: MouseEvent) => void;
 }) {
-  const shown = displayName || card.nickname || card.userId;
+  // 末级不落 userId（10 位随机数字内部 ID）；退到 @句柄，再退到占位。
+  const shown = displayName || card.nickname || (card.username ? `@${card.username}` : "未命名用户");
   return (
     <div className="contact-row" onClick={onClick} onContextMenu={onContextMenu}>
       <Avatar url={card.avatarUrl} label={shown} seed={card.userId} cls="avatar contact-row-avatar" />
       <div className="contact-row-body">
         <div className="contact-row-name">{shown}</div>
+        {/* 副标题 = @句柄（+ 来源）。绝不显示 card.userId——那是内部 ID。 */}
         <div className="contact-row-sub">
-          ID {card.userId}{sourceName ? ` · 由 ${sourceName} 分享` : ""}
+          {[card.username ? `@${card.username}` : "", sourceName ? `由 ${sourceName} 分享` : ""].filter(Boolean).join(" · ")}
         </div>
       </div>
       {timeText && <div className="contact-row-time">{timeText}</div>}

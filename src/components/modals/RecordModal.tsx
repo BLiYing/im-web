@@ -65,10 +65,11 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
                   return (
                     <div className="contact-card" onClick={() => onOpenContact(card.userId)}>
                       <div className="contact-card-head">
-                        <Avatar url={card.avatarUrl} label={card.nickname || card.userId} seed={card.userId} cls="avatar" />
+                        {/* 显示名末级不落 userId；标识行显 @句柄，没有就不渲染。 */}
+                        <Avatar url={card.avatarUrl} label={card.nickname || (card.username ? `@${card.username}` : "未命名用户")} seed={card.userId} cls="avatar" />
                         <div className="contact-card-body">
-                          <div className="contact-card-name">{card.nickname || card.userId}</div>
-                          <div className="contact-card-id">ID {card.userId}</div>
+                          <div className="contact-card-name">{card.nickname || (card.username ? `@${card.username}` : "未命名用户")}</div>
+                          {card.username && <div className="contact-card-id">@{card.username}</div>}
                         </div>
                       </div>
                       <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>

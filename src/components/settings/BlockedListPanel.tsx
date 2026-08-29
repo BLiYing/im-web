@@ -24,7 +24,8 @@ export function BlockedListPanel({ list, busyUser, friendLabel, onUnblock, onBac
                 <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id} />
                 <div className="convbody">
                   <div className="convpeer">{friendLabel(f)}</div>
-                  <div className="convlast">{f.user_id}</div>
+                  {/* @句柄而非内部 ID；没有就留空。 */}
+                  <div className="convlast">{f.username ? `@${f.username}` : ""}</div>
                 </div>
                 <div className="row-actions">
                   <button className="mini-btn ghost" disabled={busyUser === f.user_id} onClick={() => onUnblock(f.user_id)}>解除</button>

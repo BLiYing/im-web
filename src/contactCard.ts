@@ -1,5 +1,5 @@
 // 个人名片消息（content_type=contact）的 content 解析 / 构造 / 预览（纯函数，可单测）。
-// content 是极小的 JSON 快照 {"u","n","a"}——uid / 发送时冻结的昵称 / 头像 URL。
+// content 是极小的 JSON 快照 {"u","un","n","a"}——内部 ID / username / 昵称 / 头像 URL（后三者为发送时冻结的快照）。
 // 协议见 IMServer docs/PROTOCOL.md §4.1，设计见 docs/CONTACT_CARD_DESIGN.md。
 // 与 iOS Common/IMContactCard.m 逐条同口径（解析三态、预览文案），两端不得漂移。
 
@@ -8,8 +8,10 @@ export const CONTACT_CONTENT_TYPE = "contact";
 
 /** 解析后的名片快照。 */
 export interface ContactCard {
-  /** u（必有，解析成功即非空） */
+  /** u：**内部 ID**（必有）。点卡片发起聊天/加好友用它，**不得展示**。 */
   userId: string;
+  /** un：公开句柄快照，卡片副标题显示 @xxx。老消息无此字段 → undefined → 副标题不显示标识。 */
+  username?: string;
   /** n（发送时冻结的**真实昵称**，非备注） */
   nickname?: string;
   /** a（可空 → 回退首字母圈） */
@@ -40,7 +42,7 @@ export function parseContactCard(content: string | undefined | null): ContactCar
   const d = obj as Record<string, unknown>;
   const userId = trimmed(d.u);
   if (!userId) return null;
-  return { userId, nickname: trimmed(d.n), avatarUrl: trimmed(d.a) };
+  return { userId, username: trimmed(d.un), nickname: trimmed(d.n), avatarUrl: trimmed(d.a) };
 }
 
 /**
@@ -50,12 +52,15 @@ export function parseContactCard(content: string | undefined | null): ContactCar
  */
 export function buildContactCard(
   userId: string | undefined | null,
+  username?: string | null,
   nickname?: string | null,
   avatarUrl?: string | null,
 ): string | null {
   const u = (userId ?? "").trim();
   if (!u) return null;
   const out: Record<string, string> = { u };
+  const un = (username ?? "").trim();
+  if (un) out.un = un;
   const n = (nickname ?? "").trim();
   if (n) out.n = n;
   const a = (avatarUrl ?? "").trim();
@@ -65,10 +70,15 @@ export function buildContactCard(
 
 /**
  * 会话列表 / 置顶横幅 / 合并转发条目 / 收藏预览的文案：`[个人名片] 小明`。
- * 无昵称回落 uid；解析失败回落裸 `[个人名片]`（不崩、不漏 JSON 原文）。
+ *
+ * 无昵称退 `@username`；**绝不回落 userId**——那是 10 位随机数字内部 ID，而这条预览会出现在
+ * 会话列表/引用条上（与服务端 contactReplySnapshot、iOS IMContactCardPreview 同口径）。
+ * 两者皆无或解析失败回落裸 `[个人名片]`（不崩、不漏 JSON 原文）。
  */
 export function contactCardPreview(content: string | undefined | null): string {
   const c = parseContactCard(content);
   if (!c) return "[个人名片]";
-  return `[个人名片] ${c.nickname || c.userId}`;
+  if (c.nickname) return `[个人名片] ${c.nickname}`;
+  if (c.username) return `[个人名片] @${c.username}`;
+  return "[个人名片]";
 }

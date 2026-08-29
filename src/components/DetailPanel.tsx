@@ -45,7 +45,7 @@ export interface DetailPanelProps {
   memberLabel: (m: GroupMember) => string;
   peerAvatar: (id: string) => string | undefined;
   /** 入口 ②「推荐给朋友」：把当前单聊对端做成名片，交给转发选择页选会话（见 useContactShare）。 */
-  onShareContact: (card: { userId: string; nickname?: string; avatarUrl?: string }) => void;
+  onShareContact: (card: { userId: string; username?: string; nickname?: string; avatarUrl?: string }) => void;
   /** 名片行显示名（**备注优先**）。由 App 注入——只有那里能拿到 remarks；
    *  曾在此就地用 peerNick 拼，那个函数只查昵称不查备注，同一张名片在气泡显「老王」、
    *  在本页名片签却显「王建国」（/code-review 2026-08-29）。 */
@@ -215,7 +215,7 @@ export function DetailPanel(p: DetailPanelProps) {
                           setDetailMore(false);
                           // 昵称取 peerNickname（服务端下发的真实昵称），**不是**页面标题——后者备注优先，
                           // 发出去就泄露"我给你起的外号"（§2.4）。
-                          onShareContact({ userId: d.peer!, nickname: detailPeerNickname, avatarUrl: detailPeerAvatar });
+                          onShareContact({ userId: d.peer!, username: peerUsername(d.peer!), nickname: detailPeerNickname, avatarUrl: detailPeerAvatar });
                         }}><IdCard size={16} className="menu-icon" />推荐给朋友</button>
                       )}
                       <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>

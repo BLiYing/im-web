@@ -348,7 +348,8 @@ export function MessageList(p: MessageListProps) {
                           <Avatar url={card.avatarUrl} label={shown} seed={card.userId} cls="avatar" />
                           <div className="contact-card-body">
                             <div className="contact-card-name">{shown}</div>
-                            <div className="contact-card-id">ID {card.userId}</div>
+                            {/* @句柄而非内部 ID（10 位随机数字）。老消息无 un → 该行不渲染。 */}
+                            {card.username && <div className="contact-card-id">@{card.username}</div>}
                           </div>
                         </div>
                         <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>

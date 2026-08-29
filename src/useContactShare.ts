@@ -86,7 +86,7 @@ export function useContactShare(d: ContactShareDeps) {
     if (!conv || !client || cards.length === 0) return;
     const to = conv.is_group ? "" : (conv.peer ?? "");
     for (const card of cards) {
-      const content = buildContactCard(card.userId, card.nickname, card.avatarUrl);
+      const content = buildContactCard(card.userId, card.username, card.nickname, card.avatarUrl);
       if (!content) continue; // 无 uid（理论到不了）：服务端也会拒，不如本地就别发
       const clientMsgId = client.sendMedia(content, CONTACT_CONTENT_TYPE, to, conv.conv_id);
       appendMsg(conv.conv_id, {
@@ -102,7 +102,7 @@ export function useContactShare(d: ContactShareDeps) {
    * 故转发路径的保留原类型 / 逐条发送 / 吐司汇总全部白拿，无需新写发送代码。
    */
   const shareContactCard = useCallback((card: ContactCard) => {
-    const content = buildContactCard(card.userId, card.nickname, card.avatarUrl);
+    const content = buildContactCard(card.userId, card.username, card.nickname, card.avatarUrl);
     if (!content) { setToast("该用户资料不完整，无法分享名片"); return; }
     setForwardMode("each");
     setForwardVerb("发送"); // 分享名片不是转发，吐司说「已发送到 X」（与 iOS 一致）
