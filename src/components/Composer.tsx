@@ -5,7 +5,7 @@
 // - reactive 值（input/replyTo/editingMsg/selectMode/pastedImages/mentionRows…）走 props。
 // 护栏：Composer.test.tsx + App.smoke.test.tsx（发消息主链路）。
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Bookmark, Forward, Mic, Trash2, type LucideIcon } from "lucide-react";
+import { Bookmark, Forward, Mic, Trash2, type LucideIcon, IdCard } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
 import { VoiceRecorder, voiceRecordingSupported, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
@@ -56,7 +56,7 @@ export function Composer(p: ComposerProps) {
   } = p;
   const {
     setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, deleteSelected,
-    removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, onFilePicked,
+    removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, openContactPicker, onFilePicked,
     setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, send,
     sendVoice, setToast,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
@@ -235,6 +235,11 @@ export function Composer(p: ComposerProps) {
                   <button className="attach-item" role="menuitem" onClick={openFavoritesPick}>
                     <Bookmark size={24} aria-hidden="true" />
                     <span>收藏</span>
+                  </button>
+                  {/* 个人名片（CONTACT_CARD_DESIGN §8.1 入口 ①）：选好友 → 二次确认 → 发进当前会话。 */}
+                  <button className="attach-item" role="menuitem" onClick={openContactPicker}>
+                    <IdCard size={24} aria-hidden="true" />
+                    <span>个人名片</span>
                   </button>
                 </div>
               )}

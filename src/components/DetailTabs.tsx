@@ -11,6 +11,8 @@ import { MediaTile } from "./MediaTile";
 import { FileGateIcon } from "./FileGateIcon";
 import { FileTypeIcon } from "../FileTypeIcon";
 import { DetailLinkItem } from "./DetailLinkItem";
+import { ContactRow } from "./ContactRow";
+import { parseContactCard } from "../contactCard";
 import { VoiceBubble } from "./VoiceBubble";
 import type { LinkPreview } from "./LinkCard";
 
@@ -38,12 +40,13 @@ function detailLinkTimeText(ts: number): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
-export type DetailTab = "members" | "media" | "files" | "voice" | "links";
+export type DetailTab = "members" | "media" | "files" | "voice" | "links" | "contacts";
 
-// 会话详情抽屉的页签区（成员 / 媒体 / 文件 / 链接）。纯展示：数据与动作全经 props 注入。
+// 会话详情抽屉的页签区（成员 / 媒体 / 文件 / 语音 / 链接 / 名片）。纯展示：数据与动作全经 props 注入。
 // DOM/className/结构与原 App 内联逐字一致（行为等价）。媒体/文件门控与聊天气泡共用 MediaTile/FileGateIcon。
 export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
+  contacts, contactDisplayName, contactSourceLabel, onOpenContact,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
@@ -58,6 +61,13 @@ export function DetailTabs({
   voices: ChatMessage[]; // 语音 tab（2026-08-26）：voice/audio 消息，VoiceBubble 就地播放
   voiceSenderLabel?: (m: ChatMessage) => string; // 三行行头「发送者」显名（"你自己" / 昵称 / uid），2026-08-27
   links: ChatMessage[];
+  contacts: ChatMessage[];        // 名片 tab（contact 消息，解析不出的脏名片已由调用方过滤）
+  /** 名片主行显示名（备注 > 快照昵称 > uid）；由调用方按 remarks 解析后注入，本组件不查 store。 */
+  contactDisplayName?: (userId: string, fallback?: string) => string;
+  /** 名片行副行的「由 X 分享」显示名；群聊传、单聊不传（发送者只可能是我或对方，写出来纯冗余）。 */
+  contactSourceLabel?: (m: ChatMessage) => string | undefined;
+  /** 点名片行 → 名片里那个人的资料页（与点气泡同一落点）。 */
+  onOpenContact: (userId: string) => void;
   canInvite: boolean;
   onAddMember: (cid: string) => void;
   onOpenMember: (userId: string) => void;
@@ -194,6 +204,25 @@ export function DetailTabs({
                   <DetailLinkItem key={msgKey(m)} url={url}
                     timeText={detailLinkTimeText(m.timestamp)}
                     fetchPreview={fetchLinkPreview}
+                    onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }} />
+                );
+              })}
+            </div>
+          )
+        )}
+        {activeTab === "contacts" && (
+          contacts.length === 0 ? <div className="detail-empty">暂无名片</div> : (
+            // 行组件 ContactRow **与收藏页「名片」分类共用**（§7.1）——这就是"收藏页复用资料详情页"的落地方式。
+            <div className="detail-filelist">
+              {contacts.map((m) => {
+                const card = parseContactCard(m.content);
+                if (!card) return null;   // 理论到不了：脏名片已在数据源侧过滤
+                return (
+                  <ContactRow key={msgKey(m)} card={card}
+                    displayName={contactDisplayName?.(card.userId, card.nickname) ?? card.nickname}
+                    sourceName={contactSourceLabel?.(m)}
+                    timeText={detailFullDateTime(m.timestamp)}
+                    onClick={() => onOpenContact(card.userId)}
                     onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }} />
                 );
               })}

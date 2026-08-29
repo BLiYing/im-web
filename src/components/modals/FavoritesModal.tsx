@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { parseContactCard } from "../../contactCard";
 import type { MouseEvent } from "react";
 import { Check, ChevronLeft, MoreHorizontal } from "lucide-react";
 import type { ChatMessage, Conversation, Favorite } from "../../sdk/protocol";
@@ -14,7 +15,7 @@ import {
 import { Modal } from "../Modal";
 import { AnchoredMenu } from "../AnchoredMenu";
 import {
-  FavFileRow, FavMediaGrid, FavRow, FavSourceList, FavVoiceRow, favDate, favFileName, favKind, sourceNameOf, type FavoritesMediaGlue,
+  FavContactRow, FavFileRow, FavMediaGrid, FavRow, FavSourceList, FavVoiceRow, favDate, favFileName, favKind, sourceNameOf, type FavoritesMediaGlue,
 } from "./FavoritesItems";
 
 /**
@@ -34,7 +35,7 @@ const FAV_PICK_MAX = 9;
 export function FavoritesModal({
   favorites, total, loadingMore, onLoadMore,
   mode = "browse", sourceLabel, actions, glue, myUid, conversations, convDisplayLabel, convAvatarUrl,
-  onOpenMedia, onOpenLink, onOpenRecord, onPick, onPickLimit, onClose, fetchLinkPreview,
+  onOpenMedia, onOpenLink, onOpenRecord, onOpenContact, contactDisplayName, onPick, onPickLimit, onClose, fetchLinkPreview,
 }: {
   favorites: Favorite[];
   /** 服务端总条数（可能大于已加载的 favorites.length）。 */
@@ -53,6 +54,9 @@ export function FavoritesModal({
   onOpenMedia: (fav: Favorite, kind: "image" | "video") => void;
   onOpenLink: (url: string) => void;
   onOpenRecord: (fav: Favorite) => void;   // 聊天记录 → 打开记录查看器（recordStack）
+  onOpenContact: (userId: string) => void; // 名片 → 名片里那个人的资料页（与点气泡同一落点）
+  /** 名片行显示名（备注 > 快照昵称 > uid）；调用方按 remarks 解析后注入。 */
+  contactDisplayName?: (userId: string, fallback?: string) => string;
   onPick?: (favs: Favorite[]) => void;     // pick 模式：发送选中项到当前会话
   onPickLimit?: (msg: string) => void;      // pick 模式勾选超上限时的提示回调（一般 = setToast）
   onClose: () => void;
@@ -131,6 +135,7 @@ export function FavoritesModal({
     const k = favKind(f);
     if (k === "link") onOpenLink(f.content);
     else if (k === "record") onOpenRecord(f);
+    else if (k === "contact") { const c = parseContactCard(f.content); if (c) onOpenContact(c.userId); }
     else setReader(f);
   };
 
@@ -220,6 +225,15 @@ export function FavoritesModal({
               {shown.map((f) => (
                 <FavVoiceRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={isPick} sourceLabel={sourceLabel}
                   uid={myUid} mediaSrc={glue.mediaSrc} onCheck={() => toggleSelect(f.id)}
+                  onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
+              ))}
+            </div>
+          ) : kind === "contact" ? (
+            // 名片分类：行复用详情页的 ContactRow；点行 → 名片里那个人的资料页（与点气泡同一落点，§6）。
+            <div className="fav-list fav-contacts" {...listProps}>
+              {shown.map((f) => (
+                <FavContactRow key={f.id} f={f} on={selected.has(f.id)} pickMulti={isPick} sourceLabel={sourceLabel}
+                  displayName={contactDisplayName} onClick={onRowClick(f)} onCheck={() => toggleSelect(f.id)}
                   onMenu={openMenu && ((e) => openMenu(e, f))} onDelete={deleteOf?.(f)} />
               ))}
             </div>

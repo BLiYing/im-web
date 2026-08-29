@@ -107,3 +107,28 @@ describe("deriveCategories", () => {
     }
   });
 });
+
+// 名片分类（CONTACT_CARD_DESIGN §7.3）：置末、精确匹配、脏名片不计入。
+describe("名片分类", () => {
+  const contact = (content: string) => ({ id: 1, content_type: "contact", content } as Favorite);
+  it("按 content_type 精确匹配，不被文本/链接/记录抢走", () => {
+    const f = contact('{"u":"1002","n":"小明"}');
+    expect(matchesCategory(f, "contact")).toBe(true);
+    expect(matchesCategory(f, "all")).toBe(true);
+    expect(matchesCategory(f, "text")).toBe(false);
+    expect(matchesCategory(f, "link")).toBe(false);
+    expect(matchesCategory(f, "record")).toBe(false);
+  });
+  it("脏名片（解析不出）不计入——列表里不该出现点不动的空行", () => {
+    expect(matchesCategory(contact('{"n":"小明"}'), "contact")).toBe(false);
+    expect(matchesCategory(contact("garbage"), "contact")).toBe(false);
+  });
+  it("动态分类里置末（在聊天记录之后）", () => {
+    const cats = deriveCategories([
+      contact('{"u":"1002"}'),
+      { id: 2, content_type: "text", content: "hello" } as Favorite,
+    ], { includeAll: false });
+    expect(cats).toEqual(["text", "contact"]);
+    expect(CATEGORY_LABELS.contact).toBe("名片");
+  });
+});

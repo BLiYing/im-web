@@ -43,6 +43,8 @@ export interface ChatActions {
   setAttachPanel: Dispatch<SetStateAction<boolean>>;
   pickFile: (mode: AttachmentPickMode, accept: string) => void;
   openFavoritesPick: () => void;
+  /** 附件面板「个人名片」：打开好友选择弹窗（见 useContactShare）。 */
+  openContactPicker: () => void;
   onFilePicked: (e: ChangeEvent<HTMLInputElement>) => void;
   setMentionFilter: Dispatch<SetStateAction<string>>;
   pickMention: (displayName: string, userId: string | null) => void;

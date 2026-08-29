@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import type { ChatMessage, Favorite } from "./sdk/protocol";
 import { mediaDisplaySize } from "./media";
+import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
 export const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
@@ -59,6 +60,7 @@ export const localizeSnippet = (s: string) =>
   s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]"
   : s === "[file]" ? "[文件]" : s.startsWith("[file] ") ? "[文件] " + s.slice(7) // 文件带原名（M4-x）
   : s === "[chat_record]" ? "[聊天记录]" // 旧服务端 token（无标题）兜底
+  : s === "[contact]" ? "[个人名片]"      // 同上：老服务端下发的裸 contact token
   // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
   : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
 
@@ -68,7 +70,9 @@ export const replyPreviewOf = (m: ChatMessage): string =>
   m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? m.caption.slice(0, 60)
   : m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
   : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
-  : m.contentType === "chat_record" ? chatRecordSnippet(m.content) : (m.content || "").slice(0, 60);
+  : m.contentType === "chat_record" ? chatRecordSnippet(m.content)
+  : m.contentType === CONTACT_CONTENT_TYPE ? contactCardPreview(m.content)
+  : (m.content || "").slice(0, 60);
 
 /** 「可搜索/可选/可定位」的消息：已确认（convSeq>0）、非撤回、非系统提示。搜索命中集、日历活跃日、多选勾选共用此一处谓词。 */
 export const isSearchableMessage = (m: Pick<ChatMessage, "convSeq"> & { recalledAt?: number; contentType?: string }): boolean =>
@@ -103,6 +107,7 @@ export const recordItemPreview = (it: RecordItem): string => {
   if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();
   // 嵌套合并转发：预览显「[聊天记录] 子标题」，不铺子卡片 JSON 原文（套娃卡片）；
   // 子 JSON 非法时 parseChatRecord 回落标题「聊天记录」，此时不再叠加以免「[聊天记录] 聊天记录」。
+  if (it.ct === CONTACT_CONTENT_TYPE) return contactCardPreview(it.c);
   if (it.ct === "chat_record") {
     const t = parseChatRecord(it.c).t;
     return t && t !== "聊天记录" ? `[聊天记录] ${t}` : "[聊天记录]";

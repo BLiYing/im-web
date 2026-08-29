@@ -3,6 +3,7 @@
 // 来源会话显示名由调用方解析（备注 > 群名/昵称 > uid），来源已不存在时显 conv_id 兜底、不隐藏。
 import type { Favorite } from "./sdk/protocol";
 import { looksLikeChatRecordJSON } from "./messageContent";
+import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 
 /** 「我的」桶的分组键（与真实 conv_id 不冲突）。 */
 export const MINE_GROUP_KEY = "__mine__";
@@ -51,5 +52,6 @@ export function favoritePreviewText(f: Favorite): string {
   if (ct === "file") return (f.file_name && f.file_name.trim()) || (f.caption ? `[文件] ${f.caption}` : "[文件]");
   if (ct === "audio" || ct === "voice") return "[语音]";
   if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return "[聊天记录]";
+  if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(f.content);
   return f.content;
 }

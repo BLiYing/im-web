@@ -4,17 +4,19 @@
 // 聊天记录 = content_type==='chat_record' 或内容形如合并转发 JSON（老收藏兜底），且**文本段排除记录**。
 import type { Favorite } from "./sdk/protocol";
 import { looksLikeChatRecordJSON, firstURLInText } from "./messageContent";
+import { CONTACT_CONTENT_TYPE, parseContactCard } from "./contactCard";
 
 /** 分类种类。all 仅 v1/兼容用；B 方案页签不含 all。 */
-export type FavoriteKind = "all" | "media" | "file" | "link" | "voice" | "text" | "record";
+export type FavoriteKind = "all" | "media" | "file" | "link" | "voice" | "text" | "record" | "contact";
 
 /** 段中文标题（chips / 范围前缀 chip / 空态文案共用）。 */
 export const CATEGORY_LABELS: Record<FavoriteKind, string> = {
   all: "全部", media: "媒体", file: "文件", link: "链接", voice: "语音", text: "文本", record: "聊天记录",
+  contact: "名片",
 };
 
 /** 动态段的固定出现顺序（全部之后），新增 content_type 在此加一行即可。 */
-const DYNAMIC_ORDER: Exclude<FavoriteKind, "all">[] = ["media", "file", "link", "voice", "text", "record"];
+const DYNAMIC_ORDER: Exclude<FavoriteKind, "all">[] = ["media", "file", "link", "voice", "text", "record", "contact"];
 
 /** 是否聊天记录收藏（显式类型或 JSON 形态兜底）。 */
 function isRecord(f: Favorite): boolean {
@@ -35,6 +37,8 @@ export function matchesCategory(f: Favorite, kind: FavoriteKind): boolean {
     // 文本 = 纯 text 且不含 URL、不是聊天记录 JSON（各归链接/记录，不重复计入）。
     case "text": return ct === "text" && firstURLInText(f.content) === null && !isRecord(f);
     case "record": return isRecord(f);
+    // 名片：与详情页页签同口径——**解析不出的脏名片不计入**（列表里不该出现点不动的空行）。
+    case "contact": return ct === CONTACT_CONTENT_TYPE && parseContactCard(f.content) !== null;
   }
 }
 

@@ -20,6 +20,7 @@ import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
+import type { DetailTab } from "./components/DetailTabs";
 import { Composer } from "./components/Composer";
 import { ContactsTab } from "./components/ContactsTab";
 import { ChatHeader } from "./components/ChatHeader";
@@ -45,6 +46,7 @@ import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
 import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
+import { useContactShare, CONTACT_MAX_SELECTION } from "./useContactShare";
 import { useMentions } from "./useMentions";
 import { useQR } from "./useQR";
 import { useAppearanceSettings } from "./useAppearanceSettings";
@@ -73,7 +75,8 @@ import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
 import { PinnedListModal } from "./components/modals/PinnedListModal";
 import { GroupsModal } from "./components/modals/GroupsModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
-import { InviteMembersModal } from "./components/modals/InviteMembersModal";
+import { FriendPickerModal } from "./components/modals/FriendPickerModal";
+import { ConfirmSendCardModal } from "./components/modals/ConfirmSendCardModal";
 import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
@@ -93,8 +96,7 @@ import {
   Trash2, BellOff, Menu,
   Pin,
   Search, FileText, MessageCircle, X, Forward,
-  ChevronDown, ChevronUp, QrCode,
-} from "lucide-react";
+  ChevronDown, ChevronUp, QrCode, IdCard } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
@@ -239,7 +241,7 @@ export default function App() {
   // fromOwnChat：从「当前正在聊的这个人」的聊天页顶栏头像进来的——此时不显示「消息」入口
   // （你已经在这个会话里了，点它等于原地不动）。与 iOS 的 showsMessagePill 取反同义。
   const [detail, setDetail] = useState<{ convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean } | null>(null);
-  const [detailTab, setDetailTab] = useState<"members" | "media" | "files" | "voice" | "links">("media"); // voice tab 2026-08-26
+  const [detailTab, setDetailTab] = useState<DetailTab>("media"); // voice tab 2026-08-26；contacts tab 2026-08-29
   const [detailMsgs, setDetailMsgs] = useState<ChatMessage[]>([]); // 详情页签数据源（本地历史）
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
   const [deleteMenu, setDeleteMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 删除两档子菜单 B（为所有人删除/仅删除自己）——由菜单 A 的「删除」展开，对齐 iOS 子菜单
@@ -1012,6 +1014,13 @@ export default function App() {
     favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites,
     favoriteActions, sendFavoritesToCurrent,
   } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode });
+  // 个人名片簇 → useContactShare（CONTACT_CARD_DESIGN §8）：入口 ① 选好友 + 二次确认发进当前会话；
+  // 入口 ②③ 合成一条 contact 消息交给**已有的**转发选择页（故消费 useForward 的 setForwardMode/setForwarding）。
+  const {
+    cardPicker, cardConfirm, contactCandidates,
+    openContactPicker, toggleContactPick, confirmContactPick, sendContactCards, shareContactCard,
+    closeContactPicker, closeContactConfirm,
+  } = useContactShare({ clientRef, setToast, uid, friends, conversations, currentConvRef, appendMsg, setAttachPanel, setForwardMode, setForwarding });
 
   // 多选批量删除（仅本端）。
   const deleteSelected = useCallback(() => {
@@ -1972,6 +1981,7 @@ export default function App() {
   const scheduleAttachCloseEv = useEvent(scheduleAttachClose);
   const pickFileEv = useEvent(pickFile);
   const openFavoritesPickEv = useEvent(openFavoritesPick);
+  const openContactPickerEv = useEvent(openContactPicker);
   const onFilePickedEv = useEvent(onFilePicked);
   const pickMentionEv = useEvent(pickMention);
   const onInputChangeEv = useEvent(onInputChange);
@@ -2008,7 +2018,7 @@ export default function App() {
     jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
     forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, favoriteSelected: favoriteSelectedEv, removePastedImage: removePastedImageEv,
     cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
-    openFavoritesPick: openFavoritesPickEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
+    openFavoritesPick: openFavoritesPickEv, openContactPicker: openContactPickerEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
     setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, send: sendEv,
     sendVoice: sendVoiceEv,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
@@ -2496,6 +2506,9 @@ export default function App() {
     // 显示的是**公开句柄**而非 uid——后者是 10 位随机内部 ID，`@4820571639` 对用户毫无意义。
     { id: "username", label: myInfo?.username ? `@${myInfo.username}` : "未设置", icon: AtSign, iconTint: "blue", value: "用户名", onClick: () => void openProfile() },
     { id: "qr", label: "我的二维码", icon: QrCode, iconTint: "gray", value: "", chevron: true, onClick: () => void openMyCard() },
+    // 入口 ③（CONTACT_CARD_DESIGN §8.1）：与「我的二维码」并列——二维码给**面对面**，名片消息给**线上**。
+    { id: "shareMyCard", label: "分享我的名片", icon: IdCard, iconTint: "teal", value: "", chevron: true,
+      onClick: () => shareContactCard({ userId: uid, nickname: myInfo?.nickname, avatarUrl: myInfo?.avatar_url }) },
   ];
 
   // 通讯录顶部入口行（数据驱动）。
@@ -2883,6 +2896,10 @@ export default function App() {
           glue={{ gateOf: mediaGate, mediaSrc, onGateTap, onOpenFile: (m) => void openReadyFile(m), onMediaError: (m) => void onPassiveMediaError(m) }}
           myUid={uid} conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl}
           onOpenRecord={(f) => setRecordStack([parseChatRecord(f.content)])}
+          // 名片行 → 名片里那个人的资料页。与点聊天气泡、点详情页名片行**三处同一落点**（§6）：
+          // 先关收藏弹窗再开资料面板（Web 一直避免弹窗套弹窗）。
+          onOpenContact={(userId) => { closeFavorites(); openPeerDetail(userId); }}
+          contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
           onPick={sendFavoritesToCurrent}
           onPickLimit={setToast}
           onClose={closeFavorites}
@@ -3071,6 +3088,7 @@ export default function App() {
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
+          onShareContact={shareContactCard}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
@@ -3082,12 +3100,12 @@ export default function App() {
         />
       )}
 
-      {/* 邀请成员弹窗：见 components/modals/InviteMembersModal（候选=非群内好友）。 */}
+      {/* 邀请成员弹窗：见 components/modals/FriendPickerModal（候选=非群内好友）。 */}
       {inviteDraft && (() => {
         const inGroup = new Set((groupInfos[inviteDraft.convId]?.members ?? []).map((m) => m.user_id));
         const candidates = accepted.filter((f) => !inGroup.has(f.user_id));
         return (
-          <InviteMembersModal
+          <FriendPickerModal
             selected={inviteDraft.selected} candidates={candidates} friendLabel={friendLabel}
             onToggle={(userId) => setInviteDraft({
               ...inviteDraft,
@@ -3100,6 +3118,31 @@ export default function App() {
           />
         );
       })()}
+
+      {/* 个人名片入口 ①（CONTACT_CARD_DESIGN §8.2）：选好友 → 二次确认 → 发进当前会话。
+          选人复用通用 FriendPickerModal（与群邀请同一组件，只换三处文案 + 传上限 9）；
+          确认是**顺序**的第二个弹窗，不是嵌套（Web 侧一直避免弹窗套弹窗）。 */}
+      {cardPicker && (
+        <FriendPickerModal
+          selected={cardPicker.selected} candidates={contactCandidates} friendLabel={friendLabel}
+          title="选择联系人" confirmLabel="发送" emptyText="还没有好友" maxSelection={CONTACT_MAX_SELECTION}
+          onToggle={toggleContactPick}
+          onInvite={confirmContactPick}
+          onCancel={closeContactPicker}
+        />
+      )}
+      {cardConfirm && (
+        <ConfirmSendCardModal
+          cards={cardConfirm}
+          targetName={(() => {
+            const c = conversations.find((x) => x.conv_id === convId);
+            return c ? convDisplayLabel(c) : "";
+          })()}
+          displayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
+          onSend={() => sendContactCards(cardConfirm)}
+          onCancel={closeContactConfirm}
+        />
+      )}
 
       {/* 群成员管理 ⋯ 菜单（按角色矩阵显隐；服务端仍会二次校验）。 */}
       {memberMenu && groupInfos[memberMenu.convId] && (

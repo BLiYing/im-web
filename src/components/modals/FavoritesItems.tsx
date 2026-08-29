@@ -12,6 +12,8 @@ import { MediaTile } from "../MediaTile";
 import { FileGateIcon } from "../FileGateIcon";
 import { Avatar } from "../Avatar";
 import { DetailLinkItem } from "../DetailLinkItem";
+import { ContactRow } from "../ContactRow";
+import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { VoiceBubble } from "../VoiceBubble";
 import type { LinkPreview } from "../LinkCard";
 
@@ -31,13 +33,15 @@ export interface FavoritesMediaGlue {
 }
 
 /** 收藏项渲染类型（决定展示件）。 */
-export type FavKind = "image" | "video" | "file" | "link" | "record" | "text" | "voice";
+export type FavKind = "image" | "video" | "file" | "link" | "record" | "text" | "voice" | "contact";
 export function favKind(f: Favorite): FavKind {
   const ct = f.content_type;
   if (ct === "image") return "image";
   if (ct === "video") return "video";
   if (ct === "audio" || ct === "voice") return "voice"; // 语音：内嵌迷你播放器行（2026-08-26 拍板，曾按文件行兜底）
   if (ct === "file") return "file";
+  // 名片：内容也是 JSON，与 chat_record 同理须在 link/text 前拦下（否则会当纯文本显 JSON 串）。
+  if (ct === CONTACT_CONTENT_TYPE) return "contact";
   // 合并转发「聊天记录」：内容是 JSON，须在 link/text 前拦下——否则会当纯文本显 JSON 串。
   if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return "record";
   // 草图 §D：text 只要含 URL 就归"链接"分类（与聊天页/详情页 §C 视图口径一致）。
@@ -167,6 +171,26 @@ export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, onCh
           <span className="fav-src">来自{sourceLabel(f)}</span>
           {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
         </div>
+      </div>
+      <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
+    </div>
+  );
+}
+
+/** 名片 chip：**直接复用详情页「名片」页签的 ContactRow**（不另建一套行）——这正是
+ *  "收藏页复用资料详情页"的落地方式，与文件行复用 detail-fileitem DOM 一脉相承。
+ *  与详情页的差别只有一处：副行**恒显**「由 X 分享」（收藏页天然需要来源）。 */
+export function FavContactRow({ f, on, pickMulti, sourceLabel, displayName, onClick, onCheck, onMenu, onDelete }: RowCommon & {
+  /** 显示名（备注 > 快照昵称 > uid），由调用方解析后注入。 */
+  displayName?: (userId: string, fallback?: string) => string;
+}) {
+  const card = parseContactCard(f.content);
+  if (!card) return null; // 理论到不了：脏名片已被 matchesCategory 挡在分类之外
+  return (
+    <div className={`fav-item contact${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}>
+      <div className="fav-main">
+        <ContactRow card={card} displayName={displayName?.(card.userId, card.nickname) ?? card.nickname}
+          sourceName={sourceLabel(f)} timeText={favDate(f.created_at)} onClick={onClick} />
       </div>
       <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
     </div>

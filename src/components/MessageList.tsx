@@ -18,6 +18,8 @@ import {
   isUrlText, localizeSnippet, selectableInMultiSelect, parseChatRecord, recordItemPreview,
   fileNameFromContent, mediaBoxProps, isPreviewableFile, videoFrameSrc, firstURLInText,
 } from "../messageContent";
+import { IdCard } from "lucide-react";
+import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
 import { Avatar } from "./Avatar";
 import { AlbumGrid } from "./AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./QuoteThumb";
@@ -330,6 +332,29 @@ export function MessageList(p: MessageListProps) {
                       <div className="record-foot">聊天记录</div>
                     </div>
                   ); })()
+                ) : m.contentType === CONTACT_CONTENT_TYPE ? (
+                  // 个人名片卡片（镜像 iOS IMContactCardCell）：头像 + 显示名 + ID + 脚注，点击进对方资料页。
+                  // 落点用**已有的** openPeerDetail —— 与 iOS 落到 IMChatDetailViewController 是同一件事
+                  //（QR 结果弹窗的「查看资料」走的也是它），不另造 modal。
+                  (() => {
+                    const card = parseContactCard(m.content);
+                    // 脏名片（JSON 非法 / 缺 u）：退化成一行灰字、不可点——历史里不留点不动的死卡。
+                    if (!card) return <div className="contact-card dirty">[个人名片]</div>;
+                    // 主标题走**收方本地**显示名（备注优先），与会话/详情页同源，不会一处备注一处昵称。
+                    const shown = localNameOf(card.userId, m.convId, card.nickname);
+                    return (
+                      <div className="contact-card" onClick={() => openPeerDetail(card.userId)}>
+                        <div className="contact-card-head">
+                          <Avatar url={card.avatarUrl} label={shown} seed={card.userId} cls="avatar" />
+                          <div className="contact-card-body">
+                            <div className="contact-card-name">{shown}</div>
+                            <div className="contact-card-id">ID {card.userId}</div>
+                          </div>
+                        </div>
+                        <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>
+                      </div>
+                    );
+                  })()
                 ) : m.contentType === "voice" ? (
                   // 语音气泡（P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §10）：
                   // ▶ + 波形 + m:ss + 未播红点；单例 audio 同页面一次只播一条。

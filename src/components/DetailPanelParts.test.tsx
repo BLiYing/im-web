@@ -54,6 +54,7 @@ describe("DetailTabs", () => {
     tabs: [{ k: "members" as DetailTab, label: "成员" }, { k: "links" as DetailTab, label: "链接" }],
     activeTab: "members" as DetailTab, uid: "u1", canInvite: true,
     media: [] as ChatMessage[], files: [] as ChatMessage[], voices: [] as ChatMessage[], links: [] as ChatMessage[],
+    contacts: [] as ChatMessage[], onOpenContact: vi.fn(),
     onSelectTab: vi.fn(), onAddMember: vi.fn(), onOpenMember: vi.fn(),
     canManageMember: () => true, onMemberMenu: vi.fn(),
     memberLabel: (m: GroupMember) => m.group_nickname || m.nickname || m.user_id,

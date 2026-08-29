@@ -8,10 +8,12 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
+  IdCard,
 } from "lucide-react";
 import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, GroupMember } from "../sdk/protocol";
 import type { DownloadState } from "../download";
 import { firstURLInText } from "../messageContent";
+import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
 import { useAppServices } from "../AppServicesContext";
 import { useChatActions } from "../ChatActionsContext";
 import { Avatar } from "./Avatar";
@@ -39,6 +41,8 @@ export interface DetailPanelProps {
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 昵称 > uid（透传给 DetailTabs）。 */
   memberLabel: (m: GroupMember) => string;
   peerAvatar: (id: string) => string | undefined;
+  /** 入口 ②「推荐给朋友」：把当前单聊对端做成名片，交给转发选择页选会话（见 useContactShare）。 */
+  onShareContact: (card: { userId: string; nickname?: string; avatarUrl?: string }) => void;
   mediaGate: (m: ChatMessage) => DownloadState | undefined;
   mediaSrc: (m: ChatMessage) => string; // blob 缓存优先解析（语音 tab）
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
@@ -74,7 +78,7 @@ export interface DetailPanelProps {
 export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
-    groupRemark, peerNick, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember,
+    groupRemark, peerNick, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact,
     onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
@@ -94,6 +98,11 @@ export function DetailPanel(p: DetailPanelProps) {
     // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
     // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
     const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url)
+      : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
+    // 名片快照用的**真实昵称/头像**（推荐给朋友，入口 ②）：刻意**不含备注**（title 含），见 §2.4。
+    const detailPeerNickname = d.isGroup ? undefined
+      : (conv?.peer_nickname || (d.peer ? peerNick(d.peer) : undefined));
+    const detailPeerAvatar = d.isGroup ? undefined
       : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
     const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (d.peer ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
@@ -124,11 +133,17 @@ export function DetailPanel(p: DetailPanelProps) {
       // 老的 isUrlText 只认整段 = URL，会漏掉"看看 https://xxx"这类混排消息。
       isPresentable(m) && (m.contentType === "text" || m.contentType === "link") && firstURLInText(m.content) !== null
     ).sort((a, b) => b.convSeq - a.convSeq);
-    // 语音 tab 与 iOS 对齐：有语音消息才出现（其余 tab 维持恒显的既有 Web 行为）。
+    // 名片 tab（2026-08-29）：与 iOS IMDetailTabKindContacts 同口径——**解析不出的脏名片不收录**
+    //（列表里不该出现点不动的空行；气泡侧另有灰字降级，那是历史记录该保留）。
+    const contacts = detailMsgs.filter((m) =>
+      isPresentable(m) && m.contentType === CONTACT_CONTENT_TYPE && parseContactCard(m.content) !== null
+    ).sort((a, b) => b.convSeq - a.convSeq);
+    // 语音 / 名片 tab 与 iOS 对齐：有该类消息才出现（其余 tab 维持恒显的既有 Web 行为）。名片**置末**。
     const voiceTabs: Array<{ k: typeof detailTab; label: string }> = voices.length > 0 ? [{ k: "voice", label: "语音" }] : [];
+    const contactTabs: Array<{ k: typeof detailTab; label: string }> = contacts.length > 0 ? [{ k: "contacts", label: "名片" }] : [];
     const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
-      ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }]
-      : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }];
+      ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }, ...contactTabs]
+      : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }, ...contactTabs];
     const activeTab = tabs.some((t) => t.k === detailTab) ? detailTab : tabs[0].k;
 
     return (
@@ -180,6 +195,16 @@ export function DetailPanel(p: DetailPanelProps) {
                   <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                   {detailMore && (
                     <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
+                      {/* 入口 ②「推荐给朋友」（CONTACT_CARD_DESIGN §8.1）：把正在看的这个人推给别的会话。
+                          选会话复用**已有的** ForwardPicker，零新组件。系统通知会话不给（推它没有意义）。 */}
+                      {!isSystemPeer && !d.isGroup && d.peer && (
+                        <button className="menu-item" onClick={() => {
+                          setDetailMore(false);
+                          // 昵称取 peerNickname（服务端下发的真实昵称），**不是**页面标题——后者备注优先，
+                          // 发出去就泄露"我给你起的外号"（§2.4）。
+                          onShareContact({ userId: d.peer!, nickname: detailPeerNickname, avatarUrl: detailPeerAvatar });
+                        }}><IdCard size={16} className="menu-icon" />推荐给朋友</button>
+                      )}
                       <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
                       {!isSystemPeer && !d.isGroup && (
                         <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
@@ -283,6 +308,15 @@ export function DetailPanel(p: DetailPanelProps) {
                   return label || m.fromNickname || m.from;
                 }}
                 links={links}
+                contacts={contacts}
+                contactDisplayName={(userId, fallback) => peerNick?.(userId) || fallback || userId}
+                contactSourceLabel={(m) => {
+                  // 「由 X 分享」只在群聊显——单聊详情页里发送者只可能是我或对方，写出来纯冗余（与 iOS 一致）。
+                  if (!d.isGroup) return undefined;
+                  if (m.from === uid) return "你自己";
+                  return peerNick?.(m.from) || m.fromNickname || m.from;
+                }}
+                onOpenContact={openPeerDetail}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}

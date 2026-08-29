@@ -1,4 +1,5 @@
 import { ChevronRight, Check } from "lucide-react";
+import type { CSSProperties } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Avatar } from "./Avatar";
 
@@ -19,15 +20,17 @@ export const renderRow = (r: Row, cls: string) => (
 );
 
 // 多选用户行：勾选框 + 头像 + 名称。建群 / 邀请成员共用（转发选择器结构略异，未走此路）。
-export function CheckRow({ selected, url, label, seed, onClick }: {
+export function CheckRow({ selected, url, label, seed, onClick, style }: {
   selected: boolean;
   url?: string;
   label: string;
   seed: string;
   onClick: () => void;
+  /** 可选行内样式（分享名片达选择上限时把未选中行置灰）。 */
+  style?: CSSProperties;
 }) {
   return (
-    <button className="check-row" onClick={onClick}>
+    <button className="check-row" onClick={onClick} style={style}>
       <span className={`checkbox${selected ? " on" : ""}`}>{selected && <Check size={13} />}</span>
       <Avatar url={url} label={label} seed={seed} />
       <span className="row-label">{label}</span>

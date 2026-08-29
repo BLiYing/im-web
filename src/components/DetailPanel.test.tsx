@@ -40,6 +40,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     groupRemark: () => "", peerNick: () => "小明", peerAvatar: () => undefined,
     memberLabel: (m: GroupMember) => m.group_nickname || m.nickname || m.user_id, mediaGate: () => undefined,
     mediaSrc: (m: { content: string }) => m.content, canManageMember: () => true,
+    onShareContact: vi.fn(),
     onClose: vi.fn(), setDetailTab: vi.fn(), setDetailMore: vi.fn(), setManageOpen: vi.fn(),
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),
     doFriendAction: vi.fn(async () => {}), openChat: vi.fn(), openInChatSearch: vi.fn(),

@@ -648,6 +648,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .bubble:has(.msg-caption) > .bmeta,
 .bubble:has(> .link-card) > .bmeta,
 .bubble:has(> .record-card) > .bmeta,
+.bubble:has(> .contact-card) > .bmeta,
 .bubble:has(> .longtext-card) > .bmeta { margin-left: auto; }
 /* 悬浮角标：底恒为半透明黑，浅色图上也读得清（不靠文字阴影）。 */
 .media-badge { position: absolute; padding: 1px 6px; border-radius: 9px; background: var(--overlay);
@@ -724,6 +725,42 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .record-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .record-foot { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--separator); font-size: 11px; color: var(--text-secondary); }
 .record-modal { width: min(520px, 92vw); max-height: 80vh; overflow-y: auto; }
+
+/* 个人名片（contact）——与 .record-card(220px) / .link-card(260px) 同族的定宽块级卡片。
+   规格见 IMServer docs/CONTACT_CARD_DESIGN.md §8.3；行 .contact-row 被详情页页签与收藏分类共用。 */
+.contact-card { width: 232px; background: var(--card-bg); border: 1px solid var(--separator);
+  border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+.contact-card:hover { background: color-mix(in srgb, var(--accent) 6%, var(--card-bg)); }
+/* 脏名片（JSON 非法/缺 u）降级：一行灰字、不可点——不留一张点不动的死卡。 */
+.contact-card.dirty { cursor: default; color: var(--text-secondary); font-size: 13px; text-align: center; }
+.contact-card.dirty:hover { background: var(--card-bg); }
+.contact-card-head { display: flex; gap: 10px; align-items: center; }
+.contact-card-head .avatar { width: 40px; height: 40px; font-size: 15px; }
+.contact-card-body { min-width: 0; }
+.contact-card-name { font-size: 14px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-card-id { font-size: 12px; color: var(--text-secondary); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-card-foot { display: flex; align-items: center; gap: 4px; margin-top: 8px; padding-top: 6px;
+  border-top: 1px solid var(--separator); font-size: 11px; color: var(--text-secondary); }
+
+/* 发送前的名片确认弹窗：预览卡居中 + 折叠的其余人名。 */
+.card-confirm-preview { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 16px 0; }
+.card-confirm-rest { font-size: 13px; color: var(--text-secondary); text-align: center;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 详情页「名片」页签 / 收藏页「名片」分类**共用**的行。 */
+.contact-row { display: flex; align-items: center; gap: 11px; padding: 10px 12px; cursor: pointer; }
+.contact-row:hover { background: var(--surface-hover); }
+.contact-row-avatar { width: 44px; height: 44px; font-size: 16px; }
+.contact-row-body { flex: 1; min-width: 0; }
+.contact-row-name { font-size: 15px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-row-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-row-time { margin-left: auto; font-size: 12.5px; color: var(--text-secondary);
+  align-self: flex-start; white-space: nowrap; }
+
 .record-item { padding: 8px 0; border-bottom: 1px solid var(--separator); }
 .record-item-name { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
 .record-item-media { max-width: 200px; max-height: 200px; border-radius: 6px; cursor: pointer; display: block; }
