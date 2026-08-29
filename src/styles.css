@@ -741,8 +741,17 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-card-id { font-size: 12px; color: var(--text-secondary); margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.contact-card-foot { display: flex; align-items: center; gap: 4px; margin-top: 8px; padding-top: 6px;
+/* 脚注行 = 左「个人名片」+ 右「时间/勾」，与 iOS IMContactCardView 同布局（_footText 与 _meta 同排、_meta 贴右）。 */
+.contact-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 8px; padding-top: 6px;
   border-top: 1px solid var(--separator); font-size: 11px; color: var(--text-secondary); }
+.contact-card-foot-label { display: inline-flex; align-items: center; gap: 4px; }
+.contact-card-foot .bmeta { margin: 0; flex-shrink: 0; }
+
+/* 名片气泡：**卡片本身就是气泡**（与 iOS 一致——那边卡片直接带底色圆角、没有外层气泡）。
+   外层 .bubble 去掉底色/内边距/阴影，只当定位容器；时间已嵌进卡片脚注行。 */
+.bubble.contact { padding: 0; background: transparent; box-shadow: none; }
+.me .bubble.contact, .them .bubble.contact { background: transparent; }
 
 /* 发送前的名片确认弹窗：预览卡居中 + 折叠的其余人名。 */
 .card-confirm-preview { display: flex; flex-direction: column; align-items: center; gap: 8px; margin: 16px 0; }

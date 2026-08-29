@@ -13,6 +13,8 @@ export function useProfileEdit(d: ProfileEditDeps) {
   // 打开弹窗时的 username 原值：只有真改了才发改名请求，否则每次保存都可能撞「用户名已被占用」。
   const [loadedUsername, setLoadedUsername] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
+  // 资料面板双态：进页默认只读，点「编辑」才可改（与 iOS IMProfileEditViewController 拉齐）。
+  const [profileEditing, setProfileEditing] = useState(false);
   const [cropReq, setCropReq] = useState<{ file: File; onDone: (blob: Blob) => void | Promise<void> } | null>(null);
 
   // 加载本人资料到 myInfo（左上角头像 / 设置页头部共用同一份数据）。失败静默回退首字母圈。
@@ -31,6 +33,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
       if (p) {
         setProfileDraft({ nickname: p.nickname ?? "", username: p.username ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
         setLoadedUsername(p.username ?? "");
+        setProfileEditing(false); // 每次进页都从只读态开始
       }
     } catch (e) {
       setToast(`加载资料失败：${(e as Error).message}`);
@@ -68,8 +71,16 @@ export function useProfileEdit(d: ProfileEditDeps) {
       }
       // 保存后刷新设置页顶部名片（否则头像/昵称仍显旧值）。改名接口回的名片更新，优先用它。
       const fresh = renamed ?? updated;
-      if (fresh) setMyInfo({ nickname: fresh.nickname ?? "", username: fresh.username ?? "", phone: fresh.phone ?? "", avatar_url: fresh.avatar_url ?? "" });
-      setProfileDraft(null);
+      if (fresh) {
+        setMyInfo({ nickname: fresh.nickname ?? "", username: fresh.username ?? "", phone: fresh.phone ?? "", avatar_url: fresh.avatar_url ?? "" });
+        // 保存后**回只读态而不是关面板**：用户刚改完就被关掉，看不到改后的样子；
+        // 留在页内看到新昵称/新句柄才是完整的反馈闭环（与 iOS exitEditingAfterSave 同）。
+        setProfileDraft({
+          nickname: fresh.nickname ?? "", username: fresh.username ?? "",
+          avatar_url: fresh.avatar_url ?? "", phone: fresh.phone ?? "", tags: (fresh.tags ?? []).join(" "),
+        });
+      }
+      setProfileEditing(false);
     } catch (e) {
       setToast(`保存失败：${(e as Error).message}`);
     } finally {
@@ -96,5 +107,13 @@ export function useProfileEdit(d: ProfileEditDeps) {
     });
   }, []);
 
-  return { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq, loadMyInfo, openProfile, saveProfile, onPickAvatar };
+  /** 取消编辑：丢弃未保存的输入，用最后一次载入/保存的权威值重填，回只读态。 */
+  const cancelProfileEditing = useCallback(() => {
+    setProfileEditing(false);
+    void openProfile(); // 重拉一次权威资料，确保只读态显示的是服务端认的值
+  }, [openProfile]);
+
+  return { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq,
+    loadMyInfo, openProfile, saveProfile, onPickAvatar,
+    profileEditing, enterProfileEditing: () => setProfileEditing(true), cancelProfileEditing };
 }

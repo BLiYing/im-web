@@ -541,7 +541,8 @@ export default function App() {
   // 找人/好友动作/黑名单 → useFriendOps；本人资料 → useProfileEdit（阶段 8b）。须在 refreshFriends/clientRef/setToast 之后。
   const { searchQ, setSearchQ, searchResults, setSearchResults, busyUser, blockedList, doSearch, doFriendAction, openBlacklist, unblock } =
     useFriendOps({ clientRef, setToast, refreshFriends });
-  const { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq, loadMyInfo, openProfile, saveProfile, onPickAvatar } =
+  const { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq, loadMyInfo, openProfile, saveProfile, onPickAvatar,
+    profileEditing, enterProfileEditing, cancelProfileEditing } =
     useProfileEdit({ clientRef, setToast });
 
   // token 非空=扫码登录路径（无密码，走 connectWithToken）；否则密码/免密登录。
@@ -2707,6 +2708,7 @@ export default function App() {
             draft={profileDraft}
             uid={uid}
             busy={profileBusy}
+            editing={profileEditing} onEnterEditing={enterProfileEditing} onCancelEditing={cancelProfileEditing}
             onChange={setProfileDraft}
             onSave={() => void saveProfile()}
             onPickAvatar={onPickAvatar}

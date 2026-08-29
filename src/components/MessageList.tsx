@@ -243,6 +243,23 @@ export function MessageList(p: MessageListProps) {
         // （2026-08-27 修）。不并入 isMediaBubble（那会带来 .bubble.media 的 padding:0/overflow:hidden，
         // 语音气泡内部另有自己的 padding，会挤成一坨）——只让外层 bmeta 跳过 voice。
         const isVoiceBubble = m.contentType === "voice";
+        // 名片气泡：卡片**本身就是气泡**（与 iOS 一致——那边卡片直接带底色圆角，没有外层气泡），
+        // 时间/勾画在卡片脚注行内，故外层不再渲染 .bmeta、气泡也不画底色（见 .bubble.contact）。
+        const isContactBubble = m.contentType === CONTACT_CONTENT_TYPE;
+        // 时间 + 勾的内容抽一份出来：普通气泡放在下方 .bmeta 里，名片气泡嵌进卡片脚注行。
+        // 两处各写一遍迟早漂移（改了"已编辑"标记只改一处之类）。
+        const metaNode = (
+          <span className="bmeta">
+            {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
+            {mine ? (
+              m.status === "sending" ? "发送中…"
+                : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
+                  : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+            ) : (
+              formatTime(m.timestamp, timeFormat)
+            )}
+          </span>
+        );
         const uploading = uploadProgress[m.clientMsgId ?? ""];
         // 暂停态唯一真相=分片任务（toggleUploadPause bump 进度对象触发重渲染）；小文件无任务恒 false。
         const uploadPaused = !!chunkedTaskFor(m.clientMsgId ?? "")?.paused;
@@ -258,7 +275,7 @@ export function MessageList(p: MessageListProps) {
               {mine && m.status === "failed" && (
                 <span className="fail-badge" title={m.note || "发送失败"}>!</span>
               )}
-              <div className={`bubble${isMediaBubble ? " media" : ""}${menuActive ? " ctx-active" : ""}`}
+              <div className={`bubble${isMediaBubble ? " media" : ""}${isContactBubble ? " contact" : ""}${menuActive ? " ctx-active" : ""}`}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                 {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
                 {m.replyToConvSeq ? (
@@ -352,7 +369,13 @@ export function MessageList(p: MessageListProps) {
                             {card.username && <div className="contact-card-id">@{card.username}</div>}
                           </div>
                         </div>
-                        <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>
+                          {/* 脚注行 = 左「个人名片」+ 右「时间/勾」，与 iOS IMContactCardView 同布局
+                            （那边是 _footText 与 _meta 同排、_meta 贴右）。时间放进卡片内而不是卡片下方的
+                            .bmeta，两端才真正一致。 */}
+                        <div className="contact-card-foot">
+                          <span className="contact-card-foot-label"><IdCard size={12} aria-hidden="true" />个人名片</span>
+                          {metaNode}
+                        </div>
                       </div>
                     );
                   })()
@@ -435,17 +458,8 @@ export function MessageList(p: MessageListProps) {
                 {m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? (
                   <div className={`msg-caption${m.contentType === "file" ? " file" : ""}`}>{renderMentionText(m, m.caption)}</div>
                 ) : null}
-                {!isMediaBubble && !isVoiceBubble && (
-                  <span className="bmeta">
-                    {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
-                    {mine ? (
-                      m.status === "sending" ? "发送中…"
-                        : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
-                          : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
-                    ) : (
-                      formatTime(m.timestamp, timeFormat)
-                    )}
-                  </span>
+                {!isMediaBubble && !isVoiceBubble && !isContactBubble && (
+                  metaNode
                 )}
               </div>
             </div>

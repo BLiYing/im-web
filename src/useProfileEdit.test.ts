@@ -25,7 +25,11 @@ describe("useProfileEdit", () => {
     expect(c.updateMyProfile).toHaveBeenCalledWith({ nickname: "新名", avatar_url: "a.png", phone: "138", tags: ["a", "b", "c"] });
     // username 与载入值相同 → **不**发改名请求（否则每次保存都可能撞「用户名已被占用」）。
     expect(c.updateMyUsername).not.toHaveBeenCalled();
-    expect(result.current.profileDraft).toBeNull(); expect(result.current.myInfo?.nickname).toBe("新名");
+    // 保存后**回只读态而不是关面板**（2026-08-30 双态改造）：草稿仍在（供只读态渲染），
+    // editing 落回 false。用户刚改完就被关掉，看不到改后的样子。
+    expect(result.current.profileEditing).toBe(false);
+    expect(result.current.profileDraft?.nickname).toBe("新名");
+    expect(result.current.myInfo?.nickname).toBe("新名");
   });
 
   it("saveProfile：username 改了才发改名请求，并用它回的名片刷新 myInfo", async () => {
@@ -35,7 +39,8 @@ describe("useProfileEdit", () => {
     await act(async () => { await result.current.saveProfile(); });
     expect(c.updateMyUsername).toHaveBeenCalledWith("newhandle");
     expect(result.current.myInfo?.username).toBe("newhandle");
-    expect(result.current.profileDraft).toBeNull();
+    expect(result.current.profileEditing).toBe(false);
+    expect(result.current.profileDraft?.username).toBe("newhandle");
   });
 
   it("saveProfile：昵称清空直接拒（回退链止于昵称，空了会露出内部 ID）", async () => {
@@ -57,5 +62,29 @@ describe("useProfileEdit", () => {
     expect(c.uploadAvatar).toHaveBeenCalled();
     expect(result.current.profileDraft?.avatar_url).toBe("https://cdn/av.jpg");
     expect(deps.setToast).toHaveBeenCalledWith("头像已更新");
+  });
+});
+
+// 双态（2026-08-30，与 iOS IMProfileEditViewController 拉齐）：
+// 从设置页进来默认只读，点「编辑」才可改——多数人只是想看一眼，直接给一屏输入框既突兀又易误改。
+describe("useProfileEdit 的只读/编辑双态", () => {
+  it("openProfile 后默认只读态", async () => {
+    const { result } = mount();
+    await act(async () => { await result.current.openProfile(); });
+    expect(result.current.profileEditing).toBe(false);
+  });
+
+  it("enterProfileEditing → 编辑态；cancelProfileEditing → 回只读并重拉权威值", async () => {
+    const { result, c } = mount();
+    await act(async () => { await result.current.openProfile(); });
+    act(() => result.current.enterProfileEditing());
+    expect(result.current.profileEditing).toBe(true);
+
+    // 改了草稿再取消：应回只读态，且重新拉一次 /users/me（不能把未保存的输入当成权威值留着）
+    act(() => result.current.setProfileDraft({ nickname: "临时改的", username: "tmp", avatar_url: "", phone: "", tags: "" }));
+    const before = c.fetchMyProfile.mock.calls.length;
+    await act(async () => { result.current.cancelProfileEditing(); });
+    expect(result.current.profileEditing).toBe(false);
+    expect(c.fetchMyProfile.mock.calls.length).toBeGreaterThan(before);
   });
 });

@@ -1,5 +1,6 @@
 import { useRef } from "react";
-import { Check, SquarePen } from "lucide-react";
+import { AtSign, Check, Phone, SquarePen } from "lucide-react";
+import { renderRow } from "../rows";
 import { Avatar } from "../Avatar";
 import { SubPanel } from "./SubPanel";
 
@@ -7,20 +8,56 @@ import { SubPanel } from "./SubPanel";
 // 两者独立提交：改名走独立接口，见 useProfileEdit.saveProfile。
 export type ProfileDraft = { nickname: string; username: string; avatar_url: string; phone: string; tags: string };
 
-/** 编辑资料面板：经设置页铅笔进入，叠在设置面板之上（对齐 Telegram Web「Edit profile」）。
+/** 我的资料面板，**双态**（2026-08-30，与 iOS IMProfileEditViewController 拉齐）：
+ *
+ *  - 默认**只读**：大头像 + 昵称 + 在线态 + 一张信息卡（手机 / 用户名）。右上角「编辑」。
+ *  - 点编辑才进可修改的表单，右上角变「保存」、左上角变「取消」。
+ *
+ *  从设置页点头部进来的用户多数只是想看一眼，直接给一屏输入框既突兀又容易误改。
+ *  刻意不显示内部 ID（10 位随机数字，见 docs/UI.md「用户标识」）与标签（Telegram 那张卡上无对应物）。
+ *
  *  纯展示：草稿状态与保存/选头像动作由 App 注入；隐藏 file input 的 ref 归本组件私有。 */
-export function EditProfilePanel({ draft, uid, busy, onChange, onSave, onPickAvatar, onBack }: {
+export function EditProfilePanel({ draft, uid, busy, editing, onEnterEditing, onCancelEditing, onChange, onSave, onPickAvatar, onBack }: {
   draft: ProfileDraft;
   uid: string;
   busy: boolean;
+  editing: boolean;
+  onEnterEditing: () => void;
+  onCancelEditing: () => void;
   onChange: (next: ProfileDraft) => void;
   onSave: () => void;
   onPickAvatar: (file?: File) => void;
   onBack: () => void;
 }) {
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
+
+  if (!editing) {
+    return (
+      <SubPanel className="edit-panel" title="我的资料" onBack={onBack}
+        right={<button className="icon-btn" title="编辑" onClick={onEnterEditing}><SquarePen size={22} /></button>}>
+        <div className="settings-profile">
+          <Avatar url={draft.avatar_url} label={draft.nickname} seed={uid} cls="settings-avatar" />
+          <div className="settings-name">{draft.nickname || (draft.username ? `@${draft.username}` : "未命名用户")}</div>
+          <div className="settings-status">在线</div>
+        </div>
+        {/* 复用设置页的 info 行（左大字=值、右小字=字段名，正是 Telegram 那张卡的布局）。
+            没填手机号就整行不占位（Telegram 同款）。点任一行 → 进编辑态。 */}
+        <div className="settings-group">
+          {draft.phone
+            ? renderRow({ id: "phone", label: draft.phone, icon: Phone, iconTint: "green", value: "手机", onClick: onEnterEditing }, "settings-row info")
+            : null}
+          {renderRow({
+            id: "username",
+            label: draft.username ? `@${draft.username}` : "未设置",
+            icon: AtSign, iconTint: "blue", value: "用户名", onClick: onEnterEditing,
+          }, "settings-row info")}
+        </div>
+      </SubPanel>
+    );
+  }
+
   return (
-    <SubPanel className="edit-panel" title="编辑资料" onBack={onBack}
+    <SubPanel className="edit-panel" title="编辑资料" onBack={onCancelEditing}
       right={<button className="icon-btn save" title="保存" disabled={busy} onClick={onSave}><Check size={22} /></button>}>
         {/* 点头像 → 选本机图片（隐藏的 file input，浏览器自动用系统原生文件框，跨平台无需检测系统）。 */}
         <button className="edit-avatar" title="更换头像" onClick={() => avatarFileRef.current?.click()}>
