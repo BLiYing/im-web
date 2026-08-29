@@ -20,10 +20,13 @@ export function ConfirmSendCardModal({ cards, targetName, displayName, onSend, o
 }) {
   if (cards.length === 0) return null;
   const first = cards[0];
-  const firstName = displayName?.(first.userId, first.nickname) ?? first.nickname ?? first.userId;
+  // 末级不落 userId（10 位随机数字内部 ID）；退到 @句柄，再退到占位。
+  const nameOf = (c: { userId: string; username?: string; nickname?: string }) =>
+    displayName?.(c.userId, c.nickname) ?? c.nickname ?? (c.username ? `@${c.username}` : "未命名用户");
+  const firstName = nameOf(first);
   // ≥2 张时首卡出全卡，其余折叠成一行显示名（≤3 个，再多显「等 N 人」）——9 张卡会把弹窗撑爆。
   const rest = cards.slice(1);
-  const restNames = rest.slice(0, 3).map((c) => displayName?.(c.userId, c.nickname) ?? c.nickname ?? c.userId);
+  const restNames = rest.slice(0, 3).map(nameOf);
   const restText = rest.length === 0 ? ""
     : rest.length > restNames.length ? `${restNames.join(" · ")} 等 ${rest.length} 人`
     : restNames.join(" · ");
@@ -37,7 +40,8 @@ export function ConfirmSendCardModal({ cards, targetName, displayName, onSend, o
             <Avatar url={first.avatarUrl} label={firstName} seed={first.userId} cls="avatar" />
             <div className="contact-card-body">
               <div className="contact-card-name">{firstName}</div>
-              <div className="contact-card-id">ID {first.userId}</div>
+              {/* @句柄而非内部 ID；没有句柄就不渲染这行。 */}
+              {first.username && <div className="contact-card-id">@{first.username}</div>}
             </div>
           </div>
           <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>

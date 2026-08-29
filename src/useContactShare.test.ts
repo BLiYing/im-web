@@ -101,3 +101,28 @@ describe("入口②③：交给转发选择页", () => {
     expect(setToast).toHaveBeenCalled();
   });
 });
+
+// 回归：从好友项构造名片时**必须带上 username**。
+//
+// 2026-08-29 实测踩过：协议加了 un、buildContactCard 加了参数、显示端也改了，
+// 唯独这一步的映射漏了 username → un 永远不写进 JSON → 收端副标题永远是空的。
+// 「三处都改对了却看不到效果」正是这种源头丢字段的典型症状。
+describe("名片构造必须带 username", () => {
+  it("confirmContactPick 把好友的 username 带进 ContactCard", async () => {
+    const friendWithHandle = {
+      user_id: "4820571639", username: "xiaoming", nickname: "小明",
+      avatar_url: "/a.jpg", status: "accepted", updated_at: 1,
+    } as FriendEntry;
+    const { result } = setup({ friends: [friendWithHandle] });
+
+    act(() => result.current.openContactPicker());
+    act(() => result.current.toggleContactPick("4820571639"));
+    act(() => result.current.confirmContactPick());
+
+    const cards = result.current.cardConfirm!;
+    expect(cards).toHaveLength(1);
+    expect(cards[0].username).toBe("xiaoming");   // ← 漏了这个字段就前功尽弃
+    expect(cards[0].userId).toBe("4820571639");
+    expect(cards[0].nickname).toBe("小明");
+  });
+});

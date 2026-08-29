@@ -69,7 +69,9 @@ export function useContactShare(d: ContactShareDeps) {
     const byId = new Map(friends.map((f) => [f.user_id, f]));
     const cards: ContactCard[] = sel.map((id) => {
       const f = byId.get(id);
-      return { userId: id, nickname: f?.nickname, avatarUrl: f?.avatar_url };
+      // username 必须一起带上——它是名片副标题 @xxx 的唯一来源。漏了这一行，
+      // 协议/构造/显示三处都改对了也看不到效果（2026-08-29 实测踩过）。
+      return { userId: id, username: f?.username, nickname: f?.nickname, avatarUrl: f?.avatar_url };
     });
     setCardPicker(null);
     setCardConfirm(cards);
