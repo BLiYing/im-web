@@ -6,7 +6,7 @@
 ## 当前焦点
 
 > **收藏页 / 详情页 / 置顶 / 记录卡 五项 UI 修复（2026-08-30，与 iOS 同步；`tsc -b` + **vitest 681 全绿**
-> （+3：置顶 voice/chat_record 两例、记录条目 voice 预览一例）；**未在浏览器手测**）**
+> （+3：置顶 voice/chat_record 两例、记录条目 voice 预览一例）；**已在浏览器手测通过（2026-08-30）**）**
 >
 > 1. **置顶预览** `src/pinned.ts`：只认 `audio` 不认 `voice`、且无 `chat_record` 分支 → 语音置顶铺一串 URL、
 >    合并转发卡片铺整段 JSON。现统一 `[语音]` / `chatRecordSnippet()` 的 `[聊天记录] 标题`。
@@ -27,7 +27,7 @@
 >    （与 iOS 同约定），老记录无这两项时退化成等高条纹 + 0:00 仍可播。`recordItemPreview` 补 voice 分支。
 >    名片条目 Web 本就是卡片，无需改（iOS 那侧此次才补上）。
 
-> **记录卡补齐 + 语音红点/倍速对齐（2026-08-30 第三批；`tsc -b` + vitest 685 绿）**
+> **记录卡补齐 + 语音红点/倍速对齐（2026-08-30 第三批；`tsc -b` + vitest 685 绿；**已手测通过**）**
 > 1. **合并转发条目新增 `ts`/`u`/`a`**（与 iOS 同 key，契约表进了 `../IMServer/docs/PROTOCOL.md`）。
 >    `useForward` 新增注入 `recordSenderAvatar`（头像来源=我自己 `myInfo` / 群成员表 / 会话行对端，
 >    都长在 App，故留在 App 注入）。`RecordModal` 据此显每条时间 + 头像，**连续同一人只显一次**
@@ -36,7 +36,7 @@
 >    **倍速胶囊改到时长行右端**（`justify-content: space-between`），也与 iOS 一致。
 > 3. 转文字 Web 仍未实现（P2），故"转文字也消红点"这条只在 iOS 落地。
 >
-> **记录卡三个后续（2026-08-30 用户实测报，已修；`tsc -b` + vitest 681 绿）**
+> **记录卡三个后续（2026-08-30 用户实测报，已修并**复测通过**；`tsc -b` + vitest 681 绿）**
 > 1. **录音格式红线被绕过（本次 iOS 崩溃的源头）**：`voiceRecordingSupported()` 第一顺位问裸
 >    `audio/mp4`——**Chrome 会把 Opus 塞进 MP4 容器**，探测照样 true，于是录出「扩展名 .m4a、内容是
 >    Opus」的文件。iOS `AVAudioPlayer` 拿到 `framesPerPacket==0` 直接**除零崩整个 App**。
