@@ -90,9 +90,16 @@ export function minSeqOf(messages: ChatMessage[]): number {
 
 /** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
  *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
-/** 合并转发条目。fn/fs=文件原名与字节数；d/w=语音时长(ms)与波形 base64；cap=图说随附文本。
- *  key 与 iOS `mergedForwardJSONForMessages` 逐字对齐——两端读写同一份 JSON。 */
-export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number; cap?: string; d?: number; w?: string };
+/** 合并转发条目。fn/fs=文件原名与字节数；d/w=语音时长(ms)与波形 base64；cap=图说随附文本；
+ *  ts=原消息时间(ms)；u=发送者 uid（**只作查头像/判「连续同一人」的键，永不上屏**）；
+ *  a=发送者头像相对路径（快照，读端自己拼 host）。
+ *  key 与 iOS `mergedForwardJSONForMessages` 逐字对齐——两端读写同一份 JSON。
+ *  **老记录一定缺字段**：无 ts 不显时间、无 u/a 头像退化成按名字生成的首字母块，绝不能因此不渲染。 */
+export type RecordItem = {
+  n: string; ct: string; c: string;
+  fn?: string; fs?: number; cap?: string; d?: number; w?: string;
+  ts?: number; u?: string; a?: string;
+};
 export type ChatRecord = { t: string; items: RecordItem[] };
 export function parseChatRecord(content: string): ChatRecord {
   try {
@@ -171,6 +178,13 @@ export function videoFrameSrc(url: string): string {
  */
 export function syntheticViewerMessage(clientMsgId: string, content: string, kind: "image" | "video"): ChatMessage {
   return { clientMsgId, convId: "", from: "", content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" };
+}
+
+/** 合并转发条目的「发送者身份键」——记录详情据此判「连续同一人」（只显一次头像与昵称）。
+ *  优先 `u`（uid，同名不同人才分得开）；老记录没有 `u` 就退回显示名 `n`。
+ *  两个前缀（`u:` / `n:`）保证 uid 与昵称不会互相误撞。与 iOS `IMRecordSenderKey` 同口径。 */
+export function recordSenderKey(it: Pick<RecordItem, "n" | "u">): string {
+  return it.u ? `u:${it.u}` : `n:${it.n ?? ""}`;
 }
 
 /** 合并转发记录里的语音条目 → 供 VoiceBubble(mini) 渲染的临时 ChatMessage。

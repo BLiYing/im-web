@@ -258,6 +258,9 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readBy
     <div className={`voice-bubble${variant === "mini" ? " variant-mini" : ""}`}
          style={variant === "mini" ? undefined : { width }}
          onClick={toggle} role="button">
+      {/* 未播红点：气泡**右上角**（与 iOS IMVoiceBubbleCell 同位置）。曾挤在时长行里跟时长/倍速
+          抢位置，长语音时容易被推没；红点是"这条我处理过没有"的角标，本就该在角上。 */}
+      {!played && !isCurrent && <span className="voice-unplayed" aria-label="未播放" />}
       {/* 播放器行：▶ 与「波形 + 时长行」垂直居中。时间行在这一行**之外**——
           曾放进 .voice-center 里，把居中轴往下拽，视觉上 ▶ 比波形低一截（2026-08-27 修）。 */}
       <div className="voice-player-row">
@@ -283,8 +286,8 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readBy
             <span className="voice-scrub-tip" style={{ left: `${scrubHint.x}px` }}>{scrubHint.text}</span>
           )}
         </div>
+        {/* 时长行：左=时长（播放中显剩余），右端=倍速胶囊——与 iOS 同排布（倍速右对齐，不跟时长挤在一起）。 */}
         <div className="voice-meta-row">
-          {!played && !isCurrent && <span className="voice-unplayed" aria-label="未播放" />}
           <span className="voice-meta-text">{durLabel}</span>
           {isCurrent ? (
             <button className={`voice-speed${mine ? " mine" : ""}`}

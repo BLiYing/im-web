@@ -1018,7 +1018,17 @@ export default function App() {
   const {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
     forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected, setForwardVerb,
-  } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode });
+  } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode,
+    // 合并转发条目的头像快照（相对路径；同源直接可当 <img src>）：我自己 → 本人资料；
+    // 群 → 成员表；单聊 → 会话行的对端头像。都取不到就不带 `a`，读端按 uid 兜底。
+    recordSenderAvatar: (m) => {
+      if (m.from === uid) return myInfo?.avatar_url || undefined;
+      const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from);
+      if (gm?.avatar_url) return gm.avatar_url;
+      const c = conversations.find((x) => x.conv_id === m.convId);
+      return (c && !c.is_group && c.peer === m.from && c.peer_avatar_url) || undefined;
+    },
+  });
   // 收藏「来自X」补拉到的个人名片（uid→名片）与"已试过"集合，见下方 useEffect。
   const [favUserCards, setFavUserCards] = useState<Record<string, UserCard>>({});
   const favResolveTriedRef = useRef<{ groups: Set<string>; users: Set<string> }>({ groups: new Set(), users: new Set() });

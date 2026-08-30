@@ -789,8 +789,17 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .contact-row-time { margin-left: auto; font-size: 12.5px; color: var(--text-secondary);
   align-self: flex-start; white-space: nowrap; }
 
+/* 条目 = 头行（头像 + 昵称 + 右上时间）+ 正文；正文缩进对齐头像右缘，与聊天流同一种读法。
+   连续同一人（.continued）只留时间行，头像列用 .record-item-avatar-gap 占位，正文不左右跳。 */
 .record-item { padding: 8px 0; border-bottom: 1px solid var(--separator); }
-.record-item-name { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
+.record-item.continued { border-top: 0; padding-top: 2px; }
+.record-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.record-item-avatar { width: 28px; height: 28px; font-size: 12px; flex-shrink: 0; }
+.record-item-avatar-gap { width: 28px; flex-shrink: 0; }
+.record-item-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.record-item-time { margin-left: auto; flex-shrink: 0; font-size: 12px; color: var(--text-tertiary); }
+.record-item-body { padding-left: 36px; }  /* 28 头像 + 8 gap */
 .record-item-media { max-width: 200px; max-height: 200px; border-radius: 6px; cursor: pointer; display: block; }
 /* 语音条目：迷你播放器（▶+波形+时长），宽度与图片条目同一视觉档位。 */
 .record-item-voice { max-width: 260px; }
@@ -1799,10 +1808,11 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 /* 新布局（用户 2026-08-27 拍板）：▶ 左侧居中；中间 vertical stack（波形 + meta 行：时长·时间·勾）。 */
 /* 外层改列向：[播放器行(▶ + 波形/时长)] + [时间行]。时间行独立在播放器行之外，
    否则它会把 ▶ 的垂直居中轴往下拽（2026-08-27 修：用户报"波形和时长和左边 logo 不居中"）。 */
-.voice-bubble { display: flex; flex-direction: column; padding: 4px 4px; cursor: pointer; user-select: none; }
+.voice-bubble { position: relative; display: flex; flex-direction: column; padding: 4px 4px; cursor: pointer; user-select: none; }
 .voice-player-row { display: flex; align-items: center; gap: 10px; }
 .voice-center { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.voice-meta-row { display: flex; align-items: center; gap: 6px; }
+/* 时长左、倍速右（与 iOS 的「时长行左端时长 / 右端倍速胶囊」同排布）。 */
+.voice-meta-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
 /* 消息时间独立一行右对齐（2026-08-27 用户拍板，与 iOS 拉齐）；mini 变体不渲染此行。 */
 .voice-time-row { display: flex; justify-content: flex-end; margin-top: 1px; }
 .voice-meta-text { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
@@ -1822,7 +1832,9 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
   transition: background 0.12s linear; }
 .voice-wave span.on { background: var(--accent); }
 .bubble.me .voice-wave span.on { background: rgba(20, 96, 31, 0.9); }
-.voice-unplayed { width: 7px; height: 7px; border-radius: 50%; background: var(--danger);
+/* 未播红点定位在气泡右上角（与 iOS 同：trailing -10 / top +6）；mini 变体无气泡背景，贴自身右上。 */
+.voice-unplayed { position: absolute; top: 2px; right: 2px; z-index: 1;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--danger);
   box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--danger) 18%, transparent);
   animation: voice-unplayed-pulse 2.4s infinite; }
 @keyframes voice-unplayed-pulse {

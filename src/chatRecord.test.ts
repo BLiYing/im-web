@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseChatRecord, recordItemPreview } from "./messageContent";
+import { parseChatRecord, recordItemPreview, recordSenderKey } from "./messageContent";
 
 // 合并转发「聊天记录」纯函数：解析 + 单条预览 token（含嵌套「套娃」→[聊天记录] 子标题）。
 // 与 iOS IMMediaUtil 的 IMSummarizeRecord/IMRecordItemPreview 逐条对齐。
@@ -46,5 +46,16 @@ describe("chat_record 合并转发解析与预览", () => {
 
   it("嵌套子 JSON 非法时不叠加默认标题（避免「[聊天记录] 聊天记录」）", () => {
     expect(recordItemPreview({ n: "1001", ct: "chat_record", c: "garbled" })).toBe("[聊天记录]");
+  });
+});
+
+describe("recordSenderKey（连续同一人只显一次头像/昵称的身份判据）", () => {
+  it("有 u 就按 uid：同名不同人分得开，改过昵称仍算同一人", () => {
+    expect(recordSenderKey({ n: "小明", u: "1001" })).not.toBe(recordSenderKey({ n: "小明", u: "1002" }));
+    expect(recordSenderKey({ n: "改过名了", u: "1001" })).toBe(recordSenderKey({ n: "小明", u: "1001" }));
+  });
+  it("老记录没有 u → 退回昵称；前缀保证 uid 与昵称不互撞", () => {
+    expect(recordSenderKey({ n: "小明" })).toBe(recordSenderKey({ n: "小明" }));
+    expect(recordSenderKey({ n: "1001" })).not.toBe(recordSenderKey({ n: "x", u: "1001" }));
   });
 });

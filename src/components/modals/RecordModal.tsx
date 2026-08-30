@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react";
 import { ChevronLeft, IdCard } from "lucide-react";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, parseChatRecord, recordItemPreview, recordVoiceMessage, type ChatRecord, type RecordItem } from "../../messageContent";
+import { fileNameFromContent, parseChatRecord, recordItemPreview, recordSenderKey, recordVoiceMessage, type ChatRecord, type RecordItem } from "../../messageContent";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { Avatar } from "../Avatar";
 import { formatFileSize } from "../../fileMetadata";
 import { Modal } from "../Modal";
 import { VideoThumb } from "../VideoThumb";
 import { VoiceBubble } from "../VoiceBubble";
+
+/** 条目右上角的时间：`ts` 是打包端带的原消息时间。老记录没有 → 空串，整块不渲染。
+ *  同一天只显 HH:mm，跨天带 M月d日（记录里常横跨多天，只显时分会看不出来）。 */
+function recordItemTime(ts: number | undefined): string {
+  if (!ts || ts <= 0) return "";
+  const d = new Date(ts), now = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return d.toDateString() === now.toDateString() ? hm : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+}
 
 /** 记录里的语音条目。**时长只有打包端带了 `d` 才有**（2026-08-30 起两端都带）——
  *  更早打包的老记录没有这个字段，只能从音频元数据里探一次；探不到就保持 0（显 0:00）。
@@ -65,9 +75,20 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
           <span className="record-head-title">{view.t}</span>
         </div>
         <div className="record-list">
-          {view.items.map((it, i) => (
-            <div key={i} className="record-item">
-              <div className="record-item-name">{it.n}</div>
+          {view.items.map((it, i) => {
+            const sameAsPrev = (k: number) => k > 0 && recordSenderKey(view.items[k - 1]) === recordSenderKey(it);
+            return (
+            <div key={i} className={`record-item${sameAsPrev(i) ? " continued" : ""}`}>
+              {/* 头行恒在（每条都要有自己的时间），但**连续同一人只显一次头像与昵称**——
+                  后续条目只留右侧时间，左侧头像列照旧占位，正文不会左右跳。 */}
+              <div className="record-item-head">
+                {sameAsPrev(i)
+                  ? <span className="record-item-avatar-gap" />
+                  : <Avatar url={it.a} label={it.n || "?"} seed={it.u || it.n} cls="avatar record-item-avatar" />}
+                {!sameAsPrev(i) && <span className="record-item-name">{it.n}</span>}
+                <span className="record-item-time">{recordItemTime(it.ts)}</span>
+              </div>
+              <div className="record-item-body">
               {it.ct === "image" ? (
                 <img className="record-item-media" src={it.c} alt="图片" onClick={() => onOpenMedia(i, it.c, "image")} />
               ) : it.ct === "video" ? (
@@ -120,8 +141,9 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
               {it.cap && (it.ct === "image" || it.ct === "video" || it.ct === "file") ? (
                 <div className="record-item-cap">{it.cap}</div>
               ) : null}
+              </div>
             </div>
-          ))}
+          ); })}
         </div>
         <button className="modal-close" onClick={onClose}>关闭</button>
     </Modal>

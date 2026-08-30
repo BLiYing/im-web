@@ -13,7 +13,8 @@ function mount(over: Partial<ForwardDeps> = {}) {
   const client = { sendText: vi.fn(() => "cm-t"), sendMedia: vi.fn(() => "cm-m") };
   const deps: ForwardDeps = {
     uid: "u1", peer: "u2", groupConvId: "", clientRef: fakeClientRef(client), setToast: vi.fn(),
-    appendMsg: vi.fn(), msgsByConv: {}, groupInfos: {}, selected: new Set(), setMenu: vi.fn(), exitSelectMode: vi.fn(), ...over,
+    appendMsg: vi.fn(), msgsByConv: {}, groupInfos: {}, recordSenderAvatar: () => undefined,
+    selected: new Set(), setMenu: vi.fn(), exitSelectMode: vi.fn(), ...over,
   };
   return { ...renderHook(() => useForward(deps)), deps, client };
 }
@@ -44,6 +45,22 @@ describe("useForward", () => {
     const [json, ct] = (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(ct).toBe("chat_record");
     expect(JSON.parse(json as string).items).toHaveLength(2);
+  });
+  it("合并：条目带 ts/u/a（读端据此显时间、判连续同一人、查头像）", () => {
+    const { result, client } = mount({ recordSenderAvatar: () => "/avatars/ab.jpg" });
+    act(() => { result.current.setForwardMode("merged"); result.current.setForwarding([msg({ convSeq: 1, timestamp: 1700, from: "u2" })]); });
+    act(() => result.current.sendForwardToTarget(conv()));
+    const [json] = (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(json as string).items[0]).toMatchObject({ ts: 1700, u: "u2", a: "/avatars/ab.jpg" });
+  });
+  it("合并：取不到头像时不带 a（读端按 uid 兜底），其余字段照常", () => {
+    const { result, client } = mount({ recordSenderAvatar: () => undefined });
+    act(() => { result.current.setForwardMode("merged"); result.current.setForwarding([msg({ convSeq: 1, timestamp: 1700, from: "u2" })]); });
+    act(() => result.current.sendForwardToTarget(conv()));
+    const [json] = (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
+    const item = JSON.parse(json as string).items[0];
+    expect(item).toMatchObject({ ts: 1700, u: "u2" });
+    expect(item).not.toHaveProperty("a");
   });
   it("doForwardToTargets：发出后关闭选择器、退出多选、单条 toast", () => {
     const { result, deps } = mount();

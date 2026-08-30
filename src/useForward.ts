@@ -20,13 +20,16 @@ export interface ForwardDeps {
   appendMsg: (convId: string, m: ChatMessage) => void;
   msgsByConv: Record<string, ChatMessage[]>;
   groupInfos: Record<string, GroupInfo>;
+  /** 合并转发条目里的发送者头像**相对路径**（快照，读端自己拼 host）。取不到回 undefined，
+   *  读端按 uid 查本地缓存、再退首字母块。留在 App 注入——头像来源（群成员/会话/我自己）都长在那边。 */
+  recordSenderAvatar: (m: ChatMessage) => string | undefined;
   selected: Set<number>;
   setMenu: (v: null) => void;
   exitSelectMode: () => void;
 }
 
 export function useForward(d: ForwardDeps) {
-  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode } = d;
+  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, recordSenderAvatar, selected, setMenu, exitSelectMode } = d;
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
   const [forwardMulti, setForwardMulti] = useState(false); // 转发选择器：多选目标会话模式（对齐 iOS「多选」）
@@ -62,6 +65,11 @@ export function useForward(d: ForwardDeps) {
         .filter((m) => m.content && !m.recalledAt && m.contentType !== "system" && m.convSeq > 0)
         .map((m) => ({
           n: nameOf(m), ct: m.contentType || "text", c: m.content,
+          // ts/u/a：读端右上角显原消息时间、按 uid 判「连续同一人」并查头像（u 只作键，永不上屏）。
+          // 三者都是**可选**：老记录没有，读端各自降级（不显时间 / 首字母色块）。
+          ...(m.timestamp ? { ts: m.timestamp } : {}),
+          ...(m.from ? { u: m.from } : {}),
+          ...((): { a?: string } => { const a = recordSenderAvatar(m); return a ? { a } : {}; })(),
           // 文件行随包携带原名与大小（fn/fs，与 iOS 同约定）——收端不再只显「[文件]」。
           ...(m.contentType === "file"
             ? { fn: m.fileName || fileNameFromContent(m.content), ...(m.fileSize ? { fs: m.fileSize } : {}) }
