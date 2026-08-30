@@ -329,7 +329,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 发送失败：气泡左侧红色感叹号（微信式）。.row 是纵向列，用 .bubble-line 横向裹住 [❗ 气泡]。 */
 .bubble-line { display: flex; align-items: center; gap: 6px; max-width: 100%; }
 .fail-badge { flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%; background: var(--danger); color: var(--on-accent);
-  font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center; cursor: default; }
+  font-size: 12px; font-weight: 700; line-height: 1; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; padding: 0; font-family: inherit; cursor: pointer; }
+/* 不可重发（被服务端拒收等）：红❗照显但不可点，恢复入口在下方 .sys-note 那行。 */
+.fail-badge:disabled { cursor: default; }
 /* 被拒收等系统提示：该条下方居中灰字（类似"未读消息"分割提示，但无横线）。 */
 .sys-note { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 4px 0 8px; }
 .sys-note span { color: var(--text-secondary); font-size: var(--sys-font); text-align: center; max-width: 80%; }

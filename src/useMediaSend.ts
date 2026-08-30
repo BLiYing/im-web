@@ -17,6 +17,8 @@ import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode 
 import { makeTinyThumbFromImage, probeMediaMetadata } from "./media";
 import { captureVideoPoster } from "./videoPoster";
 import { LOG_TAG, logger } from "./logging/logger";
+import { resendPolicyFor } from "./resendPolicy";
+import { resendMessage as sdkResendMessage } from "./sdk/resend";
 
 export interface MediaSendDeps {
   uid: string;
@@ -312,11 +314,41 @@ export function useMediaSend(d: MediaSendDeps) {
     else void uploadAndSend(kept.file, kept.mode, kept.convId, kept.caption, kept.mentions, kept.mentionAll);
   }, [removeMsgRow, sendMediaBatch, uploadAndSend]);
 
+  /// 单条重发（红❗入口的实现，见下）。
+  const resendOne = useCallback((one: ChatMessage) => {
+    switch (resendPolicyFor(one, one.from === uid)) {
+      case "none": return;             // 红❗此时本就不可点，走到这里只可能是并发改了状态
+      case "retry-upload": retryUpload(one); return;
+      case "same-id": {
+        const client = clientRef.current;
+        // to：单聊=对端 uid，群聊=""（服务端按 conv_id 写扩散）。与首发同一个取值来源。
+        if (!client || !sdkResendMessage(client, one, peer)) { setToast("这条消息内容已丢失，无法重发"); return; }
+        // 立刻转"发送中"：红❗消失，给出点击反馈（否则 ack 超时窗内像点了没反应）。
+        // note/noteCode 一并清掉，否则上一轮失败的系统行会挂在这一轮重试上。
+        patchMsg(one.convId, one.clientMsgId!, { status: "sending", note: undefined, noteCode: undefined });
+        return;
+      }
+    }
+  }, [uid, peer, clientRef, patchMsg, setToast, retryUpload]);
+
+  /// 红❗点击的唯一入口（与 iOS `im_resendMessage:` 同一套）：按 `resendPolicyFor` 分派——
+  /// 上传失败 → 用留存的 File 重传（换新 localId）；send_msg 失败 → 按**原 clientMsgId** 重发
+  /// （服务端 (conv_id, client_msg_id) 幂等去重，换新 ID 会让对端收到两条）。
+  /// 相册宫格外侧只有一个红❗ → 传该组任一成员 + 同会话消息表，点一次重发整组失败成员。
+  const resendMessage = useCallback((m: ChatMessage, all?: ChatMessage[]) => {
+    if (m.groupId && all) {
+      // 先拍快照再遍历：重传会就地改消息表（旧行删了重建），边遍历边改要出错。
+      for (const mm of all.filter((x) => x.groupId === m.groupId)) resendOne(mm);
+      return;
+    }
+    resendOne(m);
+  }, [resendOne]);
+
   /// 媒体气泡点按路由（与 iOS 中心按钮状态机一致）：失败 ↻ 重试；上传中 ⏸↔↑ 暂停恢复
   /// （仅 ≥8MB 分片任务；小文件几秒传完不可暂停，点击忽略）；已发出 → 打开查看器。
   const onMediaBubbleTap = useCallback((m: ChatMessage, openViewer: () => void) => {
     const mine = m.from === uid;
-    if (mine && m.status === "failed" && m.convSeq === 0 && pendingFilesRef.current.has(m.clientMsgId ?? "")) {
+    if (mine && resendPolicyFor(m, mine) === "retry-upload") {
       retryUpload(m);
       return;
     }
@@ -365,7 +397,7 @@ export function useMediaSend(d: MediaSendDeps) {
     attachPanel, setAttachPanel,
     pendingFilesRef, uploadProgress, teardownOutboxUpload, hasActiveSend, toggleUploadPause, cancelSendMessage,
     pastedImages, setPastedImages, addPastedFiles, removePastedImage, onComposerPaste,
-    sendMediaBatch, uploadAndSend, retryUpload, onMediaBubbleTap,
+    sendMediaBatch, uploadAndSend, retryUpload, resendMessage, onMediaBubbleTap,
     fileInputRef, attachAnchorRef, cancelAttachClose, scheduleAttachClose, attachItems, pickFile, onFilePicked,
   };
 }

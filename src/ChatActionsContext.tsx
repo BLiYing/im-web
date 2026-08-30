@@ -23,6 +23,8 @@ export interface ChatActions {
   openReadyFile: (m: ChatMessage) => Promise<void>;
   onPassiveMediaError: (m: ChatMessage) => Promise<void>;
   retryUpload: (m: ChatMessage) => void;
+  /** 发送失败红❗点击：按 resendPolicyFor 分派重发。相册传该组任一成员 + 当前会话消息表（整组重发）。 */
+  resendMessage: (m: ChatMessage, all?: ChatMessage[]) => void;
   toggleUploadPause: (m: ChatMessage) => boolean;
   toggleSelected: (seq: number) => void;
   fetchLinkPreview: (url: string) => Promise<LinkPreview>;

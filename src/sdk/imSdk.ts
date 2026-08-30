@@ -41,6 +41,8 @@ export interface MediaSendOptions {
   mentions?: string[];
   /** 配文 @所有人（仅群聊、群主/管理员）。 */
   mentionAll?: boolean;
+  /** **仅失败重发**指定：沿用原 client_msg_id 吃服务端幂等去重（见 sdk/resend.ts）。首发一律不传。 */
+  clientMsgId?: string;
 }
 
 export interface IMClientHandlers {
@@ -635,7 +637,7 @@ export class IMClient {
 
   /** 发送富媒体（图片/文件，M4-6）：content=已上传的 URL，contentType=image|video|file。
    *  opts.forwardFrom=转发溯源；opts.groupId=相册分组；opts.poster=视频封面首帧 URL（M4+，收端直显免解码）。 */
-  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions): string {
+  sendMedia(url: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string } }): string {
     return this.sendContent(url, contentType, to, convId, opts);
   }
 
@@ -694,7 +696,7 @@ export class IMClient {
 
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
   private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string }; mentions?: string[]; mentionAll?: boolean }): string {
-    const clientMsgId = crypto.randomUUID();
+    const clientMsgId = opts?.clientMsgId ?? crypto.randomUUID(); // 只有失败重发会指定（见 sdk/resend.ts）
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
       fileName: opts?.fileName, fileSize: opts?.fileSize, caption: opts?.caption,

@@ -892,7 +892,7 @@ export default function App() {
   const {
     attachPanel, setAttachPanel, pendingFilesRef, uploadProgress, teardownOutboxUpload, hasActiveSend, toggleUploadPause,
     cancelSendMessage, pastedImages, setPastedImages, removePastedImage, onComposerPaste, sendMediaBatch, uploadAndSend,
-    retryUpload, onMediaBubbleTap, fileInputRef, attachAnchorRef, cancelAttachClose, scheduleAttachClose, attachItems, pickFile, onFilePicked,
+    retryUpload, resendMessage, onMediaBubbleTap, fileInputRef, attachAnchorRef, cancelAttachClose, scheduleAttachClose, attachItems, pickFile, onFilePicked,
   } = useMediaSend({ uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
 
   // @提及簇 → useMentions（阶段 7b）：须在 send()（读 mentionCandidates/mentionAllPending）之前；convId 在此处尚未定义，
@@ -1977,6 +1977,7 @@ export default function App() {
   const openReadyFileEv = useEvent(openReadyFile);
   const onPassiveMediaErrorEv = useEvent(onPassiveMediaError);
   const retryUploadEv = useEvent(retryUpload);
+  const resendMessageEv = useEvent(resendMessage);
   const toggleUploadPauseEv = useEvent(toggleUploadPause);
   const toggleSelectedEv = useEvent(toggleSelected);
   const fetchLinkPreviewEv = useEvent(fetchLinkPreview);
@@ -2024,7 +2025,7 @@ export default function App() {
   const chatActions = useMemo<ChatActions>(() => ({
     setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat: locateInChatEv,
     onGateTap: onGateTapEv, onMediaBubbleTap: onMediaBubbleTapEv, openReadyFile: openReadyFileEv, onPassiveMediaError: onPassiveMediaErrorEv,
-    retryUpload: retryUploadEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
+    retryUpload: retryUploadEv, resendMessage: resendMessageEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
     onMediaLoad: onMediaLoadEv, pendingFilesRef,
     jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
     forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, favoriteSelected: favoriteSelectedEv, removePastedImage: removePastedImageEv,
