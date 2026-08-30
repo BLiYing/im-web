@@ -18,6 +18,7 @@ import { isOnline, presenceFromConversation, presenceText, type Presence } from 
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
 import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
+import { sysSegmentName } from "./sysSegments";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
 import type { DetailTab } from "./components/DetailTabs";
@@ -2286,7 +2287,10 @@ export default function App() {
     if (c.last_message.content_type === "system") {
       return c.last_message.sys_segments?.length
         ? c.last_message.sys_segments
-            .map((seg) => (seg.uid ? displayNameOf(seg.uid, remarks, memberNick(c.conv_id, seg.uid) || seg.text) : seg.text))
+            .map((seg) => (seg.uid
+              // 我自己 → 「我」，与聊天页系统行同口径（sysSegmentName）。
+              ? sysSegmentName(seg.uid, uid, (id) => displayNameOf(id, remarks, memberNick(c.conv_id, id) || seg.text))
+              : seg.text))
             .join("")
         : c.last_message.content;
     }

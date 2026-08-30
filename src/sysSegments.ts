@@ -23,3 +23,11 @@ export function parseSysSegments(raw: unknown): SysSegment[] | undefined {
 export function sysSegmentsText(segs: SysSegment[] | undefined): string | undefined {
   return segs?.length ? segs.map((s) => s.text).join("") : undefined;
 }
+
+/** 系统消息名字段在**本机**的显示名。唯一硬规则：**是我自己就显示「我」**——
+ *  「用户1002 将 用户3001 移出群聊」里那个 `用户1002` 就是登录者本人，照着服务端字面显示读起来像在说别人。
+ *  其余交给 resolve（备注 > 群昵称 > 昵称 > 服务端字面）。
+ *  聊天页系统行与会话列表预览是**同一句话**，共用本函数以免两处口径漂移（一处「我」一处自己的昵称）。 */
+export function sysSegmentName(uid: string, selfUid: string, resolve: (uid: string) => string): string {
+  return uid.length > 0 && uid === selfUid ? "我" : resolve(uid);
+}

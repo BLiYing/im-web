@@ -5,6 +5,14 @@
 
 ## 当前焦点
 
+> **群系统消息可读性两条（2026-08-30 用户反馈；`tsc -b` + **vitest 672 全绿**（+5：sysSegmentName 3 例）；未在浏览器手测）**：
+> - **`.sys-name` 不再用 `--accent`**：胶囊底 `--date-pill-bg` 是 `rgba(92,138,76,.55)`（主题绿），
+>   名字再染 `--accent`(#4ca64c) 两者色相几乎重合。改 `--on-media`(白) + `font-weight:600`，
+>   可点性交给 hover 下划线。
+> - **我自己那段显示「我」**：新 `sysSegments.ts#sysSegmentName(uid, selfUid, resolve)`，
+>   **聊天页系统行（`MessageList.renderSysLine`）与会话列表预览（`App.convPreview`）共用**——
+>   不共用就会一处「我」、一处自己的昵称。`renderSysLine` 因此多收一个 `uid` 参数。
+
 > **转发选择器不再列「系统通知」会话（2026-08-30；`tsc -b` 绿 + `ForwardPicker.test.tsx` 9 例绿，
 > **按用户要求未跑全量 vitest**）**：与 iOS 同批做，后端零改动。
 > - `ForwardPicker` 内新增 `selectable = conversations.filter(c => c.is_group || c.peer !== SYSTEM_UID)`；

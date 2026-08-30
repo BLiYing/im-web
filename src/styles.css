@@ -343,7 +343,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .sys-line { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
 .sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); text-align: center; max-width: 80%; padding: 3px 12px; border-radius: 999px; } /* 999px：字号放大后仍保持胶囊形（写死 11px 会退化成方角） */
 /* 系统消息里的人名：强调色 + 可点进资料页。inline 按钮，不能带边框/内边距，否则会撑开胶囊。 */
-.sys-name { display: inline; padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; }
+/* 名字段用**同色加粗**而不是主色：胶囊底 --date-pill-bg 就是主题绿 rgba(92,138,76,.55)，
+   再把名字染成同样是绿的 --accent(#4ca64c)，两者色相几乎重合、看不出哪几个字是名字（2026-08-30 反馈）。
+   白+600 在浅色绿底与深色黑底上都稳定可读；可点性交给 hover 下划线。 */
+.sys-name { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; color: var(--on-media); cursor: pointer; }
 .sys-name:hover { text-decoration: underline; }
 /* 撤回消息的"重新编辑"链接按钮（微信式，紧随撤回系统行）。 */
 .reedit-btn { background: none; border: none; color: var(--accent); font-size: var(--sys-font); cursor: pointer; padding: 0; } /* 跟撤回系统行同字号联动 */

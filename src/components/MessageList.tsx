@@ -12,6 +12,7 @@ import { albumMembers, isAlbumLeader, isAlbumMember, msgKey } from "../album";
 import { formatTime, isSameDay, dayHeader, type TimeFormat } from "../time";
 import { FileTypeIcon } from "../FileTypeIcon";
 import { formatFileSize } from "../fileMetadata";
+import { sysSegmentName } from "../sysSegments";
 import { formatMediaDuration, formatUploadProgress } from "../media";
 import { downloadGlyph, downloadText, type DownloadState, type MediaKind } from "../download";
 import {
@@ -142,7 +143,7 @@ export function MessageList(p: MessageListProps) {
               {i === firstUnreadIdx && (
                 <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
               )}
-              <div className="sys-line"><span>{renderSysLine(m, localNameOf, openPeerDetail)}</span></div>
+              <div className="sys-line"><span>{renderSysLine(m, uid, localNameOf, openPeerDetail)}</span></div>
             </div>
           );
         }
@@ -545,6 +546,7 @@ export function MessageList(p: MessageListProps) {
  *  历史系统消息（服务端当时没存分段）走回退分支：名字仍是当时的昵称、不可点。 */
 function renderSysLine(
   m: ChatMessage,
+  uid: string,
   localNameOf: (uid: string, convId: string, fallback?: string) => string,
   openPeerDetail: (uid: string) => void,
 ): ReactNode {
@@ -552,7 +554,7 @@ function renderSysLine(
   return m.sysSegments.map((seg, i) =>
     seg.uid ? (
       <button key={i} type="button" className="sys-name" onClick={() => openPeerDetail(seg.uid!)}>
-        {localNameOf(seg.uid, m.convId, seg.text)}
+        {sysSegmentName(seg.uid, uid, (id) => localNameOf(id, m.convId, seg.text))}
       </button>
     ) : (
       <Fragment key={i}>{seg.text}</Fragment>
