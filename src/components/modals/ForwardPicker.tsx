@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Check } from "lucide-react";
-import type { Conversation } from "../../sdk/protocol";
+import { SYSTEM_UID, type Conversation } from "../../sdk/protocol";
 import { Avatar } from "../Avatar";
 import { ListSearchInput, isSearching } from "../ListSearchInput";
 import { filterByQuery } from "../../listSearch";
@@ -27,11 +27,17 @@ export function ForwardPicker({
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
+  // 可转发目标 = 会话全集减去「系统通知」单聊：那是只读会话，服务端直接拒 send_msg to=system
+  // （护栏见 IMServer/docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §2.2），列出来只会点了报错。
+  // **过滤放在这一层**：转发消息 / 收藏转发 / 推荐名片三个入口都汇到本组件，一处挡住即可。
+  const selectable = useMemo(
+    () => conversations.filter((c) => c.is_group || c.peer !== SYSTEM_UID),
+    [conversations]);
   // 可见行 = 按显示名（会话备注 > 好友备注 > 昵称 > 群名）与单聊对端 uid 子串匹配。
   // 备注参与匹配是安全的：本选择器只在本机显示，转发出去的是消息本身、不含任何名字。
   const visible = useMemo(
-    () => filterByQuery(conversations, q, (c) => [convDisplayLabel(c), c.peer]),
-    [q, conversations, convDisplayLabel]);
+    () => filterByQuery(selectable, q, (c) => [convDisplayLabel(c), c.peer]),
+    [q, selectable, convDisplayLabel]);
 
   return (
     <Modal className="modal fwd-picker" onClose={onClose}>
@@ -66,9 +72,9 @@ export function ForwardPicker({
           <div className="fwd-actions">
             <button className="link" onClick={onClose}>取消</button>
             <button className="mini-btn" disabled={targets.length === 0}
-              // 刻意遍历 conversations（全量）而非 visible：先勾选、再输入搜索词把它过滤掉的会话
+              // 刻意遍历 selectable（可转发全集）而非 visible：先勾选、再输入搜索词把它过滤掉的会话
               // 仍在 targets 里，按 visible 取就会静默少发一个人。
-              onClick={() => onForward(conversations.filter((c) => targets.includes(c.conv_id)))}>
+              onClick={() => onForward(selectable.filter((c) => targets.includes(c.conv_id)))}>
               发送{targets.length > 0 ? `(${targets.length})` : ""}
             </button>
           </div>

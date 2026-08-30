@@ -5,6 +5,15 @@
 
 ## 当前焦点
 
+> **转发选择器不再列「系统通知」会话（2026-08-30；`tsc -b` 绿 + `ForwardPicker.test.tsx` 9 例绿，
+> **按用户要求未跑全量 vitest**）**：与 iOS 同批做，后端零改动。
+> - `ForwardPicker` 内新增 `selectable = conversations.filter(c => c.is_group || c.peer !== SYSTEM_UID)`；
+>   **可见行与多选「发送」都改读它**——后者若照旧读 `conversations` 全量，勾中系统会话再用搜索把它挡掉，
+>   仍会被发出去。
+> - **过滤放在组件内**而不是 App 调用点：转发消息 / 收藏转发 / 推荐名片三个入口都汇到本组件，一处即全覆盖。
+> - 理由：系统通知是只读会话，服务端直接拒 `send_msg to=system`
+>   （`../IMServer/docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md` §2.2），列出来点了必报错。新增 2 例单测。
+
 > **发送失败重发（2026-08-30，**已合入 main**；`tsc -b` + **vitest 643 全绿**（+7：resendPolicy 6 例、消息列表 1 例）；未手测）**：
 > 与 iOS 同批做，口径两端一致（蓝图见 `../IMServer/docs/CHAT_UX.md` §8.1）。此前 `.fail-badge` 只是个
 > `<span>`，文本/语音完全没有重发；媒体只有「点气泡重传」一条路。

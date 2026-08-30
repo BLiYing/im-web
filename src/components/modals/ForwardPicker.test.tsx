@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ForwardPicker } from "./ForwardPicker";
-import type { Conversation } from "../../sdk/protocol";
+import { SYSTEM_UID, type Conversation } from "../../sdk/protocol";
 
 afterEach(cleanup);
 
@@ -69,6 +69,25 @@ describe("ForwardPicker 单选/多选与合并模式", () => {
     expect(screen.queryByText("a", { selector: ".fwd-item-label" })).toBeNull(); // a 已不可见
     fireEvent.click(screen.getByText(/发送/));
     expect(onForward).toHaveBeenCalledWith([expect.objectContaining({ conv_id: "a" }), expect.objectContaining({ conv_id: "c" })]);
+  });
+
+  // 系统通知是只读会话（服务端拒 send_msg to=system），列出来点了必报错。
+  // 三个入口（转发消息 / 收藏转发 / 推荐名片）都汇到本组件，挡在这一层。
+  it("系统通知会话不出现在列表里，搜索也搜不出来", () => {
+    const sys: Conversation = { ...conv(SYSTEM_UID), peer: SYSTEM_UID };
+    render(<ForwardPicker {...base} conversations={[...convs, sys]} count={1} multi={false} mode="each" targets={[]} />);
+    expect(screen.queryByText(SYSTEM_UID, { selector: ".fwd-item-label" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("搜索会话"), { target: { value: SYSTEM_UID } });
+    expect(screen.getByText("无匹配会话")).toBeTruthy();
+  });
+
+  it("多选态：系统通知即使混进 targets 也不会被发送", () => {
+    const onForward = vi.fn();
+    const sys: Conversation = { ...conv(SYSTEM_UID), peer: SYSTEM_UID };
+    render(<ForwardPicker {...base} conversations={[...convs, sys]} count={1} multi={true} mode="each"
+      targets={["a", SYSTEM_UID]} onForward={onForward} />);
+    fireEvent.click(screen.getByText(/发送/));
+    expect(onForward).toHaveBeenCalledWith([expect.objectContaining({ conv_id: "a" })]);
   });
 
   it("「多选」按钮回传 onToggleMulti", () => {
