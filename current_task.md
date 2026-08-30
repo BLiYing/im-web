@@ -5,7 +5,7 @@
 
 ## 当前焦点
 
-> **发送失败重发（2026-08-30，worktree `feat/resend-failed-msg`；`tsc -b` + **vitest 643 全绿**（+7：resendPolicy 6 例、消息列表 1 例）；未手测）**：
+> **发送失败重发（2026-08-30，**已合入 main**；`tsc -b` + **vitest 643 全绿**（+7：resendPolicy 6 例、消息列表 1 例）；未手测）**：
 > 与 iOS 同批做，口径两端一致（蓝图见 `../IMServer/docs/CHAT_UX.md` §8.1）。此前 `.fail-badge` 只是个
 > `<span>`，文本/语音完全没有重发；媒体只有「点气泡重传」一条路。
 > - 新 `src/resendPolicy.ts`（6 例单测，与 iOS `IMResendPolicyForMessage` 同口径）：
