@@ -22,6 +22,17 @@ describe("pinnedPreview", () => {
     expect(pinnedPreview({ contentType: "image", content: "https://x/a.png" })).toBe("[图片]");
   });
 
+  it("语音显 [语音]（voice 与旧名 audio 都要认，否则横幅铺一串 URL）", () => {
+    expect(pinnedPreview({ contentType: "voice", content: "/uploads/v/a.m4a" })).toBe("[语音]");
+    expect(pinnedPreview({ contentType: "audio", content: "/uploads/v/a.m4a" })).toBe("[语音]");
+  });
+
+  it("合并转发卡片显「[聊天记录] 标题」，不铺整段 JSON", () => {
+    const json = JSON.stringify({ t: "小刚 的聊天记录", items: [{ n: "小刚", ct: "text", c: "在吗" }] });
+    expect(pinnedPreview({ contentType: "chat_record", content: json })).toBe("[聊天记录] 小刚 的聊天记录");
+    expect(pinnedPreview({ contentType: "chat_record", content: "garbled" })).toBe("[聊天记录]");
+  });
+
   it("空文本与未知类型都有兜底，不返回空串", () => {
     expect(pinnedPreview({ contentType: "text", content: "   " })).toBe("（空消息）");
     expect(pinnedPreview({ contentType: "sticker", content: "" })).toBe("[sticker]");

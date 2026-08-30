@@ -90,7 +90,9 @@ export function minSeqOf(messages: ChatMessage[]): number {
 
 /** 合并转发「聊天记录」结构（与 iOS chat_record 一致）：t=标题,
  *  items=[{n发送者, ct类型, c内容/URL, 文件另带 fn文件名/fs字节数}]。老记录无 fn 时从 URL 反推原名兜底。 */
-export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number; cap?: string };
+/** 合并转发条目。fn/fs=文件原名与字节数；d/w=语音时长(ms)与波形 base64；cap=图说随附文本。
+ *  key 与 iOS `mergedForwardJSONForMessages` 逐字对齐——两端读写同一份 JSON。 */
+export type RecordItem = { n: string; ct: string; c: string; fn?: string; fs?: number; cap?: string; d?: number; w?: string };
 export type ChatRecord = { t: string; items: RecordItem[] };
 export function parseChatRecord(content: string): ChatRecord {
   try {
@@ -105,9 +107,14 @@ export const recordItemPreview = (it: RecordItem): string => {
   if (it.ct === "image") return "[图片]";
   if (it.ct === "video") return "[视频]";
   if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();
+  if (it.ct === CONTACT_CONTENT_TYPE) return contactCardPreview(it.c);
+  // 语音条目：预览显 [语音] m:ss（有 d 才带时长），别把 URL 铺进套娃卡片的两行预览里。
+  if (it.ct === "voice" || it.ct === "audio") {
+    const sec = Math.max(0, Math.floor((it.d ?? 0) / 1000));
+    return it.d ? `[语音] ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : "[语音]";
+  }
   // 嵌套合并转发：预览显「[聊天记录] 子标题」，不铺子卡片 JSON 原文（套娃卡片）；
   // 子 JSON 非法时 parseChatRecord 回落标题「聊天记录」，此时不再叠加以免「[聊天记录] 聊天记录」。
-  if (it.ct === CONTACT_CONTENT_TYPE) return contactCardPreview(it.c);
   if (it.ct === "chat_record") {
     const t = parseChatRecord(it.c).t;
     return t && t !== "聊天记录" ? `[聊天记录] ${t}` : "[聊天记录]";
@@ -164,6 +171,17 @@ export function videoFrameSrc(url: string): string {
  */
 export function syntheticViewerMessage(clientMsgId: string, content: string, kind: "image" | "video"): ChatMessage {
   return { clientMsgId, convId: "", from: "", content, contentType: kind, convSeq: 0, timestamp: 0, status: "sent" };
+}
+
+/** 合并转发记录里的语音条目 → 供 VoiceBubble(mini) 渲染的临时 ChatMessage。
+ *  d/w 是打包端随包带的时长与波形；老记录没这两个字段时退化成等高条纹 + 0:00，仍可播。
+ *  clientMsgId 带行号：同一条语音在记录里出现多次时，两行不能共用一个播放态。 */
+export function recordVoiceMessage(it: RecordItem, index: number): ChatMessage {
+  return {
+    clientMsgId: `rec-voice-${index}-${it.c}`, convId: "", from: "",
+    content: it.c, contentType: "voice", duration: it.d ?? 0, waveform: it.w,
+    convSeq: 0, timestamp: 0, status: "sent",
+  };
 }
 
 // convSeq 置 1（快照非引用，仅为过合并转发的 convSeq>0 守卫）；from=source_from 保留最初作者链。

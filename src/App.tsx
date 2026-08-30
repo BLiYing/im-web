@@ -1019,6 +1019,9 @@ export default function App() {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
     forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected, setForwardVerb,
   } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode });
+  // 收藏「来自X」补拉到的个人名片（uid→名片）与"已试过"集合，见下方 useEffect。
+  const [favUserCards, setFavUserCards] = useState<Record<string, UserCard>>({});
+  const favResolveTriedRef = useRef<{ groups: Set<string>; users: Set<string> }>({ groups: new Set(), users: new Set() });
   // 收藏簇 → useFavorites（阶段 6）：消费 useForward 的 setForwardMode/setForwarding/sendForwardToTarget。
   const {
     favorites, setFavorites, favPick, favTotal, favLoadingMore, loadMoreFavorites,
@@ -2080,6 +2083,40 @@ export default function App() {
   const { qrScan, setQrScan, qrCardModal, setQrCardModal, qrResult, setQrResult, handleScanRaw, openMyCard, openGroupCard, resetQRCard, qrResultActions } =
     useQR({ phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshFriends, refreshConversations, openPeerDetailRef });
 
+  // 收藏「来自X」缺名补齐（**必须在登录早退之前**：hook 数每次渲染要一致）。
+  // groupInfos 只在**打开过**那个群时才有成员表，friends 又只覆盖好友——于是"没聊过的群里、
+  // 非好友发的收藏"来源名一律露出 10 位内部 ID（用户反馈）。这里按需两级补拉：先拉群资料
+  // （拿群昵称，与聊天里看到的名字一致），仍缺再拉个人名片。每个 id 只发一次（成功与否都记进
+  // favResolveTriedRef），失败静默——来源名不值得打断浏览收藏。
+  // 判据**不复用**下方的 favSourceLabel：那是早退之后定义的 const，写进这里就等着 TDZ。
+  useEffect(() => {
+    if (!favorites) return;
+    const client = clientRef.current;
+    if (!client) return;
+    const tried = favResolveTriedRef.current;
+    for (const f of favorites) {
+      const from = f.source_from;
+      if (!from || from === uid) continue;
+      const cid = f.source_conv_id || "";
+      const known = remarks.has(from)
+        || friends.some((x) => x.user_id === from)
+        || !!groupInfos[cid]?.members.some((x) => x.user_id === from)
+        || !!favUserCards[from];
+      if (known) continue;
+      if (cid.startsWith("g_") && !groupInfos[cid] && !tried.groups.has(cid)) {
+        tried.groups.add(cid);
+        void refreshGroupInfo(cid); // 成员表回来后 groupInfos 变化 → 本 effect 重跑，仍缺的转走名片补拉
+        continue;
+      }
+      if (!tried.users.has(from)) {
+        tried.users.add(from);
+        void client.userProfile(from)
+          .then((u) => setFavUserCards((m) => ({ ...m, [from]: u })))
+          .catch(() => undefined); // 已注销/网络失败：保持内部 ID 占位
+      }
+    }
+  }, [favorites, groupInfos, friends, remarks, favUserCards, uid, refreshGroupInfo]);
+
   // ---- 登录 ----
   if (phase === "login") {
     return (
@@ -2252,7 +2289,13 @@ export default function App() {
     if (f.source_from === uid) return "我";
     const fr = friends.find((x) => x.user_id === f.source_from);
     if (fr) return friendLabel(fr);
-    return memberNick(f.source_conv_id, f.source_from) || f.source_from;
+    const nick = memberNick(f.source_conv_id, f.source_from);
+    if (nick) return displayNameOf(f.source_from, remarks, nick);
+    // 补拉到的名片（见下方 useEffect）：备注 > 昵称 > @句柄。仍没有才回退内部 ID——
+    // 这个回退值同时是"尚未解析"的判据，补齐逻辑照它筛。
+    const card = favUserCards[f.source_from];
+    if (card) return displayNameOf(f.source_from, remarks, card.nickname, card.username);
+    return f.source_from;
   };
   // 会话列表预览的类型占位。**voice 与 contact 需要 content_type 之外的东西**（时长 / 名片快照里的昵称），
   // 故 extra 带 content——曾漏给 contact 传 content，预览直接把 {"u":"1002",…} 整串 JSON 显在列表上
@@ -3036,6 +3079,7 @@ export default function App() {
       {recordView && (
         <RecordModal
           view={recordView}
+          uid={uid}
           canGoBack={recordStack.length > 1}
           nestedAt={(i) => recordNested.get(i)}
           onBack={() => setRecordStack((s) => s.slice(0, -1))}

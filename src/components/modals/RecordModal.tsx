@@ -1,19 +1,22 @@
 import { ChevronLeft, IdCard } from "lucide-react";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, parseChatRecord, recordItemPreview, type ChatRecord } from "../../messageContent";
+import { fileNameFromContent, parseChatRecord, recordItemPreview, recordVoiceMessage, type ChatRecord } from "../../messageContent";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { Avatar } from "../Avatar";
 import { formatFileSize } from "../../fileMetadata";
 import { Modal } from "../Modal";
 import { VideoThumb } from "../VideoThumb";
+import { VoiceBubble } from "../VoiceBubble";
 
 /** 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器；
  *  嵌套合并转发条目 → 套娃 mini 卡片，点击入栈下钻（栈深 >1 时显返回）。
  *  纯展示：栈操作/打开查看器/子记录缓存由 App 注入。 */
-export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpenMedia, onOpenContact, onClose }: {
+export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, onOpenMedia, onOpenContact, onClose }: {
   view: ChatRecord; // 栈顶层
   canGoBack: boolean; // 栈深 > 1
   nestedAt: (index: number) => ChatRecord | undefined; // recordNested 缓存
+  /** 当前登录 uid：VoiceBubble 的"已播过"集合按 uid 分桶。 */
+  uid: string;
   onBack: () => void;
   onDrill: (sub: ChatRecord) => void;
   onOpenMedia: (index: number, content: string, kind: "image" | "video") => void;
@@ -45,6 +48,13 @@ export function RecordModal({ view, canGoBack, nestedAt, onBack, onDrill, onOpen
                   <span>{it.fn || fileNameFromContent(it.c)}</span>
                   {it.fs ? <span className="msg-file-size">{formatFileSize(it.fs)}</span> : null}
                 </a>
+              ) : it.ct === "voice" || it.ct === "audio" ? (
+                // 语音条目 → 与详情页语音 tab / 收藏页语音行同一迷你播放器（此前落到最后的
+                // .record-item-text 分支，屏幕上是一串裸 URL）。mine=false：记录是"别人说的话"视角，
+                // 且 mini 变体本就不显勾与时间。
+                <div className="record-item-voice">
+                  <VoiceBubble m={recordVoiceMessage(it, i)} mine={false} uid={uid} audioSrc={it.c} variant="mini" />
+                </div>
               ) : it.ct === "chat_record" ? (
                 // 套娃 mini 卡片：标题 + 前 2 行预览 + 脚注；点击入栈进子记录（任意深度）。sub 走 nestedAt 缓存。
                 (() => { const sub = nestedAt(i) ?? parseChatRecord(it.c); return (

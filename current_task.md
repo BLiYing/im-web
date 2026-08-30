@@ -5,37 +5,36 @@
 
 ## 当前焦点
 
-> **网络恢复秒连（2026-08-30；`tsc -b` + **vitest 676 全绿**（+4：wakeActionFor）；**未在浏览器手测**）**：
-> 原先断网恢复后最坏要等完 16~30s 的指数退避档才重连。
-> - 新 `src/sdk/wake.ts`：判据纯函数 `wakeActionFor(state, manualClose)`（与 iOS `IMSocketWakeActionFor` 同口径）
->   + `installWakeListeners`（`online` / `visibilitychange`，返回拆除函数）。三条"不该做"逐条有单测：
->   manualClose 后不连、连接中不连、已连接只 `probe` 不重连。
-> - `IMClient` 只留薄入口 `reconnectNow(reason)`；监听在 `connect`/`connectWithToken` 装、`disconnect` 拆——
->   **换号会新建 IMClient 并断开旧的，不拆则旧实例跟着醒来重连**，把已作废的会话拉回来
->   （这个坑 2026-08-22 以"旧 client 拿已吊销 token 探活把新会话踢回登录页"的形态出现过）。
-> - **代价**：`check-file-size.sh` 里 `imSdk.ts` 预算 1450 → **1465**。判据与 DOM 监听都已抽到 `wake.ts`，
->   类里剩的是接线口（连接活性本就是这个类的职责），再往外拆就是为凑数字硬拆。**这是一次"只准降不准升"的破例，
->   记在这里等复查。**
+> **收藏页 / 详情页 / 置顶 / 记录卡 五项 UI 修复（2026-08-30，与 iOS 同步；`tsc -b` + **vitest 679 全绿**
+> （+3：置顶 voice/chat_record 两例、记录条目 voice 预览一例）；**未在浏览器手测**）**
+>
+> 1. **置顶预览** `src/pinned.ts`：只认 `audio` 不认 `voice`、且无 `chat_record` 分支 → 语音置顶铺一串 URL、
+>    合并转发卡片铺整段 JSON。现统一 `[语音]` / `chatRecordSnippet()` 的 `[聊天记录] 标题`。
+> 2. **收藏「来自X」不再露 10 位内部 ID**：`groupInfos` 只在**打开过**那个群时才有成员表、`friends` 只覆盖好友
+>    → "没聊过的群里、非好友发的收藏"全回退 uid。`App.tsx` 加按需两级补拉 effect（先 `refreshGroupInfo`
+>    拿群昵称，仍缺再 `client.userProfile`），每个 id 只发一次、失败静默。
+>    **effect 与 `favUserCards` state 放在登录早退之前**（hook 数恒定），判据不复用早退之后定义的
+>    `favSourceLabel`（那会 TDZ）。
+> 3. **收藏副行时间与「来自X」拆两行 + 颜色分开**（新 `FavMeta` 组件；`.fav-src` 改 accent，与链接卡来源行同色）：
+>    长备注名会把时间挤没。名片行的「由 X 分享」从 `ContactRow` 副行拆成第三行（`.contact-row-source`）。
+>    顺手去掉链接分类里重复的来源（`DetailLinkItem` 的 `source` prop 与 `FavMeta` 各显一遍）。
+> 4. **详情页链接 tab 时间改 `detailFullDateTime`**（原「今日 HH:mm / 昨天 / M月d日」，同页四 tab 两套语言）；
+>    **文件 tab 补上原本完全没有的时间行**（`.detail-file-time`）。
+> 5. **`.detail-tabs` 横向可滚**：`flex:1` 等分在 6 签时把每格压到放不下两个字。改 `flex:1 0 auto` + `min-width`
+>    + 容器 `overflow-x:auto`（够放时仍等分铺满，同旧行为）。收藏的 `.fav-chips` 本就可滚，无需改。
+> 6. **合并转发记录弹窗**：语音条目原先落 `.record-item-text` 铺裸 URL → 改用 `VoiceBubble variant="mini"`
+>    （与详情页语音 tab / 收藏语音行同一组件）。打包端 `useForward.ts` 补 `d`（时长）/`w`（波形）两个 key
+>    （与 iOS 同约定），老记录无这两项时退化成等高条纹 + 0:00 仍可播。`recordItemPreview` 补 voice 分支。
+>    名片条目 Web 本就是卡片，无需改（iOS 那侧此次才补上）。
 
-> **`UI_COLOR.md` 收敛为「跨端主文档 + 本端补充」（2026-08-30，纯文档）**：本端这份开头一直写着
-> 「由 iOS 那份同步并适配」——是**复制**不是引用，109 vs 120 行早已分叉。现在跨端共同规则
-> （语义令牌总表、文本层级、页面/卡片/输入口径、聊天个性化、深色验收清单、检查清单）搬进
-> `../IMServer/docs/UI_COLOR.md`，**本端只留 Web 平台特有**：`:root` 声明纪律与迁移期别名、
-> **卡片/Modal/浮层菜单三层用色不可互借**（`--glass-menu-*` + `@supports` 兜底）、根壁纸层唯一性、
-> `--app-gap` 桌面布局、深色具体取值（`#242424`/`#1f1f1f`、选中态 24%/32%）、PWA 图标。
-> 109 → 69 行。`CLAUDE.md`/`AGENTS.md`/`CODING_STYLE.md` 的指引**不用改**——本端这份第一句就指向主文档
-> （与 `docs/LOGGING.md` 同一套分工）。
-
-> **无进行中的开发项。** 2026-08-30 三批（单聊资料卡收口 5 条 / 群系统消息可读性 2 条 /
-> 转发选择器排除系统通知）**用户已验收通过并提交**；细节转入 `current_task.archive.md`。
-> 仍**未做**的是「下一步」里那几件：浏览器手测语音、转文字 P2 调研、网络恢复秒连、列表虚拟化。
+> **无其它进行中的开发项。** 网络恢复秒连与 `UI_COLOR.md` 收敛（均 2026-08-30）已完成，细节转入
+> `current_task.archive.md`。仍**未做**的是「下一步」里那几件：浏览器手测语音、转文字 P2 调研、列表虚拟化。
 
 ## 下一步
 1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
 2. Web 转文字 P2 方案调研（Whisper.wasm on-device vs 服务端 ASR）。
-3. 网络恢复秒连：听 `online` 事件跳过退避立即重连。
-4. 群内已读细化（随主线）。
-5. 消息列表虚拟化；测试债：Playwright E2E。
+3. 群内已读细化（随主线）。
+4. 消息列表虚拟化；测试债：Playwright E2E。
 
 ## 技术债 / 下次
 - **`src/App.tsx` 系统性拆分 ✅ 收口（2026-08-21，6302 → 2958 行；详情已归档）**。**剩余 2958 行 = 应用外壳本体**（44 个核心 state/连接/phase 路由 + enterApp 173 行 + 滚动·定位·已读核心 ~320 行·20 个互咬 ref + conversationActions 菜单表 160 行/43 依赖 + send() 编排 + 子组件组装接线）——均为 §7 点名的胶水，**不再硬抽**；新功能按决策树进新文件即可。

@@ -32,6 +32,11 @@ describe("chat_record 合并转发解析与预览", () => {
     expect(recordItemPreview({ n: "a", ct: "file", c: "x", fn: "报表.xlsx" })).toBe("[文件] 报表.xlsx");
   });
 
+  it("语音条目预览 = [语音] m:ss（无 d 的老记录退化成 [语音]），不铺裸 URL", () => {
+    expect(recordItemPreview({ n: "a", ct: "voice", c: "/uploads/v/x.m4a", d: 12400 })).toBe("[语音] 0:12");
+    expect(recordItemPreview({ n: "a", ct: "voice", c: "/uploads/v/x.m4a" })).toBe("[语音]");
+  });
+
   it("嵌套 chat_record 条目预览 = [聊天记录] 子标题（不铺 JSON 原文）", () => {
     const child = JSON.stringify({ t: "1002和1003的聊天记录", items: [{ n: "1002", ct: "text", c: "在吗" }] });
     const preview = recordItemPreview({ n: "1001", ct: "chat_record", c: child });

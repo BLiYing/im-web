@@ -62,6 +62,19 @@ export function favDate(ts: number): string {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
+/** 行副信息：**时间与「来自X」分两行、颜色分开**（时间 tertiary / 来源 accent，与链接卡的来源行同色）。
+ *  曾挤成一行「来自X · 年月日时分」：备注名或群昵称一长，时间就被截没（用户反馈）。
+ *  与 iOS `IMFavoriteRowCell` / `IMFavoriteVoiceCell` / `IMDetailFileCell` 同款两行布局。 */
+export function FavMeta({ source, ts }: { source: string; ts: number }) {
+  const t = favDate(ts);
+  return (
+    <div className="fav-meta">
+      {t && <span className="fav-time">{t}</span>}
+      {source && <span className="fav-src">来自{source}</span>}
+    </div>
+  );
+}
+
 /** 行右槽：pick 模式=可点勾选框（独立触发，不冒泡给行 onClick）；browse=删除 ✕ 快捷。
  *  勾选框 onClick 必带 stopPropagation——否则外层行 onClick（打开预览/播放/链接）会同时触发。
  *  checkClass 让宫格覆盖层（fav-tile-check）复用同一个勾选框，勿再另写一份。 */
@@ -148,7 +161,8 @@ export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onChe
         <span className="detail-file-name">{name}</span>
         {f.caption && <span className="fav-caption">{f.caption}</span>}
         {meta && <span className="detail-file-size">{meta}</span>}
-        <span className="fav-src">来自{sourceLabel(f)}{favDate(f.created_at) && ` · ${favDate(f.created_at)}`}</span>
+        {favDate(f.created_at) && <span className="fav-time">{favDate(f.created_at)}</span>}
+        <span className="fav-src">来自{sourceLabel(f)}</span>
       </span>
       <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
     </div>
@@ -167,10 +181,7 @@ export function FavVoiceRow({ f, on, pickMulti, sourceLabel, uid, mediaSrc, onCh
     <div className={`fav-item voice${pickMulti && on ? " on" : ""}`} onContextMenu={onMenu}>
       <div className="fav-main">
         <VoiceBubble m={m} mine={false} uid={uid} audioSrc={mediaSrc(m)} variant="mini" />
-        <div className="fav-meta">
-          <span className="fav-src">来自{sourceLabel(f)}</span>
-          {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
-        </div>
+        <FavMeta source={sourceLabel(f)} ts={f.created_at} />
       </div>
       <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
     </div>
@@ -211,14 +222,11 @@ export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onCheck, onMenu
     return (
       <div className={`fav-item link${pickMulti && on ? " on" : ""}`} onClick={onClick} onContextMenu={onMenu}>
         <div className="fav-linkbody">
+          {/* 来源与时间统一由下方 FavMeta 承担；这里再传 source 会让「来自X」在同一张卡上出现两次。 */}
           <DetailLinkItem url={url} timeText="" fetchPreview={fetchLinkPreview}
-            source={sourceLabel(f)}
             onOpen={onClick} onContextMenu={onMenu} />
           {originalText && <div className="fav-linkquote">「{originalText}」</div>}
-          <div className="fav-meta">
-            <span className="fav-src">来自{sourceLabel(f)}</span>
-            {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
-          </div>
+          <FavMeta source={sourceLabel(f)} ts={f.created_at} />
         </div>
         <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
       </div>
@@ -238,10 +246,7 @@ export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onCheck, onMenu
       <div className={`fav-icon ${k}`}>{icon}</div>
       <div className="fav-main">
         {body}
-        <div className="fav-meta">
-          <span className="fav-src">来自{sourceLabel(f)}</span>
-          {favDate(f.created_at) && <> · {favDate(f.created_at)}</>}
-        </div>
+        <FavMeta source={sourceLabel(f)} ts={f.created_at} />
       </div>
       <FavTrailing pickMulti={pickMulti} on={on} onDelete={onDelete} />
     </div>

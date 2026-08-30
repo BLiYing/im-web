@@ -17,28 +17,13 @@ import { parseContactCard } from "../contactCard";
 import { VoiceBubble } from "./VoiceBubble";
 import type { LinkPreview } from "./LinkCard";
 
-/** 语音 tab 完整时间（2026-08-27 拍板："年月日 时:分"，与 iOS IMFormatFileDateTime 对齐）。 */
+/** 详情页各 tab 的统一时间口径（"年月日 时:分"，与 iOS IMFormatFileDateTime 对齐）：
+ *  语音 / 名片 / 文件 / 链接四个 tab 共用一套格式，别再各写各的。 */
 function detailFullDateTime(ts: number): string {
   if (!ts || ts <= 0) return "";
   const d = new Date(ts);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
-// 详情页链接 tab 的时间格式（草图 §C：HH:mm / 昨天 HH:mm / M月d日）——先用最小实现：
-// 今日→HH:mm；昨日→"昨天 HH:mm"；更早→"M月d日"（跨年不特殊，年份不显）。iOS 侧沿用 IMFormatFileDateTime 完整时间，
-// 视觉略有出入但语义一致（快速迭代，等收藏页 §E 统一改造再对齐）。
-function detailLinkTimeText(ts: number): string {
-  if (!ts || ts <= 0) return "";
-  const d = new Date(ts);
-  const now = new Date();
-  const sameDay = d.toDateString() === now.toDateString();
-  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (sameDay) return hm;
-  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${hm}`;
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
 }
 
 export type DetailTab = "members" | "media" | "files" | "voice" | "links" | "contacts";
@@ -166,6 +151,9 @@ export function DetailTabs({
                               : downloadText(gate, formatFileSize(m.fileSize)))
                           : (formatFileSize(m.fileSize) || "")}
                       </span>
+                      {/* 文件行第三行 = 收到/发出时间（与语音/名片/链接 tab 同一「年月日 时:分」口径）。
+                          曾整个文件 tab 不显时间，四个 tab 里只有它看不出这份文件是什么时候的（用户反馈）。 */}
+                      <span className="detail-file-time">{detailFullDateTime(m.timestamp)}</span>
                     </span>
                   </div>
                 );
@@ -205,7 +193,7 @@ export function DetailTabs({
                 const url = firstURLInText(m.content) || m.content;
                 return (
                   <DetailLinkItem key={msgKey(m)} url={url}
-                    timeText={detailLinkTimeText(m.timestamp)}
+                    timeText={detailFullDateTime(m.timestamp)}
                     fetchPreview={fetchLinkPreview}
                     onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }} />
                 );

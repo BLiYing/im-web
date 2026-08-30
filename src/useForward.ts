@@ -66,6 +66,11 @@ export function useForward(d: ForwardDeps) {
           ...(m.contentType === "file"
             ? { fn: m.fileName || fileNameFromContent(m.content), ...(m.fileSize ? { fs: m.fileSize } : {}) }
             : {}),
+          // 语音条目携带时长与波形（d/w，与 iOS 同约定）——收端记录卡才画得出真正的语音气泡；
+          // 缺了就只有一条 URL，读端要么铺裸链接、要么画一个 0:00 的空播放器。
+          ...((m.contentType === "voice" || m.contentType === "audio")
+            ? { ...(m.duration ? { d: m.duration } : {}), ...(m.waveform ? { w: m.waveform } : {}) }
+            : {}),
           // 图说条目携带 caption（cap，与 iOS 同 key）——收端记录卡「有字显字」，不再只显 [图片]。
           ...(m.caption ? { cap: m.caption } : {}),
         }));

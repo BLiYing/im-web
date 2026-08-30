@@ -481,8 +481,11 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fav-content.link { color: var(--accent); -webkit-line-clamp: 2; }
 .fav-content.filename { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; -webkit-line-clamp: 1; display: block; }
 .fav-record-count { color: var(--text-secondary); font-size: 13px; }
-.fav-meta { font-size: 13px; color: var(--text-tertiary); }
-.fav-meta .fav-src { color: var(--text-secondary); }
+/* 副信息两行：时间（tertiary）在上、「来自X」（accent，同链接卡来源行）在下。
+   曾单行「来自X · 年月日时分」，长备注名把时间挤没。 */
+.fav-meta { display: flex; flex-direction: column; gap: 1px; font-size: 12px; color: var(--text-tertiary); min-width: 0; }
+.fav-time { font-size: 12px; color: var(--text-tertiary); }
+.fav-src { font-size: 12px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fav-caption { font-size: 13px; color: var(--text-secondary); } /* 图说整体收藏：快照下方随附文字 */
 .fav-del { align-self: center; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px; flex-shrink: 0; }
 /* pick 勾选框：button + stopPropagation 独立触发；`checkbox` 基类由 shared 提供圆边+选中态。 */
@@ -775,6 +778,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .contact-row-body { flex: 1; min-width: 0; }
 .contact-row-name { font-size: 15px; color: var(--text);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contact-row-source { font-size: 12px; color: var(--accent); margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-row-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .contact-row-time { margin-left: auto; font-size: 12.5px; color: var(--text-secondary);
@@ -783,6 +788,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .record-item { padding: 8px 0; border-bottom: 1px solid var(--separator); }
 .record-item-name { font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; }
 .record-item-media { max-width: 200px; max-height: 200px; border-radius: 6px; cursor: pointer; display: block; }
+/* 语音条目：迷你播放器（▶+波形+时长），宽度与图片条目同一视觉档位。 */
+.record-item-voice { max-width: 260px; }
 .record-item-text { white-space: pre-wrap; word-break: break-word; }
 .record-item-cap { margin-top: 4px; white-space: pre-wrap; word-break: break-word; } /* 图说条目随附文本 */
 /* 套娃：详情页里的嵌套合并转发条目 = mini 卡片；标题栏用统一 icon-btn 返回，按钮与标题中线对齐 */
@@ -1236,8 +1243,11 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .switch:disabled { opacity: .5; cursor: default; }
 
 /* 页签 */
-.detail-tabs { display: flex; gap: 4px; padding: 4px; margin: 16px 16px 0; background: var(--card-bg); border-radius: 10px; }
-.detail-tab { flex: 1; padding: 8px 4px; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); font-size: 14px; cursor: pointer; }
+/* 页签条横向可滚：签多了（群聊 6 签：成员/媒体/文件/语音/链接/名片）等分会把每格压到放不下两个字，
+   再多就直接看不全。给每格一个 min-width 下限并让容器 overflow-x 滚动——够放时仍是等分铺满（同旧行为）。 */
+.detail-tabs { display: flex; gap: 4px; padding: 4px; margin: 16px 16px 0; background: var(--card-bg); border-radius: 10px; overflow-x: auto; scrollbar-width: none; }
+.detail-tabs::-webkit-scrollbar { display: none; }
+.detail-tab { flex: 1 0 auto; min-width: 52px; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); font-size: 14px; cursor: pointer; white-space: nowrap; }
 .detail-tab.active { background: var(--accent); color: var(--on-accent); }
 .detail-tabbody { margin: 12px; }
 
@@ -1270,6 +1280,7 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .detail-file-body { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
 .detail-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .detail-file-size { color: var(--text-secondary); font-size: 12px; }
+.detail-file-time { color: var(--text-tertiary); font-size: 12px; }
 .detail-empty { text-align: center; color: var(--text-secondary); padding: 32px 0; font-size: 14px; }
 
 /* 详情页 / 收藏页链接 tab 的 URL 卡（草图 §C/§D）：36×36 favicon + t1/t2/t3。
