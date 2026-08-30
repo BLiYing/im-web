@@ -1,9 +1,9 @@
 // voiceRecorder.ts —— Web 语音录制（P1，Telegram 布局：输入栏原地 morph 成录制条）。
 //
 // 设计参见 IMServer docs/design/VOICE_MESSAGE_DESIGN.md §4/§9：
-//   - AAC 兼容探测：MediaRecorder.isTypeSupported('audio/mp4') → 支持才允许录制；
-//     不支持 → mic 按钮置灰 + tooltip"当前浏览器不支持录制语音，可在 App 内发送"。
-//     绝不产出 webm/opus——iOS AVFoundation 解不了。
+//   - AAC 兼容探测（见 voiceRecordingSupported）：**点名 AAC 的 mime 优先**，裸 audio/mp4 只在浏览器
+//     不支持 opus-in-mp4 时才用；都不行 → mic 按钮置灰 + tooltip"当前浏览器不支持录制语音，可在 App 内发送"。
+//     绝不产出 opus（不论装在 webm 还是 mp4 里）——iOS AVFoundation 解不了，且会让 AVAudioPlayer 除零崩溃。
 //   - 采样：AnalyserNode 每 100ms 取 RMS → 0~100 百分比 → base64 waveform（≤120 字节）。
 //   - 时长上限 5min（超上限自动停并进入待发送态）；<0.6s 提示"说话时间太短"并丢弃。
 
@@ -23,18 +23,22 @@ export interface VoiceRecordingResult {
   waveformBase64: string;
 }
 
-/** 探测浏览器是否支持产出 iOS 可播的音频（audio/mp4 优先，audio/aac 次之）。 */
+/** 探测浏览器是否支持产出 **iOS 可播** 的音频。
+ *
+ *  ⚠️ 不能只问 `isTypeSupported('audio/mp4')`：**Chrome 会把 Opus 塞进 MP4 容器**，这个探测照样返回 true，
+ *  于是录出一份"扩展名 .m4a、内容是 Opus"的文件。iOS 解不了 Opus，且 `AVAudioPlayer` 拿到
+ *  `framesPerPacket == 0` 的流会在 AVFAudio 内部**除零崩溃**（EXC_ARITHMETIC，整个 App 当场没，
+ *  2026-08-30 实测；iOS 侧已加 `IMVoiceFileIsPlayable` 兜底，但源头不该产出这种文件）。
+ *  所以：**先问点名 AAC 的 mime**；裸 `audio/mp4` 只在浏览器明确**不**支持 opus-in-mp4 时才敢用
+ *  （Safari 就属于这类）。宁可置灰 mic 按钮，也不产出对端播不了的消息。 */
 export function voiceRecordingSupported(): { supported: boolean; mime: string; ext: string } {
   if (typeof MediaRecorder === "undefined") return { supported: false, mime: "", ext: "" };
-  // Safari MediaRecorder 通常支持 audio/mp4。Chrome/Firefox 需装 aac codec；标准配置里都不支持。
-  const cands: [string, string][] = [
-    ["audio/mp4", ".m4a"],
-    ["audio/aac", ".aac"],
-    ["audio/mp4;codecs=mp4a.40.2", ".m4a"],
-  ];
-  for (const [m, e] of cands) {
-    if (MediaRecorder.isTypeSupported(m)) return { supported: true, mime: m, ext: e };
-  }
+  const ok = (m: string): boolean => {
+    try { return MediaRecorder.isTypeSupported(m); } catch { return false; }
+  };
+  if (ok("audio/mp4;codecs=mp4a.40.2")) return { supported: true, mime: "audio/mp4;codecs=mp4a.40.2", ext: ".m4a" };
+  if (ok("audio/aac")) return { supported: true, mime: "audio/aac", ext: ".aac" };
+  if (ok("audio/mp4") && !ok("audio/mp4;codecs=opus")) return { supported: true, mime: "audio/mp4", ext: ".m4a" };
   return { supported: false, mime: "", ext: "" };
 }
 

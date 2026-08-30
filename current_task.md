@@ -5,7 +5,7 @@
 
 ## 当前焦点
 
-> **收藏页 / 详情页 / 置顶 / 记录卡 五项 UI 修复（2026-08-30，与 iOS 同步；`tsc -b` + **vitest 679 全绿**
+> **收藏页 / 详情页 / 置顶 / 记录卡 五项 UI 修复（2026-08-30，与 iOS 同步；`tsc -b` + **vitest 681 全绿**
 > （+3：置顶 voice/chat_record 两例、记录条目 voice 预览一例）；**未在浏览器手测**）**
 >
 > 1. **置顶预览** `src/pinned.ts`：只认 `audio` 不认 `voice`、且无 `chat_record` 分支 → 语音置顶铺一串 URL、
@@ -26,6 +26,21 @@
 >    （与详情页语音 tab / 收藏语音行同一组件）。打包端 `useForward.ts` 补 `d`（时长）/`w`（波形）两个 key
 >    （与 iOS 同约定），老记录无这两项时退化成等高条纹 + 0:00 仍可播。`recordItemPreview` 补 voice 分支。
 >    名片条目 Web 本就是卡片，无需改（iOS 那侧此次才补上）。
+
+> **记录卡三个后续（2026-08-30 用户实测报，已修；`tsc -b` + vitest 681 绿）**
+> 1. **录音格式红线被绕过（本次 iOS 崩溃的源头）**：`voiceRecordingSupported()` 第一顺位问裸
+>    `audio/mp4`——**Chrome 会把 Opus 塞进 MP4 容器**，探测照样 true，于是录出「扩展名 .m4a、内容是
+>    Opus」的文件。iOS `AVAudioPlayer` 拿到 `framesPerPacket==0` 直接**除零崩整个 App**。
+>    改成：先问点名 AAC 的 mime（`audio/mp4;codecs=mp4a.40.2` → `audio/aac`），裸 `audio/mp4`
+>    只在浏览器**不**支持 `audio/mp4;codecs=opus` 时才用（Safari 属这类）；都不行就置灰 mic。
+>    `voiceRecorder.test.ts` +2 例（Chrome 式误判 / 点名 AAC 优先），并**刻意更新**了那条
+>    「探测抛异常应冒出去」的旧护栏——现在一律兜底成"不支持"。
+> 2. **弹窗正中冒出一个 ▶**：`.play-badge` 是 `position:absolute`，而外层 `.fav-thumb-wrap`
+>    **没有定位**，于是它一路找到最近的定位祖先（`.modal` 本身）。给 wrap 加
+>    `position:relative; display:inline-block`；收藏宫格里 `.fav-icon` 本就 relative，观感不变。
+> 3. **语音无时长**：老记录没有 `d` 字段 → 新增 `RecordVoiceItem`，用一个独立的
+>    `<audio preload="metadata">` 探一次（不碰 VoiceBubble 的模块级播放单例）；`Infinity`/荒唐大数
+>    一律丢弃，宁可不显。新记录直接读 `d`，不走探测。
 
 > **无其它进行中的开发项。** 网络恢复秒连与 `UI_COLOR.md` 收敛（均 2026-08-30）已完成，细节转入
 > `current_task.archive.md`。仍**未做**的是「下一步」里那几件：浏览器手测语音、转文字 P2 调研、列表虚拟化。

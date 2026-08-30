@@ -673,6 +673,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .media-badge .ck.read { color: var(--check-read-on-media); }
 
 .msg-video-wrap { position: relative; display: inline-block; cursor: pointer; }
+/* ▶ 角标是 position:absolute，**外层 wrap 必须自己定位**：否则它会一路找到最近的定位祖先
+   （合并转发弹窗里就是 .modal 本身），变成一颗浮在整个弹窗正中的播放按钮（2026-08-30 实测）。
+   收藏宫格里 .fav-icon 本就 relative、wrap 又铺满它，加这条不改那边的观感。 */
+.fav-thumb-wrap { position: relative; display: inline-block; }
 .play-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--on-media); font-size: 26px; text-shadow: 0 1px 6px var(--overlay-strong); pointer-events: none; }
 /* 已失效（服务端已清理）：中心 ⊘ 灰白、略降透明 —— 与"加载中/可重试"区分（草图 §02/§03 终态）。 */
 .play-badge.expired { color: var(--on-media); opacity: .82; font-size: 30px; }

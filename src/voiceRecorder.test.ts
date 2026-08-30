@@ -26,6 +26,18 @@ describe("voiceRecordingSupported", () => {
     expect(voiceRecordingSupported()).toEqual({ supported: true, mime: "audio/aac", ext: ".aac" });
   });
 
+  it("Chrome 式「audio/mp4 支持但装的是 Opus」→ 不支持（否则录出 iOS 播不了、还会崩的文件）", () => {
+    // @ts-expect-error 测试注入
+    globalThis.MediaRecorder = { isTypeSupported: (m: string) => m === "audio/mp4" || m === "audio/mp4;codecs=opus" };
+    expect(voiceRecordingSupported().supported).toBe(false);
+  });
+
+  it("点名 AAC 的 mime 优先于裸 audio/mp4", () => {
+    // @ts-expect-error 测试注入
+    globalThis.MediaRecorder = { isTypeSupported: (m: string) => m === "audio/mp4" || m === "audio/mp4;codecs=mp4a.40.2" || m === "audio/mp4;codecs=opus" };
+    expect(voiceRecordingSupported()).toEqual({ supported: true, mime: "audio/mp4;codecs=mp4a.40.2", ext: ".m4a" });
+  });
+
   it("仅支持 webm/opus（默认 Chrome/Firefox）→ 不支持——绝不产出 iOS 播不了的消息", () => {
     // @ts-expect-error
     globalThis.MediaRecorder = { isTypeSupported: (m: string) => m === "audio/webm;codecs=opus" };
@@ -35,8 +47,9 @@ describe("voiceRecordingSupported", () => {
   it("探测函数不 throw（isTypeSupported 抛异常时兜底走 false）", () => {
     // @ts-expect-error
     globalThis.MediaRecorder = { isTypeSupported: () => { throw new Error("boom"); } };
-    // 现实现没有 try/catch 包裹——这里断言：exception 会冒出去（护栏，若将来加了 try/catch 需刻意更新）。
-    expect(() => voiceRecordingSupported()).toThrow();
+    // 2026-08-30 起**刻意**加了 try/catch（探测要按 mime 逐个问好几遍，任何一次抛都不该把
+    // 输入栏渲染带崩）：探测异常一律当"不支持"，mic 置灰即可。原护栏断言的是没有 try/catch 的旧行为。
+    expect(voiceRecordingSupported()).toEqual({ supported: false, mime: "", ext: "" });
   });
 });
 

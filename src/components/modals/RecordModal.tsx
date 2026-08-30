@@ -1,12 +1,42 @@
+import { useEffect, useState } from "react";
 import { ChevronLeft, IdCard } from "lucide-react";
 import { FileTypeIcon } from "../../FileTypeIcon";
-import { fileNameFromContent, parseChatRecord, recordItemPreview, recordVoiceMessage, type ChatRecord } from "../../messageContent";
+import { fileNameFromContent, parseChatRecord, recordItemPreview, recordVoiceMessage, type ChatRecord, type RecordItem } from "../../messageContent";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { Avatar } from "../Avatar";
 import { formatFileSize } from "../../fileMetadata";
 import { Modal } from "../Modal";
 import { VideoThumb } from "../VideoThumb";
 import { VoiceBubble } from "../VoiceBubble";
+
+/** 记录里的语音条目。**时长只有打包端带了 `d` 才有**（2026-08-30 起两端都带）——
+ *  更早打包的老记录没有这个字段，只能从音频元数据里探一次；探不到就保持 0（显 0:00）。
+ *  探测用一个独立的 `<audio preload="metadata">`，不碰 VoiceBubble 的模块级播放单例。 */
+function RecordVoiceItem({ it, index, uid }: { it: RecordItem; index: number; uid: string }) {
+  const known = it.d ?? 0;
+  const [probed, setProbed] = useState(0);
+  useEffect(() => {
+    if (known > 0 || !it.c) return;
+    const a = new Audio();
+    a.preload = "metadata";
+    const onMeta = () => {
+      // 坏文件（如某些浏览器录出的 MP4/Opus）会报 Infinity 或荒唐的大数 → 一律丢弃，宁可不显。
+      if (Number.isFinite(a.duration) && a.duration > 0 && a.duration < 24 * 3600) {
+        setProbed(Math.round(a.duration * 1000));
+      }
+    };
+    a.addEventListener("loadedmetadata", onMeta);
+    a.src = it.c;
+    return () => { a.removeEventListener("loadedmetadata", onMeta); a.removeAttribute("src"); };
+  }, [it.c, known]);
+  const m = { ...recordVoiceMessage(it, index), duration: known || probed };
+  // mine=false：记录是"别人说的话"视角；mini 变体本就不显勾与时间。
+  return (
+    <div className="record-item-voice">
+      <VoiceBubble m={m} mine={false} uid={uid} audioSrc={it.c} variant="mini" />
+    </div>
+  );
+}
 
 /** 合并转发详情（镜像 iOS）：列出全部消息；图片/视频点击进查看器；
  *  嵌套合并转发条目 → 套娃 mini 卡片，点击入栈下钻（栈深 >1 时显返回）。
@@ -50,11 +80,8 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
                 </a>
               ) : it.ct === "voice" || it.ct === "audio" ? (
                 // 语音条目 → 与详情页语音 tab / 收藏页语音行同一迷你播放器（此前落到最后的
-                // .record-item-text 分支，屏幕上是一串裸 URL）。mine=false：记录是"别人说的话"视角，
-                // 且 mini 变体本就不显勾与时间。
-                <div className="record-item-voice">
-                  <VoiceBubble m={recordVoiceMessage(it, i)} mine={false} uid={uid} audioSrc={it.c} variant="mini" />
-                </div>
+                // .record-item-text 分支，屏幕上是一串裸 URL）。
+                <RecordVoiceItem it={it} index={i} uid={uid} />
               ) : it.ct === "chat_record" ? (
                 // 套娃 mini 卡片：标题 + 前 2 行预览 + 脚注；点击入栈进子记录（任意深度）。sub 走 nestedAt 缓存。
                 (() => { const sub = nestedAt(i) ?? parseChatRecord(it.c); return (
