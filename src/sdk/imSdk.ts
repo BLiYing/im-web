@@ -3,6 +3,7 @@
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./protocol";
+import { installWakeListeners, runWake } from "./wake";
 import { presenceFromFrame, type Presence } from "./presence";
 import { parseSysSegments } from "../sysSegments";
 import * as localStore from "./localStore";
@@ -104,6 +105,7 @@ export class IMClient {
   private pingTimer: number | null = null;
   private reconnectTimer: number | null = null;
   private reconnectAttempts = 0;
+  private wakeStop: (() => void) | null = null;           // 浏览器唤醒监听的拆除函数（见 sdk/wake.ts）
   private connectionGeneration = 0; // 使切账号/新重连之前仍在途的登录与 socket 回调失效
   private manualClose = false;
   private syncedSeq = new Map<string, number>(); // convId -> 已连续接上的 conv_seq（不能用“见过的最大值”越过空洞）
@@ -155,6 +157,7 @@ export class IMClient {
     this.sessionToken = ""; // 密码登录路径：清掉可能残留的扫码 token，避免重连误用旧会话
     this.manualClose = false;
     this.clearReconnectTimer();
+    this.wakeStop ??= installWakeListeners((r) => this.reconnectNow(r));
     logger.info(LOG_TAG.ws, "connect_requested", { username });
     await this.openSocket(true);
   }
@@ -180,12 +183,24 @@ export class IMClient {
     this.token = token;
     this.manualClose = false;
     this.clearReconnectTimer();
+    this.wakeStop ??= installWakeListeners((r) => this.reconnectNow(r));
     logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid, via: "qr_login" });
     await this.openSocket(true);
   }
 
+  /** **立即重连/探活**：浏览器唤醒信号（`online` / 标签页重新可见）触发，也可手动调。
+   *  判据与动作见 `sdk/wake.ts`（指数退避最长 30s，断网恢复干等一档是用户能直接看见的"卡住"）。 */
+  reconnectNow(reason: string): void {
+    const action = runWake(this.state, this.manualClose, {
+      probe: () => this.send({ type: T.PING, seq: ++this.seq }),
+      reconnect: () => { this.clearReconnectTimer(); this.reconnectAttempts = 0; void this.openSocket(); },
+    });
+    if (action !== "none") logger.info(LOG_TAG.ws, "wake", { reason, action, attempts: this.reconnectAttempts });
+  }
+
   disconnect(): void {
     logger.info(LOG_TAG.ws, "disconnect_requested", { user_id: this.uid });
+    this.wakeStop?.(); this.wakeStop = null;
     this.manualClose = true;
     this.connectionGeneration++;
     this.stopPing();

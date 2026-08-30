@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { shouldHealGap, nextSyncCursor } from "./imSdk";
+import { wakeActionFor } from "./wake";
 import { friendlyMessage, FRIENDLY_MESSAGES } from "./errcode";
 
 // 后端 errcode 权威码集镜像——**唯一来源 `../IMServer/internal/errcode/errcode.go`**。
@@ -85,5 +86,27 @@ describe("nextSyncCursor 按 covered_conv_seq 推进游标（破解可见性空�
   });
   it("缺字段 covered=0 → 保持原位（老服务端兼容，不倒退）", () => {
     expect(nextSyncCursor(50, 0)).toBe(50);
+  });
+});
+
+// 网络恢复秒连：指数退避最长 30s，断网恢复后干等一档是用户能直接看见的"卡住"。
+// 判据只有两个输入，但三条"不该做"全是踩过或想得到的坑，故逐条钉住。与 iOS IMSocketWakeActionFor 同口径。
+describe("wakeActionFor 唤醒信号该做什么", () => {
+  it("断开态 → 立即重连（这是本功能的主场）", () => {
+    expect(wakeActionFor("disconnected", false)).toBe("reconnect");
+  });
+
+  it("已连接 → 只探活，不重连（重连=白白断一次好连接）", () => {
+    expect(wakeActionFor("connected", false)).toBe("probe");
+  });
+
+  it("连接中 → 什么都不做（别掐掉正在握手的那条）", () => {
+    expect(wakeActionFor("connecting", false)).toBe("none");
+  });
+
+  it("manualClose 压倒一切：退出登录/被踢下线不得被唤醒信号自动撤销", () => {
+    expect(wakeActionFor("disconnected", true)).toBe("none");
+    expect(wakeActionFor("connecting", true)).toBe("none");
+    expect(wakeActionFor("connected", true)).toBe("none");
   });
 });

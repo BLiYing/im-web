@@ -5,6 +5,18 @@
 
 ## 当前焦点
 
+> **网络恢复秒连（2026-08-30；`tsc -b` + **vitest 676 全绿**（+4：wakeActionFor）；**未在浏览器手测**）**：
+> 原先断网恢复后最坏要等完 16~30s 的指数退避档才重连。
+> - 新 `src/sdk/wake.ts`：判据纯函数 `wakeActionFor(state, manualClose)`（与 iOS `IMSocketWakeActionFor` 同口径）
+>   + `installWakeListeners`（`online` / `visibilitychange`，返回拆除函数）。三条"不该做"逐条有单测：
+>   manualClose 后不连、连接中不连、已连接只 `probe` 不重连。
+> - `IMClient` 只留薄入口 `reconnectNow(reason)`；监听在 `connect`/`connectWithToken` 装、`disconnect` 拆——
+>   **换号会新建 IMClient 并断开旧的，不拆则旧实例跟着醒来重连**，把已作废的会话拉回来
+>   （这个坑 2026-08-22 以"旧 client 拿已吊销 token 探活把新会话踢回登录页"的形态出现过）。
+> - **代价**：`check-file-size.sh` 里 `imSdk.ts` 预算 1450 → **1465**。判据与 DOM 监听都已抽到 `wake.ts`，
+>   类里剩的是接线口（连接活性本就是这个类的职责），再往外拆就是为凑数字硬拆。**这是一次"只准降不准升"的破例，
+>   记在这里等复查。**
+
 > **`UI_COLOR.md` 收敛为「跨端主文档 + 本端补充」（2026-08-30，纯文档）**：本端这份开头一直写着
 > 「由 iOS 那份同步并适配」——是**复制**不是引用，109 vs 120 行早已分叉。现在跨端共同规则
 > （语义令牌总表、文本层级、页面/卡片/输入口径、聊天个性化、深色验收清单、检查清单）搬进

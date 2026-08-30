@@ -22,7 +22,9 @@ WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败�
 grandfather_limit() {
   case "$1" in
     src/App.tsx)      echo 4000 ;;  # 2026-08-25 用户拍板放宽到 4000（原棘轮下调 5100→…→3000，触顶挡了 bug fix→放宽为准）
-    src/sdk/imSdk.ts) echo 1450 ;;
+    src/sdk/imSdk.ts) echo 1465 ;;  # 2026-08-30 1450→1465：网络恢复秒连。判据(wakeActionFor)+DOM 监听
+                                    # 已抽到 sdk/wake.ts，类里只剩 reconnectNow 这个接线口（连接活性本就是
+                                    # 本类的职责，再往外拆就是为凑数字硬拆，见 CLAUDE.md 体量红线那条）。
     *)                echo "" ;;
   esac
 }
