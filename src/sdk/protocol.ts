@@ -273,6 +273,8 @@ export type GroupRole = "owner" | "admin" | "member";
 export interface GroupMember {
   user_id: string;
   nickname: string;
+  /** 公开句柄（成员行副标题渲染成 @xxx）。副标题此前显示 user_id——那是 10 位随机数字内部 ID。 */
+  username?: string;
   group_nickname?: string; // 我在本群的昵称（G1，空=未设置；显示时优先于 nickname）
   avatar_url: string;
   role: GroupRole;

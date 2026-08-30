@@ -6,6 +6,7 @@ import { downloadText } from "../download";
 import { formatFileSize } from "../fileMetadata";
 import { fileNameFromContent, isPreviewableFile, firstURLInText } from "../messageContent";
 import { msgKey } from "../album";
+import { memberSubtitle } from "../groupAdmin";
 import { Avatar } from "./Avatar";
 import { MediaTile } from "./MediaTile";
 import { FileGateIcon } from "./FileGateIcon";
@@ -106,7 +107,9 @@ export function DetailTabs({
                 <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
                 <div className="detail-member-body">
                   <div className="detail-member-name">{memberLabel(m)}{m.user_id === uid && <span className="me-tag">我</span>}</div>
-                  <div className="detail-member-sub">{m.user_id}</div>
+                  {/* 副行 = 群昵称 / @句柄 / 空。**绝不显示 user_id**——那是 10 位随机内部 ID
+                      （docs/design/ACCOUNT_IDENTITY_REDESIGN.md §5.2）。 */}
+                  <div className="detail-member-sub">{memberSubtitle(m)}</div>
                 </div>
                 {/* G2 被禁言标签：服务端把「永久」归一为大正数（MutePermanent = 1<<62），直接 >now 判定。
                     与 role 徽标同排、居右紧挨（role 左侧），未禁言时不渲染，不占位。 */}

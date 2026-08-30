@@ -77,6 +77,9 @@ import { PinnedListModal } from "./components/modals/PinnedListModal";
 import { GroupsModal } from "./components/modals/GroupsModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
+import { adminCandidates, transferCandidates } from "./groupAdmin";
+import { AdminPickerModal } from "./components/modals/AdminPickerModal";
+import { TransferOwnerModal } from "./components/modals/TransferOwnerModal";
 import { ConfirmSendCardModal } from "./components/modals/ConfirmSendCardModal";
 import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
@@ -249,6 +252,9 @@ export default function App() {
   const [fileMenu, setFileMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 详情文件行右键菜单（转发/定位/取消下载/删除，对齐 iOS 长按）
   const [deleteMenu, setDeleteMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 删除两档子菜单 B（为所有人删除/仅删除自己）——由菜单 A 的「删除」展开，对齐 iOS 子菜单
   const [manageOpen, setManageOpen] = useState(false); // 群管理二级视图（改名/头像/简介/公告/禁言）
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false); // 群管理 →「管理员」二级面板（群主可增删、管理员只读）
+  const [adminPicker, setAdminPicker] = useState<{ convId: string; selected: string[] } | null>(null); // 添加管理员弹窗（多选 ≤5）
+  const [transferPicker, setTransferPicker] = useState<string | null>(null); // 选择新群主弹窗（单选即确认）的 conv_id
   const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null); // 当前群黑名单（管理面板显示计数）
   const [groupBansModal, setGroupBansModal] = useState<{ convId: string; bans: GroupBan[] } | null>(null); // 黑名单弹窗
   // 二维码体系（QRCODE P0）+ G3 入群 UI 状态。
@@ -984,7 +990,7 @@ export default function App() {
   // 群资料写操作簇：收口到 useGroupActions（只吃 services）。仍留 App 的 pickGroupAvatar/doEditGroupRemark 复用 doGroupAction。
   // App 仍用到的：doGroupAction（pickGroupAvatar 复用）、doEditAnnouncement（全文视图「编辑」）、doEditMyGroupNickname（详情主视图）。
   // rename/intro/mute/settings 已随 GroupManagePanel 迁出（它自取 useGroupActions）。
-  const { doGroupAction, doEditAnnouncement, doEditMyGroupNickname } = useGroupActions(services);
+  const { doGroupAction, doEditAnnouncement, doEditMyGroupNickname, doSetAdmins, doRevokeAdmin, doTransferOwner } = useGroupActions(services);
 
 
 
@@ -2031,6 +2037,20 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
+  // 我在当前打开的群管理面板里，但角色被**别处**降成了普通成员（另一台设备/另一端撤了我的管理员、
+  // 或把群主转给了别人）→ 整个面板对我不再成立，收起来并说一句。不收的话：管理员列表页只是悄悄少掉
+  // 「添加/撤销」，返回后群管理页那一排开关照样可点，点下去只会吃一句英文的 no group permission。
+  // 收在这一个 effect 里而不是两个面板各判一次（角色是同一份 my_role，判定只该有一处）。
+  useEffect(() => {
+    if (!manageOpen || !detail?.isGroup) return;
+    const role = groupInfos[detail.convId]?.my_role;
+    if (role && role === "member") {
+      setManageOpen(false);
+      setAdminPanelOpen(false);
+      setToast("你已不是群主或管理员");
+    }
+  }, [manageOpen, detail, groupInfos, setToast]);
+
   // 二维码簇 → useQR（阶段 7c）：openPeerDetail 定义在早退后，经 ref 注入（定义处回写 .current）。
   const openPeerDetailRef = useRef<(peer: string) => void>(() => {});
   const { qrScan, setQrScan, qrCardModal, setQrCardModal, qrResult, setQrResult, handleScanRaw, openMyCard, openGroupCard, resetQRCard, qrResultActions } =
@@ -2272,7 +2292,7 @@ export default function App() {
 
   // 打开群聊详情面板（拉最新资料 + 本地消息）。默认页签=成员（对齐 iOS 群聊成员恒第一）。
   const openGroupPanel = (cid: string) => {
-    setManageOpen(false); setDetailMore(false); setDetailTab("members");
+    setManageOpen(false); setAdminPanelOpen(false); setDetailMore(false); setDetailTab("members");
     setDetail({ convId: cid, isGroup: true });
     setDetailMsgs([]); loadDetailMsgs(cid);
     void refreshGroupInfo(cid);
@@ -2287,7 +2307,7 @@ export default function App() {
     // 此前是 `peer === uid` 直接 return，点了毫无反应，用户以为卡坏了；iOS 侧同样已补此分支。
     if (peer === uid) { void openProfile(); return; }
     const cid = convIdFor(uid, peer);
-    setManageOpen(false); setDetailMore(false); setDetailTab("media");
+    setManageOpen(false); setAdminPanelOpen(false); setDetailMore(false); setDetailTab("media");
     setDetail({ convId: cid, isGroup: false, peer, fromOwnChat });
     setDetailMsgs([]); loadDetailMsgs(cid);
     void loadPeerCard(peer);
@@ -3135,13 +3155,17 @@ export default function App() {
       {detail && (
         <DetailPanel detail={detail}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
-          detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} groupBans={groupBans}
+          detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} adminPanelOpen={adminPanelOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
           peerDeleted={!!detail.peer && deletedPeers.has(detail.peer)}
-          onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); }}
+          onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); setAdminPanelOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
+          setAdminPanelOpen={setAdminPanelOpen}
+          openAdminPicker={(cid) => setAdminPicker({ convId: cid, selected: [] })}
+          openTransferPicker={(cid) => setTransferPicker(cid)}
+          revokeAdmin={(cid, m) => void doRevokeAdmin(cid, m.user_id, groupMemberLabel(m))}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
           doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={() => search.openInChatSearch()}
           doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
@@ -3169,6 +3193,49 @@ export default function App() {
           />
         );
       })()}
+
+      {/* 添加管理员（GROUP_ADMIN_TRANSFER_DESIGN §5.3）：候选＝本群普通成员（本地过滤掉群主/现有管理员/我），
+          一次 ≤5 人、串行下发（后端每设一次发一条系统消息，且没有批量接口）。 */}
+      {adminPicker && groupInfos[adminPicker.convId] && (
+        <AdminPickerModal
+          candidates={adminCandidates(groupInfos[adminPicker.convId], uid)}
+          selected={adminPicker.selected}
+          memberLabel={groupMemberLabel}
+          onToggle={(userId) => setAdminPicker({
+            ...adminPicker,
+            selected: adminPicker.selected.includes(userId)
+              ? adminPicker.selected.filter((x) => x !== userId)
+              : [...adminPicker.selected, userId],
+          })}
+          onConfirm={() => {
+            const d = adminPicker;
+            // 全失败就把弹窗留着（选中态还在，用户能换个人重试），与 iOS「停在选人页」对齐。
+            void doSetAdmins(d.convId, d.selected).then(({ ok }) => { if (ok > 0) setAdminPicker(null); });
+          }}
+          onCancel={() => setAdminPicker(null)}
+        />
+      )}
+
+      {/* 转让群组：单选即确认（点行 → askConfirm → transferGroup）。成功后**必须关掉群管理与管理员面板**——
+          那一刻我已是普通成员，整页对我不再可见，留着下一次点击必然 300204。 */}
+      {transferPicker && groupInfos[transferPicker] && (
+        <TransferOwnerModal
+          candidates={transferCandidates(groupInfos[transferPicker], uid)}
+          memberLabel={groupMemberLabel}
+          onPick={(m) => {
+            const cid = transferPicker;
+            // **先关选人弹窗再弹二次确认**：确认是顺序的第二个弹窗，不是嵌套
+            // （两层 .modal 遮罩会叠深，且 ESC 只关一层——本仓一直避免弹窗套弹窗）。
+            setTransferPicker(null);
+            void doTransferOwner(cid, m.user_id, groupMemberLabel(m)).then((ok) => {
+              if (!ok) return;                       // 取消或失败：停在群管理面板，可再点一次转让
+              setAdminPanelOpen(false);
+              setManageOpen(false);                  // 详情抽屉保持打开：group 帧会把「群管理」行刷没
+            });
+          }}
+          onCancel={() => setTransferPicker(null)}
+        />
+      )}
 
       {/* 个人名片入口 ①（CONTACT_CARD_DESIGN §8.2）：选好友 → 二次确认 → 发进当前会话。
           选人复用通用 FriendPickerModal（与群邀请同一组件，只换三处文案 + 传上限 9）；

@@ -1205,6 +1205,9 @@ button.detail-row:hover { background: var(--surface-hover); }
 .detail-card .detail-row + .detail-row { border-top: 1px solid var(--separator); }
 .detail-row-ic { flex-shrink: 0; color: var(--text-secondary); display: flex; }
 .detail-row.accent, .detail-row.accent .detail-row-ic { color: var(--accent); }
+/* 危险行（转让群组）：整行红——与详情页底部「解散群组」同族。本页唯一的红色例外，有意为之。 */
+.detail-row.danger, .detail-row.danger .detail-row-ic, .detail-row.danger .detail-row-chev { color: var(--danger); }
+button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .detail-row.disabled { color: var(--text-secondary); }
 .detail-row-val { margin-left: auto; color: var(--text-secondary); font-size: 14px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-row-val.accent { color: var(--accent); }

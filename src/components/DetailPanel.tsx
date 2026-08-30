@@ -18,6 +18,7 @@ import { useAppServices } from "../AppServicesContext";
 import { useChatActions } from "../ChatActionsContext";
 import { Avatar } from "./Avatar";
 import { GroupManagePanel } from "./GroupManagePanel";
+import { AdminListPanel } from "./AdminListPanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
 import { SYSTEM_UID } from "../sdk/protocol";
 
@@ -34,6 +35,8 @@ export interface DetailPanelProps {
   detailMsgs: ChatMessage[];
   detailMore: boolean;
   manageOpen: boolean;
+  /** 群管理 →「管理员」二级面板是否展开（与 manageOpen 同级的抽屉内层级）。 */
+  adminPanelOpen: boolean;
   groupBans: GroupBan[] | null;
   // —— 解析/判定（App 内闭包）——
   groupRemark: (cid: string) => string;
@@ -61,6 +64,13 @@ export interface DetailPanelProps {
   setDetailTab: (k: DetailTab) => void;
   setDetailMore: Dispatch<SetStateAction<boolean>>;
   setManageOpen: (v: boolean) => void;
+  setAdminPanelOpen: (v: boolean) => void;
+  /** 打开「添加管理员」弹窗（仅群主；候选在 App 里按 groupAdmin.adminCandidates 过滤）。 */
+  openAdminPicker: (cid: string) => void;
+  /** 打开「选择新群主」弹窗（仅群主）。 */
+  openTransferPicker: (cid: string) => void;
+  /** 撤销某人的管理员身份（含二次确认）。 */
+  revokeAdmin: (cid: string, m: GroupMember) => void;
   setContactDraft: (v: { peer: string; remark: string }) => void;
   setInviteDraft: (v: { convId: string; selected: string[] }) => void;
   setMemberMenu: (v: { x: number; y: number; convId: string; m: GroupMember }) => void;
@@ -87,9 +97,10 @@ export interface DetailPanelProps {
 
 export function DetailPanel(p: DetailPanelProps) {
   const {
-    detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, groupBans,
+    detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, adminPanelOpen, groupBans,
     groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted,
-    onClose, setDetailTab, setDetailMore, setManageOpen, setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
+    onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
+    setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail,
@@ -170,10 +181,18 @@ export function DetailPanel(p: DetailPanelProps) {
             </div>
           )}
 
-          {manageOpen && gp ? (
+          {manageOpen && gp && adminPanelOpen ? (
+            <AdminListPanel gp={gp} uid={uid} memberLabel={memberLabel}
+              onBack={() => setAdminPanelOpen(false)}
+              onAdd={() => openAdminPicker(gp.conv_id)}
+              onRevoke={(m) => revokeAdmin(gp.conv_id, m)}
+              onOpenMember={openPeerDetail} />
+          ) : manageOpen && gp ? (
             <GroupManagePanel gp={gp} groupBans={groupBans}
-              onBack={() => setManageOpen(false)} onPickAvatar={pickGroupAvatar}
-              onOpenJoinRequests={openJoinRequests} onOpenBans={openGroupBans} />
+              onBack={() => { setManageOpen(false); setAdminPanelOpen(false); }} onPickAvatar={pickGroupAvatar}
+              onOpenJoinRequests={openJoinRequests} onOpenBans={openGroupBans}
+              onOpenAdmins={() => setAdminPanelOpen(true)}
+              onOpenTransfer={openTransferPicker} />
           ) : (
             <>
               {/* ---- 头部：头像 + 名 + 副标题 ---- */}
@@ -268,8 +287,10 @@ export function DetailPanel(p: DetailPanelProps) {
                   <button className={`switch ${pinned ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvPinned(conv, !pinned)} /></div>
                 <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>消息免打扰</span>
                   <button className={`switch ${muted ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvMuted(conv, !muted)} /></div>
+                {/* 进「群管理」时显式复位管理员二级面板：不复位的话，上次从管理员页直接退出抽屉后，
+                    下次点「群管理」会一步跨进管理员列表（层级状态是两个独立布尔，不会自己归位）。 */}
                 {canManage && (
-                  <button className="detail-row" onClick={() => setManageOpen(true)}>
+                  <button className="detail-row" onClick={() => { setAdminPanelOpen(false); setManageOpen(true); }}>
                     <span className="detail-row-ic"><Settings2 size={18} /></span><span>群管理</span>
                     {(gp?.pending_count ?? 0) > 0
                       ? <span className="detail-badge">{gp!.pending_count}</span>

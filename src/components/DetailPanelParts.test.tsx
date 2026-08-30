@@ -39,7 +39,8 @@ describe("GroupManagePanel", () => {
     const onBack = vi.fn();
     const { getByText, container } = withServices(makeServices({ askPrompt }),
       <GroupManagePanel gp={gp()} groupBans={null} onBack={onBack}
-        onPickAvatar={vi.fn()} onOpenJoinRequests={vi.fn()} onOpenBans={vi.fn()} />);
+        onPickAvatar={vi.fn()} onOpenJoinRequests={vi.fn()} onOpenBans={vi.fn()}
+        onOpenAdmins={vi.fn()} onOpenTransfer={vi.fn()} />);
     expect(getByText("群管理")).toBeTruthy();
     expect(getByText("进群确认")).toBeTruthy();
     fireEvent.click(container.querySelector(".detail-manage-head .icon-btn")!);

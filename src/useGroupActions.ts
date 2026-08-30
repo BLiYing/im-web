@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import type { GroupInfo } from "./sdk/protocol";
 import type { AppServices } from "./AppServicesContext";
+import { adminErrorToast, batchToast, clampBatch } from "./groupAdmin";
 
 // 群资料写操作簇（改名/简介/公告/禁言/治理开关/我的群昵称）。从 App.tsx 收口出来的第一批——
 // 它们**只依赖稳定服务**（clientRef/askPrompt/setToast/refresh*），故整簇只注入一个 `services`，直接复用
@@ -10,7 +11,7 @@ import type { AppServices } from "./AppServicesContext";
 // `doGroupAction(cid, fn)` 是这簇的公共骨架（跑操作 → 刷群资料 + 会话列表 → 失败吐司），一并导出供 App 里
 // 仍留守的动作（如 pickGroupAvatar）复用。
 export function useGroupActions(services: AppServices) {
-  const { clientRef, setToast, askPrompt, refreshGroupInfo, refreshConversations } = services;
+  const { clientRef, setToast, askPrompt, askConfirm, refreshGroupInfo, refreshConversations } = services;
 
   const doGroupAction = useCallback(async (cid: string, fn: () => Promise<void>) => {
     try {
@@ -69,5 +70,61 @@ export function useGroupActions(services: AppServices) {
     await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMyNickname(gp.conv_id, nick.trim()));
   }, [askPrompt, clientRef, doGroupAction]);
 
-  return { doGroupAction, doRenameGroup, doEditIntro, doEditAnnouncement, doToggleGroupMute, doToggleGroupSetting, doEditMyGroupNickname };
+  // 批量设管理员（仅群主）：后端没有批量接口，**串行**逐个 PUT（并发会让系统消息乱序）。
+  // 逐条汇总成败——部分失败也要刷新，成功的那几位已经生效了，不刷就是骗用户。
+  // 刻意**不做乐观更新**：角色即权限，先改 UI 再等服务器，一旦失败就是"看着是管理员、点什么都被拒"。
+  const doSetAdmins = useCallback(async (cid: string, uids: string[]): Promise<{ ok: number; bad: number }> => {
+    const ids = clampBatch(uids);
+    if (ids.length === 0) return { ok: 0, bad: 0 };
+    let ok = 0, bad = 0, firstError: string | undefined;
+    for (const id of ids) {
+      try {
+        await clientRef.current!.setGroupRole(cid, id, "admin");
+        ok++;
+      } catch (e) {
+        bad++;
+        firstError = firstError ?? adminErrorToast(e);
+      }
+    }
+    setToast(batchToast(ok, bad, firstError));
+    void refreshGroupInfo(cid);
+    void refreshConversations();
+    return { ok, bad }; // 全失败时调用方把弹窗留着，用户能换个人重试（与 iOS「停在选人页」对齐）
+  }, [clientRef, setToast, refreshGroupInfo, refreshConversations]);
+
+  // 撤销管理员（仅群主）：SetRole 幂等，重复撤同一人不会报错。
+  const doRevokeAdmin = useCallback(async (cid: string, userId: string, label: string) => {
+    const ok = await askConfirm(`撤销 ${label} 的管理员身份？`, { okText: "撤销", danger: true });
+    if (!ok) return;
+    try {
+      await clientRef.current!.setGroupRole(cid, userId, "member");
+      setToast("已撤销管理员");
+    } catch (e) {
+      setToast(adminErrorToast(e)); // 通用 doGroupAction 只会透传英文原文，这里按码本地化
+    }
+    void refreshGroupInfo(cid);
+    void refreshConversations();
+  }, [askConfirm, clientRef, setToast, refreshGroupInfo, refreshConversations]);
+
+  // 转让群组（仅群主，不可逆）：二次确认 → 转让。**原群主降为普通成员**（member，不是管理员），
+  // 这是后端 store.TransferGroupOwner 的既定行为，客户端不做任何补偿。
+  // 成功返回 true，调用方据此关掉群管理/管理员面板——那一刻我已是 member，整页对我不再可见。
+  const doTransferOwner = useCallback(async (cid: string, userId: string, label: string): Promise<boolean> => {
+    const ok = await askConfirm(`确定把群主转让给 ${label}？转让后你将变为普通成员，且不可撤销。`,
+      { okText: "转让", danger: true });
+    if (!ok) return false;
+    try {
+      await clientRef.current!.transferGroup(cid, userId);
+    } catch (e) {
+      setToast(adminErrorToast(e));
+      return false;
+    }
+    setToast(`已转让给 ${label}`);
+    void refreshGroupInfo(cid);
+    void refreshConversations();
+    return true;
+  }, [askConfirm, clientRef, setToast, refreshGroupInfo, refreshConversations]);
+
+  return { doGroupAction, doRenameGroup, doEditIntro, doEditAnnouncement, doToggleGroupMute, doToggleGroupSetting, doEditMyGroupNickname,
+           doSetAdmins, doRevokeAdmin, doTransferOwner };
 }

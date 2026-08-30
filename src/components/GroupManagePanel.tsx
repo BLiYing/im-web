@@ -1,19 +1,24 @@
-import { ChevronLeft, Camera, SquarePen, Info, Megaphone, Lock, BellOff, UserPlus, Pin, Eye, Ban, ChevronRight } from "lucide-react";
+import { ChevronLeft, Camera, SquarePen, Info, Megaphone, Lock, BellOff, UserPlus, Pin, Eye, Ban, ChevronRight, ShieldCheck, Crown } from "lucide-react";
 import type { GroupInfo, GroupBan } from "../sdk/protocol";
 import { useAppServices } from "../AppServicesContext";
 import { useGroupActions } from "../useGroupActions";
+import { adminCountText } from "../groupAdmin";
 import { Avatar } from "./Avatar";
 
 // 群管理二级视图（改名/头像/简介/公告/禁言/治理开关/待审/黑名单）。从 App 详情抽屉抽出的展示组件。
 // **群写操作走 useAppServices()+useGroupActions**（只依赖稳定服务，不再逐层传）；碰 App UI 态的动作
 // （选群头像 setCropReq、开待审/黑名单弹窗）由 props 注入。DOM/className/结构与原内联逐字一致（行为等价）。
-export function GroupManagePanel({ gp, groupBans, onBack, onPickAvatar, onOpenJoinRequests, onOpenBans }: {
+export function GroupManagePanel({ gp, groupBans, onBack, onPickAvatar, onOpenJoinRequests, onOpenBans, onOpenAdmins, onOpenTransfer }: {
   gp: GroupInfo;
   groupBans: GroupBan[] | null;
   onBack: () => void;
   onPickAvatar: (gp: GroupInfo) => void;
   onOpenJoinRequests: (cid: string) => void;
   onOpenBans: (cid: string) => void;
+  /** 打开「管理员」二级面板（群主可增删、管理员只读）。 */
+  onOpenAdmins: (cid: string) => void;
+  /** 打开「选择新群主」弹窗（仅群主可见此行）。 */
+  onOpenTransfer: (cid: string) => void;
 }) {
   const { doRenameGroup, doEditIntro, doEditAnnouncement, doToggleGroupSetting, doToggleGroupMute } = useGroupActions(useAppServices());
   return (
@@ -79,6 +84,29 @@ export function GroupManagePanel({ gp, groupBans, onBack, onPickAvatar, onOpenJo
         </button>
       </div>
       <div className="detail-foot-note">「新成员仅可见入群后历史」开启后，新成员看不到加入前的聊天记录。</div>
+      {/* 管理员：群主可增删、管理员只读。此前「设为管理员」只藏在成员行的 ⋯ 菜单里，
+          既不好发现，也没有任何一处能回答"这个群有几个管理员"。 */}
+      <div className="detail-card-title">管理员</div>
+      <div className="detail-card">
+        <button className="detail-row" onClick={() => onOpenAdmins(gp.conv_id)}>
+          <span className="detail-row-ic"><ShieldCheck size={18} /></span><span>管理员</span>
+          <span className="detail-row-val">{adminCountText(gp)}</span>
+          <ChevronRight size={16} className="detail-row-chev" />
+        </button>
+      </div>
+      <div className="detail-foot-note">管理员可审批入群、禁言与移出普通成员，但不能设置管理员或转让群组。</div>
+      {/* 转让群组：**仅群主**。单开一张带红字的卡，与「解散群组」同族——不可逆的一次性操作
+          不该和会反复进出的「治理」项混在一张卡里（手指一滑就点到旁边）。 */}
+      {gp.my_role === "owner" && (<>
+        <div className="detail-card-title">群主</div>
+        <div className="detail-card">
+          <button className="detail-row danger" onClick={() => onOpenTransfer(gp.conv_id)}>
+            <span className="detail-row-ic"><Crown size={18} /></span><span>转让群组</span>
+            <ChevronRight size={16} className="detail-row-chev end" />
+          </button>
+        </div>
+        <div className="detail-foot-note">转让后你将立即变为普通成员，且不可撤销。群主不能直接退群，须先转让。</div>
+      </>)}
     </div>
   );
 }
