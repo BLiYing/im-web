@@ -5,6 +5,25 @@
 
 ## 当前焦点
 
+> **发送失败重发（2026-08-30，worktree `feat/resend-failed-msg`；`tsc -b` + **vitest 643 全绿**（+7：resendPolicy 6 例、消息列表 1 例）；未手测）**：
+> 与 iOS 同批做，口径两端一致（蓝图见 `../IMServer/docs/CHAT_UX.md` §8.1）。此前 `.fail-badge` 只是个
+> `<span>`，文本/语音完全没有重发；媒体只有「点气泡重传」一条路。
+> - 新 `src/resendPolicy.ts`（6 例单测，与 iOS `IMResendPolicyForMessage` 同口径）：
+>   `none`（非本人/非失败/已有 convSeq/**被拒收**）· `retry-upload`（content 是 `blob:` 或空 → 本地重传）·
+>   `same-id`（内容已就绪 → 按**原 clientMsgId** 重发）。
+> - **`same-id` 是正确性红线**：服务端按 `(conv_id, client_msg_id)` 幂等去重，换新 ID 会在「上次其实已存下、
+>   只是 ack 丢了」时让对端收到两条。新增 `src/sdk/resend.ts#resendMessage(client, m, to)`——
+>   **刻意放在 IMClient 类外**：`imSdk.ts` 有 1450 行硬预算（`check-file-size.sh` 只准降不准升），
+>   加在类里当场超预算；它本就只是 `sendMedia` 的一次组合调用。为此 `MediaSendOptions` 加
+>   `clientMsgId?`（**仅重发指定**，首发仍一律新 UUID），引用/转发溯源/@/媒体元数据/caption/waveform 原样带回。
+> - **被拒收判据用 `note` 而不是 `noteCode`**（noteCode 瞬态不落 IndexedDB，刷新后归 0）。
+> - `.fail-badge` 由 `<span>` 改 `<button>`：不可重发时 `disabled`（恢复入口仍是下方系统行）。
+>   相册整组一个红❗ → 点一次重发组内所有失败成员（`useMediaSend.resendMessage(m, messages)`）。
+> - `FakeIMClient` 补显式 `sendMedia`（Proxy 兜底返回 Promise，拿不到 cid 也断言不了实参）；
+>   `App.messageList.test.tsx` 加 2 例（点红❗按原 cid 重发 / 被拒收那条 disabled）。
+> - **已知限制**：`retry-upload` 依赖内存里留存的 `File`（`pendingFilesRef`），**刷新页面即失效**，
+>   只能提示"原文件已失效，请重新选择"——与 iOS 的 `im-pending://` 落盘副本不同，这条差距本次不补。
+
 > **登录页「请求在途」可见反馈（2026-08-28，`LoginView.tsx` + `styles.css`，tsc + 555 vitest 绿）**：
 > 用户反馈点登录看不到转圈。原来 `authBusy` 只把三个按钮 `disabled`，没有任何可见的进行中态——
 > 弱网/后端连不上时就是"点了没反应"。现在被点的那个入口显示内联菊花 + 文案切「登录中…／注册中…」，

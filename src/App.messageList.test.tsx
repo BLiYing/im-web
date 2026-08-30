@@ -173,10 +173,34 @@ describe("消息列表：状态标记", () => {
     await waitFor(() => expect(msgs().querySelector(".date-pill")).toBeInTheDocument());
   });
 
-  it("本人失败消息显示失败角标 .fail-badge", async () => {
+  it("本人失败消息显示失败角标 .fail-badge，点它按原 clientMsgId 重发", async () => {
     await enterChat();
     await push(recv({ from: UID, contentType: "text", content: "发不出去", convSeq: 0, clientMsgId: "c-fail", status: "failed" }));
-    await waitFor(() => expect(msgs().querySelector(".fail-badge")).toBeInTheDocument());
+    const badge = await waitFor(() => {
+      const el = msgs().querySelector(".fail-badge") as HTMLButtonElement | null;
+      expect(el).toBeInTheDocument();
+      return el!;
+    });
+    expect(badge.disabled).toBe(false);
+    fireEvent.click(badge);
+    // 沿用原 clientMsgId（服务端据此幂等去重；换新 ID 会让对端收到两条）。
+    await waitFor(() => {
+      const [content, , , , opts] = Fake.last!.calls.sendMedia?.[0] ?? [];
+      expect(content).toBe("发不出去");
+      expect(opts).toMatchObject({ clientMsgId: "c-fail" });
+    });
+  });
+
+  it("被服务端拒收的失败消息：红❗不可点（恢复入口在下方系统行）", async () => {
+    await enterChat();
+    await push(recv({ from: UID, contentType: "text", content: "被拉黑了", convSeq: 0, clientMsgId: "c-rej",
+                      status: "failed", note: "消息已发出，但被对方拒收了", noteCode: 200102 }));
+    const badge = await waitFor(() => {
+      const el = msgs().querySelector(".fail-badge") as HTMLButtonElement | null;
+      expect(el).toBeInTheDocument();
+      return el!;
+    });
+    expect(badge.disabled).toBe(true);
   });
 });
 

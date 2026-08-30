@@ -62,6 +62,12 @@ export class FakeIMClient {
     this.rec("sendText", content, to, convId);
     return `cmid-${++this.seq}`;
   }
+  // 失败重发走 sdk/resend.ts 的自由函数 → 最终仍落到 sendMedia；显式实现它以返回真实的
+  // string cid（Proxy 兜底会返回 Promise），并记录实参供断言"沿用了原 clientMsgId"。
+  sendMedia(content: string, contentType: string, to: string, convId: string, opts?: Record<string, unknown>): string {
+    this.rec("sendMedia", content, contentType, to, convId, opts);
+    return (opts?.clientMsgId as string) ?? `cmid-${++this.seq}`;
+  }
 }
 
 /** 测试通过 `(IMClient as unknown as Fake).last` 驱动服务端事件 / 断言调用。 */

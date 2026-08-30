@@ -27,6 +27,7 @@ import { FileGateIcon } from "./FileGateIcon";
 import { LinkCard } from "./LinkCard";
 import { VoiceBubble, setVoiceRelayResolver, voicePlayedSet } from "./VoiceBubble";
 import { useChatActions } from "../ChatActionsContext";
+import { resendPolicyFor } from "../resendPolicy";
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -69,7 +70,7 @@ export function MessageList(p: MessageListProps) {
   } = p;
   const {
     setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat,
-    onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, toggleUploadPause,
+    onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, resendMessage, toggleUploadPause,
     toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
   } = useChatActions();
   // 语音接力连播（§6.4，对齐 iOS）：把"下一条该播谁"的数据源注入 VoiceBubble 的模块级单例 audio。
@@ -175,13 +176,19 @@ export function MessageList(p: MessageListProps) {
           // 整组共用一条失败/拒收表达（同批发送、同一原因被拒）：取首个带 note 的成员。
           const notedMember = members.find((mm) => mm.note);
           const albumFailed = mine && members.some((mm) => mm.status === "failed");
+          // 整组共用一个红❗ → 只要还有一格能重发就可点，点一次重发组里所有失败成员。
+          const albumResendable = members.some((mm) => resendPolicyFor(mm, mine) !== "none");
           // 多选：整组作为一个勾选单位——可选成员=已入库(convSeq>0)未撤回；整组"已选"=全部可选成员都在选择集。
           const memberSeqs = members.filter((mm) => mm.convSeq > 0 && !mm.recalledAt).map((mm) => mm.convSeq);
           const albumSelectable = memberSeqs.length > 0;
           const albumSelected = albumSelectable && memberSeqs.every((s) => selected.has(s));
           const grid = (
             <div className="bubble-line">
-              {albumFailed && <span className="fail-badge" title={notedMember?.note || "发送失败"}>!</span>}
+              {albumFailed && (
+                <button type="button" className="fail-badge" disabled={!albumResendable}
+                        title={notedMember?.note || (albumResendable ? "发送失败，点击重发" : "发送失败")}
+                        onClick={() => resendMessage(m, messages)}>!</button>
+              )}
               <AlbumGrid members={members}
                 timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
                 progress={uploadProgress}
@@ -269,11 +276,15 @@ export function MessageList(p: MessageListProps) {
         // 右键/长按选中态（方案A）：菜单作用的目标消息稳态高亮。身份走 msgKey（与 React key 同一唯一来源）
         // ——convSeq 优先，发送中 convSeq=0 回退 clientMsgId 区分，避免多条 sending 一起亮。
         const menuActive = !!menu && msgKey(menu.m) === msgKey(m);
+        // 红❗可不可点 = 这条能不能重发（被拒收/已送达的不给入口，判据与 iOS 同一套）。
+        const canResend = resendPolicyFor(m, mine) !== "none";
         const bubbleBlock = (
           <>
             <div className="bubble-line">
               {mine && m.status === "failed" && (
-                <span className="fail-badge" title={m.note || "发送失败"}>!</span>
+                <button type="button" className="fail-badge" disabled={!canResend}
+                        title={m.note || (canResend ? "发送失败，点击重发" : "发送失败")}
+                        onClick={() => resendMessage(m)}>!</button>
               )}
               <div className={`bubble${isMediaBubble ? " media" : ""}${isContactBubble ? " contact" : ""}${menuActive ? " ctx-active" : ""}`}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
