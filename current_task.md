@@ -14,6 +14,19 @@
 > - 理由：系统通知是只读会话，服务端直接拒 `send_msg to=system`
 >   （`../IMServer/docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md` §2.2），列出来点了必报错。新增 2 例单测。
 
+> **单聊资料卡收口 · 6 条用户反馈（2026-08-30；`tsc -b` + **vitest 667 全绿**（+2：删除好友 / 点复制用户名）；未在浏览器手测）**：
+> 与 iOS 同批做，逐功能状态见 `../IMServer/docs/CLIENT_PARITY.md`「资料 · 单聊资料页收口」行。
+> - **「更多」弹窗点空白处不消失**（本次最实的一个 bug）：菜单挂在 `.detail-panel` 内，而面板自身
+>   `onClick={e => e.stopPropagation()}`（防误关抽屉），冒泡阶段的 window 监听根本收不到面板内的点击。
+>   修法照抄成员菜单那条既有注释：**捕获阶段** window click + 排除整个 `.detail-pill-anchor`
+>   （只排除菜单的话，再点一次「更多」会先被关掉再被按钮 toggle 打开，永远关不掉）。Esc/滚动一并关闭。
+> - **非好友不再显示「更多」**：菜单里全是"已经是好友"才有意义的项，此时页面只留「加好友」一个入口（与 iOS 同）。
+> - **「更多」补「删除好友」**（此前只有通讯录行菜单有）：`doRemoveFriend` = askConfirm + `removeFriend` +
+>   刷新好友表；**删完不关面板**，本页随即切成非好友视图，用户当场看得到关系已变。破坏性最重故置末位。
+> - **头部副标题不再显 @句柄**：改显在线态 `presenceText(presence[peer])`（新 prop `peerPresenceText`）——
+>   下方「用户名」行已经显示句柄，同屏显两遍没有新信息（iOS 早就是在线态，这次对齐）。
+> - **「用户名」行点击复制**裸句柄（不带 @）+ 吐司；iOS 那端是长按，Web 上点击是其等价物。
+
 > **发送失败重发（2026-08-30，**已合入 main**；`tsc -b` + **vitest 643 全绿**（+7：resendPolicy 6 例、消息列表 1 例）；未手测）**：
 > 与 iOS 同批做，口径两端一致（蓝图见 `../IMServer/docs/CHAT_UX.md` §8.1）。此前 `.fail-badge` 只是个
 > `<span>`，文本/语音完全没有重发；媒体只有「点气泡重传」一条路。

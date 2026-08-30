@@ -45,7 +45,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     setAdminPanelOpen: vi.fn(), openAdminPicker: vi.fn(), openTransferPicker: vi.fn(), revokeAdmin: vi.fn(),
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),
     doFriendAction: vi.fn(async () => {}), openChat: vi.fn(), openInChatSearch: vi.fn(),
-    doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),
+    doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doRemoveFriend: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),
     setConvPinned: vi.fn(), setConvMuted: vi.fn(), openGroupText: vi.fn(), openGroupCard: vi.fn(async () => {}),
     doEditMyGroupNickname: vi.fn(async () => {}), doEditGroupRemark: vi.fn(async () => {}), pickGroupAvatar: vi.fn(),
     openJoinRequests: vi.fn(async () => {}), openGroupBans: vi.fn(async () => {}), openPeerDetail: vi.fn(),
@@ -69,11 +69,22 @@ describe("DetailPanel · 单聊", () => {
   });
   // 内部 ID 零 UI 露出（docs/UI.md「用户标识」）：这一行的标签是「用户名」，
   // 值必须是公开句柄 @xxx；曾经显示的是 d.peer——10 位随机数字内部 ID，标签与内容完全对不上。
-  it("「用户名」行显示 @username，绝不显示内部 ID", () => {
-    const { getAllByText, queryByText } = mount(base({ peerUsername: () => "xiaoming" }));
-    // 两处：头像下的副标题 + 「用户名」行。两处都必须是句柄，都不能是内部 ID。
-    expect(getAllByText("@xiaoming").length).toBe(2);
+  it("「用户名」行显示 @username，绝不显示内部 ID；头部副标题不再重复它", () => {
+    const { getAllByText, queryByText } = mount(base({ peerUsername: () => "xiaoming", peerPresenceText: "在线" }));
+    // 只此一处：「用户名」行。头部副标题曾经也显 @句柄——同一信息在同屏出现两遍，
+    // 2026-08-30 改成显示在线态（与 iOS displaySubtitle 同口径）。
+    expect(getAllByText("@xiaoming").length).toBe(1);
+    expect(queryByText("在线")).toBeTruthy();
     expect(queryByText("u2")).toBeNull(); // u2 是内部 ID，不得出现在任何位置
+  });
+
+  // 用户名要能拿走：点整行即复制**裸句柄**（不带 @）。iOS 那端是长按菜单，Web 上点击是其等价物。
+  it("点「用户名」行复制裸句柄 + 吐司", () => {
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    const { getByTitle } = mount(base({ peerUsername: () => "xiaoming" }));
+    fireEvent.click(getByTitle("点击复制用户名"));
+    expect(writeText).toHaveBeenCalledWith("xiaoming");
   });
 
   // 拿不到句柄时整行隐藏——不显示"未设置"，更不回退到内部 ID。
@@ -83,10 +94,12 @@ describe("DetailPanel · 单聊", () => {
     expect(queryByText("u2")).toBeNull();
   });
 
-  it("非好友：只显「加好友」，隐藏 消息/备注名/置顶", () => {
+  it("非好友：只显「加好友」，隐藏 消息/更多/备注名/置顶", () => {
     const { getByText, queryByText } = mount(base({ friends: [] }));
     expect(getByText("加好友")).toBeTruthy();
     expect(queryByText("消息")).toBeNull(); expect(queryByText("备注名")).toBeNull(); expect(queryByText("置顶聊天")).toBeNull();
+    // 「更多」也不显（2026-08-30）：菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友）。
+    expect(queryByText("更多")).toBeNull();
   });
   it("「消息」→ close + openChat(peer)；置顶开关 → setConvPinned(conv, true)", () => {
     const p = base();
@@ -103,6 +116,16 @@ describe("DetailPanel · 单聊", () => {
     expect(p.doClearHistory).toHaveBeenCalledWith("u_u1_u_u2");
     fireEvent.click(getByText("拉黑"));
     expect(p.doToggleBlock).toHaveBeenCalledWith("u2", true);
+  });
+  // 删除好友此前只在通讯录左滑里有，资料卡的「更多」里找不到（2026-08-30 补齐，末位·破坏性）。
+  it("更多菜单：删除好友 → doRemoveFriend(peer)；非好友时该项不存在", () => {
+    const p = base({ detailMore: true });
+    const { getByText } = mount(p);
+    fireEvent.click(getByText("删除好友"));
+    expect(p.doRemoveFriend).toHaveBeenCalledWith("u2");
+    cleanup();
+    const { queryByText } = mount(base({ detailMore: true, friends: [] }));
+    expect(queryByText("删除好友")).toBeNull();
   });
 });
 

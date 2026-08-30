@@ -1615,6 +1615,28 @@ export default function App() {
     };
   }, [memberMenu]);
 
+  // 资料卡「更多」菜单：点空白/滚动/Esc 关闭。
+  // 与成员菜单同理走**捕获阶段**：菜单挂在 `.detail-panel` 内，而面板自身 `onClick={e => e.stopPropagation()}`
+  // （防误关抽屉），冒泡阶段的 window 监听收不到面板内的点击 —— 那正是「点空白处菜单不消失」的成因。
+  // 排除整个 `.detail-pill-anchor`（按钮 + 菜单）：只排除菜单的话，再点一次「更多」会先被这里关掉、
+  // 再被按钮的 toggle 打开，菜单永远关不掉。
+  useEffect(() => {
+    if (!detailMore) return;
+    const close = (e: Event) => {
+      if ((e.target as Element)?.closest?.(".detail-pill-anchor")) return;
+      setDetailMore(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDetailMore(false); };
+    window.addEventListener("click", close, true);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close, true);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [detailMore]);
+
   // 详情文件行右键菜单：点空白/滚动/Esc 关闭。与成员菜单同理走**捕获阶段**——菜单虽渲染在顶层，但触发点
   // 在 `.detail-panel`（挂了 stopPropagation）内，冒泡阶段的 window 监听收不到面板内的点击。菜单自身点击由
   // `.ctx-menu` 排除（菜单项各自负责关闭），避免在按钮 handler 前先卸载菜单。
@@ -2379,6 +2401,19 @@ export default function App() {
         void refreshFriends();
         setToast(block ? "已拉黑" : "已取消拉黑");
       } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+    })();
+  };
+
+  // 单聊「删除好友」（资料卡「更多」菜单，二次确认）。
+  // 删完**不关面板**：refreshFriends 后本页自动切成非好友视图（只剩「加好友」），
+  // 用户能直接看到关系已变——弹回聊天页反而让人怀疑到底删没删。
+  const doRemoveFriend = (peer: string) => {
+    void (async () => {
+      if (!(await askConfirm("删除该好友？将从通讯录移除，聊天记录仍保留在本机。", { okText: "删除", danger: true }))) return;
+      await doFriendAction(peer, async () => {
+        await clientRef.current!.removeFriend(peer);
+        setToast("已删除好友");
+      });
     })();
   };
 
@@ -3161,6 +3196,7 @@ export default function App() {
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
           peerDeleted={!!detail.peer && deletedPeers.has(detail.peer)}
+          peerPresenceText={detail.isGroup || !detail.peer ? "" : presenceText(presence[detail.peer])}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); setAdminPanelOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setAdminPanelOpen={setAdminPanelOpen}
@@ -3169,7 +3205,7 @@ export default function App() {
           revokeAdmin={(cid, m) => void doRevokeAdmin(cid, m.user_id, groupMemberLabel(m))}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
           doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={() => search.openInChatSearch()}
-          doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
+          doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doRemoveFriend={doRemoveFriend} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
           setConvPinned={setConvPinned} setConvMuted={setConvMuted} openGroupText={openGroupText} openGroupCard={openGroupCard}
           doEditMyGroupNickname={doEditMyGroupNickname} doEditGroupRemark={doEditGroupRemark} pickGroupAvatar={pickGroupAvatar}
           openJoinRequests={openJoinRequests} openGroupBans={openGroupBans} openPeerDetail={openPeerDetail}

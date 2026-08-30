@@ -6,7 +6,7 @@
 // 护栏：DetailPanel.test.tsx + DetailPanelParts.test.tsx（子件）。
 import type { Dispatch, SetStateAction } from "react";
 import {
-  X, Camera, UserPlus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
+  X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
   IdCard,
 } from "lucide-react";
@@ -53,6 +53,9 @@ export interface DetailPanelProps {
    *  曾在此就地用 peerNick 拼，那个函数只查昵称不查备注，同一张名片在气泡显「老王」、
    *  在本页名片签却显「王建国」（/code-review 2026-08-29）。 */
   contactDisplayName: (userId: string, fallback?: string) => string;
+  /** 单聊头部副标题 = 对端**在线态**文案（App 用 presenceText(presence[peer]) 算好传入，取不到为空串）。
+   *  刻意**不显示 @句柄**：下方「用户名」行已经显示它，头部再来一次是纯重复（与 iOS displaySubtitle 同口径）。 */
+  peerPresenceText?: string;
   /** 该 uid 经 GET /users/{id} 确认已注销（200001）→ 面板显空态（CONTACT_CARD_DESIGN §6 第四分支）。
    *  名片卡是唯一能打开任意陌生/已注销 uid 的入口，没有这一支就会显示一个看似正常的空资料页。 */
   peerDeleted?: boolean;
@@ -81,6 +84,8 @@ export interface DetailPanelProps {
   openInChatSearch: () => void;
   doClearHistory: (cid: string) => void;
   doToggleBlock: (peer: string, block: boolean) => void;
+  /** 删除好友（含二次确认）。删完保持面板打开——好友态刷新后本页自动切成非好友视图。 */
+  doRemoveFriend: (peer: string) => void;
   doLeaveGroup: (cid: string) => Promise<void>;
   doDissolveGroup: (cid: string) => void;
   setConvPinned: (c: Conversation, pinned: boolean) => void;
@@ -98,10 +103,10 @@ export interface DetailPanelProps {
 export function DetailPanel(p: DetailPanelProps) {
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, adminPanelOpen, groupBans,
-    groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted,
+    groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
     onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
-    doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doLeaveGroup, doDissolveGroup,
+    doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doRemoveFriend, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail,
   } = p;
@@ -125,10 +130,10 @@ export function DetailPanel(p: DetailPanelProps) {
       : (conv?.peer_nickname || (d.peer ? peerNick(d.peer) : undefined));
     const detailPeerAvatar = d.isGroup ? undefined
       : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
-    // 单聊副标题显示**公开句柄**，不是 d.peer（10 位随机数字内部 ID）。
-    // 拿不到句柄就留空——头像下方多一串随机数字比什么都没有更糟。
-    const peerHandle = d.peer ? peerUsername(d.peer) : undefined;
-    const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (peerHandle ? `@${peerHandle}` : "");
+    // 单聊副标题 = **在线态**（对齐 iOS：标题是名字、副标题是「在线 / 最近在线」）。
+    // 曾经显示 @句柄——但下方「用户名」行已经显示了它，头部再来一次是纯重复、没有新信息。
+    // 取不到在线态时为空串，副标题自然隐藏（不显示占位；绝不回退到 d.peer 那串内部 ID）。
+    const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (peerPresenceText ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
     const muted = !!conv?.muted;
     const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
@@ -223,6 +228,9 @@ export function DetailPanel(p: DetailPanelProps) {
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
                 {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
+                {/* 「更多」：单聊**非好友**不显示——菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友），
+                    此时页面只应给一个主入口「加好友」（与 iOS actionPillSpecs 同口径）。系统通知会话例外：它只有这一个入口。 */}
+                {(d.isGroup || isSystemPeer || detailPeerIsFriend) && (
                 <div className="detail-pill-anchor">
                   <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
                   {detailMore && (
@@ -247,9 +255,15 @@ export function DetailPanel(p: DetailPanelProps) {
                       {isOwner && (
                         <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />删除群组</button>
                       )}
+                      {/* 删除好友：破坏性最重，按本仓 destructive-last 约定放末位（与消息/会话菜单一致）。
+                          删完不关面板——好友列表刷新后本页自动切成非好友视图（只剩「加好友」）。 */}
+                      {!isSystemPeer && !d.isGroup && detailPeerIsFriend && d.peer && (
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doRemoveFriend(d.peer!); }}><UserMinus size={16} className="menu-icon" />删除好友</button>
+                      )}
                     </div>
                   )}
                 </div>
+                )}
               </div>
               {/* 已注销用户：一段空态替代全部资料/页签（§6 第四分支）。头部头像+名字仍显快照，
                   与「卡片本身仍显示快照、历史记录不该凭空变空」同口径。 */}
@@ -336,7 +350,13 @@ export function DetailPanel(p: DetailPanelProps) {
                   {/* 显示公开句柄，不是 d.peer（内部 ID）。拿不到时整行不渲染——
                       标签写着"用户名"却显示一串随机数字，是最刺眼的一处错配。 */}
                   {d.peer && peerUsername(d.peer) && (
-                    <div className="detail-row"><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">@{peerUsername(d.peer)}</span></div>
+                    // 点整行即复制句柄（不带 @）：用户名是要拿去搜人/发给别人的，看得见却复制不走等于没有。
+                    // Web 上「长按」没有原生语义，点击就是它的等价物（iOS 那端是长按菜单「复制」）。
+                    <button className="detail-row" title="点击复制用户名" onClick={() => {
+                      const handle = peerUsername(d.peer!) ?? "";
+                      if (!handle) return;
+                      void navigator.clipboard?.writeText(handle).then(() => setToast("已复制用户名"), () => setToast("复制失败"));
+                    }}><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">@{peerUsername(d.peer)}</span></button>
                   )}
                 </div>
               )}
