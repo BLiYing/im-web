@@ -45,7 +45,8 @@
 3. `sendSyncReq([...tracked])`——按各会话游标补回离线期间的消息；
 4. `fetchHidden()`——补收敛离线期间在其它设备产生的「仅为我删除」；
 5. **重发 `watched` 订阅集**（连接级易失态，见 PROTOCOL §5.5）。
-   > 这一步 Web 在 SDK 里做，iOS 在聊天页 `didChangeState:` 里做——层次不同，别按错层找。
+   > iOS 2026-08-30 也已把这一步从聊天页上移到 `IMSocketManager`，两端现在同层。
+   > 两端都只记"最后一次传入的全集"，**不支持多消费者合并**——出现第二个 watch 消费者时要一起升级。
 
 ## 4. 排查
 
@@ -58,5 +59,6 @@
 | 连上了 | `connected`（带 `tracked_conversations`） |
 | 订阅有没有补回来 | `watch_resent` |
 | 是不是被踢了 | `disconnect_requested` / `onAuthError` 链路上的 `login_failed 100101` |
+| 唤醒信号来了但**故意没动**（反例取证） | `wake_ignored`（Debug 级，带 `state` / `manual`） |
 
 手测口径（断够 40 秒再恢复，否则看不出差别）与反例（退出登录后不得自动连回）见跨端主文档 §7。

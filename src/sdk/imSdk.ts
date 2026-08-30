@@ -195,7 +195,8 @@ export class IMClient {
       probe: () => this.send({ type: T.PING, seq: ++this.seq }),
       reconnect: () => { this.clearReconnectTimer(); this.reconnectAttempts = 0; void this.openSocket(); },
     });
-    if (action !== "none") logger.info(LOG_TAG.ws, "wake", { reason, action, attempts: this.reconnectAttempts });
+    if (action === "none") logger.debug(LOG_TAG.ws, "wake_ignored", { reason, state: this.state, manual: this.manualClose });
+    else logger.info(LOG_TAG.ws, "wake", { reason, action, attempts: this.reconnectAttempts });
   }
 
   disconnect(): void {
