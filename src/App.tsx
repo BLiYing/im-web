@@ -654,6 +654,8 @@ export default function App() {
       onWindow: (meta) => {
         const pend = pendingLocateRef.current;
         if (!pend || pend.convId !== meta.convId) return;
+        // 锚点对不上=这帧回的是更早那次开窗（连点了两个定位入口），用了它会跳到上一个目标。
+        if (meta.anchor !== pend.seq) return;
         if (!meta.anchorFound) {
           pendingLocateRef.current = null;
           setToast("原消息已被删除");
@@ -1376,7 +1378,10 @@ export default function App() {
   // 这时直接 jumpToSeq 会滚到一条「撤回了一条消息」的系统行并高亮，用户看不出原消息已经没了。
   // 故显式提示 + 顺手重拉一次让横幅收敛（iOS 同口径，见 +PinnedBanner 的 didRequestJumpToConvSeq）。
   const jumpToPinned = useCallback((seq: number) => {
-    if (messagesRef.current.some((m) => m.convSeq === seq && m.recalledAt)) {
+    // 查**本地全量**而不是渲染窗口：置顶消息天然是较早那条，十有八九不在窗口里，
+    // 只查窗口的话这个判定基本恒假，「原消息已被撤回」这条提示等于没了。
+    const localAll = msgsByConvRef.current[currentConvRef.current] ?? [];
+    if (localAll.some((m) => m.convSeq === seq && m.recalledAt)) {
       setToast("原消息已被撤回");
       void refreshPinned(currentConvRef.current);
       return;
@@ -1867,11 +1872,14 @@ export default function App() {
   transcriptsRef.current = transcripts; // 同上：transcribeMessage 判断"已展开→收起"要读当前值
 
   // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
-  // searchOpen/searchQuery 受控注入（见上）；副作用依赖（jumpToSeq/locateInChat/setToast/各 ref/客户端）注入进去。=====
+  // searchOpen/searchQuery 受控注入（见上）；副作用依赖（locateInChat/setToast/客户端）注入进去。
+  // **传 allLocal 而不是 messages**：搜索/日历/发件人候选问的是"整个会话"，不是"现在渲染的那一窗"。
+  // W2 引入渲染窗口后一度传了切片，实测「会话内搜索」在 3 万条的群里只命中 98 条（= 窗口条数）——
+  // 功能还在、界面照常，结果悄悄错了，这类静默降级最难发现。=====
   const search = useChatSearch({
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
-    messages, convId, groupConvId, uid, groupInfos, conversations,
-    messagesRef, jumpToSeq, locateInChat, setToast,
+    allMessages: allLocal, convId, groupConvId, uid, groupInfos, conversations,
+    locateInChat, setToast,
   });
 
   // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。

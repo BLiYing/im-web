@@ -1,11 +1,11 @@
 // useChatSearch：会话内搜索 / 按日期日历 / 「来自」发件人过滤 / 首页全局搜索的状态 + 逻辑外壳
 // （从 App.tsx 抽出控制体量，CODING_STYLE §7「①有自己状态+一组操作 → 自定义 Hook」）。纯本地，命中口径/
-// 摘要/活跃日走已抽出的 searchPredicate（+单测）。副作用依赖（jumpToSeq/locateInChat/setToast/客户端/各 ref）
+// 摘要/活跃日走已抽出的 searchPredicate（+单测）。副作用依赖（locateInChat/setToast/客户端/各 ref）
 // 全部**注入**，Hook 不摸全局。行为与抽出前逐字一致（默认跳最新签名去重 / 越界提示上拉 / 切会话重置 …）。
 //
 // ⚠️ searchOpen / searchQuery 刻意**留在 App 受控注入**：App 里 highlightSearch 定义在本 Hook 调用点之前
 //    （消息气泡渲染要读它），若把这两个 state 搬进来会令 highlightSearch 反向依赖后定义的 Hook（TDZ）。
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, Conversation, GroupInfo } from "./sdk/protocol";
 import { searchMessages, type MsgRecord } from "./sdk/localStore";
 import { minSeqOf, isSearchableMessage } from "./messageContent";
@@ -21,16 +21,19 @@ export interface ChatSearchDeps {
   searchQuery: string;
   setSearchQuery: (v: string) => void;
   // 实时值
-  messages: ChatMessage[];
+  /** **当前会话本地已有的全部消息**（升序）。会话内搜索/日历/发件人候选问的是"整个会话"，
+   *  不是"现在渲染的那一窗"——W2 引入渲染窗口后这里一度传的是渲染切片，
+   *  「会话内搜索」在 3 万条的群里只命中 98 条（=窗口条数）：界面照常、结果是错的。
+   *  本 Hook 因此**刻意不接收渲染窗口**，从签名上杜绝再传错。 */
+  allMessages: ChatMessage[];
   convId: string;
   groupConvId: string;
   uid: string;
   groupInfos: Record<string, GroupInfo>;
   conversations: Conversation[];
-  // ref
-  messagesRef: MutableRefObject<ChatMessage[]>;
   // 回调 / 常量
-  jumpToSeq: (seq: number) => void;
+  /** **唯一的跳转出口**：窗口内 → 滚动；本地有 → 移窗；都没有 → window_req 开窗。
+   *  本 Hook 刻意不持有 jumpToSeq（只滚 DOM 的那个）——搜索命中/日历落点都可能在窗口外。 */
   locateInChat: (cid: string, seq: number) => void;
   setToast: (msg: string | null) => void;
 }
@@ -38,8 +41,8 @@ export interface ChatSearchDeps {
 export function useChatSearch(d: ChatSearchDeps) {
   const {
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
-    messages, convId, groupConvId, uid, groupInfos, conversations,
-    messagesRef, jumpToSeq, locateInChat, setToast,
+    allMessages, convId, groupConvId, uid, groupInfos, conversations,
+    locateInChat, setToast,
   } = d;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -58,13 +61,13 @@ export function useChatSearch(d: ChatSearchDeps) {
   const searchNeedle = searchQuery.trim().toLowerCase();
   const searchHits = useMemo(() =>
     (searchOpen && (searchNeedle || searchFrom))
-      ? messages.filter((m) => {
+      ? allMessages.filter((m) => {
           if (!isSearchableMessage(m)) return false;
           if (searchFrom && m.from !== searchFrom) return false;
           return !searchNeedle || messageMatchesNeedle(m, searchNeedle);
         })
       : [],
-    [searchOpen, searchNeedle, searchFrom, messages]);
+    [searchOpen, searchNeedle, searchFrom, allMessages]);
   // 词/发件人/会话变化 → 默认跳「最新一条命中」；签名去重避免每次渲染重跳。命中集为空时不锁签名（切会话消息异步载入中）。
   useEffect(() => {
     if (!searchOpen) { searchSigRef.current = ""; return; }
@@ -75,12 +78,14 @@ export function useChatSearch(d: ChatSearchDeps) {
     const idx = searchHits.length - 1;
     setSearchHitIdx(idx);
     const seq = searchHits[idx].convSeq;
-    requestAnimationFrame(() => jumpToSeq(seq));
-  }, [searchOpen, convId, searchNeedle, searchFrom, searchHits, jumpToSeq]);
+    // 走 locateInChat 而非 jumpToSeq：命中集来自**本地全量**，多半不在当前渲染窗口里，
+    // 而 jumpToSeq 只会滚 DOM——跨不了窗，只会弹「原消息较早，请上拉加载后重试」。
+    requestAnimationFrame(() => locateInChat(convId, seq));
+  }, [searchOpen, convId, searchNeedle, searchFrom, searchHits, locateInChat]);
   const gotoSearchHit = (idx: number) => {
     if (idx < 0 || idx >= searchHits.length) return;
     setSearchHitIdx(idx);
-    jumpToSeq(searchHits[idx].convSeq);
+    locateInChat(convId, searchHits[idx].convSeq); // ▲▼ 逐条跳同理：命中可能在窗口外
   };
 
   // 「来自:」候选 = 本会话已发言者去重（iOS 拍板：未发言者必 0 命中）；名字 我→「我」→消息昵称→成员昵称→uid。
@@ -89,14 +94,14 @@ export function useChatSearch(d: ChatSearchDeps) {
     const members = groupInfos[groupConvId]?.members ?? [];
     const seen = new Set<string>();
     const rows: FromRow[] = [];
-    for (const m of messages) {
+    for (const m of allMessages) {
       if (!m.from || m.recalledAt || m.contentType === "system" || seen.has(m.from)) continue;
       seen.add(m.from);
       const mem = members.find((x) => x.user_id === m.from);
       rows.push({ userId: m.from, label: m.from === uid ? "我" : (m.fromNickname || mem?.nickname || m.from), role: mem?.role, avatarUrl: mem?.avatar_url });
     }
     return rows;
-  }, [searchFromPickerOpen, groupConvId, groupInfos, uid, messages]);
+  }, [searchFromPickerOpen, groupConvId, groupInfos, uid, allMessages]);
 
   const closeInChatSearch = () => {
     setSearchOpen(false); setSearchQuery(""); setSearchFrom(""); setSearchFromName("");
@@ -143,14 +148,14 @@ export function useChatSearch(d: ChatSearchDeps) {
   }, [convId]);
 
   // ===== 按日期跳转 / 日历：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
-  const searchableMsgs = () => messages.filter(isSearchableMessage);
+  const searchableMsgs = () => allMessages.filter(isSearchableMessage);
   const monthLabel = (dt: Date) => `${dt.getFullYear()}年${dt.getMonth() + 1}月`;
-  const activeDays = useMemo(() => activeDayKeys(messages), [messages]);
+  const activeDays = useMemo(() => activeDayKeys(allMessages), [allMessages]);
   const jumpToDay = (dayStart: number, label: string) => {
     const list = searchableMsgs();
-    const oldest = list[0]; // 升序，[0]=已加载窗口最旧
-    // 选中日早于已加载最旧且未到顶（minSeq>1）→ 提示上拉；否则会误跳已加载最旧并谎称「已跳到最近的 X」（原判据恒假、不可达，#1）。
-    if (oldest && dayStart < oldest.timestamp && minSeqOf(messagesRef.current) > 1) {
+    const oldest = list[0]; // 升序，[0]=**本地已有**最旧（不是渲染窗口最旧）
+    // 选中日早于本地最旧且本地没到会话开头（minSeq>1）→ 提示；否则会误跳本地最旧并谎称「已跳到最近的 X」（#1）。
+    if (oldest && dayStart < oldest.timestamp && minSeqOf(allMessages) > 1) {
       setToast(`${label}早于已加载范围，请上拉加载更早历史`);
       return;
     }
@@ -180,9 +185,10 @@ export function useChatSearch(d: ChatSearchDeps) {
   // anchor=1 即会话第一条；服务端按可见下界过滤后回的就是"我能看到的最早那一段"。
   const jumpToEarliest = () => {
     setCalendarOpen(false);
-    const first = messagesRef.current.find((m) => m.convSeq > 0);
+    const first = allMessages.find((m) => m.convSeq > 0);
     if (!first) { setToast("暂无消息"); return; }
-    if (minSeqOf(messagesRef.current) <= 1) { jumpToSeq(first.convSeq); return; } // 已到顶
+    // 本地已有第 1 条 → 仍走统一定位（它可能不在渲染窗口里，jumpToSeq 只会滚 DOM、跨不了窗）。
+    if (minSeqOf(allMessages) <= 1) { locateInChat(convId, first.convSeq); return; }
     setToast("正在加载更早历史…");
     // 借道统一定位入口：目标不在窗口 → 开窗 → 到达后滚动高亮，与其他定位场景同一条路径。
     locateInChat(convId, 1);

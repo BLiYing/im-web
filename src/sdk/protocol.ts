@@ -186,6 +186,8 @@ export interface ConvLastMessage {
 /** window_resp 的边界信息（消息本身走 processIncoming 常规落库，不在此重复）。 */
 export interface WindowMeta {
   convId: string;
+  /** 服务端原样回显的请求锚点。用来丢弃"回的是更早那次开窗"的迟到帧（用户连点两个定位入口）。 */
+  anchor: number;
   /**
    * 锚点消息**是否存在且对我可见**。
    * false = 真的没有这条（已删除/不可见）——据此可以放心提示「原消息已被删除」。

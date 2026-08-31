@@ -1081,6 +1081,7 @@ export class IMClient {
         for (const m of d.messages || []) this.processIncoming(m, false);
         this.handlers.onWindow?.({
           convId: String(d.conv_id ?? ""),
+          anchor: Number(d.anchor) || 0,
           anchorFound: !!d.anchor_found,
           hasBefore: !!d.has_before,
           hasAfter: !!d.has_after,
