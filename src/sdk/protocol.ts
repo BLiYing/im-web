@@ -23,6 +23,12 @@ export const T = {
   CAPS_UPDATE: "capabilities_update",
   /** 「仅为我删除」多设备同步（任务2）：本人另一端删了某条 → 本端物理移除该 (conv_id, conv_seq)。 */
   MSG_HIDDEN: "msg_hidden",
+  /**
+   * 超级群（2 万人量级）的轻量投递信号：一帧带一批「某会话最新到 conv_seq 了」。
+   * 超级群**不推全文** new_msg——2 万人数千在线推全文约 50MB/s，算术上不成立。
+   * 正文在**打开该会话时**经 sync_req 拉。见 IMServer/docs/design/SUPERGROUP_DESIGN.md §5。
+   */
+  CONV_BUMP: "conv_bump",
   VOICE_TRANSCRIPT: "voice_transcript", // 语音转文字结果（服务端识别，只推给请求者）
   ERROR: "error",
 } as const;
@@ -170,6 +176,22 @@ export interface ConvLastMessage {
   sys_segments?: SysSegment[];
 }
 
+/** 部署级能力/配额（对齐后端 GET /api/v1/server-config）。 */
+export interface ServerConfig {
+  max_group_members: number;       // 标准群成员上限（部署配置，端上不得硬编码）
+  supergroup_enabled: boolean;     // 本部署是否提供超级群 → 决定相关入口显隐
+  max_supergroup_members: number;  // 超级群上限；supergroup_enabled=false 时无意义
+}
+
+/** conv_bump 的一条信号（对齐后端 protocol.ConvBumpItem）。 */
+export interface ConvBumpItem {
+  conv_id: string;
+  latest_seq: number;      // 该会话当前最新 conv_seq
+  from?: string;           // 最新一条的发送者 uid
+  from_nickname?: string;  // 群内昵称优先
+  preview?: string;        // 截断后的预览文本（够会话列表显示那一行；正文另拉）
+}
+
 /** 会话列表项（对齐后端 conversation.Summary）。 */
 export interface Conversation {
   conv_id: string;
@@ -177,6 +199,12 @@ export interface Conversation {
   name?: string;        // 群名（仅群聊）
   avatar_url?: string;  // 群头像（仅群聊，空则回退群名首字母）
   member_count?: number; // 群成员数（仅群聊）
+  /**
+   * 超级群（2 万人量级）。为 true 时该会话：
+   * 不显示已读双勾/「正在输入」/成员在线态，收到的是 conv_bump 信号而非全文消息，
+   * 成员列表须走分页接口。**不要按 member_count 自己猜**——它跟群的类型走，不跟人数走。
+   */
+  is_super?: boolean;
   peer: string;
   peer_nickname?: string;   // 对端昵称（空则回退 uid）
   peer_remark?: string;     // 我对对端的备注名（显示优先级最高，仅自己可见）
@@ -306,6 +334,12 @@ export interface GroupInfo {
   perm_pin?: boolean;
   history_visible?: boolean;
   my_mute_until?: number; // 我的成员级禁言到期（G2）
+  /**
+   * 超级群（2 万人量级）。为 true 时 `members` **只含我自己**——服务端不再一次性下发全量成员
+   * （2 万人约 2.5MB），成员列表须走 `GET /groups/{id}/members?cursor=&limit=` 分页。
+   * `member_count` 仍是真实人数，标题「群名（N人）」照常用它。
+   */
+  is_super?: boolean;
   pending_count?: number; // 待审入群申请数（G3，仅群主/管理员下发）
 }
 

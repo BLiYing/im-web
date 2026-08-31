@@ -2,8 +2,12 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView, } from "./protocol";
 import { createProbeWatchdog, installWakeListeners, runWake } from "./wake";
+import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
+import { parseConvBumpItems } from "./convBump";
+import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
+import type { ConvBumpItem } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { parseSysSegments } from "../sysSegments";
 import * as localStore from "./localStore";
@@ -80,6 +84,11 @@ export interface IMClientHandlers {
   onConvUpdate?: (u: ConvUpdate) => void;
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
+  /**
+   * 超级群轻量信号：一批「某会话最新到 conv_seq 了」。**没有正文**——
+   * UI 据此刷新会话列表那一行（预览+角标），真要看内容得进会话时 sync。
+   */
+  onConvBump?: (items: ConvBumpItem[]) => void;
   /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
@@ -242,18 +251,9 @@ export class IMClient {
     });
   }
 
-  /** 拉账号级自动下载策略（M4-7）。返回 `{version, settings}`；未设置过时后端回出厂默认。 */
-  async downloadSettings(): Promise<{ version: number; settings: unknown }> {
-    return (await this.api("/api/v1/download-settings")) as { version: number; settings: unknown };
-  }
-
-  /** 保存自动下载策略（整体替换）：后端规整 + bump 版本 + 推 capabilities_update 给本账号其它端。
-   *  请求体**就是 settings 本身**（后端直接 Decode 进 downloadsettings.Settings），不要再包一层。 */
-  async saveDownloadSettings(settings: unknown): Promise<{ version: number; settings: unknown }> {
-    return (await this.api("/api/v1/download-settings", {
-      method: "PUT", body: JSON.stringify(settings),
-    })) as { version: number; settings: unknown };
-  }
+  /** 账号级自动下载策略（M4-7）：读 / 整体替换。实现在 sdk/downloadSettingsApi.ts（无状态 HTTP）。 */
+  downloadSettings(): Promise<DownloadSettingsResult> { return fetchDownloadSettings(this.token); }
+  saveDownloadSettings(s: unknown): Promise<DownloadSettingsResult> { return putDownloadSettings(this.token, s); }
 
   /** 恢复出厂默认（草图 §05-3「重置自动下载设置」）。 */
   async resetDownloadSettings(): Promise<{ version: number; settings: unknown }> {
@@ -533,29 +533,12 @@ export class IMClient {
     });
   }
 
-  // ---- 收藏（M4-4）----
-
-
-  /** 收藏一条内容（快照）：POST /api/v1/favorites。 */
-  async addFavorite(f: { content_type?: string; content: string; caption?: string; file_name?: string; file_size?: number; duration?: number; waveform?: string; thumb?: string; poster?: string; media_w?: number; media_h?: number; source_conv_id?: string; source_conv_seq?: number; source_from?: string }): Promise<void> {
-    await this.api("/api/v1/favorites", { method: "POST", body: JSON.stringify(f) });
+  // ---- 收藏（M4-4）：无状态 HTTP，实现在 sdk/favoritesApi.ts ----
+  addFavorite(f: FavoriteDraft): Promise<void> { return addFavorite(this.token, f); }
+  listFavorites(offset = 0, limit = FAVORITES_PAGE_SIZE): Promise<{ items: Favorite[]; total: number }> {
+    return listFavorites(this.token, offset, limit);
   }
-  /** 我的收藏列表：GET /api/v1/favorites?limit&offset。
-   *
-   *  返回 items 与**服务端总数** total。total 用来判断"还有没有下一页"与显示总条数——
-   *  只按 items.length 判断会在最后一页恰好装满时永远停不下来（多发一次空请求才知道到底了）。 */
-  async listFavorites(offset = 0, limit = FAVORITES_PAGE_SIZE): Promise<{ items: Favorite[]; total: number }> {
-    const data = await this.api(`/api/v1/favorites?limit=${limit}&offset=${offset}`);
-    return {
-      items: (data?.favorites ?? []) as Favorite[],
-      // 老服务端不返回 page 时退化成"就这一页"，UI 不会显示错的总数、也不会误以为还有更多。
-      total: typeof data?.page?.total === "number" ? data.page.total : (data?.favorites?.length ?? 0),
-    };
-  }
-  /** 删除收藏：DELETE /api/v1/favorites/{id}。 */
-  async deleteFavorite(id: number): Promise<void> {
-    await this.api(`/api/v1/favorites/${id}`, { method: "DELETE" });
-  }
+  deleteFavorite(id: number): Promise<void> { return deleteFavorite(this.token, id); }
 
   /** 翻译文本（M4-5）：POST /api/v1/translate → 译文（服务端代理 + 缓存）。 */
   async translate(text: string, targetLang = "zh"): Promise<string> {
@@ -637,6 +620,11 @@ export class IMClient {
   loadNewer(convId: string, newestSeq: number): void {
     if (!convId) return;
     this.requestPage(convId, newestSeq); // [newestSeq+1 .. newestSeq+页]
+  }
+
+  /** 补拉某会话在本地游标之后的新消息（超级群收到 conv_bump 后用；信号无正文，见 sdk/convBump.ts）。 */
+  syncConversation(convId: string, sinceConvSeq: number): void {
+    if (convId) this.requestPage(convId, Math.max(0, sinceConvSeq));
   }
 
   /** 发一页分页请求：指定游标、单页、不自动向前翻页（由 SYNC_RESP 的 pagedPending 抑制）。 */
@@ -1100,6 +1088,9 @@ export class IMClient {
         break;
       case T.GROUP:
         this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "", d.result ?? "");
+        break;
+      case T.CONV_BUMP: // 超级群轻量信号（无正文）：刷列表那一行；正文进会话时再 sync
+        this.handlers.onConvBump?.(parseConvBumpItems(d));
         break;
       case T.CAPS_UPDATE: // 账号级配置版本变更（M4-7）：另一端改了自动下载策略 → 本端重拉
         this.handlers.onCapabilitiesUpdate?.(Number(d.version) || 0);

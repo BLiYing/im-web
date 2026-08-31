@@ -34,6 +34,7 @@ export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
   contacts, contactDisplayName, contactSourceLabel, onOpenContact,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
+  members: membersOverride, hasMoreMembers, onLoadMoreMembers,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
@@ -54,6 +55,14 @@ export function DetailTabs({
   contactSourceLabel?: (m: ChatMessage) => string | undefined;
   /** 点名片行 → 名片里那个人的资料页（与点气泡同一落点）。 */
   onOpenContact: (userId: string) => void;
+  /**
+   * 成员列表的数据源。缺省用 `gp.members`（普通群，服务端一次全量下发）。
+   * **超级群必须传**：那时 `gp.members` 只含我自己（2 万人约 2.5MB，服务端不再全量下发），
+   * 由父组件走 `groupMembersPage` 分页取。
+   */
+  members?: GroupMember[];
+  hasMoreMembers?: boolean;          // 还有下一页 → 渲染「加载更多」
+  onLoadMoreMembers?: () => void;    // 点「加载更多」
   canInvite: boolean;
   onAddMember: (cid: string) => void;
   onOpenMember: (userId: string) => void;
@@ -86,7 +95,7 @@ export function DetailTabs({
                 <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
               </button>
             )}
-            {gp.members.map((m) => (
+            {(membersOverride ?? gp.members).map((m) => (
               <div key={m.user_id} className="detail-member"
                 onClick={() => m.user_id !== uid && onOpenMember(m.user_id)} role="button">
                 <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
@@ -107,6 +116,12 @@ export function DetailTabs({
                 )}
               </div>
             ))}
+            {/* 分页续拉（超级群）：一次 50 人，避免 2 万行一次性进 DOM。 */}
+            {hasMoreMembers && (
+              <button className="detail-row" onClick={() => onLoadMoreMembers?.()}>
+                <span>加载更多成员</span>
+              </button>
+            )}
           </div>
         )}
         {activeTab === "media" && (

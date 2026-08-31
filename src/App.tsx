@@ -5,7 +5,8 @@ import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
-import { convIdFor, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest, type UserCard } from "./sdk/protocol";
+import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
+import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL } from "./mention";
@@ -106,10 +107,13 @@ import {
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
 
-// 群成员上限（含群主），与后端 group.MaxGroupMembers=500 对齐（该值不由接口下发，两端各自硬编码）。
-// 建群时群主已占 1 席，故初始成员（好友）最多可选 MAX_GROUP_MEMBERS-1；超限由服务端 GroupMemberLimit 兜底拒绝。
-const MAX_GROUP_MEMBERS = 500;
-const MAX_INITIAL_MEMBERS = MAX_GROUP_MEMBERS - 1;
+// 群成员上限**不再硬编码**：它是部署级配置（后端 `-max-group-members`，默认 2000），
+// 登录后经 GET /api/v1/server-config 拉一次。
+//
+// 这里曾写死 500，而后端 2026-08-31 已放到 2000——端上会在选到第 501 人时误拦，
+// 用户看到的是"明明还能加却加不了"。**部署配置一律读接口，别在端上复制一份。**
+// 拉取失败时的兜底：给一个保守值，让 UI 可用；真超限由服务端 GroupMemberLimit 兜底拒绝。
+const FALLBACK_MAX_GROUP_MEMBERS = 500;
 // 转发目标会话上限：一次最多转给 9 个会话，与 iOS kIMForwardMaxSelection / 微信一致。
 
 // 收藏 → 合成 ChatMessage：转发/从收藏发送统一走 sendForwardToTarget（§6，媒体/文件透传 URL 不重传）。
@@ -312,6 +316,14 @@ export default function App() {
   }, [dismissedBanners]);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
+  // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
+  // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
+  const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+  // 当前 JWT。serverConfigApi 的两个接口是无状态查询（不挂 IMClient，见该模块头注释），
+  // 需要显式传 token；放 ref 是因为分页拉取发生在稳定回调里。
+  const tokenRef = useRef<string>("");
+  const [superMembers, setSuperMembers] = useState<GroupMember[]>([]);
+  const [superCursor, setSuperCursor] = useState<{ next: string; hasMore: boolean }>({ next: "", hasMore: false });
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
   const msgsRef = useRef<HTMLDivElement>(null); // 消息滚动容器
@@ -478,6 +490,22 @@ export default function App() {
     }, 400);
   }, [refreshConversations]);
 
+  /**
+   * 拉超级群成员的下一页。普通群不调用（服务端已随群资料一次全量下发）。
+   * cursor 为空表示重新从第一页开始（打开群资料页时）。
+   */
+  const loadSuperMembers = useCallback(async (convId: string, cursor: string) => {
+    if (!convId || !tokenRef.current) return;
+    try {
+      const page = await fetchGroupMembersPage(tokenRef.current, convId, { cursor, limit: 50 });
+      setSuperMembers((prev) => (cursor ? [...prev, ...page.members] : page.members));
+      setSuperCursor({ next: page.next_cursor ?? "", hasMore: !!page.has_more });
+    } catch {
+      // 拉不到就维持现状：成员 Tab 少几行，不影响聊天本身。
+      setSuperCursor((prev) => ({ ...prev, hasMore: false }));
+    }
+  }, []);
+
   const refreshFriends = useCallback(async () => {
     try {
       const list = await clientRef.current?.listFriends();
@@ -597,6 +625,21 @@ export default function App() {
           // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变绿✓✓（否则要切会话才更新）。
           scheduleListRefresh();
         }
+      },
+      // 超级群轻量信号（2 万人量级）：服务端不推全文，只说「某会话最新到 seq 了」。
+      //   · 会话列表：走既有的节流刷新，从服务端拿到权威的预览/未读（比自己拼更不容易错）。
+      //   · **正开着的那个会话**：主动补拉落后的那段，否则界面会停在旧消息上，
+      //     直到用户切走再切回——那是最容易被当成"消息丢了"的体验。
+      // 没开着的会话不拉，那正是信号化省下的开销。
+      onConvBump: (items) => {
+        scheduleConversationRefresh();
+        const openConv = currentConvRef.current;
+        if (!openConv) return;
+        const hit = items.find((it) => it.conv_id === openConv);
+        if (!hit) return;
+        // 本地已加载到的最大 conv_seq 作为游标；空会话从 0 开始拉。
+        const localNewest = messagesRef.current.reduce((mx, m) => Math.max(mx, m.convSeq ?? 0), 0);
+        if (hit.latest_seq > localNewest) clientRef.current?.syncConversation(openConv, localNewest);
       },
       onPresence: (user, p) => setPresence((prev) => ({ ...prev, [user]: p })),
       onTyping: (convId, from) => {
@@ -750,6 +793,10 @@ export default function App() {
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
     void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
+    // 部署级能力/配额（超级群开关、群成员上限）：本次会话内不会变，登录后拉一次即可。
+    // 失败不阻断登录——UI 会退回保守默认值，真超限仍由服务端兜底拒绝。
+    tokenRef.current = token ?? "";
+    void fetchServerConfig(tokenRef.current).then(setServerConfig).catch(() => { /* 保守默认即可 */ });
     void restoreDownloadState(myUID); // 回灌解门控记录 / 失效标记 / Cache Storage 已下载文件（见 useMediaDownload）
     // 保持登录：刷新后静默重登（Web #4）。扫码登录存 token（无密码，过期即回登录）。
     // **username 必须一起存**：重登走 /login，而它只认 username。
@@ -2132,6 +2179,20 @@ export default function App() {
     }
   }, [favorites, groupInfos, friends, remarks, favUserCards, uid, refreshGroupInfo]);
 
+  // ⚠️ **必须放在下面的登录早退之前**：hooks 数量每次渲染必须一致（Rules of Hooks）。
+  // 当前详情抽屉打开的群若是**超级群**，成员表要走分页（gp.members 只含我自己）。
+  // 返回 conv_id 供拉取与透传；普通群返回空串，走原来的全量渲染。
+  const activeSuperGroupId = useMemo(() => {
+    if (!detail?.isGroup || !detail.convId) return "";
+    const gp = groupInfos[detail.convId];
+    return gp?.is_super ? detail.convId : "";
+  }, [detail, groupInfos]);
+  // 打开超级群详情（或换了个群）→ 从第一页重新拉；离开则清空，免得下次串到别的群的成员。
+  useEffect(() => {
+    if (!activeSuperGroupId) { setSuperMembers([]); setSuperCursor({ next: "", hasMore: false }); return; }
+    void loadSuperMembers(activeSuperGroupId, "");
+  }, [activeSuperGroupId, loadSuperMembers]);
+
   // ---- 登录 ----
   if (phase === "login") {
     return (
@@ -2235,7 +2296,9 @@ export default function App() {
   const chatTitle = isGroupChat
     ? (groupRemark(groupConvId) || activeGroupInfo?.name || activeGroupConv?.name || "群聊")
     : peerLabel;
-  const chatMemberCount = activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
+  // 同 DetailPanel：优先 member_count。超级群的 members 只含我自己，
+  // 用 members.length 会让标题变成「群名（1）」。
+  const chatMemberCount = activeGroupInfo?.member_count ?? activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
     : (peerConv?.peer_avatar_url || peerAvatar(peer));
@@ -3245,7 +3308,7 @@ export default function App() {
       {createDraft && (
         <CreateGroupModal
           draft={createDraft} accepted={accepted} friendLabel={friendLabel}
-          busy={createBusy} maxInitialMembers={MAX_INITIAL_MEMBERS}
+          busy={createBusy} maxInitialMembers={(serverConfig?.max_group_members ?? FALLBACK_MAX_GROUP_MEMBERS) - 1}
           onChange={setCreateDraft}
           onCreate={() => void doCreateGroup()}
           onCancel={() => setCreateDraft(null)}
@@ -3255,6 +3318,9 @@ export default function App() {
       {/* 会话详情抽屉：见 components/DetailPanel（派生 + JSX 整块平移；稳定服务走 Context，其余动作按组注入）。 */}
       {detail && (
         <DetailPanel detail={detail}
+          superMembers={activeSuperGroupId ? superMembers : undefined}
+          superHasMore={activeSuperGroupId ? superCursor.hasMore : false}
+          onLoadMoreMembers={() => activeSuperGroupId && void loadSuperMembers(activeSuperGroupId, superCursor.next)}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} adminPanelOpen={adminPanelOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}

@@ -44,6 +44,14 @@ export interface DetailPanelProps {
   /** 对端的**公开句柄**（GET /users/{id} 的 username），UI 显示为 @xxx。
    *  「用户名」行显示它——绝不能显示 d.peer，那是 10 位随机数字内部 ID（见 docs/UI.md「用户标识」）。 */
   peerUsername: (id: string) => string | undefined;
+  /**
+   * 超级群的成员分页（普通群不传，走 gp.members 全量）。
+   * 超级群的 `GET /groups/{id}` 只回我自己，成员表必须由 App 走 groupMembersPage 分页取，
+   * 再从这里透传下来——DetailPanel/DetailTabs 都是纯展示组件，不自己发请求。
+   */
+  superMembers?: GroupMember[];
+  superHasMore?: boolean;
+  onLoadMoreMembers?: () => void;
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 昵称 > uid（透传给 DetailTabs）。 */
   memberLabel: (m: GroupMember) => string;
   peerAvatar: (id: string) => string | undefined;
@@ -136,7 +144,9 @@ export function DetailPanel(p: DetailPanelProps) {
     // 单聊副标题 = **在线态**（对齐 iOS：标题是名字、副标题是「在线 / 最近在线」）。
     // 曾经显示 @句柄——但下方「用户名」行已经显示了它，头部再来一次是纯重复、没有新信息。
     // 取不到在线态时为空串，副标题自然隐藏（不显示占位；绝不回退到 d.peer 那串内部 ID）。
-    const subtitle = d.isGroup ? `${gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (peerPresenceText ?? "");
+    // 人数优先取 member_count：超级群的 members 只含我自己（服务端不再下发全量），
+    // 用 members.length 会显示成「1 位成员」。member_count 恒是真实人数。
+    const subtitle = d.isGroup ? `${gp?.member_count ?? gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (peerPresenceText ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
     const muted = !!conv?.muted;
     const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
@@ -383,6 +393,7 @@ export function DetailPanel(p: DetailPanelProps) {
                   return contactDisplayName(m.from, m.fromNickname);
                 }}
                 onOpenContact={openPeerDetail}
+                members={p.superMembers} hasMoreMembers={p.superHasMore} onLoadMoreMembers={p.onLoadMoreMembers}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}
