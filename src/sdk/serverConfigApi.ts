@@ -28,11 +28,25 @@ export function fetchServerConfig(token: string): Promise<ServerConfig> {
   return get<ServerConfig>(token, "/api/v1/server-config");
 }
 
-/** 群成员分页的一页。 */
+/**
+ * 群成员分页的一页。
+ *
+ * ⚠️ 服务端把成员数组放在 **`items`** 里（不是 `members`）——`GET /groups/{id}` 用 `members`，
+ * 这个分页接口用 `items`，两者不同名。第一版照着直觉写成 `members`，结果拿到 `undefined`
+ * 一路传进 React state，界面直接白屏（`undefined.map`）。这里解析时归一成 `members`，
+ * 免得每个调用方各踩一次。
+ */
 export interface GroupMembersPage {
   members: GroupMember[];
   next_cursor: string;
   has_more: boolean;
+}
+
+/** 服务端原始返回（字段名以后端 handlers_group.go 为准）。 */
+interface RawMembersPage {
+  items?: GroupMember[];
+  next_cursor?: string;
+  has_more?: boolean;
 }
 
 /**
@@ -41,7 +55,7 @@ export interface GroupMembersPage {
  *
  * cursor 传上一页的 `next_cursor`，空=首页；q 为空则按 user_id 升序列全部。
  */
-export function fetchGroupMembersPage(
+export async function fetchGroupMembersPage(
   token: string, convId: string, opts?: { cursor?: string; limit?: number; q?: string },
 ): Promise<GroupMembersPage> {
   const qs = new URLSearchParams();
@@ -49,5 +63,7 @@ export function fetchGroupMembersPage(
   if (opts?.limit) qs.set("limit", String(opts.limit));
   if (opts?.q) qs.set("q", opts.q);
   const suffix = qs.toString() ? `?${qs}` : "";
-  return get<GroupMembersPage>(token, `/api/v1/groups/${encodeURIComponent(convId)}/members${suffix}`);
+  const raw = await get<RawMembersPage>(token, `/api/v1/groups/${encodeURIComponent(convId)}/members${suffix}`);
+  // 兜底成空数组：调用方会把它塞进 state 再 .map，拿到 undefined 就是白屏。
+  return { members: raw.items ?? [], next_cursor: raw.next_cursor ?? "", has_more: !!raw.has_more };
 }

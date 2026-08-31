@@ -319,9 +319,6 @@ export default function App() {
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
-  // 当前 JWT。serverConfigApi 的两个接口是无状态查询（不挂 IMClient，见该模块头注释），
-  // 需要显式传 token；放 ref 是因为分页拉取发生在稳定回调里。
-  const tokenRef = useRef<string>("");
   const [superMembers, setSuperMembers] = useState<GroupMember[]>([]);
   const [superCursor, setSuperCursor] = useState<{ next: string; hasMore: boolean }>({ next: "", hasMore: false });
   const typingTimer = useRef<number | null>(null);
@@ -495,9 +492,10 @@ export default function App() {
    * cursor 为空表示重新从第一页开始（打开群资料页时）。
    */
   const loadSuperMembers = useCallback(async (convId: string, cursor: string) => {
-    if (!convId || !tokenRef.current) return;
+    const tok = clientRef.current?.authToken ?? "";
+    if (!convId || !tok) return;
     try {
-      const page = await fetchGroupMembersPage(tokenRef.current, convId, { cursor, limit: 50 });
+      const page = await fetchGroupMembersPage(tok, convId, { cursor, limit: 50 });
       setSuperMembers((prev) => (cursor ? [...prev, ...page.members] : page.members));
       setSuperCursor({ next: page.next_cursor ?? "", hasMore: !!page.has_more });
     } catch {
@@ -795,8 +793,9 @@ export default function App() {
     void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
     // 部署级能力/配额（超级群开关、群成员上限）：本次会话内不会变，登录后拉一次即可。
     // 失败不阻断登录——UI 会退回保守默认值，真超限仍由服务端兜底拒绝。
-    tokenRef.current = token ?? "";
-    void fetchServerConfig(tokenRef.current).then(setServerConfig).catch(() => { /* 保守默认即可 */ });
+    // **取 client.authToken 而不是入参 token**：入参只有扫码登录路径才有值，
+    // 密码/免密登录时是 undefined——照它取会静默 401（第一版就是这么错的）。
+    void fetchServerConfig(client.authToken).then(setServerConfig).catch(() => { /* 保守默认即可 */ });
     void restoreDownloadState(myUID); // 回灌解门控记录 / 失效标记 / Cache Storage 已下载文件（见 useMediaDownload）
     // 保持登录：刷新后静默重登（Web #4）。扫码登录存 token（无密码，过期即回登录）。
     // **username 必须一起存**：重登走 /login，而它只认 username。
@@ -948,7 +947,15 @@ export default function App() {
   const {
     mentionQuery, setMentionQuery, mentionFilter, setMentionFilter, mentionActive, setMentionActive,
     mentionCandidates, mentionAllPending, mentionPanelRef, mentionActiveRef, mentionRows, pickMention, onMentionNavKey,
-  } = useMentions({ convId, groupConvId, peer, uid, groupInfos, friends, input, setInput, composerRef });
+  } = useMentions({ convId, groupConvId, peer, uid, groupInfos, friends, input, setInput, composerRef,
+    // 超级群 @人：候选走服务端搜索（本地成员表只有我自己）。q 为空时取第一页，够列出前几十人。
+    searchGroupMembers: useCallback(async (cid: string, q: string) => {
+      const tok = clientRef.current?.authToken ?? "";
+      if (!tok) return [];
+      const page = await fetchGroupMembersPage(tok, cid, { q, limit: 20 });
+      return page.members;
+    }, []),
+  });
   const send = useCallback(() => {
     const text = input.trim();
     const client = clientRef.current;
@@ -2302,8 +2309,11 @@ export default function App() {
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
     : (peerConv?.peer_avatar_url || peerAvatar(peer));
+  // 「大群」标注：大群不显示已读双勾/正在输入/成员在线态，副标题点明缘由，
+  // 否则用户会把"功能没了"当成 bug 报上来。
+  const chatIsSuper = activeGroupInfo?.is_super ?? activeGroupConv?.is_super ?? false;
   const chatSubtitle = isGroupChat
-    ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员` : "群聊")
+    ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员${chatIsSuper ? " · 大群" : ""}` : (chatIsSuper ? "大群" : "群聊"))
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
     : presenceText(presence[peer]);
   // 群成员昵称（气泡回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。

@@ -19,16 +19,25 @@ export interface MentionsDeps {
   input: string;
   setInput: (v: string) => void;
   composerRef: RefObject<HTMLTextAreaElement>;
+  /**
+   * 超级群的成员搜索（依赖注入，便于单测）。
+   *
+   * 超级群的 `GET /groups/{id}` 只回我自己，`info.members` 里没有别人——不接这条，
+   * 大群里 @人会**一个候选都搜不到**。普通群不传/不调用（成员表已全量在手，走服务端只会更慢）。
+   */
+  searchGroupMembers?: (convId: string, q: string) => Promise<Array<{ user_id: string; nickname?: string; role?: string; avatar_url?: string }>>;
 }
 
 export function useMentions(d: MentionsDeps) {
-  const { convId, groupConvId, peer, uid, groupInfos, friends, input, setInput, composerRef } = d;
+  const { convId, groupConvId, peer, uid, groupInfos, friends, input, setInput, composerRef, searchGroupMembers } = d;
   const [mentionQuery, setMentionQuery] = useState<string | null>(null); // null=面板关闭
   const [mentionFilter, setMentionFilter] = useState(""); // 面板顶部搜索框的**独立**搜索词（从空开始，不随消息框 @后文字回填；空时列表跟随 mentionQuery）
   const mentionCandidates = useRef<MentionCandidates>({});
   const mentionAllPending = useRef(false);
   const mentionPanelRef = useRef<HTMLDivElement>(null); // 面板 DOM：判定"点击是否落在面板外"
   const mentionActiveRef = useRef<HTMLButtonElement>(null); // 当前高亮行：键盘移动时滚入视野
+  // 超级群：候选来自**服务端搜索**（本地只有我自己）。存搜到的那一页，随过滤词变化重取。
+  const [remoteMembers, setRemoteMembers] = useState<Array<{ user_id: string; nickname?: string; role?: string; avatar_url?: string }>>([]);
 
   const mentionRows = useMemo(() => {
     if (mentionQuery === null || !groupConvId || peer) return [];
@@ -37,7 +46,11 @@ export function useMentions(d: MentionsDeps) {
     // displayName 恒为群内**公开名**（选中后插进消息的就是它）；remark 只挂在候选项上参与匹配，
     // 绝不进 label——备注仅本人可见，写进消息文本等于把私房名发给全群。
     const remarkOf = remarkMap(friends);
-    const others = info.members
+    // 超级群的候选来自服务端搜索（本地 info.members 只有我自己）；普通群仍用本地全量成员表。
+    const source = info.is_super
+      ? remoteMembers.map((m) => ({ user_id: m.user_id, nickname: m.nickname, role: m.role, avatar_url: m.avatar_url }))
+      : info.members;
+    const others = source
       .filter((m) => m.user_id !== uid)
       .map((m) => ({ userId: m.user_id, displayName: m.nickname || m.user_id, remark: remarkOf.get(m.user_id),
                      role: m.role, avatarUrl: m.avatar_url }));
@@ -50,10 +63,27 @@ export function useMentions(d: MentionsDeps) {
       hits.map((m) => ({ label: m.displayName, userId: m.userId, role: m.role, avatarUrl: m.avatarUrl,
                          ...(m.remark ? { note: `备注: ${m.remark}` } : {}) }));
     if (canMentionAll(info.my_role) && effQuery.trim() === "") {
-      rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${others.length} 人` });
+      // 「通知全部 N 人」的 N 用群真实人数：超级群的候选是搜出来的一页，用 others.length 会显示成个位数。
+      const total = info.member_count ?? others.length;
+      rows.unshift({ label: MENTION_ALL_LABEL, userId: null, note: `通知全部 ${total} 人` });
     }
     return rows;
-  }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, friends, uid]);
+  }, [mentionQuery, mentionFilter, groupConvId, peer, groupInfos, friends, uid, remoteMembers]);
+
+  // 超级群：面板打开或过滤词变化时向服务端搜成员。
+  // 300ms 去抖——每敲一个字打一次请求，在 2 万人的群里既浪费也会让候选闪烁。
+  useEffect(() => {
+    const info = groupConvId ? groupInfos[groupConvId] : undefined;
+    if (mentionQuery === null || !info?.is_super || !searchGroupMembers) { setRemoteMembers([]); return; }
+    const q = (mentionFilter.trim() !== "" ? mentionFilter : mentionQuery).trim();
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      void searchGroupMembers(groupConvId, q)
+        .then((ms) => { if (alive) setRemoteMembers(Array.isArray(ms) ? ms : []); })
+        .catch(() => { if (alive) setRemoteMembers([]); }); // 搜不到就空列表，不打断输入
+    }, 300);
+    return () => { alive = false; window.clearTimeout(timer); };
+  }, [mentionQuery, mentionFilter, groupConvId, groupInfos, searchGroupMembers]);
 
   // 面板关闭时清空搜索框：下次打开是干净的空框（搜索词不跨会话/跨次残留）。
   useEffect(() => { if (mentionQuery === null) setMentionFilter(""); }, [mentionQuery]);

@@ -146,7 +146,10 @@ export function DetailPanel(p: DetailPanelProps) {
     // 取不到在线态时为空串，副标题自然隐藏（不显示占位；绝不回退到 d.peer 那串内部 ID）。
     // 人数优先取 member_count：超级群的 members 只含我自己（服务端不再下发全量），
     // 用 members.length 会显示成「1 位成员」。member_count 恒是真实人数。
-    const subtitle = d.isGroup ? `${gp?.member_count ?? gp?.members.length ?? conv?.member_count ?? 0} 位成员` : (peerPresenceText ?? "");
+    const memberTotal = gp?.member_count ?? gp?.members.length ?? conv?.member_count ?? 0;
+    // 「大群」标注：让用户明白为什么这里看不到已读/正在输入/在线态（否则会当成 bug 报上来）。
+    const superTag = (gp?.is_super ?? conv?.is_super) ? " · 大群" : "";
+    const subtitle = d.isGroup ? `${memberTotal} 位成员${superTag}` : (peerPresenceText ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
     const muted = !!conv?.muted;
     const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;

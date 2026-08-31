@@ -110,6 +110,11 @@ export class IMClient {
   private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
   private sessionToken = ""; // 扫码登录标记（置位=本会话无密码可回退）：重连探活失效时无法 /login 自愈，一律回登录
   private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
+
+  /** 当前 JWT（只读），给不挂在 IMClient 上的无状态 HTTP 模块用（sdk/serverConfigApi.ts 等）。
+   *  **别在外面另存一份**：登录路径有密码/免密/扫码三条，各自拿到 token 的时机不同，
+   *  外部副本必然漂移——第一版就这么错过，结果是静默 401、界面只表现为"列表是空的"。 */
+  get authToken(): string { return this.token; }
   private state: ConnState = "disconnected";
   private pingTimer: number | null = null;
   private reconnectTimer: number | null = null;
