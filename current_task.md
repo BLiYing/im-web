@@ -5,6 +5,30 @@
 
 ## 当前焦点
 
+> **三项：会话内搜索开错会话 + 合并转发标题口径 + 条目 `u` 匿名化（2026-08-31，与 iOS 同步；
+> `tsc -b` 干净、`vitest 704` 全绿；**未手测**）**
+>
+> 1. **搜索 pill 静默搜错会话（真 bug）** —— `DetailPanel` 的搜索 pill 调 `openInChatSearch()`，
+>    这函数**不收会话参数**，开的是当前活动会话的搜索；而 `openPeerDetail()` 只设 `detail.convId`、
+>    **不切活动会话**。于是「群里点成员头像 → 资料卡 → 搜索」搜到了那个**群**上，且毫无提示。
+>    现 pill 交出 `(d.convId, d.peer, d.isGroup)`；App 侧目标 ≠ 当前会话就先 `openChat`/`openGroupChat`。
+>    **不能"先切会话再 openInChatSearch"**——`useChatSearch` 的 `[convId]` effect 会把刚开的搜索态关掉
+>    （那是防"关键词泄漏到下一个会话"的既有逻辑）。故新增 `armInChatSearch(targetConvId)` 把"待开"
+>    记在 ref 上，由那个 effect 在切换落定后接手打开。回归见 `DetailPanel.test.tsx`。
+> 2. **合并转发标题收敛到微信口径** —— 原 `useForward.ts` 按条目发送者数量推标题
+>    （一个人「张三 的聊天记录」/ 多人「群聊的聊天记录」），而 iOS 那侧写的是**真实群名**，同一操作两端分叉。
+>    现共用纯函数 `chatRecordTitle`（`messageContent.ts`）：群聊固定「群聊的聊天记录」（不写群名）、
+>    单聊「{对方公开名}和{我的公开名}的聊天记录」。名字从 `App.tsx` 注入（`peer_nickname` + `myInfo.nickname`，
+>    **不是 `peer_remark`**——备注仅本人可见）；**直接从 `conversations` 取而不调 `peerNick()`**，
+>    后者定义在 `useForward` 调用点之后，取值会 TDZ。
+> 3. **条目 `u` 改成卡片内匿名序号 `s1/s2`**（`buildRecordSenderKeys`）—— 原本发的是发送者真 10 位内部 ID，
+>    随卡片到了可能不在群里的收件人手上，而 `GET /users/{id}` 不校验请求方与目标的关系。
+>    **读端零改动**（`recordSenderKey` 本就只做相等比较）；只把 `RecordModal` 的头像色种从 `it.u` 换成 `it.n`
+>    （匿名序号当色种没意义：同一人在两张卡里会换色）。契约见 `../IMServer/docs/PROTOCOL.md`。
+>
+> **未手测**；后端同批加了显示名字符清洗（`internal/textguard`），Web 侧无需配合改动
+> （`maxLength` 计数按 UTF-16 码元、服务端按 rune，方向上客户端更严，刻意不动）。
+
 > **收藏页 / 详情页 / 置顶 / 记录卡 五项 UI 修复（2026-08-30，与 iOS 同步；`tsc -b` + **vitest 681 全绿**
 > （+3：置顶 voice/chat_record 两例、记录条目 voice 预览一例）；**已在浏览器手测通过（2026-08-30）**）**
 >

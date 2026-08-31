@@ -94,13 +94,51 @@ export function minSeqOf(messages: ChatMessage[]): number {
  *  ts=原消息时间(ms)；u=发送者 uid（**只作查头像/判「连续同一人」的键，永不上屏**）；
  *  a=发送者头像相对路径（快照，读端自己拼 host）。
  *  key 与 iOS `mergedForwardJSONForMessages` 逐字对齐——两端读写同一份 JSON。
- *  **老记录一定缺字段**：无 ts 不显时间、无 u/a 头像退化成按名字生成的首字母块，绝不能因此不渲染。 */
+ *  **老记录一定缺字段**：无 ts 不显时间、无 u/a 头像退化成按名字生成的首字母块，绝不能因此不渲染。
+ *
+ *  ⚠️ `u` 是**卡片内匿名序号**（s1/s2/…），不是真 uid——见 buildRecordItemsSenderKeys。
+ *  存量卡片里的 `u` 仍是真 10 位 uid，故读端**只能拿它做相等比较**，不得解析、不得当接口参数。 */
 export type RecordItem = {
   n: string; ct: string; c: string;
   fn?: string; fs?: number; cap?: string; d?: number; w?: string;
   ts?: number; u?: string; a?: string;
 };
 export type ChatRecord = { t: string; items: RecordItem[] };
+
+/** 合并转发卡片标题 `t` 的**唯一生成口径**（与 iOS `IMChatRecordTitle` 逐字对齐）。
+ *
+ *  群聊一律固定串「群聊的聊天记录」，**绝不写真实群名**：收件人往往不在那个群里，群名本身就是
+ *  信息（「XX 病友群」），而 `t` 会被冻结进消息内容、还能被再次转发，泄露没有回收路径。
+ *  单聊写双方名字（微信同款）——只写对方的话，收件人看不出这是「对方和谁」的对话。
+ *
+ *  名字用**公开名**（昵称），不是备注：备注仅本人可见，写进去等于把「我给他起的私房名」发出去。
+ *  缺名时逐级降级到「聊天记录」，绝不落到 10 位内部 ID（内部 ID 不上屏是全局纪律）。 */
+export function chatRecordTitle(o: { isGroup: boolean; peerName?: string; myName?: string }): string {
+  if (o.isGroup) return "群聊的聊天记录";
+  const peer = (o.peerName ?? "").trim();
+  const me = (o.myName ?? "").trim();
+  if (peer && me) return `${peer}和${me}的聊天记录`;
+  if (peer || me) return `${peer || me}的聊天记录`;
+  return "聊天记录";
+}
+
+/** 为一组条目算出**卡片内匿名发送者序号**（真 uid → "s1"/"s2"/…，按首次出现顺序）。
+ *
+ *  为什么不直接发真 uid（2026-08-31 收口）：`GET /users/{id}` 只校验「持有合法 token」、不校验
+ *  请求方与目标的关系——随机 10 位内部 ID 的**不可枚举**就是这个接口唯一的防线。把群成员的真 uid
+ *  打包发给一个不在群里的收件人，等于绕过它：对方照着拉一遍就能多拿到 @句柄 / 标签 / 注册时间，
+ *  还得到一个长期可复查的稳定句柄、可对这些人挨个发好友申请。
+ *
+ *  `u` 原本的两个用途都不需要真 uid：判「连续同一人」只要卡片内可区分；查头像本就有 `a` 快照兜底
+ *  （而且 `a` 比读端查本地缓存更准——读端未必缓存过这个陌生人）。 */
+export function buildRecordSenderKeys(froms: (string | undefined)[]): Map<string, string> {
+  const keys = new Map<string, string>();
+  for (const f of froms) {
+    if (!f || keys.has(f)) continue;
+    keys.set(f, `s${keys.size + 1}`);
+  }
+  return keys;
+}
 export function parseChatRecord(content: string): ChatRecord {
   try {
     const o = JSON.parse(content);

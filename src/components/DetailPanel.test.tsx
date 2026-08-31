@@ -67,6 +67,16 @@ describe("DetailPanel · 单聊", () => {
     fireEvent.click(getByTitle("关闭"));
     expect(p.onClose).toHaveBeenCalled();
   });
+  // 回归（2026-08-31）：从**群成员头像**进来的单聊资料卡，点「搜索」要搜的是与该成员的单聊，
+  // 不是当时还开着的那个群。此前 openInChatSearch 不带任何会话参数，App 侧就把搜索开在了当前
+  // 会话上——静默搜错会话、没有任何提示。故 pill 必须把 (convId, peer, isGroup) 一并交出去。
+  it("搜索 pill 把**本卡片对应的会话**身份交给上层（不是当前打开的会话）", () => {
+    const p = base({ detail: { convId: "u_u1_u_u9", isGroup: false, peer: "u9" }, friends: [friendOf("u9")] });
+    const { getByText } = mount(p);
+    fireEvent.click(getByText("搜索"));
+    expect(p.onClose).toHaveBeenCalled();
+    expect(p.openInChatSearch).toHaveBeenCalledWith("u_u1_u_u9", "u9", false);
+  });
   // 内部 ID 零 UI 露出（docs/UI.md「用户标识」）：这一行的标签是「用户名」，
   // 值必须是公开句柄 @xxx；曾经显示的是 d.peer——10 位随机数字内部 ID，标签与内容完全对不上。
   it("「用户名」行显示 @username，绝不显示内部 ID；头部副标题不再重复它", () => {

@@ -81,7 +81,10 @@ export interface DetailPanelProps {
   // —— 动作 ——
   doFriendAction: (userId: string, fn: () => Promise<void>) => Promise<void>;
   openChat: (peer: string) => void;
-  openInChatSearch: () => void;
+  /** 在**该资料卡对应的会话**里开搜索（不是当前打开的那个会话）。
+   *  从群成员头像进来的单聊资料卡，convId 是与该成员的单聊——此前这里不传参，
+   *  App 侧就把搜索开在了当时还开着的那个群上（静默搜错会话，2026-08-31 修）。 */
+  openInChatSearch: (targetConvId: string, peer: string, isGroup: boolean) => void;
   doClearHistory: (cid: string) => void;
   doToggleBlock: (peer: string, block: boolean) => void;
   /** 删除好友（含二次确认）。删完保持面板打开——好友态刷新后本页自动切成非好友视图。 */
@@ -227,7 +230,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 )}
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
-                {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(); }}><Search size={20} /><span>搜索</span></button>}
+                {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>搜索</span></button>}
                 {/* 「更多」：单聊**非好友**不显示——菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友），
                     此时页面只应给一个主入口「加好友」（与 iOS actionPillSpecs 同口径）。系统通知会话例外：它只有这一个入口。 */}
                 {(d.isGroup || isSystemPeer || detailPeerIsFriend) && (

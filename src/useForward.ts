@@ -7,7 +7,7 @@ import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type GroupInfo } from "./sdk/protocol";
 import { toggleCapped } from "./selection";
-import { fileNameFromContent, type RecordItem } from "./messageContent";
+import { fileNameFromContent, chatRecordTitle, buildRecordSenderKeys, type RecordItem } from "./messageContent";
 
 export const MAX_FORWARD_TARGETS = 9;
 
@@ -23,21 +23,30 @@ export interface ForwardDeps {
   /** 合并转发条目里的发送者头像**相对路径**（快照，读端自己拼 host）。取不到回 undefined，
    *  读端按 uid 查本地缓存、再退首字母块。留在 App 注入——头像来源（群成员/会话/我自己）都长在那边。 */
   recordSenderAvatar: (m: ChatMessage) => string | undefined;
+  /** 合并转发卡片标题用的**公开名**（昵称，非备注）：单聊写「对方和我的聊天记录」。
+   *  群聊不用这两个值（标题固定「群聊的聊天记录」，不写群名），见 chatRecordTitle。 */
+  peerPublicName: string;
+  myPublicName: string;
   selected: Set<number>;
   setMenu: (v: null) => void;
   exitSelectMode: () => void;
 }
 
 export function useForward(d: ForwardDeps) {
-  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, recordSenderAvatar, selected, setMenu, exitSelectMode } = d;
+  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, recordSenderAvatar, peerPublicName, myPublicName, selected, setMenu, exitSelectMode } = d;
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
   const [forwardMulti, setForwardMulti] = useState(false); // 转发选择器：多选目标会话模式（对齐 iOS「多选」）
   const [forwardTargets, setForwardTargets] = useState<string[]>([]); // 多选选中的目标 conv_id（有序，上限 MAX_FORWARD_TARGETS）
+  /** 吐司动词：默认「转发」；分享个人名片等复用本选择页但语义不是转发的入口置成「发送」
+   *  （与 iOS IMContactShare 的文案对齐——两端同一操作不该一个说"已转发"一个说"已发送"）。
+   *  **复位放在 closeForwardPicker**：取消/点蒙层关掉选择页时也要还原，否则那次「发送」会粘住，
+   *  下一次真正的转发会吐司「已发送到 X」。 */
+  const [forwardVerb, setForwardVerb] = useState("转发");
 
   const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwardMode("each"); setForwarding([m]); }, []);
   // 关闭转发选择器并复位多选态（点蒙层 / 取消 / 发送完成统一走这里）。
-  const closeForwardPicker = useCallback(() => { setForwarding(null); setForwardMulti(false); setForwardTargets([]); }, []);
+  const closeForwardPicker = useCallback(() => { setForwarding(null); setForwardMulti(false); setForwardTargets([]); setForwardVerb("转发"); }, []);
   // 多选态切换某个目标会话（上限 MAX_FORWARD_TARGETS，超限吐司，对齐 iOS）。
   // 副作用（吐司）在 updater 外算，避免 StrictMode 双调用致重复吐司。
   const toggleForwardTarget = useCallback((cid: string) => {
@@ -61,14 +70,18 @@ export function useForward(d: ForwardDeps) {
       appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}), ...(extra ?? {}) });
 
     if (mode === "merged" && msgs.length > 0) {
-      const items: RecordItem[] = msgs
-        .filter((m) => m.content && !m.recalledAt && m.contentType !== "system" && m.convSeq > 0)
+      const kept = msgs.filter((m) => m.content && !m.recalledAt && m.contentType !== "system" && m.convSeq > 0);
+      // 发送者键先算：整张卡片共用一份「真 uid → s1/s2」映射，读端才判得出「连续同一人」。
+      const senderKeys = buildRecordSenderKeys(kept.map((m) => m.from));
+      const items: RecordItem[] = kept
         .map((m) => ({
           n: nameOf(m), ct: m.contentType || "text", c: m.content,
-          // ts/u/a：读端右上角显原消息时间、按 uid 判「连续同一人」并查头像（u 只作键，永不上屏）。
+          // ts/u/a：读端右上角显原消息时间、按 u 判「连续同一人」并查头像（u 只作键，永不上屏）。
           // 三者都是**可选**：老记录没有，读端各自降级（不显时间 / 首字母色块）。
+          // u 是**卡片内匿名序号**而非真 uid——真 uid 发给群外收件人会绕过 GET /users/{id} 的
+          // 「不可枚举」防线（见 buildRecordSenderKeys 注释）。
           ...(m.timestamp ? { ts: m.timestamp } : {}),
-          ...(m.from ? { u: m.from } : {}),
+          ...((): { u?: string } => { const k = m.from ? senderKeys.get(m.from) : undefined; return k ? { u: k } : {}; })(),
           ...((): { a?: string } => { const a = recordSenderAvatar(m); return a ? { a } : {}; })(),
           // 文件行随包携带原名与大小（fn/fs，与 iOS 同约定）——收端不再只显「[文件]」。
           ...(m.contentType === "file"
@@ -82,8 +95,9 @@ export function useForward(d: ForwardDeps) {
           // 图说条目携带 caption（cap，与 iOS 同 key）——收端记录卡「有字显字」，不再只显 [图片]。
           ...(m.caption ? { cap: m.caption } : {}),
         }));
-      const names = new Set(items.map((i) => i.n));
-      const title = names.size <= 1 ? `${[...names][0] || "聊天"} 的聊天记录` : "群聊的聊天记录";
+      // 标题按**来源会话**算，不按条目发送者数量——从群里只转一个人的几条，来源仍是群，
+      // 写成「张三 的聊天记录」会漏掉「这是群里的对话」这层语义，也和 iOS 分叉。
+      const title = chatRecordTitle({ isGroup: !!groupConvId, peerName: peerPublicName, myName: myPublicName });
       const json = JSON.stringify({ t: title, items });
       const clientMsgId = client.sendMedia(json, "chat_record", to, target.conv_id);
       pushOptimistic(clientMsgId, json, "chat_record");
@@ -130,9 +144,6 @@ export function useForward(d: ForwardDeps) {
     }
   }, [forwarding, forwardMode, groupInfos, appendMsg, uid]);
   // 执行转发到一个或多个目标：全部发出后关闭弹窗、退出多选、单条吐司汇总。
-  /** 吐司动词：默认「转发」；分享个人名片等复用本选择页但语义不是转发的入口置成「发送」
-   *  （与 iOS IMContactShare 的文案对齐——两端同一操作不该一个说"已转发"一个说"已发送"）。 */
-  const [forwardVerb, setForwardVerb] = useState("转发");
   const doForwardToTargets = useCallback((targets: Conversation[]) => {
     if (targets.length === 0) return;
     targets.forEach((t) => sendForwardToTarget(t)); // 不透传 forEach 的 index 作 msgsArg
@@ -141,7 +152,6 @@ export function useForward(d: ForwardDeps) {
     setToast(targets.length === 1
       ? `已${forwardVerb}到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
       : `已${forwardVerb}到 ${targets.length} 个会话`);
-    setForwardVerb("转发"); // 用完复位，免得下一次真转发也说"已发送"
   }, [sendForwardToTarget, closeForwardPicker, exitSelectMode, forwardVerb]);
   // 多选批量转发：收集选中的消息，打开选择器。
   const forwardSelected = useCallback(() => {

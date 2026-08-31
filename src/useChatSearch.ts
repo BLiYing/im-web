@@ -126,9 +126,32 @@ export function useChatSearch(d: ChatSearchDeps) {
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
   const clearSearchFrom = () => { setSearchFrom(""); setSearchFromName(""); };
+
+  /** 「切到某会话后再开搜索」的待办（存 conv_id，""=无）。
+   *
+   *  为什么需要它：`openInChatSearch` 开的永远是**当前**会话的搜索，而从群成员资料卡点「搜索」
+   *  时想搜的是与该成员的**单聊**——它还没被打开。直接调 openInChatSearch 会静默搜到当前那个群上
+   *  （2026-08-31 修的 bug）；先切会话再调也不行——下面的 [convId] effect 会把刚开的搜索态关掉。
+   *  故：切之前把目标 conv_id 记在这，切换落定后由那个 effect 接手打开。 */
+  const pendingOpenConvRef = useRef("");
+
+  /** 在**指定会话**里开搜索：已经是当前会话就立刻开，否则记下待办、由调用方去切会话。
+   *  调用方（App）负责真正的切会话动作——本 Hook 不摸导航。 */
+  const armInChatSearch = (targetConvId: string) => {
+    if (!targetConvId || targetConvId === convId) { openInChatSearch(); return; }
+    pendingOpenConvRef.current = targetConvId;
+  };
+
   // 切会话 → 关残留搜索态（单页共享态，否则关键词+「来自:A成员」泄漏到 B；同会话开搜不改 convId 故不误关，/code-review #2）。
+  // 若这次切换正是 armInChatSearch 要等的目标，关完立刻在新会话里开搜索（两次 setState 同批，无闪烁）。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { closeInChatSearch(); }, [convId]);
+  useEffect(() => {
+    closeInChatSearch();
+    if (pendingOpenConvRef.current && pendingOpenConvRef.current === convId) {
+      pendingOpenConvRef.current = "";
+      openInChatSearch();
+    }
+  }, [convId]);
 
   // ===== 按日期跳转 / 日历：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
   const searchableMsgs = () => messages.filter(isSearchableMessage);
@@ -213,7 +236,7 @@ export function useChatSearch(d: ChatSearchDeps) {
   }, [homeMsgHits, conversations]);
 
   return {
-    searchNeedle, searchHits, searchHitIdx, gotoSearchHit, openInChatSearch, closeInChatSearch, searchInputRef,
+    searchNeedle, searchHits, searchHitIdx, gotoSearchHit, openInChatSearch, armInChatSearch, closeInChatSearch, searchInputRef,
     searchFrom, searchFromName, searchFromPickerOpen, setSearchFromPickerOpen, searchFromRows, openFromPicker, pickSearchFrom, clearSearchFrom,
     calendarOpen, setCalendarOpen, calendarMonth, setCalendarMonth, activeDays, jumpToDay, jumpToToday, jumpToEarliest, monthLabel,
     homeSearch, setHomeSearch, homeRecordHits,

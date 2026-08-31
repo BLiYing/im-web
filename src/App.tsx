@@ -1028,6 +1028,11 @@ export default function App() {
       const c = conversations.find((x) => x.conv_id === m.convId);
       return (c && !c.is_group && c.peer === m.from && c.peer_avatar_url) || undefined;
     },
+    // 合并转发卡片标题用的**公开名**：单聊读会话行的 peer_nickname（**不是 peer_remark**——
+    // 备注仅本人可见，写进卡片等于把「我给他起的私房名」发给收件人）。群聊用不到这两个值。
+    // 直接从 conversations 取而不调 peerNick()：那个函数定义在本调用点之后，取值会 TDZ。
+    peerPublicName: conversations.find((c) => !c.is_group && c.peer === peer)?.peer_nickname || "",
+    myPublicName: myInfo?.nickname || "",
   });
   // 收藏「来自X」补拉到的个人名片（uid→名片）与"已试过"集合，见下方 useEffect。
   const [favUserCards, setFavUserCards] = useState<Record<string, UserCard>>({});
@@ -3262,7 +3267,13 @@ export default function App() {
           openTransferPicker={(cid) => setTransferPicker(cid)}
           revokeAdmin={(cid, m) => void doRevokeAdmin(cid, m.user_id, groupMemberLabel(m))}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
-          doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={() => search.openInChatSearch()}
+          doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={(targetConvId, targetPeer, targetIsGroup) => {
+            // 目标会话就是当前会话 → 直接开；否则**先切过去**（微信式：点搜索直接进那个会话的搜索态），
+            // armInChatSearch 记下待办，切换落定后由 useChatSearch 的 [convId] effect 打开。
+            search.armInChatSearch(targetConvId);
+            if (targetConvId === convId) return;
+            if (targetIsGroup) openGroupChat(targetConvId); else openChat(targetPeer);
+          }}
           doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doRemoveFriend={doRemoveFriend} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
           setConvPinned={setConvPinned} setConvMuted={setConvMuted} openGroupText={openGroupText} openGroupCard={openGroupCard}
           doEditMyGroupNickname={doEditMyGroupNickname} doEditGroupRemark={doEditGroupRemark} pickGroupAvatar={pickGroupAvatar}

@@ -14,6 +14,7 @@ function mount(over: Partial<ForwardDeps> = {}) {
   const deps: ForwardDeps = {
     uid: "u1", peer: "u2", groupConvId: "", clientRef: fakeClientRef(client), setToast: vi.fn(),
     appendMsg: vi.fn(), msgsByConv: {}, groupInfos: {}, recordSenderAvatar: () => undefined,
+    peerPublicName: "小明", myPublicName: "我自己",
     selected: new Set(), setMenu: vi.fn(), exitSelectMode: vi.fn(), ...over,
   };
   return { ...renderHook(() => useForward(deps)), deps, client };
@@ -51,7 +52,9 @@ describe("useForward", () => {
     act(() => { result.current.setForwardMode("merged"); result.current.setForwarding([msg({ convSeq: 1, timestamp: 1700, from: "u2" })]); });
     act(() => result.current.sendForwardToTarget(conv()));
     const [json] = (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(JSON.parse(json as string).items[0]).toMatchObject({ ts: 1700, u: "u2", a: "/avatars/ab.jpg" });
+    // u 是**卡片内匿名序号**（s1/s2…），不是真 uid——真 uid 发给群外收件人会绕过
+    // GET /users/{id} 的「不可枚举」防线（见 buildRecordSenderKeys）。
+    expect(JSON.parse(json as string).items[0]).toMatchObject({ ts: 1700, u: "s1", a: "/avatars/ab.jpg" });
   });
   it("合并：取不到头像时不带 a（读端按 uid 兜底），其余字段照常", () => {
     const { result, client } = mount({ recordSenderAvatar: () => undefined });
@@ -59,8 +62,40 @@ describe("useForward", () => {
     act(() => result.current.sendForwardToTarget(conv()));
     const [json] = (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
     const item = JSON.parse(json as string).items[0];
-    expect(item).toMatchObject({ ts: 1700, u: "u2" });
+    expect(item).toMatchObject({ ts: 1700, u: "s1" });
     expect(item).not.toHaveProperty("a");
+  });
+  it("合并：u 是卡片内匿名序号，真 uid 绝不出现在 JSON 里（同一人复用同一个键）", () => {
+    const { result, client } = mount();
+    act(() => {
+      result.current.setForwardMode("merged");
+      result.current.setForwarding([
+        msg({ convSeq: 1, from: "4827391056" }),
+        msg({ convSeq: 2, from: "9173628401" }),
+        msg({ convSeq: 3, from: "4827391056" }),
+      ]);
+    });
+    act(() => result.current.sendForwardToTarget(conv()));
+    const [json] = (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
+    const items = JSON.parse(json as string).items;
+    expect(items.map((i: { u: string }) => i.u)).toEqual(["s1", "s2", "s1"]); // 判「连续同一人」照常可用
+    expect(json as string).not.toContain("4827391056");
+    expect(json as string).not.toContain("9173628401");
+  });
+  it("合并：单聊标题写双方公开名（微信式），群聊固定「群聊的聊天记录」不写群名", () => {
+    const single = mount(); // groupConvId="" → 单聊
+    act(() => { single.result.current.setForwardMode("merged"); single.result.current.setForwarding([msg({ convSeq: 1 })]); });
+    act(() => single.result.current.sendForwardToTarget(conv()));
+    const [j1] = (single.client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(j1 as string).t).toBe("小明和我自己的聊天记录");
+
+    cleanup();
+    // 群聊：标题**不含群名**——收件人往往不在那个群里，群名本身就是信息且会被永久冻结进消息。
+    const group = mount({ groupConvId: "g_1", peerPublicName: "", myPublicName: "我自己" });
+    act(() => { group.result.current.setForwardMode("merged"); group.result.current.setForwarding([msg({ convSeq: 1 })]); });
+    act(() => group.result.current.sendForwardToTarget(conv()));
+    const [j2] = (group.client.sendMedia as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(j2 as string).t).toBe("群聊的聊天记录");
   });
   it("doForwardToTargets：发出后关闭选择器、退出多选、单条 toast", () => {
     const { result, deps } = mount();
@@ -69,6 +104,21 @@ describe("useForward", () => {
     expect(result.current.forwarding).toBeNull();
     expect(deps.exitSelectMode).toHaveBeenCalled();
     expect(deps.setToast).toHaveBeenCalledWith("已转发到 老王");
+  });
+
+  it("setForwardVerb 换动词后吐司用新词（分享名片走「已发送到」）", () => {
+    const { result, deps } = mount();
+    act(() => { result.current.setForwardVerb("发送"); result.current.forwardMessage(msg()); });
+    act(() => result.current.doForwardToTargets([conv()]));
+    expect(deps.setToast).toHaveBeenCalledWith("已发送到 老王");
+  });
+  it("取消选择页（closeForwardPicker）也复位动词：下一次真转发仍说「已转发到」", () => {
+    const { result, deps } = mount();
+    act(() => { result.current.setForwardVerb("发送"); result.current.forwardMessage(msg()); });
+    act(() => result.current.closeForwardPicker());   // 用户点取消 / 点蒙层
+    act(() => result.current.forwardMessage(msg()));  // 换成一次普通转发
+    act(() => result.current.doForwardToTargets([conv()]));
+    expect(deps.setToast).toHaveBeenLastCalledWith("已转发到 老王");
   });
   it("forwardSelected：按 selected 收集当前会话已确认消息（排除撤回）打开选择器", () => {
     const list = [msg({ convSeq: 1 }), msg({ convSeq: 2, recalledAt: 1 }), msg({ convSeq: 3 })];

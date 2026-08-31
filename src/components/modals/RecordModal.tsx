@@ -84,7 +84,7 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
               <div className="record-item-head">
                 {sameAsPrev(i)
                   ? <span className="record-item-avatar-gap" />
-                  : <Avatar url={it.a} label={it.n || "?"} seed={it.u || it.n} cls="avatar record-item-avatar" />}
+                  : <Avatar url={it.a} label={it.n || "?"} seed={it.n || it.u} cls="avatar record-item-avatar" />}
                 {!sameAsPrev(i) && <span className="record-item-name">{it.n}</span>}
                 <span className="record-item-time">{recordItemTime(it.ts)}</span>
               </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseChatRecord, recordItemPreview, recordSenderKey } from "./messageContent";
+import { parseChatRecord, recordItemPreview, recordSenderKey, chatRecordTitle, buildRecordSenderKeys } from "./messageContent";
 
 // 合并转发「聊天记录」纯函数：解析 + 单条预览 token（含嵌套「套娃」→[聊天记录] 子标题）。
 // 与 iOS IMMediaUtil 的 IMSummarizeRecord/IMRecordItemPreview 逐条对齐。
@@ -57,5 +57,44 @@ describe("recordSenderKey（连续同一人只显一次头像/昵称的身份判
   it("老记录没有 u → 退回昵称；前缀保证 uid 与昵称不互撞", () => {
     expect(recordSenderKey({ n: "小明" })).toBe(recordSenderKey({ n: "小明" }));
     expect(recordSenderKey({ n: "1001" })).not.toBe(recordSenderKey({ n: "x", u: "1001" }));
+  });
+});
+
+// 标题口径（2026-08-31 两端收敛）：此前 iOS 写真实群名、Web 按条目发送者数量推，同一个操作两端产出
+// 不同标题；且 iOS 那份把群名发给了往往不在群里的收件人。现统一到微信口径。
+describe("chatRecordTitle 合并转发卡片标题", () => {
+  it("群聊固定「群聊的聊天记录」——**绝不写真实群名**", () => {
+    expect(chatRecordTitle({ isGroup: true, peerName: "小明", myName: "我" })).toBe("群聊的聊天记录");
+    // 即便调用方把群名塞进 peerName 也不该漏出去
+    expect(chatRecordTitle({ isGroup: true, peerName: "XX病友群" })).toBe("群聊的聊天记录");
+  });
+  it("单聊写双方公开名（只写对方的话，收件人看不出这是「对方和谁」的对话）", () => {
+    expect(chatRecordTitle({ isGroup: false, peerName: "小明", myName: "老王" })).toBe("小明和老王的聊天记录");
+  });
+  it("缺名逐级降级，绝不落到内部 ID：只有一边有名 → 单名；两边都没有 → 「聊天记录」", () => {
+    expect(chatRecordTitle({ isGroup: false, peerName: "小明", myName: "" })).toBe("小明的聊天记录");
+    expect(chatRecordTitle({ isGroup: false, peerName: "", myName: "老王" })).toBe("老王的聊天记录");
+    expect(chatRecordTitle({ isGroup: false })).toBe("聊天记录");
+    expect(chatRecordTitle({ isGroup: false, peerName: "   ", myName: "  " })).toBe("聊天记录");
+  });
+});
+
+describe("buildRecordSenderKeys 卡片内匿名发送者序号", () => {
+  it("按首次出现顺序编号，同一人复用同一个键", () => {
+    const m = buildRecordSenderKeys(["4827391056", "9173628401", "4827391056"]);
+    expect(m.get("4827391056")).toBe("s1");
+    expect(m.get("9173628401")).toBe("s2");
+    expect(m.size).toBe(2);
+  });
+  it("缺 from 的条目不占号（读端对这类条目退化成按名字判连续）", () => {
+    const m = buildRecordSenderKeys([undefined, "1001", "", "1002"]);
+    expect(m.get("1001")).toBe("s1");
+    expect(m.get("1002")).toBe("s2");
+    expect(m.size).toBe(2);
+  });
+  it("产出的键与 recordSenderKey 的相等语义相容（判连续同一人照常可用）", () => {
+    const m = buildRecordSenderKeys(["1001", "1002"]);
+    expect(recordSenderKey({ n: "改过名了", u: m.get("1001") })).toBe(recordSenderKey({ n: "小明", u: m.get("1001") }));
+    expect(recordSenderKey({ n: "小明", u: m.get("1001") })).not.toBe(recordSenderKey({ n: "小明", u: m.get("1002") }));
   });
 });
