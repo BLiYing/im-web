@@ -27,6 +27,24 @@ describe("localStore 消息（IndexedDB）", () => {
     expect(got[0].serverMsgId).toBe("snow-123"); // 真实 id，而非 owner|c1|1 复合键
   });
 
+  it("发送者昵称/角色快照落库并载回（超级群资料只下发本人，成员表兜底失效，全靠它）", async () => {
+    // 真实回归（2026-09-01 大群联测）：这两个字段曾**从不落库**——普通群里群成员表兜底，看不出来；
+    // 超级群资料只下发"我自己"（语义降级⑤），刷新后整个会话的发件人全部显示「未命名用户」。
+    await saveIncomingMessage("oNick", {
+      convId: "g1", from: "u9", fromNickname: "王铁柱", fromRole: "admin",
+      content: "hi", contentType: "text", convSeq: 1, timestamp: 1001, status: "received",
+    }, true);
+    const got = await loadConversation("oNick", "g1");
+    expect(got[0].fromNickname).toBe("王铁柱");
+    expect(got[0].fromRole).toBe("admin");
+    // 稀疏重放（无昵称的同 seq 再来一次）不得抹掉已存快照——与文件元数据同一条合并规则。
+    await saveIncomingMessage("oNick", {
+      convId: "g1", from: "u9", content: "hi", contentType: "text", convSeq: 1, timestamp: 1001, status: "received",
+    }, true);
+    const again = await loadConversation("oNick", "g1");
+    expect(again[0].fromNickname).toBe("王铁柱");
+  });
+
   it("文件消息刷新后保留原始文件名和字节数", async () => {
     await saveMessage("oFile", {
       serverMsgId: "file-1", convId: "c1", from: "a", content: "/uploads/photo-uuid",

@@ -37,6 +37,11 @@ export interface MsgRecord {
   convId: string;
   convSeq: number;
   from: string;
+  // 发送者昵称/角色快照（服务端随群消息冗余下发）。**必须持久化**：
+  // 普通群里丢了还能从群成员表兜底，看不出来；超级群资料只下发"我自己"（语义降级⑤），
+  // 兜底失效——刷新后整个会话的发件人全部显示「未命名用户」（2026-09-01 大群联测实锤）。
+  fromNickname?: string;
+  fromRole?: string;
   content: string;
   contentType: string;
   fileName?: string;
@@ -137,7 +142,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     id: keyOf(owner, m.convId, m.convSeq),
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
-    from: m.from, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
+    from: m.from, fromNickname: m.fromNickname, fromRole: m.fromRole, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
@@ -151,6 +156,8 @@ function mergedRecord(existing: MsgRecord | undefined, rec: MsgRecord): MsgRecor
     ...existing,
     ...rec,
     fileName: rec.fileName || existing?.fileName,
+    fromNickname: rec.fromNickname || existing?.fromNickname,
+    fromRole: rec.fromRole || existing?.fromRole,
     fileSize: rec.fileSize !== undefined && rec.fileSize > 0 ? rec.fileSize : existing?.fileSize ?? rec.fileSize,
     serverMsgId: rec.serverMsgId || existing?.serverMsgId,
   };
@@ -334,7 +341,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             // 媒体字段一并还原（与下面已确认分支同一套）——少还原 groupId 会让相册散架、
             // 少还原 posterUrl/尺寸会让视频封面与比例丢失。
             clientMsgId: r.clientMsgId,
-            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
+            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
@@ -342,7 +349,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
-            convId: r.convId, from: r.from, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
+            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
             sysSegments: r.sysSegments,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
