@@ -6,8 +6,10 @@ import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpd
 import { createProbeWatchdog, installWakeListeners, runWake } from "./wake";
 import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
 import { parseConvBumpItems } from "./convBump";
+import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
+import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrApi";
 import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
-import type { ConvBumpItem } from "./protocol";
+import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { parseSysSegments } from "../sysSegments";
 import * as localStore from "./localStore";
@@ -89,6 +91,11 @@ export interface IMClientHandlers {
    * UI 据此刷新会话列表那一行（预览+角标），真要看内容得进会话时 sync。
    */
   onConvBump?: (items: ConvBumpItem[]) => void;
+  /**
+   * 窗口到达：消息本身已走常规落库，这里只回传**边界信息**。
+   * 调用方据 anchorFound 决定是滚动高亮还是提示"原消息已被删除"。
+   */
+  onWindow?: (meta: WindowMeta) => void;
   /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
@@ -265,23 +272,10 @@ export class IMClient {
     return (await this.api("/api/v1/download-settings/reset", { method: "POST" })) as { version: number; settings: unknown };
   }
 
-  // ---- 已登录设备 / 多设备管理（P2）----
-
-  /** 我的登录设备列表（本机置顶、在线优先）：GET /api/v1/devices。 */
-  async listDevices(): Promise<DeviceView[]> {
-    const data = await this.api("/api/v1/devices");
-    return (data?.devices ?? []) as DeviceView[];
-  }
-
-  /** 踢下线某设备（吊销 sid + 断活连接）：POST /api/v1/devices/{sid}/revoke。踢本机=退出登录。 */
-  async revokeDevice(sid: string): Promise<void> {
-    await this.api(`/api/v1/devices/${encodeURIComponent(sid)}/revoke`, { method: "POST" });
-  }
-
-  /** 退出除本机外的所有设备（换密码后常见动作）：POST /api/v1/devices/revoke-others。 */
-  async revokeOtherDevices(): Promise<void> {
-    await this.api("/api/v1/devices/revoke-others", { method: "POST" });
-  }
+  // ---- 已登录设备 / 多设备管理（P2）：无状态 HTTP，实现在 sdk/devicesApi.ts ----
+  listDevices(): Promise<DeviceView[]> { return listDevices(this.token); }
+  revokeDevice(sid: string): Promise<void> { return revokeDevice(this.token, sid); }
+  revokeOtherDevices(): Promise<void> { return revokeOtherDevices(this.token); }
 
   /** 修改密码：POST /api/v1/users/me/password {old_password,new_password}。
    *  成功后服务端会**自动下线本账号其它全部设备**（只保留当前，安全默认），无需前端再调 revoke-others。
@@ -486,34 +480,12 @@ export class IMClient {
     });
   }
 
-  // ---- 二维码体系（QRCODE P0）----
-
-  /** 我的名片码（懒生成，长期有效）。 */
-  async qrMyCard(): Promise<QRCard> {
-    return (await this.api(`/api/v1/qr/me`)) as QRCard;
-  }
-
-  /** 重置名片码（旧码立即失效）。 */
-  async qrResetMyCard(): Promise<QRCard> {
-    return (await this.api(`/api/v1/qr/me/reset`, { method: "POST" })) as QRCard;
-  }
-
-  /** 群二维码（须成员；perm_invite=1 时仅群主/管理员；7 天内复用同一枚）。 */
-  async groupQR(convId: string): Promise<QRCard> {
-    return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/qr`)) as QRCard;
-  }
-
-  /** 重置群码（群主/管理员）。 */
-  async groupQRReset(convId: string): Promise<QRCard> {
-    return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/qr/reset`, { method: "POST" })) as QRCard;
-  }
-
-  /** 扫码解析管道：raw=扫到的原文（URL 或裸 token）→ {kind, data}。失效码抛 200110。 */
-  async qrResolve(raw: string): Promise<QRResolved> {
-    return (await this.api(`/api/v1/qr/resolve`, {
-      method: "POST", body: JSON.stringify({ raw }),
-    })) as QRResolved;
-  }
+  // ---- 二维码体系（QRCODE P0）：无状态 HTTP，实现在 sdk/qrApi.ts ----
+  qrMyCard(): Promise<QRCard> { return qrMyCard(this.token); }
+  qrResetMyCard(): Promise<QRCard> { return qrResetMyCard(this.token); }
+  groupQR(convId: string): Promise<QRCard> { return groupQR(this.token, convId); }
+  groupQRReset(convId: string): Promise<QRCard> { return groupQRReset(this.token, convId); }
+  qrResolve(raw: string): Promise<QRResolved> { return qrResolve(this.token, raw); }
 
   // ---- 入群路径（G3）----
 
@@ -625,6 +597,17 @@ export class IMClient {
   loadNewer(convId: string, newestSeq: number): void {
     if (!convId) return;
     this.requestPage(convId, newestSeq); // [newestSeq+1 .. newestSeq+页]
+  }
+
+  /**
+   * **以某条消息为锚点取一段窗口**（IMServer/docs/design/MESSAGE_WINDOW_DESIGN.md）。
+   *
+   * anchor=0 表示"取最新"（进会话用）。所有"跳到第 X 条"的场景都走它——**一次请求直达**，
+   * 不必像旧实现那样从最新往前翻最多 40 页（翻满还找不到就报出假的「已被删除」）。
+   */
+  requestWindow(convId: string, anchor: number, before: number, after: number): void {
+    if (!convId || !this.isSocketOpen()) return;
+    this.send({ type: T.WINDOW_REQ, seq: ++this.seq, data: { conv_id: convId, anchor, before, after } });
   }
 
   /** 补拉某会话在本地游标之后的新消息（超级群收到 conv_bump 后用；信号无正文，见 sdk/convBump.ts）。 */
@@ -1094,6 +1077,16 @@ export class IMClient {
       case T.GROUP:
         this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "", d.result ?? "");
         break;
+      case T.WINDOW_RESP: { // 锚点窗口到达：消息走常规落库，边界信息交给 UI 决定滚动/提示
+        for (const m of d.messages || []) this.processIncoming(m, false);
+        this.handlers.onWindow?.({
+          convId: String(d.conv_id ?? ""),
+          anchorFound: !!d.anchor_found,
+          hasBefore: !!d.has_before,
+          hasAfter: !!d.has_after,
+        });
+        break;
+      }
       case T.CONV_BUMP: // 超级群轻量信号（无正文）：刷列表那一行；正文进会话时再 sync
         this.handlers.onConvBump?.(parseConvBumpItems(d));
         break;

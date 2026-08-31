@@ -319,6 +319,15 @@ export default function App() {
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
+  // 渲染窗口：**可移动的区间**，不是"尾部 N 条"。
+  //
+  // 第一版写成了尾部计数，跳到第 123 条时只能靠把窗口"撑大"到覆盖它——实测直接涨到 3 万条
+  // 全渲染，等于没做窗口。正确模型是窗口**移动**：anchor 为空=贴最新，非空=以那条为中心。
+  const RENDER_WINDOW_STEP = 200;
+  const [renderView, setRenderView] = useState<{ anchor: number | null; size: number }>(
+    { anchor: null, size: RENDER_WINDOW_STEP });
+  const renderViewRef = useRef(renderView);               // 稳定回调（driveLocate）里读当前值
+  const msgsByConvRef = useRef<Record<string, ChatMessage[]>>({}); // 同上：定位要判本地库有没有
   const [superMembers, setSuperMembers] = useState<GroupMember[]>([]);
   const [superCursor, setSuperCursor] = useState<{ next: string; hasMore: boolean }>({ next: "", hasMore: false });
   const typingTimer = useRef<number | null>(null);
@@ -534,6 +543,7 @@ export default function App() {
     setPeer("");
     setGroupConvId(cid);
     currentConvRef.current = cid;
+    setRenderView({ anchor: null, size: RENDER_WINDOW_STEP }); // 切会话回到贴最新
     clientRef.current?.watchUsers([]); // 切到群聊：清空单聊在线态关注（群成员在线不走 watch）
     const conv = conversations.find((c) => c.conv_id === cid);
     const readSeq = conv?.read_seq ?? 0;
@@ -638,6 +648,20 @@ export default function App() {
         // 本地已加载到的最大 conv_seq 作为游标；空会话从 0 开始拉。
         const localNewest = messagesRef.current.reduce((mx, m) => Math.max(mx, m.convSeq ?? 0), 0);
         if (hit.latest_seq > localNewest) clientRef.current?.syncConversation(openConv, localNewest);
+      },
+      // 锚点窗口到达：消息已落库，这里只决定"滚过去"还是"告诉用户没了"。
+      // **anchor_found=false 才是真的没有**——旧实现靠"翻满 40 页没见到"来猜，会误报删除。
+      onWindow: (meta) => {
+        const pend = pendingLocateRef.current;
+        if (!pend || pend.convId !== meta.convId) return;
+        if (!meta.anchorFound) {
+          pendingLocateRef.current = null;
+          setToast("原消息已被删除");
+          return;
+        }
+        // 消息刚入库，等它渲染出 DOM 节点再滚动高亮（与既有 jumpToSeq 同套路）。
+        pendingLocateRef.current = null;
+        requestAnimationFrame(() => requestAnimationFrame(() => jumpToSeq(pend.seq)));
       },
       onPresence: (user, p) => setPresence((prev) => ({ ...prev, [user]: p })),
       onTyping: (convId, from) => {
@@ -858,6 +882,7 @@ export default function App() {
     setPeer(p);
     setGroupConvId(""); // 切回单聊模式
     currentConvRef.current = cid;
+    setRenderView({ anchor: null, size: RENDER_WINDOW_STEP }); // 切会话回到贴最新
     clientRef.current?.watchUsers([p]); // 订阅对端在线态：首聊尚无会话也能即时收到上线（服务端 watch，PROTOCOL §5.5）
     // 进会话定位（CHAT_UX §3）：以 read_seq 为锚点——有未读则停在首条未读，否则到最新。
     const conv = conversations.find((c) => c.conv_id === cid);
@@ -961,6 +986,10 @@ export default function App() {
     const client = clientRef.current;
     const cid = convId;
     if (!client || !cid) return;
+    // **发送即回到最新**：窗口可能正停在历史某段（用户刚从置顶/搜索跳过来），
+    // 不复位的话自己刚发的那条落在最新处、不在窗口里——看起来就像"消息没发出去"。
+    // 微信/Telegram 同样是"发消息即拉回底部"。
+    setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
     // 先发预览条攒的粘贴件（Web #2）：图片走相册批量通道（≥2 张聚簇成宫格），
     // 文件走既有文件通道（≥8MB 自动分片可暂停续传）；文字随后补发一条文本。
     if (pastedImages.length) {
@@ -1169,44 +1198,38 @@ export default function App() {
     requestAnimationFrame(() => { scrollToNode(); flash(); });
   }, []);
 
-  // 「定位到聊天」跨窗口定位（详情文件/媒体列表读的是本地全量，聊天页是分页窗口——较早的目标不在窗口内，
-  // jumpToSeq 直接找不到）。机制：记一个待定位目标，**自动上翻分页直到目标进入窗口再滚动高亮**；到顶仍无=已删除。
-  const pendingLocateRef = useRef<{ convId: string; seq: number; tries: number } | null>(null);
-  const MAX_LOCATE_PAGES = 40; // 上限：极长历史兜底，避免异常时无限翻页
+  // 跨窗口定位：目标不在当前窗口时，**以它为锚点开一窗**（一次请求直达）。
+  //
+  // 旧实现是「从最新往前一页页翻，最多 40 页」——40 次往返，翻满还没找到就报出**假的**
+  // 「原消息已被删除」（在大群里 8000 条可能只是几小时的量）。现在服务端的 window_resp
+  // 直接给出 anchor_found：真没有才说没有。见 IMServer/docs/design/MESSAGE_WINDOW_DESIGN.md。
+  const pendingLocateRef = useRef<{ convId: string; seq: number } | null>(null);
+  const WINDOW_SIDE = 60; // 定位时锚点两侧各取多少条（够填满几屏，且一次请求内）
   const driveLocate = useCallback(() => {
     const pend = pendingLocateRef.current;
     if (!pend || pend.convId !== currentConvRef.current) return; // 会话切走 → 交给新一轮 locateInChat
-    const list = messagesRef.current;
-    if (list.some((x) => x.convSeq === pend.seq)) {
+    if (messagesRef.current.some((x) => x.convSeq === pend.seq)) {
       pendingLocateRef.current = null;
-      requestAnimationFrame(() => jumpToSeq(pend.seq)); // 等新插入的行渲染出 DOM 节点再滚动高亮
+      requestAnimationFrame(() => jumpToSeq(pend.seq)); // 已在渲染窗口内：直接滚动高亮
       return;
     }
-    const oldest = minSeqOf(list);
-    if (oldest === 0) return;                              // 窗口尚未加载完，等下一次 msgsByConv 变化
-    if (oldest <= 1 || pend.tries >= MAX_LOCATE_PAGES) {   // 到顶仍没有 / 翻页超上限 → 判定已删除
-      pendingLocateRef.current = null;
-      setToast("原消息已被删除");
-      return;
+    // **本地库有、只是没渲染出来** → 扩窗即可，不必请求
+    // （首次进会话的 sync 常把历史全灌进本地库，那时目标多半就在本地）。
+    const local = msgsByConvRef.current[pend.convId] ?? [];
+    if (local.some((x) => x.convSeq === pend.seq)) {
+      // 把窗口**移到**目标处（不是撑大——撑大会把整个会话渲染出来，第一版就是这么错的）。
+      setRenderView({ anchor: pend.seq, size: RENDER_WINDOW_STEP });
+      return; // 移窗触发重渲染 → 本 effect 再跑一次，那时走上面的"已在窗口内"分支
     }
-    if (pend.seq < oldest) {                               // 目标更早 → 继续上翻一页（保位，避免视觉跳动）
-      if (loadingOlderRef.current) return;                // 有一页在飞，等它到达后本流程再被触发
-      if (pend.tries === 0) setToast("正在定位…");
-      const box = msgsRef.current;
-      if (box) histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
-      pend.tries += 1;
-      loadingOlderRef.current = true;
-      clientRef.current?.loadOlder(pend.convId, oldest);
-    } else {                                               // 落在已加载窗口内却缺失 → 已被删除
-      pendingLocateRef.current = null;
-      setToast("原消息已被删除");
-    }
+    // 本地库也没有 → 以它为锚点开一窗。回包由 onWindow 处理（见 handlers），那里再滚动高亮。
+    clientRef.current?.requestWindow(pend.convId, pend.seq, WINDOW_SIDE, WINDOW_SIDE);
   }, [jumpToSeq]);
-  // 每次消息窗口变化（分页到达）推进一步定位。
+  // 消息窗口变化（窗口到达 / 分页到达）后推进一步定位。
   useEffect(() => { driveLocate(); }, [msgsByConv, driveLocate]);
+
   const locateInChat = useCallback((cid: string, seq: number) => {
     if (!cid || seq <= 0) { setToast("该消息无法定位"); return; }
-    pendingLocateRef.current = { convId: cid, seq, tries: 0 };
+    pendingLocateRef.current = { convId: cid, seq };
     if (cid !== currentConvRef.current) {
       // 详情所属会话未打开（如从通讯录/群成员进的资料页）→ 先打开它，加载窗口后由 effect 定位。
       if (cid.startsWith("g_")) openGroupChat(cid);
@@ -1358,8 +1381,10 @@ export default function App() {
       void refreshPinned(currentConvRef.current);
       return;
     }
-    jumpToSeq(seq);
-  }, [jumpToSeq, refreshPinned, setToast]);
+    // 走统一定位入口：置顶消息天然是较早那条，**最需要跨窗口定位**——
+    // 此前这里直接 jumpToSeq，目标不在窗口就只弹"请上拉加载后重试"，等于让用户自己翻。
+    locateInChat(currentConvRef.current, seq);
+  }, [locateInChat, refreshPinned, setToast]);
 
   // 置顶 / 取消置顶（G0）：发 msg_op，成功由服务端广播回 msg_op 帧（onMsgOp 里重拉横幅），
   // 越权/失效由 onMsgOpFailed toast。乐观更新交给帧回来那一下，避免本地先亮再被打回。
@@ -1815,10 +1840,29 @@ export default function App() {
   // 按时间戳排序（发送中/失败的 convSeq=0 但有发送时刻，故按时间能正确落位——
   // 否则它们会被挤到末尾，导致"解除拉黑后新发的消息排在更早的失败消息之前"）。
   // conv_seq 仅作同一毫秒内的次级排序，保证已送达消息间仍按服务端顺序。
-  const messages = (msgsByConv[convId] ?? [])
+  const allLocal = (msgsByConv[convId] ?? [])
     .slice()
     .sort((a, b) => (a.timestamp - b.timestamp) || ((a.convSeq || Number.MAX_SAFE_INTEGER) - (b.convSeq || Number.MAX_SAFE_INTEGER)));
+  // **渲染窗口**：只渲染尾部 renderWindow 条，不是本地全部。
+  //
+  // 本地库仍保全量（搜索、媒体时间线都要用），但**渲染**必须有上限——
+  // 此前这里直接把 msgsByConv 全量交给列表：3 万条的会话实测渲染 4000+ 条时 DOM 已近 3 万节点
+  // 且还在涨（见 MESSAGE_WINDOW_DESIGN §1）。往上滚会自动扩窗（见 onScroll 的 loadOlder 分支）。
+  //
+  // 按窗口切片。anchor 为空 = 贴最新（待发/失败的 conv_seq=0 消息时间戳是"现在"，
+  // 排序后必在最新一批里，故尾部切片自然包含它们，不必额外挑）。
+  const messages = (() => {
+    if (allLocal.length <= renderView.size) return allLocal;
+    if (renderView.anchor === null) return allLocal.slice(-renderView.size);
+    const at = allLocal.findIndex((m) => m.convSeq === renderView.anchor);
+    if (at < 0) return allLocal.slice(-renderView.size); // 锚点已不在本地（被删）→ 回到最新
+    const half = Math.floor(renderView.size / 2);
+    const lo = Math.max(0, at - half);
+    return allLocal.slice(lo, lo + renderView.size);
+  })();
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
+  renderViewRef.current = renderView;      // 同上：driveLocate 定义在前，要读当前窗口
+  msgsByConvRef.current = msgsByConv;     // 同上：定位要判断目标是否已在本地库
   pinnedRef.current = pinnedByConv; // 同上：WS 回调（onMsgOp）判断撤回/编辑是否命中置顶项要读当前集合
   transcriptsRef.current = transcripts; // 同上：transcribeMessage 判断"已展开→收起"要读当前值
 
@@ -1826,9 +1870,8 @@ export default function App() {
   // searchOpen/searchQuery 受控注入（见上）；副作用依赖（jumpToSeq/locateInChat/setToast/各 ref/客户端）注入进去。=====
   const search = useChatSearch({
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
-    messages, convId, groupConvId, uid, groupInfos, conversations, msgsByConv,
-    messagesRef, currentConvRef, loadingOlderRef, msgsRef, histAnchorRef, clientRef,
-    jumpToSeq, locateInChat, setToast, maxLocatePages: MAX_LOCATE_PAGES,
+    messages, convId, groupConvId, uid, groupInfos, conversations,
+    messagesRef, jumpToSeq, locateInChat, setToast,
   });
 
   // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
@@ -2029,19 +2072,40 @@ export default function App() {
     if (nearBottomPx) setJumpCount(0);
 
     const busy = loadingOlderRef.current || loadingNewerRef.current;
-    if (nearBottomPx && moreBelow && !busy) {
+    const localAll = msgsByConv[cid] ?? [];
+    // 窗口是否已经贴到本地最新一条（锚点模式下窗口停在历史某段，下面要靠它判断"该往前移窗了"）。
+    const windowAtLocalEnd = renderView.anchor === null ||
+      messagesRef.current[messagesRef.current.length - 1]?.convSeq === localAll[localAll.length - 1]?.convSeq;
+    if (nearBottomPx && !windowAtLocalEnd) {
+      // **跳到历史后往下滚**：本地还有更新的内容，只是不在窗口里 → 直接回到"贴最新"模式。
+      // 不做这一步的话，用户跳到第 123 条后往下滚会卡在窗口末尾（loadNewer 去问服务端，
+      // 而数据本就在本地，什么也不会变），再也回不到最新消息。
+      setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
+    } else if (nearBottomPx && moreBelow && !busy) {
       loadingNewerRef.current = true; // 下滚到底 → 加载更新一页
       clientRef.current?.loadNewer(cid, newest);
-    } else if (box.scrollTop < 120 && oldest > 1 && !busy) {
-      loadingOlderRef.current = true; // 上滚到顶 → 加载更早一页（保位）
-      histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
-      clientRef.current?.loadOlder(cid, oldest);
+    } else if (box.scrollTop < 120 && !busy) {
+      // 上滚到顶：**先扩渲染窗口**（本地已有的那部分不必再请求），本地也见底了才去拉更早的一页。
+      // 分两步是因为本地库常常比渲染窗口大得多——首次进会话的 sync 会把历史全灌进本地库，
+      // 那时"往上滚"应该是瞬时展开已有内容，而不是空跑一次网络请求。
+      histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop }; // 保位，避免视觉跳动
+      const localCount = (msgsByConv[cid] ?? []).length;
+      if (renderView.size < localCount) {
+        // 扩大窗口（保持当前锚点），把本地已有的更早内容展开出来。
+        setRenderView((v) => ({ ...v, size: Math.min(v.size + RENDER_WINDOW_STEP, localCount) }));
+      } else if (oldest > 1) {
+        loadingOlderRef.current = true;
+        clientRef.current?.loadOlder(cid, oldest);
+      }
     }
-  }, [msgsByConv]);
+  }, [msgsByConv, renderView]);
 
   const jumpToBottom = useCallback(() => {
     const box = msgsRef.current;
     if (!box) return;
+    // 窗口拉回"贴最新"：跳到历史后窗口停在那一段，不复位的话点"回到底部"只会滚到那一段的底，
+    // 而不是会话的最新消息。
+    setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
     const cid = currentConvRef.current;
     const newest = maxSeqOf(msgsByConv[cid] ?? []);
     // 无条件先滚一次消除假死（500人大群必现）：openConversation 拉回一页若全命中 seen → mergeMetaBySeq 不改 messages.length → layout effect 不重跑 → pendingScrollRef 卡住。真新消息到达时 layout effect 会再精修。

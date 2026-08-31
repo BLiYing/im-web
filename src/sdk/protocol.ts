@@ -29,6 +29,13 @@ export const T = {
    * 正文在**打开该会话时**经 sync_req 拉。见 IMServer/docs/design/SUPERGROUP_DESIGN.md §5。
    */
   CONV_BUMP: "conv_bump",
+  /**
+   * 消息窗口：**以某条消息为锚点**取一段上下文（IMServer/docs/design/MESSAGE_WINDOW_DESIGN.md）。
+   * 与 SYNC_REQ 的分工：sync 是"按游标推进、可推进本地已同步位点"；window 是"一次性快照，
+   * 不推进任何位点"。所有"跳到第 X 条"的场景走它——一次请求直达，不用从边缘翻页。
+   */
+  WINDOW_REQ: "window_req",
+  WINDOW_RESP: "window_resp",
   VOICE_TRANSCRIPT: "voice_transcript", // 语音转文字结果（服务端识别，只推给请求者）
   ERROR: "error",
 } as const;
@@ -174,6 +181,19 @@ export interface ConvLastMessage {
   recalled_at?: number; // >0=最后一条是撤回消息（预览显示"撤回了一条消息"，原文已脱敏）
   /** 仅系统消息：与消息流同一份分段，列表预览据此把名字换成本机显示名（不挂点击）。空=历史消息，回退 content。 */
   sys_segments?: SysSegment[];
+}
+
+/** window_resp 的边界信息（消息本身走 processIncoming 常规落库，不在此重复）。 */
+export interface WindowMeta {
+  convId: string;
+  /**
+   * 锚点消息**是否存在且对我可见**。
+   * false = 真的没有这条（已删除/不可见）——据此可以放心提示「原消息已被删除」。
+   * 此前只能靠"往前翻满 N 页还没见到"来猜，猜错就报出假的删除提示。
+   */
+  anchorFound: boolean;
+  hasBefore: boolean; // 窗口上方还有更早的
+  hasAfter: boolean;  // 窗口下方还有更新的
 }
 
 /** 部署级能力/配额（对齐后端 GET /api/v1/server-config）。 */

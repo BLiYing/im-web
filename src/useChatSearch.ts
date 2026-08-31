@@ -5,10 +5,9 @@
 //
 // ⚠️ searchOpen / searchQuery 刻意**留在 App 受控注入**：App 里 highlightSearch 定义在本 Hook 调用点之前
 //    （消息气泡渲染要读它），若把这两个 state 搬进来会令 highlightSearch 反向依赖后定义的 Hook（TDZ）。
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { ChatMessage, Conversation, GroupInfo } from "./sdk/protocol";
 import { searchMessages, type MsgRecord } from "./sdk/localStore";
-import type { IMClient } from "./sdk/imSdk";
 import { minSeqOf, isSearchableMessage } from "./messageContent";
 import { messageMatchesNeedle, activeDayKeys } from "./searchPredicate";
 import { isSameDay } from "./time";
@@ -28,33 +27,23 @@ export interface ChatSearchDeps {
   uid: string;
   groupInfos: Record<string, GroupInfo>;
   conversations: Conversation[];
-  msgsByConv: Record<string, ChatMessage[]>;
   // ref
   messagesRef: MutableRefObject<ChatMessage[]>;
-  currentConvRef: MutableRefObject<string>;
-  loadingOlderRef: MutableRefObject<boolean>;
-  msgsRef: RefObject<HTMLDivElement>;
-  histAnchorRef: MutableRefObject<{ h: number; t: number } | null>;
-  clientRef: MutableRefObject<IMClient | null>;
   // 回调 / 常量
   jumpToSeq: (seq: number) => void;
   locateInChat: (cid: string, seq: number) => void;
   setToast: (msg: string | null) => void;
-  maxLocatePages: number;
 }
 
 export function useChatSearch(d: ChatSearchDeps) {
   const {
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
-    messages, convId, groupConvId, uid, groupInfos, conversations, msgsByConv,
-    messagesRef, currentConvRef, loadingOlderRef, msgsRef, histAnchorRef, clientRef,
-    jumpToSeq, locateInChat, setToast, maxLocatePages,
+    messages, convId, groupConvId, uid, groupInfos, conversations,
+    messagesRef, jumpToSeq, locateInChat, setToast,
   } = d;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchSigRef = useRef("");                       // 上次「默认跳最新」的签名（会话|词|发件人）
-  const earliestPendingRef = useRef(false);
-  const earliestTriesRef = useRef(0);
 
   const [searchHitIdx, setSearchHitIdx] = useState(0);   // 当前命中下标（searchHits 升序，0=最早）
   const [searchFrom, setSearchFrom] = useState("");      // 「来自:」发件人 uid（""=不限，仅群聊）
@@ -186,36 +175,18 @@ export function useChatSearch(d: ChatSearchDeps) {
     setToast(`今天无消息，已跳到 ${dt.getMonth() + 1}月${dt.getDate()}日`);
     locateInChat(convId, last.convSeq);
   };
-  // 「最早」：自动上翻到顶再跳会话首条（复用 loadOlder；页 200、上限 maxLocatePages）。
+  // 「最早」：跳到会话首条。**一次锚点开窗直达**——
+  // 旧实现是"自动上翻到顶（最多 40 页）再跳"，在长会话里既慢又可能翻不到头就放弃。
+  // anchor=1 即会话第一条；服务端按可见下界过滤后回的就是"我能看到的最早那一段"。
   const jumpToEarliest = () => {
     setCalendarOpen(false);
     const first = messagesRef.current.find((m) => m.convSeq > 0);
     if (!first) { setToast("暂无消息"); return; }
     if (minSeqOf(messagesRef.current) <= 1) { jumpToSeq(first.convSeq); return; } // 已到顶
-    earliestPendingRef.current = true; earliestTriesRef.current = 0;
     setToast("正在加载更早历史…");
-    driveEarliest();
+    // 借道统一定位入口：目标不在窗口 → 开窗 → 到达后滚动高亮，与其他定位场景同一条路径。
+    locateInChat(convId, 1);
   };
-  const driveEarliest = useCallback(() => {
-    if (!earliestPendingRef.current || currentConvRef.current !== convId) { earliestPendingRef.current = false; return; }
-    const list = messagesRef.current;
-    const first = list.find((m) => m.convSeq > 0);
-    const oldest = minSeqOf(list);
-    if (!first) { earliestPendingRef.current = false; return; }
-    if (oldest <= 1 || earliestTriesRef.current >= maxLocatePages) { // 到顶 / 超上限 → 跳本地最早
-      earliestPendingRef.current = false;
-      requestAnimationFrame(() => jumpToSeq(first.convSeq));
-      return;
-    }
-    if (loadingOlderRef.current) return; // 有一页在飞，等它到
-    const box = msgsRef.current;
-    if (box) histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop };
-    earliestTriesRef.current += 1;
-    loadingOlderRef.current = true;
-    clientRef.current?.loadOlder(convId, oldest);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [convId, jumpToSeq]);
-  useEffect(() => { driveEarliest(); }, [msgsByConv, driveEarliest]);
 
   // ===== 首页全局搜索：聊天记录走本地库 searchMessages（防抖 + 结果上限）=====
   useEffect(() => {
