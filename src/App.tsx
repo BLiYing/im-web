@@ -2671,7 +2671,9 @@ export default function App() {
     { id: "qr", label: "我的二维码", icon: QrCode, iconTint: "gray", value: "", chevron: true, onClick: () => void openMyCard() },
     // 入口 ③（CONTACT_CARD_DESIGN §8.1）：与「我的二维码」并列——二维码给**面对面**，名片消息给**线上**。
     { id: "shareMyCard", label: "分享我的名片", icon: IdCard, iconTint: "teal", value: "", chevron: true,
-      onClick: () => shareContactCard({ userId: uid, nickname: myInfo?.nickname, avatarUrl: myInfo?.avatar_url }) },
+      // username 必须一起带：它是名片副标题 @xxx 的唯一来源，也是收方无昵称时预览的回退值
+      // （contactCardPreview）。漏了它，「分享我的名片」发出去的卡永远没有句柄行。
+      onClick: () => shareContactCard({ userId: uid, username: myInfo?.username, nickname: myInfo?.nickname, avatarUrl: myInfo?.avatar_url }) },
   ];
 
   // 通讯录顶部入口行（数据驱动）。

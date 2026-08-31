@@ -32,6 +32,18 @@ describe("useProfileEdit", () => {
     expect(result.current.myInfo?.nickname).toBe("新名");
   });
 
+  it("saveProfile：改名失败仍把**已保存成功**的资料本体同步进 myInfo（否则头部一直显旧昵称）", async () => {
+    const { result, c, deps } = mount({ updateMyUsername: vi.fn(async () => { throw new Error("用户名已被占用"); }) });
+    await act(async () => { await result.current.openProfile(); });
+    act(() => { result.current.enterProfileEditing(); result.current.setProfileDraft({ nickname: "新名", username: "taken", avatar_url: "b.png", phone: "138", tags: "" }); });
+    await act(async () => { await result.current.saveProfile(); });
+    expect(deps.setToast).toHaveBeenCalledWith("用户名未能修改：用户名已被占用");
+    // updateMyProfile 已经成功了：昵称/头像/手机号服务端就是新的，头部不能还挂着旧值。
+    expect(c.updateMyProfile).toHaveBeenCalled();
+    expect(result.current.myInfo).toEqual({ nickname: "新名", username: "myhandle", phone: "138", avatar_url: "b.png" });
+    // 留在编辑态，让用户换个用户名重试。
+    expect(result.current.profileEditing).toBe(true);
+  });
   it("saveProfile：username 改了才发改名请求，并用它回的名片刷新 myInfo", async () => {
     const { result, c } = mount();
     await act(async () => { await result.current.openProfile(); });

@@ -18,7 +18,9 @@ export interface ContactsTabProps {
   contactsScrollRef: RefObject<HTMLDivElement>;
   searchResults: UserCard[] | null;
   friendStatus: ReadonlyMap<string, string | undefined>;
-  labelOf: (id: string, nick: string) => string;
+  /** 显示名兜底（displayNameOf）：备注 > 昵称 > @句柄 > 占位。**username 要传**——
+   *  不传的话，没设昵称的人主名直接落到「未命名用户」，而副行明明显示着 @句柄。 */
+  labelOf: (id: string, nick: string, username?: string) => string;
   openFriendChat: (id: string) => void;
   busyUser: string | null;
   doFriendAction: (userId: string, fn: () => Promise<void>) => Promise<void>;
@@ -58,9 +60,9 @@ export function ContactsTab(p: ContactsTabProps) {
               const st = friendStatus.get(u.user_id);
               return (
                 <div key={`s-${u.user_id}`} className="convitem static">
-                  <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname)} seed={u.user_id} />
+                  <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname, u.username)} seed={u.user_id} />
                   <div className="convbody">
-                    <div className="convpeer">{labelOf(u.user_id, u.nickname)}</div>
+                    <div className="convpeer">{labelOf(u.user_id, u.nickname, u.username)}</div>
                     {/* 副标题 = @句柄（+ 标签）。绝不显示 user_id——那是 10 位随机数字内部 ID
                         （docs/UI.md「用户标识」）。句柄缺失时只留标签。 */}
                     <div className="convlast">{[u.username ? `@${u.username}` : "", u.tags.join(" ")].filter(Boolean).join(" · ")}</div>
@@ -91,9 +93,9 @@ export function ContactsTab(p: ContactsTabProps) {
             <div className="section-label">新的朋友（{incoming.length}）</div>
             {incoming.map((f) => (
               <div key={`p-${f.user_id}`} className="convitem static">
-                <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname)} seed={f.user_id} />
+                <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname, f.username)} seed={f.user_id} />
                 <div className="convbody">
-                  <div className="convpeer">{labelOf(f.user_id, f.nickname)}</div>
+                  <div className="convpeer">{labelOf(f.user_id, f.nickname, f.username)}</div>
                   <div className="convlast">请求加你为好友</div>
                 </div>
                 <div className="row-actions">

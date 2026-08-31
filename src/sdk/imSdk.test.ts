@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { shouldHealGap, nextSyncCursor } from "./imSdk";
-import { wakeActionFor } from "./wake";
+import { createProbeWatchdog, PROBE_TIMEOUT_MS, wakeActionFor } from "./wake";
 import { friendlyMessage, FRIENDLY_MESSAGES } from "./errcode";
 
 // 后端 errcode 权威码集镜像——**唯一来源 `../IMServer/internal/errcode/errcode.go`**。
@@ -108,5 +108,42 @@ describe("wakeActionFor 唤醒信号该做什么", () => {
     expect(wakeActionFor("disconnected", true)).toBe("none");
     expect(wakeActionFor("connecting", true)).toBe("none");
     expect(wakeActionFor("connected", true)).toBe("none");
+  });
+});
+
+// 探活看门狗：没有它，上面那条 "connected → probe" 等于什么都没做——标签页后台挂起后
+// socket 常是「readyState 仍 OPEN、对端早断了」，PING 写进空气不报错，而本仓的 PONG 分支
+// 从不校验超时，于是回到前台看着"已连接"实则收不到任何消息（2026-08-30 /code-review 发现）。
+describe("createProbeWatchdog 探活无回执即判僵尸连接", () => {
+  it("arm 后超时没等到 PONG → 调 onDead（由调用方关掉 socket 走既有重连）", () => {
+    vi.useFakeTimers();
+    const onDead = vi.fn();
+    createProbeWatchdog(onDead).arm();
+    vi.advanceTimersByTime(PROBE_TIMEOUT_MS - 1);
+    expect(onDead).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onDead).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("超时前收到 PONG（clear）→ 不误杀健康连接", () => {
+    vi.useFakeTimers();
+    const onDead = vi.fn();
+    const w = createProbeWatchdog(onDead);
+    w.arm();
+    w.clear();
+    vi.advanceTimersByTime(PROBE_TIMEOUT_MS * 2);
+    expect(onDead).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("连续 arm 只留最后一次的计时（不会攒出多次 onDead）", () => {
+    vi.useFakeTimers();
+    const onDead = vi.fn();
+    const w = createProbeWatchdog(onDead);
+    w.arm(); vi.advanceTimersByTime(PROBE_TIMEOUT_MS / 2);
+    w.arm(); vi.advanceTimersByTime(PROBE_TIMEOUT_MS);
+    expect(onDead).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
   });
 });

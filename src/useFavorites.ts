@@ -89,30 +89,30 @@ export function useFavorites(d: FavoritesDeps) {
    *  会多发一次空请求才知道到底了。in-flight 用 ref 而非 state 挡：滚动事件在一帧内能触发多次，
    *  等 state 更新已经晚了。 */
   const loadMoreFavorites = useCallback(() => {
-    if (favLoadingRef.current) return;
-    setFavorites((prev) => {
-      if (!prev || prev.length >= favTotal) return prev; // 已到底
-      favLoadingRef.current = true;
-      setFavLoadingMore(true);
-      void (async () => {
-        try {
-          const res = await clientRef.current?.listFavorites(prev.length);
-          if (res) {
-            // 去重再追加：删除某条后 offset 会整体前移，重新翻页可能把同一条读两次，
-            // 而 React key 用的是 f.id，重复 key 会让整列渲染错位。
-            setFavorites((cur) => {
-              if (!cur) return cur;
-              const seen = new Set(cur.map((f) => f.id));
-              return [...cur, ...res.items.filter((f) => !seen.has(f.id))];
-            });
-            setFavTotal(res.total);
-          }
-        } catch (e) { setToast(`加载更多失败：${(e as Error).message}`); }
-        finally { favLoadingRef.current = false; setFavLoadingMore(false); }
-      })();
-      return prev;
-    });
-  }, [favTotal]);
+    // **判据读 state、不借 setFavorites 的 updater 兜**：updater 必须是纯函数，在里面发请求 +
+    // setState 会在 StrictMode 的双调用下发两轮（in-flight 标记只在第一轮生效），也把渲染期
+    // 副作用埋进了状态机。offset 直接取 favorites.length（本回调随它重建，不会读到旧值）。
+    if (favLoadingRef.current || !favorites || favorites.length >= favTotal) return; // 在途 / 已到底
+    const offset = favorites.length;
+    favLoadingRef.current = true;
+    setFavLoadingMore(true);
+    void (async () => {
+      try {
+        const res = await clientRef.current?.listFavorites(offset);
+        if (res) {
+          // 去重再追加：删除某条后 offset 会整体前移，重新翻页可能把同一条读两次，
+          // 而 React key 用的是 f.id，重复 key 会让整列渲染错位。
+          setFavorites((cur) => {
+            if (!cur) return cur;
+            const seen = new Set(cur.map((f) => f.id));
+            return [...cur, ...res.items.filter((f) => !seen.has(f.id))];
+          });
+          setFavTotal(res.total);
+        }
+      } catch (e) { setToast(`加载更多失败：${(e as Error).message}`); }
+      finally { favLoadingRef.current = false; setFavLoadingMore(false); }
+    })();
+  }, [favorites, favTotal]);
 
   // 打开收藏列表弹窗（浏览态，账号卡入口）。
   const openFavorites = useCallback(() => {

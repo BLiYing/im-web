@@ -65,8 +65,12 @@ export function useProfileEdit(d: ProfileEditDeps) {
           renamed = await clientRef.current?.updateMyUsername(newName);
           setLoadedUsername(newName);
         } catch (e) {
+          // 资料本体（昵称/头像/手机号/标签）**已经保存成功**了，只是改名这一步失败——
+          // 必须先把它同步到 myInfo，否则左上角与设置页头部会一直显示旧昵称旧头像，
+          // 直到刷新才追上（服务端与界面不一致，用户会以为整次保存都没生效）。
+          if (updated) setMyInfo({ nickname: updated.nickname ?? "", username: updated.username ?? "", phone: updated.phone ?? "", avatar_url: updated.avatar_url ?? "" });
           setToast(`用户名未能修改：${(e as Error).message}`);
-          return; // 留在弹窗里，让用户改个名字重试
+          return; // 留在编辑态，让用户改个名字重试
         }
       }
       // 保存后刷新设置页顶部名片（否则头像/昵称仍显旧值）。改名接口回的名片更新，优先用它。

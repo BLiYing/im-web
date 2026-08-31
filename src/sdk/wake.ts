@@ -37,6 +37,32 @@ export interface WakePort {
   reconnect: () => void;
 }
 
+/** 唤醒探活等 PONG 的上限。超时即认定 socket 是「僵尸」（readyState 仍 OPEN、对端其实早断了）。
+ *  取 8s：比一个 RTT 宽松得多，又短到用户回到前台后不至于干等。 */
+export const PROBE_TIMEOUT_MS = 8000;
+
+/**
+ * 探活看门狗。**没有它，`wakeActionFor` 的 `probe` 分支等于什么都没做**：
+ * 标签页后台挂起后 socket 常是「readyState=OPEN 但对端早已断开」，`send()` 把 PING 写进空气不会报错，
+ * 而本仓的 PING 从不校验 PONG（`case T.PONG: break`），于是既没有写失败也永远等不到 onclose ——
+ * 回到前台看着"已连接"，实则收不到任何消息（2026-08-30 /code-review 发现）。
+ * 故：探活发出即 arm，收到 PONG 即 clear；超时未收到就调 onDead 主动关掉这条僵尸连接，
+ * 让既有的 onclose → scheduleReconnect 接手（此时 reconnectAttempts 已归零，约 1s 重试）。
+ */
+export function createProbeWatchdog(onDead: () => void, timeoutMs = PROBE_TIMEOUT_MS) {
+  // 用全局 setTimeout（不是 window.*）：本模块的判据部分要能在 node 环境下单测。
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const clear = () => { if (timer !== null) { clearTimeout(timer); timer = null; } };
+  return {
+    clear,
+    /** 探活发出时调用；重复 arm 只保留最后一次的计时。 */
+    arm() {
+      clear();
+      timer = setTimeout(() => { timer = null; onDead(); }, timeoutMs);
+    },
+  };
+}
+
 /** 按判据执行。返回实际执行的动作，便于调用方打日志/测试。 */
 export function runWake(state: ConnState, manualClose: boolean, port: WakePort): WakeAction {
   const action = wakeActionFor(state, manualClose);

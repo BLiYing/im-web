@@ -151,9 +151,12 @@ export function FavoritesModal({
 
   // 滚到底自动加载下一页。留 120px 余量提前触发，让加载发生在用户真正见底之前。
   //
-  // **只在"未过滤的浏览态"下触发**：分类 chips / 搜索 / 来源分组都是对**已加载**集合做的客户端过滤，
-  // 过滤后列表变短、一开始就在底部，会立刻把剩余所有页拉光（用户没要求，还白等）。
-  const canAutoLoad = !liveSource && !kind && !query.trim() && favorites.length < total;
+  // **不能拿 `!kind` 当"未过滤"判据**：上面那个 effect 保证 kind 恒为某个存在的分类（B 方案页签无「全部」），
+  // 于是 `!kind` 恒 false、整个分页从未触发过一次——第一页(60 条)之后的收藏根本拉不出来（2026-08-30 修）。
+  // 真正需要挡的是**搜索**与**来源分组**：它们对已加载集合做客户端过滤，列表可能一开始就在底部。
+  // 分类签不在此列：它恒有值，且用户把某一类翻到底时，想要的正是"接着往下拉"。
+  // 列表不可滚时浏览器压根不发 scroll 事件，故短列表也不会被自动拉光。
+  const canAutoLoad = !liveSource && !query.trim() && favorites.length < total;
   const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (!canAutoLoad || loadingMore) return;
     const el = e.currentTarget;

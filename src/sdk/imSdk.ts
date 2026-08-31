@@ -3,7 +3,7 @@
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView } from "./protocol";
-import { installWakeListeners, runWake } from "./wake";
+import { createProbeWatchdog, installWakeListeners, runWake } from "./wake";
 import { presenceFromFrame, type Presence } from "./presence";
 import { parseSysSegments } from "../sysSegments";
 import * as localStore from "./localStore";
@@ -106,6 +106,7 @@ export class IMClient {
   private reconnectTimer: number | null = null;
   private reconnectAttempts = 0;
   private wakeStop: (() => void) | null = null;           // 浏览器唤醒监听的拆除函数（见 sdk/wake.ts）
+  private probeWatchdog = createProbeWatchdog(() => { if (!this.manualClose) this.ws?.close(); }); // 探活无 PONG → 关掉僵尸 socket，交既有重连
   private connectionGeneration = 0; // 使切账号/新重连之前仍在途的登录与 socket 回调失效
   private manualClose = false;
   private syncedSeq = new Map<string, number>(); // convId -> 已连续接上的 conv_seq（不能用“见过的最大值”越过空洞）
@@ -192,7 +193,7 @@ export class IMClient {
    *  判据与动作见 `sdk/wake.ts`（指数退避最长 30s，断网恢复干等一档是用户能直接看见的"卡住"）。 */
   reconnectNow(reason: string): void {
     const action = runWake(this.state, this.manualClose, {
-      probe: () => this.send({ type: T.PING, seq: ++this.seq }),
+      probe: () => { this.send({ type: T.PING, seq: ++this.seq }); this.probeWatchdog.arm(); },
       reconnect: () => { this.clearReconnectTimer(); this.reconnectAttempts = 0; void this.openSocket(); },
     });
     if (action === "none") logger.debug(LOG_TAG.ws, "wake_ignored", { reason, state: this.state, manual: this.manualClose });
@@ -201,7 +202,7 @@ export class IMClient {
 
   disconnect(): void {
     logger.info(LOG_TAG.ws, "disconnect_requested", { user_id: this.uid });
-    this.wakeStop?.(); this.wakeStop = null;
+    this.wakeStop?.(); this.wakeStop = null; this.probeWatchdog.clear();
     this.manualClose = true;
     this.connectionGeneration++;
     this.stopPing();
@@ -894,7 +895,7 @@ export class IMClient {
     const previousSocket = this.ws;
     this.ws = null;
     previousSocket?.close(1000);
-    this.stopPing();
+    this.stopPing(); this.probeWatchdog.clear();
     this.setState("connecting");
     logger.info(LOG_TAG.ws, "connecting", {
       user_id: identity,
@@ -1121,7 +1122,7 @@ export class IMClient {
         });
         break;
       case T.PONG:
-        break;
+        this.probeWatchdog.clear(); break; // 唤醒探活的回执：连接确实活着
       case T.ERROR: {
         const responseSeq = typeof env.seq === "number" ? env.seq : 0;
         const syncConvs = this.syncPending.get(responseSeq) ?? [];
