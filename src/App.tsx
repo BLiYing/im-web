@@ -330,6 +330,10 @@ export default function App() {
   const msgsByConvRef = useRef<Record<string, ChatMessage[]>>({}); // 同上：定位要判本地库有没有
   const [superMembers, setSuperMembers] = useState<GroupMember[]>([]);
   const [superCursor, setSuperCursor] = useState<{ next: string; hasMore: boolean }>({ next: "", hasMore: false });
+  // 成员分页的**在途守卫**。用 ref 不用 state：state 要等下一次渲染才可见，而连点的间隔比那还短——
+  // 2000 人群实测连点「加载更多成员」，两次点击读到同一个 superCursor.next，同一页被拉两次、
+  // 追加两次，列表里整整多出 50 行重复成员（iOS 侧一直有这个守卫，Web 漏了）。
+  const superLoadingRef = useRef(false);
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
   const msgsRef = useRef<HTMLDivElement>(null); // 消息滚动容器
@@ -503,13 +507,23 @@ export default function App() {
   const loadSuperMembers = useCallback(async (convId: string, cursor: string) => {
     const tok = clientRef.current?.authToken ?? "";
     if (!convId || !tok) return;
+    if (superLoadingRef.current) return; // 连点/慢网下的重复请求（见 superLoadingRef 注释）
+    superLoadingRef.current = true;
     try {
       const page = await fetchGroupMembersPage(tok, convId, { cursor, limit: 50 });
-      setSuperMembers((prev) => (cursor ? [...prev, ...page.members] : page.members));
+      setSuperMembers((prev) => {
+        if (!cursor) return page.members;
+        // 按 user_id 去重再追加。守卫已挡住连点，这里兜的是另一种重叠：keyset 游标翻页期间
+        // 有人进群/退群，相邻两页可能覆盖到同一个人。2000 人的群这事随时可能发生。
+        const seen = new Set(prev.map((m) => m.user_id));
+        return [...prev, ...page.members.filter((m) => !seen.has(m.user_id))];
+      });
       setSuperCursor({ next: page.next_cursor ?? "", hasMore: !!page.has_more });
     } catch {
       // 拉不到就维持现状：成员 Tab 少几行，不影响聊天本身。
       setSuperCursor((prev) => ({ ...prev, hasMore: false }));
+    } finally {
+      superLoadingRef.current = false;
     }
   }, []);
 
@@ -2268,6 +2282,7 @@ export default function App() {
   }, [detail, groupInfos]);
   // 打开超级群详情（或换了个群）→ 从第一页重新拉；离开则清空，免得下次串到别的群的成员。
   useEffect(() => {
+    superLoadingRef.current = false; // 切群即复位：否则上一群的在途标记会把新群的首页请求挡掉
     if (!activeSuperGroupId) { setSuperMembers([]); setSuperCursor({ next: "", hasMore: false }); return; }
     void loadSuperMembers(activeSuperGroupId, "");
   }, [activeSuperGroupId, loadSuperMembers]);
