@@ -730,7 +730,10 @@ export default function App() {
       onMsgRejected: (clientMsgId, msg, code) => markRejected(clientMsgId, msg, code),
       // 消息操作（撤回/编辑/置顶）应用到某条消息（按 conv_seq 定位）→ 就地打补丁（撤回→墓碑，编辑→改文本）。
       onMsgOp: (cid, targetSeq, patch) => {
-        applyOp(cid, targetSeq, patch); // 按 conv_seq 就地打补丁（撤回→墓碑/编辑→改文本/置顶）
+        // 编辑改了正文 → **同时清掉 @ 片段**：偏移是相对原文的，留着会按错位的位置高亮，
+        // 而且点进去是另一个人（服务端落库时也清了，这里是内存态与之对齐）。
+        const opPatch = patch.content !== undefined ? { ...patch, mentionSpans: undefined } : patch;
+        applyOp(cid, targetSeq, opPatch); // 按 conv_seq 就地打补丁（撤回→墓碑/编辑→改文本/置顶）
         // 置顶态变化（G0）：重拉该会话置顶集合刷新顶部横幅（含别人置顶/取消置顶的实时同步）。
         // 撤回/编辑若命中横幅里的置顶项**也要重拉**：服务端置顶列表已剔除撤回消息（PinnedMessages
         // 带 recalled_at = 0）、编辑则改了文案；不刷会留一条指向墓碑/旧文案的横幅——点它只会滚到
@@ -2344,7 +2347,10 @@ export default function App() {
     }
     return [...want];
   }, [convId, groupInfos, messages]);
-  useEffect(() => { userProfiles.request(unresolvedViewUids); }, [unresolvedViewUids, userProfiles]);
+  // 依赖 request（引用稳定）而不是整个 userProfiles 对象——后者每次渲染都是新的，
+  // 会让这个 effect 每帧都跑一遍（App 因输入/在线态跳动重渲染很频繁）。
+  const requestProfiles = userProfiles.request;
+  useEffect(() => { requestProfiles(unresolvedViewUids); }, [unresolvedViewUids, requestProfiles]);
 
   // ---- 登录 ----
   if (phase === "login") {

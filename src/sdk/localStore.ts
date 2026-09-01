@@ -221,7 +221,14 @@ export async function applyMsgOpLocal(
           if (patch.recalledBy !== undefined) rec.recalledBy = patch.recalledBy;
           if (patch.editedAt !== undefined) rec.editedAt = patch.editedAt;
           if (patch.pinnedAt !== undefined) rec.pinnedAt = patch.pinnedAt;
-          if (patch.content !== undefined) rec.content = patch.content;
+          if (patch.content !== undefined) {
+            rec.content = patch.content;
+            // @ 片段的偏移是相对**原文**的，正文一改就全错位 → 连同清空（服务端落库时也清了）。
+            // 不清的话刷新后旧片段会从 IndexedDB 回来配上新正文：多数时候被
+            // segmentMentionsBySpans 挡掉（那个位置不是 `@`），但只要新正文碰巧在同一偏移
+            // 有个 `@`，就会高亮出来并且**点进去是另一个人**的资料页。
+            rec.mentionSpans = undefined;
+          }
           os.put(rec);
         }
       };

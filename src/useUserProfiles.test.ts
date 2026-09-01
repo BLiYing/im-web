@@ -75,7 +75,7 @@ describe("useUserProfiles", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1); // 负缓存挡住了
   });
 
-  it("**请求失败不写负缓存**：一次网络抖动不该变成十分钟的「查无此人」", async () => {
+  it("**请求失败不写负缓存**，但要退避一小会——否则断网时会以渲染频率反复打同一个接口", async () => {
     fetchSpy.mockRejectedValueOnce(new Error("network"));
     const { result } = renderHook(() => useUserProfiles("tok"));
     act(() => { result.current.request(["u1"]); });
@@ -83,8 +83,17 @@ describe("useUserProfiles", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(result.current.cards.u1).toBeUndefined();
 
-    // 下一次渲染还要显示他 → 应该再问一次（这正是"还在屏幕上"的证据）。
+    // 退避窗口内：App 每重渲染一次就会重新声明这批 uid，**不该**每次都真发请求。
+    // 没有退避的话服务端 60 次/分的配额几秒烧光，之后一直 429，网络恢复了也解析不出来。
     fetchSpy.mockResolvedValue({ users: [card("u1")], missing: [] });
+    for (let i = 0; i < 5; i++) {
+      act(() => { result.current.request(["u1"]); });
+      await flush();
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // 退避过去后照常重试——失败**不是**负缓存，那个 uid 还在屏幕上就该再问。
+    await act(async () => { vi.advanceTimersByTime(6000); });
     act(() => { result.current.request(["u1"]); });
     await flush();
     expect(fetchSpy).toHaveBeenCalledTimes(2);
