@@ -1,4 +1,5 @@
-import type { MouseEvent, RefObject } from "react";
+import { useRef, type MouseEvent, type RefObject } from "react";
+import { useAutoLoadMore } from "../useAutoLoadMore";
 import { UserPlus, Search, X } from "lucide-react";
 import type { ChatMessage, GroupInfo, GroupMember } from "../sdk/protocol";
 import { VirtualList } from "../VirtualList";
@@ -85,7 +86,7 @@ export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
   contacts, contactDisplayName, contactSourceLabel, onOpenContact,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
-  members: membersOverride, hasMoreMembers, onLoadMoreMembers, scrollElRef, search, upgradeHint,
+  members: membersOverride, hasMoreMembers, onLoadMoreMembers, membersLoading, scrollElRef, search, upgradeHint,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
@@ -114,6 +115,8 @@ export function DetailTabs({
   members?: GroupMember[];
   hasMoreMembers?: boolean;          // 还有下一页 → 渲染「加载更多」
   onLoadMoreMembers?: () => void;    // 点「加载更多」
+  /** 下一页正在路上。用来把按钮切成「加载中…」，并避免自动续拉在在途期间空转。 */
+  membersLoading?: boolean;
   /**
    * 详情抽屉那个滚动容器（`.detail-panel`）的 ref，成员列表虚拟化要用它算可见区。
    * 不传 = 不虚拟化（全量渲染），功能不受影响，只是大群会卡。
@@ -145,6 +148,21 @@ export function DetailTabs({
   onOpenFile: (m: ChatMessage) => void;
   fetchLinkPreview: (u: string) => Promise<LinkPreview>;
 }) {
+  // ==== 成员列表的「滚到底自动续拉」（PERF-members-autoload）====
+  // Hook 必须在组件顶层调用，故把这几个派生值提到 return 之前（下面的成员 Tab 直接复用，
+  // 别再算第二份——两份判据迟早分叉）。
+  const fallbackScrollRef = useRef<HTMLElement | null>(null); // scrollElRef 可不传；hook 依赖数组要一个稳定的 ref
+  const memberSearching = !!search?.needle;
+  const memberBrowseList = membersOverride ?? gp?.members ?? [];
+  const memberList = memberSearching ? (search?.results ?? []) : memberBrowseList;
+  useAutoLoadMore(scrollElRef ?? fallbackScrollRef, {
+    // 只在成员 Tab 打开时挂监听；媒体/文件等 Tab 共用同一个滚动容器，不加这个判断会在别的 Tab 里乱拉页。
+    enabled: activeTab === "members"
+      && (memberSearching ? !!search?.hasMore && !search.loading : !!hasMoreMembers && !membersLoading),
+    // 浏览态翻成员分页，搜索态翻结果分页——同一个接口，两份游标。
+    onLoadMore: () => { if (memberSearching) { search?.loadMore(); } else { onLoadMoreMembers?.(); } },
+    signal: memberList.length,
+  });
   return (
     <>
       <div className="detail-tabs">
@@ -154,9 +172,9 @@ export function DetailTabs({
       </div>
       <div className="detail-tabbody">
         {activeTab === "members" && gp && (() => {
-          const browseList = membersOverride ?? gp.members;
-          const searching = !!search?.needle;
-          const list = searching ? search.results : browseList;
+          const browseList = memberBrowseList;  // 与上面自动续拉用的是同一份，别再算一遍
+          const searching = memberSearching;
+          const list = memberList;
           const rest = { gp, uid, memberLabel, onOpenMember, canManageMember, onMemberMenu };
           // 搜索框只在「一屏装不下」时出现（与虚拟化同阈值）。几十人的群整张列表就在眼前，
           // 为 5 个人打一次网络请求不合理。判据用**群总人数**而非已加载行数——
@@ -223,7 +241,8 @@ export function DetailTabs({
                   list.map((m) => <MemberRow key={m.user_id} m={m} {...rest} />)
                 );
               })()}
-              {/* 续拉。浏览态翻成员分页，搜索态翻结果分页——同一个接口，两份游标。 */}
+              {/* 续拉。滚到底会自动触发（见上面的 useAutoLoadMore），这个按钮保留为
+                  **失败重试入口**——自动续拉遇到网络错误就停在那儿，没有它用户只能关掉重开抽屉。 */}
               {searching
                 ? search.hasMore && (
                     <button className="detail-row" onClick={() => search.loadMore()}>
@@ -232,7 +251,7 @@ export function DetailTabs({
                   )
                 : hasMoreMembers && (
                     <button className="detail-row" onClick={() => onLoadMoreMembers?.()}>
-                      <span>加载更多成员</span>
+                      <span>{membersLoading ? "加载中…" : "加载更多成员"}</span>
                     </button>
                   )}
             </div>

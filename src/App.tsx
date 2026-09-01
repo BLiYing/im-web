@@ -336,6 +336,8 @@ export default function App() {
   // 2000 人群实测连点「加载更多成员」，两次点击读到同一个 superCursor.next，同一页被拉两次、
   // 追加两次，列表里整整多出 50 行重复成员（iOS 侧一直有这个守卫，Web 漏了）。
   const superLoadingRef = useRef(false);
+  // 同一件事的**可渲染副本**：ref 改了不触发重渲染，而按钮文案与「自动续拉是否挂监听」都要看它。
+  const [superLoading, setSuperLoading] = useState(false);
   const typingTimer = useRef<number | null>(null);
   const lastTypingSent = useRef<number>(0);
   const msgsRef = useRef<HTMLDivElement>(null); // 消息滚动容器
@@ -511,6 +513,7 @@ export default function App() {
     if (!convId || !tok) return;
     if (superLoadingRef.current) return; // 连点/慢网下的重复请求（见 superLoadingRef 注释）
     superLoadingRef.current = true;
+    setSuperLoading(true);
     try {
       const page = await fetchGroupMembersPage(tok, convId, { cursor, limit: 50 });
       setSuperMembers((prev) => {
@@ -526,6 +529,7 @@ export default function App() {
       setSuperCursor((prev) => ({ ...prev, hasMore: false }));
     } finally {
       superLoadingRef.current = false;
+      setSuperLoading(false);
     }
   }, []);
 
@@ -2317,6 +2321,7 @@ export default function App() {
   // 打开超级群详情（或换了个群）→ 从第一页重新拉；离开则清空，免得下次串到别的群的成员。
   useEffect(() => {
     superLoadingRef.current = false; // 切群即复位：否则上一群的在途标记会把新群的首页请求挡掉
+    setSuperLoading(false);
     if (!activeSuperGroupId) { setSuperMembers([]); setSuperCursor({ next: "", hasMore: false }); return; }
     void loadSuperMembers(activeSuperGroupId, "");
   }, [activeSuperGroupId, loadSuperMembers]);
@@ -3491,6 +3496,7 @@ export default function App() {
           superMembers={activeSuperGroupId ? superMembers : undefined}
           superHasMore={activeSuperGroupId ? superCursor.hasMore : false}
           onLoadMoreMembers={() => activeSuperGroupId && void loadSuperMembers(activeSuperGroupId, superCursor.next)}
+          membersLoading={superLoading}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} adminPanelOpen={adminPanelOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}

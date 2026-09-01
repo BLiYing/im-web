@@ -54,6 +54,8 @@ export interface DetailPanelProps {
   superMembers?: GroupMember[];
   superHasMore?: boolean;
   onLoadMoreMembers?: () => void;
+  /** 成员分页在途（按钮文案 + 自动续拉在途期间不空转）。 */
+  membersLoading?: boolean;
   /** 部署级能力/配额（GET /server-config）。用于判定「满员 → 可升级为大群」告知是否显示。
    *  拿不到（还没回/请求失败）时不显示——宁可少提示，也不能按硬编码上限误报"已满"。 */
   serverConfig?: { max_group_members: number; supergroup_enabled: boolean; max_supergroup_members: number } | null;
@@ -428,6 +430,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 }}
                 onOpenContact={openPeerDetail}
                 members={p.superMembers} hasMoreMembers={p.superHasMore} onLoadMoreMembers={p.onLoadMoreMembers}
+                membersLoading={p.membersLoading}
                 scrollElRef={panelRef} search={memberSearch} upgradeHint={upgradeHint}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
