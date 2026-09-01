@@ -445,10 +445,17 @@ export class IMClient {
   }
 
   /** 邀请入群（任意成员可邀）。 */
-  async inviteToGroup(convId: string, memberIds: string[]): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members`, {
+  /**
+   * 邀请入群。**返回实际加入的 uid**（服务端 `{added}`）——不是传进去的那批：
+   * 已在群里的人会被服务端跳过，且这属于**幂等成功**而非错误。
+   * 超级群下这事是常态：`GET /groups/{id}` 对超级群只回我自己，端上算不出完整的"已在群里"
+   * 排除集，老成员照样会出现在候选里。调用方须按 added 与所选数量的差给反馈。
+   */
+  async inviteToGroup(convId: string, memberIds: string[]): Promise<string[]> {
+    const d = await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members`, {
       method: "POST", body: JSON.stringify({ member_ids: memberIds }),
-    });
+    }) as { added?: string[] } | undefined;
+    return d?.added ?? [];
   }
 
   /** 退群（群主须先转让）。 */

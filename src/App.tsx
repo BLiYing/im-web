@@ -2766,10 +2766,18 @@ export default function App() {
     if (!inviteDraft || inviteDraft.selected.length === 0) { setToast("请选择要邀请的好友"); return; }
     const { convId: cid, selected } = inviteDraft;
     try {
-      await clientRef.current!.inviteToGroup(cid, selected);
+      const added = await clientRef.current!.inviteToGroup(cid, selected);
       setInviteDraft(null);
       void refreshGroupInfo(cid);
       void refreshConversations();
+      // **超级群的成员列表是另一份 state**（superMembers），它只在切群时才重拉。
+      // 不在这里补一发，界面会自相矛盾：副标题刷成「2001 位成员」，列表还是原来那 2000 行。
+      if (groupInfos[cid]?.is_super) void loadSuperMembers(cid, "");
+      // 按**实际加入数**给反馈，而不是按勾选数：已在群里的人会被服务端跳过（幂等，不是错误）。
+      // 超级群下这是常态——端上算不出完整的"已在群里"集合（gp.members 只有我自己）。
+      const skipped = selected.length - added.length;
+      if (added.length === 0) setToast("所选的人都已在群里");
+      else if (skipped > 0) setToast(`已邀请 ${added.length} 人，其余 ${skipped} 人已在群里`);
     } catch (e) {
       // 按业务码分支（勿直接透传服务端 message，i18n）：300207 = 被邀请者已被移出/冷却期，
       // 用邀请场景的第三人称文案，区别于自加群映射表里的第二人称「你已被移出」。
@@ -3449,6 +3457,10 @@ export default function App() {
 
       {/* 邀请成员弹窗：见 components/modals/FriendPickerModal（候选=非群内好友）。 */}
       {inviteDraft && (() => {
+        // 「已在群里」排除集来自 gp.members。**超级群下它只有我自己**（2 万人服务端不下发），
+        // 所以老成员照样会出现在候选里。这是**刻意不补**的：端上根本拿不到 2 万人的完整名单，
+        // 想补全就得为每个好友查一次成员身份。正确做法是让服务端当权威——它会跳过老成员
+        // （幂等，不是错误），doInvite 按返回的 added 给准确反馈。别把这里"修"成本地全量过滤。
         const inGroup = new Set((groupInfos[inviteDraft.convId]?.members ?? []).map((m) => m.user_id));
         const candidates = accepted.filter((f) => !inGroup.has(f.user_id));
         return (
