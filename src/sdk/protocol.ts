@@ -2,6 +2,7 @@
 // 这是 Web 端"协议 SDK"的一部分，与 iOS 的 IMProtocol/IMMessageModel 对应。
 
 import type { PresenceLevel } from "./presence";
+import type { MentionSpan } from "../mention";
 
 export const T = {
   PING: "ping",
@@ -100,6 +101,9 @@ export interface ChatMessage {
   waveform?: string;
   /** M4-8 被 @ 的成员 uid（仅群聊，服务端已按当时成员集过滤）：收端据此高亮气泡内 @昵称。 */
   mentions?: string[];
+  /** 每个 @ token 在文本里的位置（UTF-16 码元偏移）。有它就直接高亮，不必反查群成员表
+   *  ——超级群不下发成员表，老路在那里对普通成员失效。见 IMServer/docs/PROTOCOL.md §4.1。 */
+  mentionSpans?: MentionSpan[];
   /** M4-8 @所有人（发送时服务端已校验发送者为群主/管理员）。 */
   mentionAll?: boolean;
   /**

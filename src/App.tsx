@@ -9,7 +9,7 @@ import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi"
 import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
-import { activeMentionQuery, resolveMentions, resolveMentionAll, countsAsUnread, segmentMentions, MENTION_ALL_LABEL } from "./mention";
+import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionSpans, countsAsUnread, segmentMentions, segmentMentionsBySpans, MENTION_ALL_LABEL } from "./mention";
 import { remarkMap, displayNameOf } from "./remarks";
 import { resolveDetailFollow } from "./detailFollow";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
@@ -1021,7 +1021,10 @@ export default function App() {
       // 配文 @提及（仅群聊）：从 caption 文本按输入框累积的 token 还原 uid / @所有人，随媒体消息上行（被@强提醒）。
       const capMentions = caption && !peer ? resolveMentions(caption, mentionCandidates.current) : [];
       const capMentionAll = caption ? (!peer && resolveMentionAll(caption, mentionAllPending.current)) : false;
-      const capMentionOpts = { mentions: capMentions.length ? capMentions : undefined, mentionAll: capMentionAll || undefined };
+      // 片段（2026-09-01）：位置随消息走，收端不必反查群成员表——超级群没那张表。
+      const capSpans = caption && !peer ? resolveMentionSpans(caption, mentionCandidates.current, capMentionAll) : [];
+      const capMentionOpts = { mentions: capMentions.length ? capMentions : undefined, mentionAll: capMentionAll || undefined,
+                               mentionSpans: capSpans.length ? capSpans : undefined };
       const imgs = items.filter((pi) => pi.kind === "image" || pi.kind === "video");
       if (imgs.length) void sendMediaBatch(imgs.map((pi) => pi.file), caption ? { caption, ...capMentionOpts } : undefined);
       for (const pi of items) {
@@ -1051,15 +1054,21 @@ export default function App() {
     // @提及（M4-8）：按输入框里**仍留着**的 token 还原 uid（删了 token 就自动不 @ 他）。
     const mentions = !peer ? resolveMentions(text, mentionCandidates.current) : [];
     const mentionAll = !peer && resolveMentionAll(text, mentionAllPending.current);
+    // 片段（2026-09-01）：与 mentions 同源同规则，只是多记了每个 token 的位置（UTF-16 偏移）。
+    // 收端有它就直接高亮，不必反查群成员表——超级群不下发成员表，老路在那里对普通成员失效。
+    const mentionSpans = !peer ? resolveMentionSpans(text, mentionCandidates.current, mentionAll) : [];
     const sendOpts = {
       ...(rt ? { replyTo: rt } : {}),
       ...(mentions.length ? { mentions } : {}),
       ...(mentionAll ? { mentionAll: true } : {}),
+      ...(mentionSpans.length ? { mentionSpans } : {}),
     };
     const clientMsgId = client.sendText(text, peer, cid, Object.keys(sendOpts).length ? sendOpts : undefined); // 群聊 to 为空：服务端按 conv_id 查成员写扩散
     appendMsg(cid, {
       clientMsgId, convId: cid, from: uid, content: text, contentType: "text",
       convSeq: 0, timestamp: Date.now(), status: "sending",
+      mentions: mentions.length ? mentions : undefined, mentionAll: mentionAll || undefined,
+      mentionSpans: mentionSpans.length ? mentionSpans : undefined,
       replyToConvSeq: rt?.convSeq, replySnapshot: rt?.preview, replyToFrom: rt?.from,
     });
     setInput("");
@@ -1333,6 +1342,21 @@ export default function App() {
   // @所有人 无 uid 只高亮不可点。无提及时叠加会话内搜索命中词高亮 + URL 高亮（http(s) → 蓝色下划线可点）。
   const renderMentionText = (m: ChatMessage, text: string) => {
     const entries = mentionEntriesFor(m);
+    // **有片段就走片段**（mention_spans，见 PROTOCOL §4.1）：位置由发送方给出，不查任何成员表——
+    // 超级群不下发成员表，老路（拿昵称扫文本）在那里对普通成员必然失效。
+    // 片段与本文对不上（编辑过的老消息 / 脏数据）时 segmentMentionsBySpans 会逐段跳过，
+    // 全跳完就退化成单段普通文本，因此下面仍保留老路作为兜底。
+    const spans = m.mentionSpans ?? [];
+    const bySpan = spans.length > 0 ? segmentMentionsBySpans(text, spans) : null;
+    if (bySpan && bySpan.some((s) => s.mention)) {
+      return bySpan.map((s, i) => {
+        if (!s.mention) return <Fragment key={i}>{renderLinkifiedText(s.text, `sh${i}`)}</Fragment>;
+        if (selectMode || !s.uid) return <span key={i} className="mention-hl">{s.text}</span>;
+        const uid = s.uid;
+        return <span key={i} className="mention-hl mention-tap"
+                     onClick={(e) => { e.stopPropagation(); setTextReader(null); openPeerDetail(uid); }}>{s.text}</span>;
+      });
+    }
     if (entries.length === 0) return renderLinkifiedText(text, "sh");
     const uidByName = new Map(entries.map((e) => [e.name, e.uid]));
     return segmentMentions(text, entries.map((e) => e.name)).map((s, i) => {

@@ -1,16 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  activeMentionQuery,
-  applyMentionToken,
-  resolveMentions,
-  resolveMentionAll,
-  filterMentionMembers,
-  canMentionAll,
-  containsMentionToken,
-  segmentMentions,
-  countsAsUnread,
-  MENTION_ALL_LABEL,
-} from "./mention";
+import { activeMentionQuery, applyMentionToken, resolveMentions, resolveMentionAll, filterMentionMembers, canMentionAll, containsMentionToken, segmentMentions, countsAsUnread, MENTION_ALL_LABEL, resolveMentionSpans, segmentMentionsBySpans, parseMentionSpans } from "./mention";
 
 describe("activeMentionQuery", () => {
   it("刚键入 @ 时返回空串（面板该弹出、显示全员）", () => {
@@ -248,5 +237,68 @@ describe("segmentMentions（气泡 @高亮切段）", () => {
     expect(segmentMentions("发 a@bc 里的 @ 号", ["b"])).toEqual([
       { text: "发 a@bc 里的 @ 号", mention: false },
     ]);
+  });
+});
+
+// ===== @ 片段（mention_spans）=====
+// 协议见 IMServer/docs/PROTOCOL.md §4.1。这套的全部意义是**收端不必有群成员表**，
+// 所以测的重点是：偏移口径对不对（emoji！）、片段对不上时会不会退回老路。
+describe("resolveMentionSpans / segmentMentionsBySpans", () => {
+  it("发送侧算出的偏移能被渲染侧原样切回来", () => {
+    const text = "@小明 和 @小红 明天开会";
+    const spans = resolveMentionSpans(text, { u1: "小明", u2: "小红" }, false);
+    expect(spans).toEqual([
+      { offset: 0, length: 3, uid: "u1" },
+      { offset: 6, length: 3, uid: "u2" },
+    ]);
+    const segs = segmentMentionsBySpans(text, spans);
+    expect(segs.filter((s) => s.mention).map((s) => [s.text, s.uid]))
+      .toEqual([["@小明", "u1"], ["@小红", "u2"]]);
+    // 拼回去必须一字不差——切段不能吞字符。
+    expect(segs.map((s) => s.text).join("")).toBe(text);
+  });
+
+  it("**偏移是 UTF-16 码元**：emoji 在前也不错位", () => {
+    // 🎉 在 UTF-16 里占 2 个码元；码点口径会算成 1，一错就整条歪掉。
+    const text = "🎉@小明 你好";
+    const spans = resolveMentionSpans(text, { u1: "小明" }, false);
+    expect(spans[0].offset).toBe(2);
+    expect(text.slice(spans[0].offset, spans[0].offset + spans[0].length)).toBe("@小明");
+  });
+
+  it("token 边界与 containsMentionToken 同规则：@小美 不误命中 @小美丽", () => {
+    const spans = resolveMentionSpans("@小美丽 你好", { u1: "小美", u2: "小美丽" }, false);
+    expect(spans).toEqual([{ offset: 0, length: 4, uid: "u2" }]); // 长名优先
+  });
+
+  it("@所有人 只在真的 mention_all 时才出片段，uid 为空串（只高亮不可点）", () => {
+    expect(resolveMentionSpans("@所有人 集合", {}, true)).toEqual([{ offset: 0, length: 4, uid: "" }]);
+    expect(resolveMentionSpans("@所有人 集合", {}, false)).toEqual([]);
+  });
+
+  it("片段与本文对不上时逐段跳过 —— 全跳完就退化成单段普通文本（调用方据此回落老路）", () => {
+    const text = "改成完全不同的一句话"; // 编辑过的消息：老片段还指着原文的位置
+    const segs = segmentMentionsBySpans(text, [{ offset: 0, length: 3, uid: "u1" }]);
+    expect(segs.some((s) => s.mention)).toBe(false);
+    expect(segs.map((s) => s.text).join("")).toBe(text);
+    // 越界的也不能抛，更不能切出乱七八糟的片段。
+    expect(segmentMentionsBySpans("@小明", [{ offset: 0, length: 999, uid: "u1" }])
+      .some((s) => s.mention)).toBe(false);
+  });
+
+  it("折叠截断后仍能切前半段（iOS 折叠传的是前缀，偏移在前缀内依旧有效）", () => {
+    const full = "@小明 " + "字".repeat(50);
+    const spans = resolveMentionSpans(full, { u1: "小明" }, false);
+    const shown = full.slice(0, 10); // 前缀截断
+    const segs = segmentMentionsBySpans(shown, spans);
+    expect(segs.filter((s) => s.mention).map((s) => s.text)).toEqual(["@小明"]);
+  });
+
+  it("parseMentionSpans 脏数据安全：非数组/字段类型不对的项一律丢弃", () => {
+    expect(parseMentionSpans(null)).toBeUndefined();
+    expect(parseMentionSpans("nope")).toBeUndefined();
+    expect(parseMentionSpans([{ offset: -1, length: 3 }, { offset: 0, length: 0 }, "x"])).toBeUndefined();
+    expect(parseMentionSpans([{ offset: 2, length: 3, user_id: "u1" }, { offset: 9, length: 4 }]))
+      .toEqual([{ offset: 2, length: 3, uid: "u1" }, { offset: 9, length: 4, uid: "" }]);
   });
 });

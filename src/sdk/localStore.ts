@@ -3,6 +3,7 @@
 // 失败记录 IM.STORE warn，但持久化是增强，绝不阻断收发主流程。
 
 import type { ChatMessage, Conversation, SysSegment } from "./protocol";
+import type { MentionSpan } from "../mention";
 import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
@@ -48,6 +49,7 @@ export interface MsgRecord {
   fileSize?: number;
   caption?: string; // 图文/视频文/文件文随附文本（Telegram 图说模型）：仅 image/video/file 有
   mentions?: string[]; // M4-8 被 @ 成员 uid：刷新后 caption/正文 @ 高亮可点 + 转发重发（强提醒）都靠它
+  mentionSpans?: MentionSpan[]; // @ token 的位置（UTF-16 偏移）：不落库的话刷新后大群里的 @ 又会退回不高亮
   mentionAll?: boolean; // @所有人
   // 系统消息分段：必须落库，否则刷新后系统消息退回"显真实昵称、名字不可点"，与刚收到时不一致。
   sysSegments?: SysSegment[];
@@ -142,7 +144,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRecord {
     id: keyOf(owner, m.convId, m.convSeq),
     ownerConv: `${owner}|${m.convId}`,
     owner, convId: m.convId, convSeq: m.convSeq,
-    from: m.from, fromNickname: m.fromNickname, fromRole: m.fromRole, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
+    from: m.from, fromNickname: m.fromNickname, fromRole: m.fromRole, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionSpans: m.mentionSpans, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
@@ -341,7 +343,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
             // 媒体字段一并还原（与下面已确认分支同一套）——少还原 groupId 会让相册散架、
             // 少还原 posterUrl/尺寸会让视频封面与比例丢失。
             clientMsgId: r.clientMsgId,
-            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
+            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionSpans: r.mentionSpans, mentionAll: r.mentionAll,
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
@@ -349,7 +351,7 @@ export async function loadConversation(owner: string, convId: string): Promise<C
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
-            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionAll: r.mentionAll,
+            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionSpans: r.mentionSpans, mentionAll: r.mentionAll,
             sysSegments: r.sysSegments,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,

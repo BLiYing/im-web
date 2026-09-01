@@ -12,6 +12,7 @@ import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "
 import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { parseSysSegments } from "../sysSegments";
+import { parseMentionSpans, type MentionSpan } from "../mention";
 import * as localStore from "./localStore";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, type UploadProgressHandler } from "./http";
@@ -136,7 +137,7 @@ export class IMClient {
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string; waveform?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; mentionSpans?: MentionSpan[]; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string; waveform?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -631,7 +632,7 @@ export class IMClient {
   }
 
   /** 发送文本，返回 client_msg_id。opts.replyTo=引用回复（M4-2）；opts.forwardFrom=转发溯源（M4-3）。 */
-  sendText(content: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string; from?: string }; forwardFrom?: string; mentions?: string[]; mentionAll?: boolean }): string {
+  sendText(content: string, to: string, convId: string, opts?: { replyTo?: { convSeq: number; preview: string; from?: string }; forwardFrom?: string; mentions?: string[]; mentionAll?: boolean; mentionSpans?: MentionSpan[] }): string {
     return this.sendContent(content, "text", to, convId, opts);
   }
 
@@ -695,12 +696,12 @@ export class IMClient {
   }
 
   /** 共用发送通道：content + content_type + 可选引用/转发。 */
-  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string }; mentions?: string[]; mentionAll?: boolean }): string {
+  private sendContent(content: string, contentType: string, to: string, convId: string, opts?: MediaSendOptions & { replyTo?: { convSeq: number; preview: string; from?: string }; mentions?: string[]; mentionAll?: boolean; mentionSpans?: MentionSpan[] }): string {
     const clientMsgId = opts?.clientMsgId ?? crypto.randomUUID(); // 只有失败重发会指定（见 sdk/resend.ts）
     // ack 后落库：记住内容类型 + 引用定位/快照 + 转发溯源 + 相册分组 + 视频封面（本端即时预览，重进会话仍在）。
     this.pendingSends.set(clientMsgId, { convId, content, contentType, timestamp: Date.now(),
       fileName: opts?.fileName, fileSize: opts?.fileSize, caption: opts?.caption,
-      mentions: opts?.mentions, mentionAll: opts?.mentionAll, // 落库供刷新后 @ 高亮与转发重发（强提醒）
+      mentions: opts?.mentions, mentionAll: opts?.mentionAll, mentionSpans: opts?.mentionSpans, // 落库供刷新后 @ 高亮与转发重发（强提醒）
       replyToConvSeq: opts?.replyTo?.convSeq, replySnapshot: opts?.replyTo?.preview, replyToFrom: opts?.replyTo?.from, forwardFrom: opts?.forwardFrom, groupId: opts?.groupId, poster: opts?.poster,
       mediaW: opts?.mediaW, mediaH: opts?.mediaH, duration: opts?.duration, thumb: opts?.thumb, waveform: opts?.waveform });
     this.sendTimers.set(clientMsgId, window.setTimeout(() => {
@@ -724,6 +725,7 @@ export class IMClient {
     // @提及（M4-8，仅群聊有意义）：服务端会按当时群成员集过滤/去重，并校验 @所有人 的群角色权限。
     if (opts?.mentions && opts.mentions.length > 0) { data.mentions = opts.mentions; }
     if (opts?.mentionAll) { data.mention_all = true; }
+    if (opts?.mentionSpans?.length) { data.mention_spans = opts.mentionSpans.map((sp) => ({ offset: sp.offset, length: sp.length, user_id: sp.uid })); }
     if (contentType === "file" && opts?.fileName) { data.file_name = opts.fileName; }
     // caption（图文/视频文/文件文随附文本）：仅 image/video/file 带上行（服务端也只对这三类收下）。
     if ((contentType === "image" || contentType === "video" || contentType === "file") && opts?.caption) { data.caption = opts.caption; }
@@ -1025,7 +1027,7 @@ export class IMClient {
             serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
             contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
             fileName: pend.fileName, fileSize: pend.fileSize, caption: pend.caption,
-            mentions: pend.mentions, mentionAll: pend.mentionAll,
+            mentions: pend.mentions, mentionAll: pend.mentionAll, mentionSpans: pend.mentionSpans,
             replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
             groupId: pend.groupId, posterUrl: pend.poster,
             mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb, waveform: pend.waveform,
@@ -1164,7 +1166,7 @@ export class IMClient {
               content: pend.content, contentType: pend.contentType,
               convSeq: 0, timestamp: pend.timestamp, status: "failed", note,
               fileName: pend.fileName, fileSize: pend.fileSize, caption: pend.caption,
-              mentions: pend.mentions, mentionAll: pend.mentionAll,
+              mentions: pend.mentions, mentionAll: pend.mentionAll, mentionSpans: pend.mentionSpans,
               replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot,
               replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
               groupId: pend.groupId, posterUrl: pend.poster,
@@ -1239,7 +1241,7 @@ export class IMClient {
       waveform: typeof d.waveform === "string" ? d.waveform : undefined,
       // @提及（M4-8）：脏数据安全——只收字符串数组，非数组一律按"未 @ 任何人"。
       mentions: Array.isArray(d.mentions) ? (d.mentions as unknown[]).filter((x): x is string => typeof x === "string") : undefined,
-      mentionAll: d.mention_all === true || undefined,
+      mentionAll: d.mention_all === true || undefined, mentionSpans: parseMentionSpans(d.mention_spans),
       // 系统消息分段（名字可点 + 换本地显示名）：脏数据安全——非数组/无 text 的项一律丢弃，
       // 一段都不剩就按"无分段"处理，渲染回退 content 整句（与历史系统消息同款）。
       sysSegments: parseSysSegments(d.sys_segments),
