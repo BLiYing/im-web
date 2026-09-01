@@ -80,6 +80,7 @@ import { GroupsModal } from "./components/modals/GroupsModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
 import { adminCandidates, transferCandidates } from "./groupAdmin";
+import { useMemberSearch } from "./useMemberSearch";
 import { AdminPickerModal } from "./components/modals/AdminPickerModal";
 import { TransferOwnerModal } from "./components/modals/TransferOwnerModal";
 import { ConfirmSendCardModal } from "./components/modals/ConfirmSendCardModal";
@@ -2273,6 +2274,14 @@ export default function App() {
   }, [favorites, groupInfos, friends, remarks, favUserCards, uid, refreshGroupInfo]);
 
   // ⚠️ **必须放在下面的登录早退之前**：hooks 数量每次渲染必须一致（Rules of Hooks）。
+  // 「添加管理员 / 选择新群主」在**超级群**下的候选源：端上只有治理集（群主+管理员），
+  // 候选必须来自服务端搜索。各给一个 hook 实例——两个弹窗状态独立，共用一个会互相清结果。
+  // 普通群传 undefined，hook 空转，弹窗照旧走本地过滤。
+  const adminPickerSuperConv = adminPicker && groupInfos[adminPicker.convId]?.is_super ? adminPicker.convId : undefined;
+  const transferSuperConv = transferPicker && groupInfos[transferPicker]?.is_super ? transferPicker : undefined;
+  const adminSearch = useMemberSearch(adminPickerSuperConv, clientRef.current?.authToken ?? "");
+  const transferSearch = useMemberSearch(transferSuperConv, clientRef.current?.authToken ?? "");
+
   // 当前详情抽屉打开的群若是**超级群**，成员表要走分页（gp.members 只含我自己）。
   // 返回 conv_id 供拉取与透传；普通群返回空串，走原来的全量渲染。
   const activeSuperGroupId = useMemo(() => {
@@ -3482,7 +3491,14 @@ export default function App() {
           一次 ≤5 人、串行下发（后端每设一次发一条系统消息，且没有批量接口）。 */}
       {adminPicker && groupInfos[adminPicker.convId] && (
         <AdminPickerModal
-          candidates={adminCandidates(groupInfos[adminPicker.convId], uid)}
+          candidates={adminPickerSuperConv
+            // 超级群：服务端搜索结果 − 治理集 − 我（服务端不认识"谁已经是管理员"，排除在端上做；
+            // 治理集有界且随群资料下发，所以这份排除集是**全的**）。
+            ? adminSearch.results.filter((m) => m.role === "member" && m.user_id !== uid)
+            : adminCandidates(groupInfos[adminPicker.convId], uid)}
+          remote={adminPickerSuperConv
+            ? { query: adminSearch.query, setQuery: adminSearch.setQuery, failed: adminSearch.failed }
+            : undefined}
           selected={adminPicker.selected}
           memberLabel={groupMemberLabel}
           onToggle={(userId) => setAdminPicker({
@@ -3504,7 +3520,12 @@ export default function App() {
           那一刻我已是普通成员，整页对我不再可见，留着下一次点击必然 300204。 */}
       {transferPicker && groupInfos[transferPicker] && (
         <TransferOwnerModal
-          candidates={transferCandidates(groupInfos[transferPicker], uid)}
+          candidates={transferSuperConv
+            ? transferSearch.results.filter((m) => m.user_id !== uid) // 超级群：全体成员 − 我，走服务端搜索
+            : transferCandidates(groupInfos[transferPicker], uid)}
+          remote={transferSuperConv
+            ? { query: transferSearch.query, setQuery: transferSearch.setQuery, failed: transferSearch.failed }
+            : undefined}
           memberLabel={groupMemberLabel}
           onPick={(m) => {
             const cid = transferPicker;

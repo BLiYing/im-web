@@ -11,7 +11,7 @@ import { CheckRow } from "../rows";
  * 不复用那一个是因为候选类型不同——它吃 FriendEntry（我的好友），而管理员候选是群成员（可能不是我的好友）。
  * 上限 5 的原因见 groupAdmin.ts MAX_ADMIN_BATCH（每人一条系统消息，且后端无批量接口）。
  */
-export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, onConfirm, onCancel }: {
+export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, onConfirm, onCancel, remote }: {
   candidates: GroupMember[];
   selected: string[];
   /** 本机显示名（备注 > 群昵称 > 昵称）。备注只在本机渲染，发出去的字节只有 uid。 */
@@ -19,20 +19,33 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
   onToggle: (userId: string) => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * **远端搜索模式**（超级群）：给了它就不做本地过滤——`candidates` 已经是服务端按 query
+   * 命中的结果。超级群的成员是 2 万人，端上只有治理集，本地过滤等于"在几个人里搜 2 万人"。
+   */
+  remote?: { query: string; setQuery: (v: string) => void; failed: boolean };
 }) {
-  const [q, setQ] = useState("");
+  const [localQ, setLocalQ] = useState("");
+  const q = remote ? remote.query : localQ;
+  const setQ = remote ? remote.setQuery : setLocalQ;
   // 匹配口径 = 显示名 + @句柄，**不含 user_id**：10 位随机内部 ID 既记不住也不该被搜，
   // 收它只会把搜索框变成 ID 探测器（设计 §1.3）。
+  // 远端模式下服务端已按 q 过滤过，再本地过一遍会**二次收窄**。
   const visible = useMemo(
-    () => filterByQuery(candidates, q, (m) => [memberLabel(m), m.username, m.group_nickname]),
-    [candidates, q, memberLabel]);
+    () => (remote ? candidates
+                  : filterByQuery(candidates, q, (m) => [memberLabel(m), m.username, m.group_nickname])),
+    [candidates, q, memberLabel, remote]);
 
   return (
     <Modal onClose={onCancel}>
       <h3>添加管理员</h3>
-      {candidates.length > 0 && <ListSearchInput value={q} onChange={setQ} placeholder="搜索群成员" />}
+      {(remote || candidates.length > 0) && <ListSearchInput value={q} onChange={setQ} placeholder="搜索群成员" />}
       {visible.length === 0 && (
-        <div className="empty">{isSearching(q) ? "没有匹配的成员" : "群里还没有其他成员"}</div>
+        <div className="empty">
+          {remote?.failed ? "搜索失败，请重试"
+            : isSearching(q) ? "没有匹配的成员"
+            : remote ? "输入关键词搜索群成员" : "群里还没有其他成员"}
+        </div>
       )}
       <div className="modal-list">
         {visible.map((m) => {
