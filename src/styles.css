@@ -1265,7 +1265,42 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .detail-tabbody { margin: 12px; }
 
 /* 成员页签 */
-.detail-members { background: var(--card-bg); border-radius: var(--radius-card); overflow: hidden; }
+.detail-members { background: var(--card-bg); border-radius: var(--radius-card); }
+/* 成员搜索行。**吸顶**：整个 .detail-panel 是一个滚动容器，不吸顶的话滚到几千行以后想搜
+   就得先滚回顶——而"滚了半天没找到才想起来搜"正是最常见的那条路径。
+   top = 标题栏实高（.detail-topbar 56px + 1px 下边框，它吸在 0），否则会钻到标题栏底下。
+   注意 .detail-members 因此**不能再 overflow:hidden**——那会让 sticky 失效（祖先裁剪上下文）；
+   圆角改由首尾子元素各自兜。 */
+.detail-member-search {
+  position: sticky; top: 57px; z-index: 2;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--card-bg);
+  border-bottom: 1px solid var(--separator);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+}
+.detail-member-search input {
+  flex: 1; min-width: 0; height: 30px; padding: 0 10px;
+  border: 1px solid var(--separator); border-radius: 8px;
+  background: var(--grouped-bg); color: var(--text); font-size: 13px;
+}
+.detail-member-search input:focus { outline: none; border-color: var(--accent); }
+.detail-member-search-ic { color: var(--text-secondary); flex: none; }
+.detail-member-search-x {
+  flex: none; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; border: none; border-radius: 50%;
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+}
+.detail-member-search-x:hover { background: var(--surface-hover); color: var(--text); }
+/* 满员 →「可升级为大群」告知。只在人满那一刻出现，不是常驻入口。 */
+.detail-upgrade-note {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 12px 14px; font-size: 12.5px; line-height: 1.55; color: var(--text-secondary);
+  border-top: 1px solid var(--separator);
+}
+.detail-upgrade-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.detail-members > .detail-member:first-child,
+.detail-members > .detail-row:first-child { border-radius: var(--radius-card) var(--radius-card) 0 0; }
+.detail-members > *:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
 .detail-member { display: flex; align-items: center; gap: 12px; padding: 8px 14px; cursor: pointer; }
 .detail-member:hover { background: var(--surface-hover); }
 .detail-member-body { flex: 1; min-width: 0; }

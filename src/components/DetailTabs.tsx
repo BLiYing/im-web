@@ -1,7 +1,8 @@
 import type { MouseEvent, RefObject } from "react";
-import { UserPlus } from "lucide-react";
+import { UserPlus, Search, X } from "lucide-react";
 import type { ChatMessage, GroupInfo, GroupMember } from "../sdk/protocol";
 import { VirtualList } from "../VirtualList";
+import type { MemberSearchState } from "../useMemberSearch";
 import type { DownloadState } from "../download";
 import { downloadText } from "../download";
 import { formatFileSize } from "../fileMetadata";
@@ -84,7 +85,7 @@ export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
   contacts, contactDisplayName, contactSourceLabel, onOpenContact,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
-  members: membersOverride, hasMoreMembers, onLoadMoreMembers, scrollElRef,
+  members: membersOverride, hasMoreMembers, onLoadMoreMembers, scrollElRef, search, upgradeHint,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
@@ -118,6 +119,16 @@ export function DetailTabs({
    * 不传 = 不虚拟化（全量渲染），功能不受影响，只是大群会卡。
    */
   scrollElRef?: RefObject<HTMLElement | null>;
+  /**
+   * 成员搜索（`useMemberSearch`）。**恒走服务端**——超级群本地只有已翻到的那几页，
+   * 本地过滤等于在 50 人里搜 2 万人。不传 = 不显示搜索框（列表照常）。
+   */
+  search?: MemberSearchState;
+  /**
+   * 满员告知（普通群人满 + 本部署开了超级群时才由调用方传入；否则不传 = 不显示）。
+   * 判定放调用方：它才拿得到 `GET /server-config` 的部署能力，本组件是纯展示。
+   */
+  upgradeHint?: { maxMembers: number; maxSuperMembers: number; onCopyGroupID: () => void };
   canInvite: boolean;
   onAddMember: (cid: string) => void;
   onOpenMember: (userId: string) => void;
@@ -142,39 +153,91 @@ export function DetailTabs({
         ))}
       </div>
       <div className="detail-tabbody">
-        {activeTab === "members" && gp && (
-          <div className="detail-members">
-            {/* 「仅管理员可邀请」开启且我非管理员 → 隐藏「添加成员」（对齐 iOS；服务端仍是权威闸门）。 */}
-            {canInvite && (
-              <button className="detail-row accent" onClick={() => onAddMember(gp.conv_id)}>
-                <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
-              </button>
-            )}
-            {(() => {
-              const list = membersOverride ?? gp.members;
-              const rest = { gp, uid, memberLabel, onOpenMember, canManageMember, onMemberMenu };
-              // 大列表只渲染视口内的行，DOM 从 N 降到几十。缺 scrollElRef 时（未注入滚动父）
-              // 一律退回全量 map——宁可慢，也不能因为量不到滚动容器而少显示人。
-              return list.length > VIRTUALIZE_MEMBERS_FROM && scrollElRef ? (
-                <VirtualList
-                  items={list}
-                  scrollElRef={scrollElRef}
-                  getKey={(m) => m.user_id}
-                  estimateSize={MEMBER_ROW_EST_H}
-                  renderRow={(m) => <MemberRow m={m} {...rest} />}
-                />
-              ) : (
-                list.map((m) => <MemberRow key={m.user_id} m={m} {...rest} />)
-              );
-            })()}
-            {/* 分页续拉（超级群）：一次 50 人，避免 2 万行一次性进 DOM。 */}
-            {hasMoreMembers && (
-              <button className="detail-row" onClick={() => onLoadMoreMembers?.()}>
-                <span>加载更多成员</span>
-              </button>
-            )}
-          </div>
-        )}
+        {activeTab === "members" && gp && (() => {
+          const browseList = membersOverride ?? gp.members;
+          const searching = !!search?.needle;
+          const list = searching ? search.results : browseList;
+          const rest = { gp, uid, memberLabel, onOpenMember, canManageMember, onMemberMenu };
+          // 搜索框只在「一屏装不下」时出现（与虚拟化同阈值）。几十人的群整张列表就在眼前，
+          // 为 5 个人打一次网络请求不合理。判据用**群总人数**而非已加载行数——
+          // 超级群刚进来只有 50 行，看行数会把 2 万人的群判成小群。
+          const total = gp.member_count ?? browseList.length;
+          const showSearch = !!search && total > VIRTUALIZE_MEMBERS_FROM;
+          return (
+            <div className="detail-members">
+              {showSearch && (
+                // 吸顶：整个 .detail-panel 是一个滚动容器，不吸顶的话滚到几千行以后想搜
+                // 就得先滚回顶——而"滚了半天没找到才想起来搜"正是最常见的那条路径。
+                <div className="detail-member-search">
+                  <Search size={14} className="detail-member-search-ic" />
+                  <input value={search.query} placeholder="搜索成员" aria-label="搜索成员"
+                    autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                    onChange={(e) => search.setQuery(e.target.value)} />
+                  {search.query && (
+                    <button className="detail-member-search-x" title="清空" onClick={() => search.clear()}>
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              )}
+              {/* 「仅管理员可邀请」开启且我非管理员 → 隐藏「添加成员」（对齐 iOS；服务端仍是权威闸门）。
+                  搜索态也隐藏：它属于浏览态，混在搜索结果里只会被误点。 */}
+              {canInvite && !searching && (
+                <button className="detail-row accent" onClick={() => onAddMember(gp.conv_id)}>
+                  <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
+                </button>
+              )}
+              {/* 满员告知。**只在人满那一刻现身**，不做常驻入口——升级不可逆，平时挂在那儿
+                  只会诱导用户在不需要的时候去点（对齐 Telegram 的 MEMBERS LIMIT REACHED）。
+                  第一版只「告知」不「申请」：审批流要先有审批人，而管理后台还没有工单队列，
+                  真做出来就是"用户点了申请、运营得自己想起来去后台翻"（TASKS C-superupgrade）。 */}
+              {!searching && upgradeHint && (
+                <div className="detail-upgrade-note">
+                  <div className="detail-upgrade-title">成员已达上限 {upgradeHint.maxMembers}</div>
+                  <div>
+                    升级为大群可容纳至 {upgradeHint.maxSuperMembers} 人，请联系管理员办理。
+                    升级后已读回执与「正在输入」将不再显示，且**不可撤销**。
+                  </div>
+                  <button className="mini-btn ghost" onClick={() => upgradeHint.onCopyGroupID()}>
+                    复制群 ID
+                  </button>
+                </div>
+              )}
+              {searching && list.length === 0 && !search.loading && (
+                // 与「群里还没有其他成员」区分开——两种空是两回事。
+                <div className="detail-empty">{search.failed ? "搜索失败，请重试" : "没有匹配的成员"}</div>
+              )}
+              {(() => {
+                // 大列表只渲染视口内的行，DOM 从 N 降到几十。缺 scrollElRef 时（未注入滚动父）
+                // 一律退回全量 map——宁可慢，也不能因为量不到滚动容器而少显示人。
+                // 搜索结果同样走这条：搜 "big" 能命中几千人，结果本身就是长列表。
+                return list.length > VIRTUALIZE_MEMBERS_FROM && scrollElRef ? (
+                  <VirtualList
+                    items={list}
+                    scrollElRef={scrollElRef}
+                    getKey={(m) => m.user_id}
+                    estimateSize={MEMBER_ROW_EST_H}
+                    renderRow={(m) => <MemberRow m={m} {...rest} />}
+                  />
+                ) : (
+                  list.map((m) => <MemberRow key={m.user_id} m={m} {...rest} />)
+                );
+              })()}
+              {/* 续拉。浏览态翻成员分页，搜索态翻结果分页——同一个接口，两份游标。 */}
+              {searching
+                ? search.hasMore && (
+                    <button className="detail-row" onClick={() => search.loadMore()}>
+                      <span>{search.loading ? "加载中…" : "加载更多结果"}</span>
+                    </button>
+                  )
+                : hasMoreMembers && (
+                    <button className="detail-row" onClick={() => onLoadMoreMembers?.()}>
+                      <span>加载更多成员</span>
+                    </button>
+                  )}
+            </div>
+          );
+        })()}
         {activeTab === "media" && (
           media.length === 0 ? <div className="detail-empty">暂无媒体</div> : (
             <div className="detail-media-grid">

@@ -21,6 +21,7 @@ import { Avatar } from "./Avatar";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { AdminListPanel } from "./AdminListPanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
+import { useMemberSearch } from "../useMemberSearch";
 import { SYSTEM_UID } from "../sdk/protocol";
 
 export type DetailTarget = { convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean };
@@ -53,6 +54,9 @@ export interface DetailPanelProps {
   superMembers?: GroupMember[];
   superHasMore?: boolean;
   onLoadMoreMembers?: () => void;
+  /** 部署级能力/配额（GET /server-config）。用于判定「满员 → 可升级为大群」告知是否显示。
+   *  拿不到（还没回/请求失败）时不显示——宁可少提示，也不能按硬编码上限误报"已满"。 */
+  serverConfig?: { max_group_members: number; supergroup_enabled: boolean; max_supergroup_members: number } | null;
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 昵称 > uid（透传给 DetailTabs）。 */
   memberLabel: (m: GroupMember) => string;
   peerAvatar: (id: string) => string | undefined;
@@ -123,10 +127,16 @@ export function DetailPanel(p: DetailPanelProps) {
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doRemoveFriend, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
-    pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail,
+    pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail, serverConfig,
   } = p;
   const { clientRef, setToast, comingSoon } = useAppServices();
   const { setViewer, onGateTap, onPassiveMediaError, openReadyFile, fetchLinkPreview } = useChatActions();
+  // 成员搜索：只对群会话有意义（单聊没有成员表）。恒走服务端 ?q=，理由见 useMemberSearch 头注释。
+  // token 每次渲染现取，**不在组件里存副本**——登录路径三条，副本必然漂移。
+  const memberSearch = useMemberSearch(
+    p.detail.isGroup ? p.detail.convId : undefined,
+    clientRef.current?.authToken ?? "",
+  );
     const d = detail;
     const conv = conversations.find((c) => c.conv_id === d.convId);
     const gp = d.isGroup ? groupInfos[d.convId] : undefined;
@@ -153,6 +163,23 @@ export function DetailPanel(p: DetailPanelProps) {
     const memberTotal = gp?.member_count ?? gp?.members.length ?? conv?.member_count ?? 0;
     // 「大群」标注：让用户明白为什么这里看不到已读/正在输入/在线态（否则会当成 bug 报上来）。
     const superTag = (gp?.is_super ?? conv?.is_super) ? " · 大群" : "";
+    // 满员告知：**普通群人满 + 本部署开了超级群**才给。三个条件缺一不可——
+    //   · 已是大群 → 没有可升的了；
+    //   · 部署没开超级群 → 入口是死的，联系管理员他也办不了（后端直接拒 upgrade-super）；
+    //   · 拿不到 serverConfig → 不显示。宁可少提示，也不能按硬编码上限误报"已满"
+    //     （端上硬编码上限这个坑本仓刚踩过：端 500、后端 2000）。
+    const isSuperHere = !!(gp?.is_super ?? conv?.is_super);
+    const upgradeHint = (!isSuperHere && gp && serverConfig?.supergroup_enabled
+      && memberTotal >= serverConfig.max_group_members)
+      ? {
+          maxMembers: serverConfig.max_group_members,
+          maxSuperMembers: serverConfig.max_supergroup_members,
+          onCopyGroupID: () => {
+            void navigator.clipboard?.writeText(gp.conv_id);
+            setToast("已复制群 ID");
+          },
+        }
+      : undefined;
     const subtitle = d.isGroup ? `${memberTotal} 位成员${superTag}` : (peerPresenceText ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
     const muted = !!conv?.muted;
@@ -401,7 +428,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 }}
                 onOpenContact={openPeerDetail}
                 members={p.superMembers} hasMoreMembers={p.superHasMore} onLoadMoreMembers={p.onLoadMoreMembers}
-                scrollElRef={panelRef}
+                scrollElRef={panelRef} search={memberSearch} upgradeHint={upgradeHint}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}

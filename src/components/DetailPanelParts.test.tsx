@@ -13,6 +13,7 @@ class RO { observe() {} unobserve() {} disconnect() {} }
 import { AppServicesProvider, type AppServices } from "../AppServicesContext";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
+import type { MemberSearchState } from "../useMemberSearch";
 import { MemberMenu } from "./MemberMenu";
 import type { GroupInfo, GroupMember, ChatMessage, FriendEntry } from "../sdk/protocol";
 
@@ -126,6 +127,65 @@ describe("DetailTabs", () => {
   it("没注入 scrollElRef → 退回全量渲染（宁可慢，也不能少显示人）", () => {
     const { container } = render(<DetailTabs {...base} gp={gp({ members: manyMembers })} />);
     expect(container.querySelectorAll(".detail-member").length).toBe(200);
+  });
+
+  // —— 成员搜索接线 ——
+  const searchStub = (over: Partial<MemberSearchState> = {}): MemberSearchState => ({
+    query: "", setQuery: vi.fn(), needle: "", results: [], loading: false,
+    hasMore: false, failed: false, loadMore: vi.fn(), clear: vi.fn(), ...over,
+  });
+
+  it("大群才显示搜索框，且判据是**群总人数**不是已加载行数", () => {
+    // 超级群刚进来只有 50 行已加载，但群里有 2 万人——看行数会把它判成小群、不给搜索框，
+    // 那恰恰是最需要搜索的场景。
+    const superGroup = gp({ members: manyMembers.slice(0, 20), member_count: 20000 });
+    const { container } = render(
+      <DetailTabs {...base} gp={superGroup} search={searchStub()} scrollElRef={createRef<HTMLElement>()} />);
+    expect(container.querySelector(".detail-member-search")).toBeTruthy();
+  });
+
+  it("小群不显示搜索框（几十人整张列表就在眼前，不为 5 个人打网络请求）", () => {
+    const small = gp({ members: manyMembers.slice(0, 10), member_count: 10 });
+    const { container } = render(
+      <DetailTabs {...base} gp={small} search={searchStub()} scrollElRef={createRef<HTMLElement>()} />);
+    expect(container.querySelector(".detail-member-search")).toBeNull();
+  });
+
+  it("搜索态：渲染结果而非浏览列表，隐藏「添加成员」，续拉走结果分页", () => {
+    const loadMore = vi.fn();
+    const hit = member({ user_id: "hit1", nickname: "命中的人" });
+    const { container, getByText, queryByText } = render(
+      <DetailTabs {...base} gp={gp({ members: manyMembers, member_count: 20000 })}
+        search={searchStub({ query: "big", needle: "big", results: [hit], hasMore: true, loadMore })}
+        scrollElRef={createRef<HTMLElement>()} />);
+
+    const names = [...container.querySelectorAll(".detail-member-name")].map((e) => e.textContent);
+    expect(names).toEqual(["命中的人"]);            // 浏览列表的 200 人不该露出来
+    expect(queryByText("添加成员")).toBeNull();     // 它属于浏览态，混在结果里只会被误点
+    fireEvent.click(getByText("加载更多结果"));
+    expect(loadMore).toHaveBeenCalled();
+  });
+
+  it("搜索无结果 vs 搜索失败：文案必须能分辨", () => {
+    const g = gp({ members: manyMembers, member_count: 20000 });
+    const { getByText, rerender } = render(
+      <DetailTabs {...base} gp={g} scrollElRef={createRef<HTMLElement>()}
+        search={searchStub({ query: "zzz", needle: "zzz", results: [] })} />);
+    expect(getByText("没有匹配的成员")).toBeTruthy();
+
+    // 失败时说"没有匹配"会让用户以为查无此人，而不是网断了。
+    rerender(<DetailTabs {...base} gp={g} scrollElRef={createRef<HTMLElement>()}
+      search={searchStub({ query: "zzz", needle: "zzz", results: [], failed: true })} />);
+    expect(getByText("搜索失败，请重试")).toBeTruthy();
+  });
+
+  it("清空按钮 → search.clear()", () => {
+    const clear = vi.fn();
+    const { getByTitle } = render(
+      <DetailTabs {...base} gp={gp({ members: manyMembers, member_count: 20000 })}
+        search={searchStub({ query: "big", clear })} scrollElRef={createRef<HTMLElement>()} />);
+    fireEvent.click(getByTitle("清空"));
+    expect(clear).toHaveBeenCalled();
   });
 });
 

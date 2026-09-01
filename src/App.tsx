@@ -3415,6 +3415,7 @@ export default function App() {
       {/* 会话详情抽屉：见 components/DetailPanel（派生 + JSX 整块平移；稳定服务走 Context，其余动作按组注入）。 */}
       {detail && (
         <DetailPanel detail={detail}
+          serverConfig={serverConfig}
           superMembers={activeSuperGroupId ? superMembers : undefined}
           superHasMore={activeSuperGroupId ? superCursor.hasMore : false}
           onLoadMoreMembers={() => activeSuperGroupId && void loadSuperMembers(activeSuperGroupId, superCursor.next)}
