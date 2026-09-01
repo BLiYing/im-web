@@ -80,6 +80,7 @@ import { GroupsModal } from "./components/modals/GroupsModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
 import { adminCandidates, transferCandidates } from "./groupAdmin";
+import { useUserProfiles } from "./useUserProfiles";
 import { useMemberSearch } from "./useMemberSearch";
 import { AdminPickerModal } from "./components/modals/AdminPickerModal";
 import { TransferOwnerModal } from "./components/modals/TransferOwnerModal";
@@ -2296,6 +2297,26 @@ export default function App() {
     void loadSuperMembers(activeSuperGroupId, "");
   }, [activeSuperGroupId, loadSuperMembers]);
 
+  // uid → 公开名片的兜底解析（超级群成员表不下发 / 发送者已退群时，头像与昵称的唯一来源）。
+  // ⚠️ 与下面两个 hook 一样**必须在登录早退之前**（Rules of Hooks）。
+  const userProfiles = useUserProfiles(clientRef.current?.authToken ?? "");
+  // 当前渲染窗口里"成员表给不出身份"的 uid：发送者、被 @ 的人、被引用者。
+  // 只声明**看得见的那一屏**，不是整个会话——2 万人群里前者是几十个，后者是无穷。
+  const unresolvedViewUids = useMemo(() => {
+    if (!convId) return [] as string[];
+    const members = groupInfos[convId]?.members;
+    const known = new Set((members ?? []).map((m) => m.user_id));
+    const want = new Set<string>();
+    for (const m of messages) {
+      // 发送者：消息自带 from_nickname，但**没有 from_avatar**，所以有名字也仍要解析头像。
+      if (m.from && !known.has(m.from)) want.add(m.from);
+      if (m.replyToFrom && !known.has(m.replyToFrom)) want.add(m.replyToFrom);
+      for (const u of m.mentions ?? []) if (u && !known.has(u)) want.add(u);
+    }
+    return [...want];
+  }, [convId, groupInfos, messages]);
+  useEffect(() => { userProfiles.request(unresolvedViewUids); }, [unresolvedViewUids, userProfiles]);
+
   // ---- 登录 ----
   if (phase === "login") {
     return (
@@ -2351,9 +2372,11 @@ export default function App() {
   // 没有会话行，头像/名字需从其它内存来源回退，否则只显示首字母圈/uid（群里气泡却正常）。
   // 资料面板拉到的对端名片（uid → Card）：作为 peerSources 的**最高优先级**来源，
   // 因为它是刚从服务端取的权威值，比会话行/好友表的缓存新。
+  // 末级来源是 useUserProfiles 的解析缓存：优先级最低（会话行/好友表/成员表都比它更贴近当前语境），
+  // 但它是超级群里唯一还有东西的那一层——成员表里根本没有普通成员。
   const peerSources = () => ({
     conversations, friends, groups: Object.values(groupInfos),
-    search: [...Object.values(peerCards), ...(searchResults ?? [])],
+    search: [...Object.values(peerCards), ...(searchResults ?? []), ...Object.values(userProfiles.cards)],
   });
   const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
   const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
@@ -2415,8 +2438,12 @@ export default function App() {
   // 群成员昵称（气泡回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
   const memberNick = (cid: string, id: string): string => {
     const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
-    // 群昵称优先（G1），回退全局昵称；都无返回空串让调用方回退 uid。
-    return (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
+    // 群昵称优先（G1），回退全局昵称。
+    const local = (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
+    if (local) return local;
+    // 成员表给不出：超级群不下发成员集、发送者已退群。问全局解析器（useUserProfiles，
+    // 缺的会被上面的 unresolvedViewUids effect 批量补上）。仍拿不到就回空串，调用方走自己的兜底。
+    return (userProfiles.cards[id]?.nickname ?? "").trim();
   };
   // 群 typing 显示昵称（对齐 iOS `IMChatViewController+Socket.m` `im_navigationSubtitle`）：
   /** 某人在**本机**的显示名：备注 > 群昵称/全局昵称 > fallback（一般是服务端字面）> uid。
@@ -2446,8 +2473,12 @@ export default function App() {
     return role === "owner" ? "owner" : role === "admin" ? "admin" : undefined;
   };
   // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
-  const senderAvatar = (m: ChatMessage): string | undefined =>
-    groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
+  const senderAvatar = (m: ChatMessage): string | undefined => {
+    const url = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
+    // 成员表兜底。**超级群里这是常态而非例外**：成员表只含群主+管理员，
+    // 不兜底的话满屏普通成员的气泡头像全是首字母圈（消息自带 from_nickname 但没有 from_avatar）。
+    return url || userProfiles.cards[m.from]?.avatar_url || undefined;
+  };
   // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordHits（不聚合）=====
   const homeQ = search.homeSearch.trim().toLowerCase();
   const homeConvHits = homeQ ? conversations.filter((c) => convDisplayLabel(c).toLowerCase().includes(homeQ)) : [];
