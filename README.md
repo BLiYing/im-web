@@ -18,10 +18,10 @@ SDK 与 UI 分层：聊天能力沉淀在 `sdk/`，界面不直接拼协议帧�
 ## 开发
 
 ```bash
-# 先启动后端
-cd ../IMServer && go run ./cmd/imserver
+# 一条命令起全套（后端 :8080 + 本仓 dev server :5173，先杀后起、幂等）
+cd ../IMServer && ./scripts/dev.sh --no-tail
 
-# 再启动 Web
+# 或只起 Web（后端已在跑时）
 cd ../im-web
 npm install
 npm run dev

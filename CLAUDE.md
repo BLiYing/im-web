@@ -52,14 +52,16 @@ src/
 
 ## 后端重启提醒（重要）
 - **纯前端改动**（仅改 `src/`）：`npm run dev` 自动热更新（HMR），**后端不用重启**；浏览器必要时 Cmd+Shift+R 硬刷。
-- **改了后端代码**（IMServer）：必须重启 `go run ./cmd/imserver`，否则前端连到旧逻辑——这种情况要**明确提醒用户重启后端**再测。
+- **改了后端代码**（IMServer）：必须重启，否则前端连到旧逻辑——这种情况要**明确提醒用户重启后端**再测。
+  提醒里一律给这一条（**不要写 `go run ./cmd/imserver`**）：`cd ../IMServer && ./scripts/dev.sh --no-tail`。
+  它按端口先杀后起（`go run` 派生子进程占端口，杀父进程杀不干净），并**连本仓的 dev server 一起重启**。
 
 ## 构建 / 运行
 ```bash
-# 1) 先起后端（另一个终端）
-cd ../IMServer && go run ./cmd/imserver        # :8080
+# 一条命令起全套（后端 :8080 + 本仓 dev server :5173，先杀后起、幂等）
+cd ../IMServer && ./scripts/dev.sh --no-tail
 
-# 2) 起 Web（dev server :5173，已配 /api 与 /ws 代理到 :8080）
+# 只起 Web（后端已在跑时；已配 /api 与 /ws 代理到 :8080）
 npm install
 npm run dev
 # 浏览器 http://localhost:5173 ，登录填 uid（如 1001 / 1002），双标签页不同 uid 互发
