@@ -14,6 +14,12 @@
 //  - **零高度兜底**：容器 clientHeight 为 0 时（布局过渡、后台标签页恢复、父级 flex 短暂塌陷）
 //    虚拟化器算不出可见区、返回空窗口 → 整列表空白。此时退化为渲染前若干行，保证有内容可见
 //    （旧的全量 map 实现不依赖容器高度，不能因引入虚拟化而新增这个失败模式）。
+//  - **滚动父收进 state 再用**（scrollEl，别直接读 scrollElRef.current）：React 提交阶段
+//    先跑子组件的 layout effect、再给祖先赋 ref，所以挂载那一帧 ref 还是 null。直接读它，
+//    虚拟化器就订阅不到滚动容器、此后永远停在 offset 0——表现是**列表只渲染开头几行，
+//    往下滚是空白**。passive effect 在整棵树 ref 都挂好之后才跑，那时取到元素、setState
+//    逼一次重渲染，虚拟化器才会重新订阅。2026-09-01 在详情抽屉（成员列表）上实测到；
+//    通讯录一直没暴露只是因为 App 重渲染频繁，顺手把它救了回来。
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
@@ -40,24 +46,28 @@ export function VirtualList<T>({
 }: VirtualListProps<T>) {
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  // ---- 滚动父：从 ref 收进 state（理由见文件头「滚动父收进 state 再用」）----
+  // 无依赖数组=每次渲染后跑一遍，同值 setState 会被 React bail out，故不会自激；
+  // 顺带覆盖「滚动容器被换掉」（切会话重挂 .detail-panel）的情形。
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
+  useEffect(() => { setScrollEl(scrollElRef.current ?? null); });
+
   // ---- scrollMargin：本列表相对「滚动内容顶」的偏移（上方搜索框/入口/标签占的高度）----
   // 不用 offsetTop——它相对最近**定位**祖先（.convlist 为 static 时会偏到更上层，值错乱）；
   // 用 getBoundingClientRect 差 + 当前 scrollTop，与 CSS 定位无关，且滚动中恒定。
   const [scrollMargin, setScrollMargin] = useState(0);
   const measureMargin = useCallback(() => {
     const wrap = wrapRef.current;
-    const scrollEl = scrollElRef.current;
     if (!wrap || !scrollEl) return;
     const offset = wrap.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop;
     setScrollMargin((prev) => (Math.abs(prev - offset) < 0.5 ? prev : offset)); // 同值不触发重渲染
-  }, [scrollElRef]);
+  }, [scrollEl]);
 
   useLayoutEffect(() => {
-    measureMargin(); // 挂载 / items 由空变非空后量一次
+    measureMargin(); // 挂载 / 滚动父就位 / items 由空变非空后量一次
   }, [measureMargin, items.length === 0]);
 
   useEffect(() => {
-    const scrollEl = scrollElRef.current;
     if (!scrollEl) return;
     const ro = new ResizeObserver(() => measureMargin()); // 容器尺寸变化（窗口 resize、侧栏折叠）
     ro.observe(scrollEl);
@@ -72,7 +82,7 @@ export function VirtualList<T>({
       ro.disconnect();
       mo.disconnect();
     };
-  }, [scrollElRef, measureMargin]);
+  }, [scrollEl, measureMargin]);
 
   // ---- 行高：首次实测采信，其后持续观测、只增不减 ----
   const [rowH, setRowH] = useState(estimateSize);
@@ -109,7 +119,7 @@ export function VirtualList<T>({
 
   const virtualizer = useVirtualizer({
     count: items.length,
-    getScrollElement: () => scrollElRef.current,
+    getScrollElement: () => scrollEl,
     estimateSize: () => rowH,
     overscan,
     scrollMargin,

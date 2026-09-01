@@ -7,6 +7,9 @@ import { createRef } from "react";
 import { render, fireEvent, cleanup } from "@testing-library/react";
 
 afterEach(cleanup); // test-setup 不自动清理，多次 render 会堆进 document.body → 文本重复命中
+// 成员列表超过阈值会挂 VirtualList，它用 ResizeObserver 量滚动父；jsdom 没有这个 API → 打桩。
+class RO { observe() {} unobserve() {} disconnect() {} }
+(globalThis as unknown as { ResizeObserver: typeof RO }).ResizeObserver = RO;
 import { AppServicesProvider, type AppServices } from "../AppServicesContext";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
@@ -85,6 +88,44 @@ describe("DetailTabs", () => {
     const { queryByText } = render(
       <DetailTabs {...base} gp={gp({ members: [member({ user_id: "u2" })] })} canInvite={false} />);
     expect(queryByText("添加成员")).toBeNull();
+  });
+
+  // —— 成员列表虚拟化（阈值 VIRTUALIZE_MEMBERS_FROM=50）——
+  // 注意断言的边界：jsdom 量不出容器高度，虚拟化器算不出可见区、返回空窗口，实际走的是
+  // VirtualList 的「零高度兜底」（渲染前若干行）。所以这里钉的是**两条路径的分流、不空、行内容一致**，
+  // 真实可见区计算只有浏览器测得出（2 万人群手测口径见 docs/ops/LOAD_TESTING.md）。
+  const manyMembers = Array.from({ length: 200 },
+    (_, i) => member({ user_id: `u${i + 2}`, nickname: `成员${i}` }));
+
+  it("成员数 ≤ 阈值 → 全量渲染（小群不为虚拟化的失败模式买单）", () => {
+    const { container } = render(
+      <DetailTabs {...base} gp={gp({ members: manyMembers.slice(0, 20) })} scrollElRef={createRef<HTMLElement>()} />);
+    expect(container.querySelectorAll(".detail-member").length).toBe(20);
+  });
+
+  it("成员数 > 阈值 → 只渲染一小撮行，且不为空", () => {
+    const { container } = render(
+      <DetailTabs {...base} gp={gp({ members: manyMembers })} scrollElRef={createRef<HTMLElement>()} />);
+    const rows = container.querySelectorAll(".detail-member").length;
+    expect(rows).toBeGreaterThan(0);  // 量不到容器也必须有内容——不能新增「数据已到却整列表空白」这个失败模式
+    expect(rows).toBeLessThan(50);    // 200 行不再全进 DOM
+  });
+
+  it("虚拟化那条路径的行内容与全量一致（群主徽标 / ⋯ 管理按钮都在）", () => {
+    const onMemberMenu = vi.fn();
+    const list = [member({ user_id: "u2", nickname: "小明", role: "owner" }), ...manyMembers];
+    const { container, getAllByTitle, getByText } = render(
+      <DetailTabs {...base} gp={gp({ members: list })} onMemberMenu={onMemberMenu}
+        scrollElRef={createRef<HTMLElement>()} />);
+    expect(container.querySelectorAll(".detail-member").length).toBeLessThan(50); // 确认确实走了虚拟化
+    expect(getByText("群主")).toBeTruthy();
+    fireEvent.click(getAllByTitle("管理")[0]);
+    expect(onMemberMenu).toHaveBeenCalled();
+  });
+
+  it("没注入 scrollElRef → 退回全量渲染（宁可慢，也不能少显示人）", () => {
+    const { container } = render(<DetailTabs {...base} gp={gp({ members: manyMembers })} />);
+    expect(container.querySelectorAll(".detail-member").length).toBe(200);
   });
 });
 

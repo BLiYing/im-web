@@ -1,6 +1,7 @@
-import type { MouseEvent } from "react";
+import type { MouseEvent, RefObject } from "react";
 import { UserPlus } from "lucide-react";
 import type { ChatMessage, GroupInfo, GroupMember } from "../sdk/protocol";
+import { VirtualList } from "../VirtualList";
 import type { DownloadState } from "../download";
 import { downloadText } from "../download";
 import { formatFileSize } from "../fileMetadata";
@@ -28,13 +29,62 @@ function detailFullDateTime(ts: number): string {
 
 export type DetailTab = "members" | "media" | "files" | "voice" | "links" | "contacts";
 
+/**
+ * 成员列表启用虚拟化的行数阈值。
+ *
+ * 低于它走原来的全量 map：虚拟化有它自己的失败模式（滚动容器测不出高度时退化为只渲染前若干行，
+ * 见 VirtualList「零高度兜底」），几十个人的群没必要为此买单。
+ * **2000 人的普通群同样吃这条路**——服务端一次全量下发 `gp.members`，行数和超级群翻满页一样多；
+ * 只按 `is_super` 分流会漏掉它（实测 2000 人群面板 136839px / DOM 12291 节点）。
+ */
+const VIRTUALIZE_MEMBERS_FROM = 50;
+/** `.detail-member` 首帧行高估算（padding 8+8 + 头像 52）；真实行高由 VirtualList 首行实测覆盖。 */
+const MEMBER_ROW_EST_H = 68;
+
+/**
+ * 单个成员行。抽成组件是为了让「全量 map」与「虚拟化」两条路径渲染**同一段 JSX**——
+ * 两处各抄一份，迟早会在其中一份上漏掉禁言标签、管理按钮这类后加的东西，
+ * 而那种 bug 只在大群（走虚拟化那条）才看得见。
+ */
+function MemberRow({ m, gp, uid, memberLabel, onOpenMember, canManageMember, onMemberMenu }: {
+  m: GroupMember;
+  gp: GroupInfo;
+  uid: string;
+  memberLabel: (m: GroupMember) => string;
+  onOpenMember: (userId: string) => void;
+  canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
+  onMemberMenu: (e: MouseEvent, cid: string, m: GroupMember) => void;
+}) {
+  return (
+    <div className="detail-member"
+      onClick={() => m.user_id !== uid && onOpenMember(m.user_id)} role="button">
+      <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
+      <div className="detail-member-body">
+        <div className="detail-member-name">{memberLabel(m)}{m.user_id === uid && <span className="me-tag">我</span>}</div>
+        {/* 副行 = 群昵称 / @句柄 / 空。**绝不显示 user_id**——那是 10 位随机内部 ID
+            （docs/design/ACCOUNT_IDENTITY_REDESIGN.md §5.2）。 */}
+        <div className="detail-member-sub">{memberSubtitle(m)}</div>
+      </div>
+      {/* G2 被禁言标签：服务端把「永久」归一为大正数（MutePermanent = 1<<62），直接 >now 判定。
+          与 role 徽标同排、居右紧挨（role 左侧），未禁言时不渲染，不占位。 */}
+      {(m.mute_until ?? 0) > Date.now() && <span className="role-badge mute">禁言中</span>}
+      {m.role === "owner" && <span className="role-badge owner">群主</span>}
+      {m.role === "admin" && <span className="role-badge">管理员</span>}
+      {canManageMember(gp, m) && (
+        <button className="mini-btn ghost" title="管理"
+          onClick={(e) => { e.stopPropagation(); onMemberMenu(e, gp.conv_id, m); }}>⋯</button>
+      )}
+    </div>
+  );
+}
+
 // 会话详情抽屉的页签区（成员 / 媒体 / 文件 / 语音 / 链接 / 名片）。纯展示：数据与动作全经 props 注入。
 // DOM/className/结构与原 App 内联逐字一致（行为等价）。媒体/文件门控与聊天气泡共用 MediaTile/FileGateIcon。
 export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
   contacts, contactDisplayName, contactSourceLabel, onOpenContact,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
-  members: membersOverride, hasMoreMembers, onLoadMoreMembers,
+  members: membersOverride, hasMoreMembers, onLoadMoreMembers, scrollElRef,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
@@ -63,6 +113,11 @@ export function DetailTabs({
   members?: GroupMember[];
   hasMoreMembers?: boolean;          // 还有下一页 → 渲染「加载更多」
   onLoadMoreMembers?: () => void;    // 点「加载更多」
+  /**
+   * 详情抽屉那个滚动容器（`.detail-panel`）的 ref，成员列表虚拟化要用它算可见区。
+   * 不传 = 不虚拟化（全量渲染），功能不受影响，只是大群会卡。
+   */
+  scrollElRef?: RefObject<HTMLElement | null>;
   canInvite: boolean;
   onAddMember: (cid: string) => void;
   onOpenMember: (userId: string) => void;
@@ -95,27 +150,23 @@ export function DetailTabs({
                 <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
               </button>
             )}
-            {(membersOverride ?? gp.members).map((m) => (
-              <div key={m.user_id} className="detail-member"
-                onClick={() => m.user_id !== uid && onOpenMember(m.user_id)} role="button">
-                <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
-                <div className="detail-member-body">
-                  <div className="detail-member-name">{memberLabel(m)}{m.user_id === uid && <span className="me-tag">我</span>}</div>
-                  {/* 副行 = 群昵称 / @句柄 / 空。**绝不显示 user_id**——那是 10 位随机内部 ID
-                      （docs/design/ACCOUNT_IDENTITY_REDESIGN.md §5.2）。 */}
-                  <div className="detail-member-sub">{memberSubtitle(m)}</div>
-                </div>
-                {/* G2 被禁言标签：服务端把「永久」归一为大正数（MutePermanent = 1<<62），直接 >now 判定。
-                    与 role 徽标同排、居右紧挨（role 左侧），未禁言时不渲染，不占位。 */}
-                {(m.mute_until ?? 0) > Date.now() && <span className="role-badge mute">禁言中</span>}
-                {m.role === "owner" && <span className="role-badge owner">群主</span>}
-                {m.role === "admin" && <span className="role-badge">管理员</span>}
-                {canManageMember(gp, m) && (
-                  <button className="mini-btn ghost" title="管理"
-                    onClick={(e) => { e.stopPropagation(); onMemberMenu(e, gp.conv_id, m); }}>⋯</button>
-                )}
-              </div>
-            ))}
+            {(() => {
+              const list = membersOverride ?? gp.members;
+              const rest = { gp, uid, memberLabel, onOpenMember, canManageMember, onMemberMenu };
+              // 大列表只渲染视口内的行，DOM 从 N 降到几十。缺 scrollElRef 时（未注入滚动父）
+              // 一律退回全量 map——宁可慢，也不能因为量不到滚动容器而少显示人。
+              return list.length > VIRTUALIZE_MEMBERS_FROM && scrollElRef ? (
+                <VirtualList
+                  items={list}
+                  scrollElRef={scrollElRef}
+                  getKey={(m) => m.user_id}
+                  estimateSize={MEMBER_ROW_EST_H}
+                  renderRow={(m) => <MemberRow m={m} {...rest} />}
+                />
+              ) : (
+                list.map((m) => <MemberRow key={m.user_id} m={m} {...rest} />)
+              );
+            })()}
             {/* 分页续拉（超级群）：一次 50 人，避免 2 万行一次性进 DOM。 */}
             {hasMoreMembers && (
               <button className="detail-row" onClick={() => onLoadMoreMembers?.()}>

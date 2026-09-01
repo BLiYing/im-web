@@ -4,6 +4,7 @@
 // - 稳定服务走 Context：AppServicesContext（clientRef/setToast/comingSoon）+ ChatActionsContext（setViewer/onGateTap/onPassiveMediaError/openReadyFile）；
 // - 其余动作多定义在 App 的 login 早退之后（plain fn，不能进 memo 化 context）→ 按组走 props（此前登记的「~35 props」路线，用户拍板整块抽）。
 // 护栏：DetailPanel.test.tsx + DetailPanelParts.test.tsx（子件）。
+import { useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
@@ -112,6 +113,9 @@ export interface DetailPanelProps {
 }
 
 export function DetailPanel(p: DetailPanelProps) {
+  // 抽屉本身就是滚动容器（.detail-panel 有 overflow-y:auto）。成员列表虚拟化复用它，
+  // 不自造内层滚动区——那会变成"抽屉里再套一个滚动条"，与现在的交互不一样。
+  const panelRef = useRef<HTMLElement>(null);
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, adminPanelOpen, groupBans,
     groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
@@ -193,7 +197,7 @@ export function DetailPanel(p: DetailPanelProps) {
 
     return (
       <div className="detail-mask" onClick={onClose}>
-        <aside className="detail-panel" onClick={(e) => e.stopPropagation()}>
+        <aside ref={panelRef} className="detail-panel" onClick={(e) => e.stopPropagation()}>
           {!manageOpen && (
             // 标题栏随面板滚动固定在顶部（对齐 iOS 大标题折叠为常驻导航栏）：关闭按钮一并锁在标题栏内。
             <div className="detail-sticky-head">
@@ -397,6 +401,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 }}
                 onOpenContact={openPeerDetail}
                 members={p.superMembers} hasMoreMembers={p.superHasMore} onLoadMoreMembers={p.onLoadMoreMembers}
+                scrollElRef={panelRef}
                 canInvite={canInviteHere}
                 onAddMember={(cid) => setInviteDraft({ convId: cid, selected: [] })}
                 onOpenMember={openPeerDetail} canManageMember={canManageMember}
