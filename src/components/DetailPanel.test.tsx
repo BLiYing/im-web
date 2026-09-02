@@ -164,4 +164,19 @@ describe("DetailPanel · 群聊", () => {
       <DetailPanel {...p} manageOpen={true} /></ChatActionsProvider></AppServicesProvider>);
     expect(getByText("进群确认")).toBeTruthy(); // GroupManagePanel 出现
   });
+  // 大群说明行：**恒显**，且不像公告/简介那样"非空才显"。
+  // 最要紧的是最后一条断言——一个既没公告也没简介的大群，若这张卡只判 announcement||intro，
+  // 整张卡都不出现，而那恰恰是最需要解释"为什么没有已读双勾"的场景。
+  it("大群 → 公告卡出现「大群」行并可点开；既无公告也无简介时这张卡仍必须在", () => {
+    const p = groupProps({ groupInfos: { g1: gp({ is_super: true }) } });
+    const { getByText } = mount(p);
+    const row = getByText("大群").closest("button")!;
+    expect(getByText("已关闭 3 项能力")).toBeTruthy();
+    fireEvent.click(row);
+    expect(p.openGroupText).toHaveBeenCalledWith("super", "g1");
+  });
+  it("普通群 → 不出现「大群」行（标记只在大群上有意义）", () => {
+    const { queryByText } = mount(groupProps({ groupInfos: { g1: gp({ is_super: false }) } }));
+    expect(queryByText("大群")).toBeNull();
+  });
 });

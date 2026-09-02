@@ -205,7 +205,9 @@ export function DetailTabs({
                   <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
                 </button>
               )}
-              {/* 满员告知。**只在人满那一刻现身**，不做常驻入口——升级不可逆，平时挂在那儿
+              {/* 满员告知（**升级前**时态；三条定稿见 docs/design/SUPERGROUP_DESIGN.md §4.1，
+                  那节是三端唯一真相源，改文案按该节搜一圈）。已升级的群走 DetailPanel 的大群说明行。
+                  **只在人满那一刻现身**，不做常驻入口——升级不可逆，平时挂在那儿
                   只会诱导用户在不需要的时候去点（对齐 Telegram 的 MEMBERS LIMIT REACHED）。
                   第一版只「告知」不「申请」：审批流要先有审批人，而管理后台还没有工单队列，
                   真做出来就是"用户点了申请、运营得自己想起来去后台翻"（TASKS C-superupgrade）。 */}

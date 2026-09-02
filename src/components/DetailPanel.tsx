@@ -9,8 +9,9 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
-  IdCard,
+  IdCard, UsersRound,
 } from "lucide-react";
+import type { GroupTextKind } from "./modals/GroupTextModal";
 import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, GroupMember } from "../sdk/protocol";
 import type { DownloadState } from "../download";
 import { firstURLInText } from "../messageContent";
@@ -108,7 +109,7 @@ export interface DetailPanelProps {
   doDissolveGroup: (cid: string) => void;
   setConvPinned: (c: Conversation, pinned: boolean) => void;
   setConvMuted: (c: Conversation, muted: boolean) => void;
-  openGroupText: (kind: "announcement" | "intro", cid: string) => void;
+  openGroupText: (kind: GroupTextKind, cid: string) => void;
   openGroupCard: (cid: string, asLink?: boolean) => Promise<void>;
   doEditMyGroupNickname: (gp: GroupInfo) => Promise<void>;
   doEditGroupRemark: (gp: GroupInfo) => Promise<void>;
@@ -328,7 +329,7 @@ export function DetailPanel(p: DetailPanelProps) {
 
               {showDetailBody && (<>
               {/* ---- 群公告 / 群简介卡（决策 17，Pills 下第一卡，全员只读；一行预览 + 点开全文视图） ---- */}
-              {d.isGroup && gp && (gp.announcement || gp.intro) && (
+              {d.isGroup && gp && (gp.announcement || gp.intro || isSuperHere) && (
                 <div className="detail-card">
                   {gp.announcement && (
                     <button className="detail-row" onClick={() => openGroupText("announcement", d.convId)}>
@@ -340,6 +341,17 @@ export function DetailPanel(p: DetailPanelProps) {
                     <button className="detail-row" onClick={() => openGroupText("intro", d.convId)}>
                       <span className="detail-row-ic"><Info size={18} /></span><span>群简介</span>
                       <span className="detail-row-val">{gp.intro}</span><ChevronRight size={16} className="detail-row-chev" />
+                    </button>
+                  )}
+                  {/* 大群说明：**只要是大群就恒显**，不像公告/简介那样"非空才显"。
+                      头部副标题的「· 大群」只让人**察觉**，这一行才**解释**为什么已读双勾/正在输入没了。
+                      注意它也进了这张卡的显示条件——一个既没公告也没简介的大群，
+                      只判 announcement||intro 的话整张卡不出现，而那恰恰是最需要解释的场景。
+                      与 iOS 的 IMChatDetailViewController+About.m 同一行同一口径。 */}
+                  {isSuperHere && (
+                    <button className="detail-row" onClick={() => openGroupText("super", d.convId)}>
+                      <span className="detail-row-ic"><UsersRound size={18} /></span><span>大群</span>
+                      <span className="detail-row-val">已关闭 3 项能力</span><ChevronRight size={16} className="detail-row-chev" />
                     </button>
                   )}
                 </div>

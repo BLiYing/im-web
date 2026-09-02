@@ -88,7 +88,7 @@ import { ConfirmSendCardModal } from "./components/modals/ConfirmSendCardModal";
 import { MuteDurationModal } from "./components/modals/MuteDurationModal";
 import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
-import { GroupTextModal } from "./components/modals/GroupTextModal";
+import { GroupTextModal, type GroupTextKind } from "./components/modals/GroupTextModal";
 import { FavoritesModal } from "./components/modals/FavoritesModal";
 import { ForwardPicker } from "./components/modals/ForwardPicker";
 import { RecordModal } from "./components/modals/RecordModal";
@@ -126,6 +126,19 @@ const omitSeq = (r: Record<number, string>, seq: number): Record<number, string>
 };
 const setIfOpen = (r: Record<number, string>, seq: number, text: string): Record<number, string> =>
   (r[seq] === undefined ? r : { ...r, [seq]: text }); // 未展开（用户已取消）就别把面板又拉回来
+
+
+/** 大群说明全文（**升级后**时态）。三条与 docs/design/SUPERGROUP_DESIGN.md §4.1 同源——
+ *  那一节是三端唯一真相源（后台升级确认框 / iOS 满员告知行与大群说明行 / Web 满员告知块 / 本常量）。
+ *  改文案时按该节搜一圈，几处一起改。
+ *
+ *  **不写具体人数**：上限是部署级配置，硬编码就会与服务端口径分叉（同 SUPERGROUP_DESIGN §3 两层闸门）。
+ *  满员告知块能写数字，是因为它本来就要判 serverConfig 才显示。 */
+const SUPER_GROUP_NOTICE = [
+  "1. 成员上限为超级群配额，成员列表分页加载",
+  "2. 已读回执、「正在输入」、成员在线态已关闭",
+  "3. 群规模所致，无法改回普通群",
+].join("\n");
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -221,7 +234,7 @@ export default function App() {
   // 弹窗本体 JSX 仍在下方渲染。须在使用 askConfirm/askPrompt 的回调之前调用（此处即最靠前）。
   const { confirmDlg, setConfirmDlg, promptDlg, setPromptDlg, askConfirm, askPrompt } = useDialogs();
   // 群公告/群简介全文视图（决策 16/17）：只读全文 + 复制 +（管理员）编辑；简介无发布者/时间/编辑。
-  const [fullTextModal, setFullTextModal] = useState<{ kind: "announcement" | "intro"; convId: string } | null>(null);
+  const [fullTextModal, setFullTextModal] = useState<{ kind: GroupTextKind; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
   const [privacyOpen, setPrivacyOpen] = useState(false); // 隐私与安全容器页（拉齐 iOS）
@@ -1522,7 +1535,7 @@ export default function App() {
     useDevices({ clientRef, askConfirm, setToast });
 
   // 打开群公告/简介全文视图（三入口共用：横幅点击 / 详情页卡点击）。
-  const openGroupText = useCallback((kind: "announcement" | "intro", cid: string) => {
+  const openGroupText = useCallback((kind: GroupTextKind, cid: string) => {
     setFullTextModal({ kind, convId: cid });
   }, []);
 
@@ -3709,17 +3722,20 @@ export default function App() {
       {fullTextModal && (() => {
         const gp = groupInfos[fullTextModal.convId];
         if (!gp) return null;
-        const isAnn = fullTextModal.kind === "announcement";
-        const text = (isAnn ? gp.announcement : gp.intro) ?? "";
+        const kind = fullTextModal.kind;
+        const isAnn = kind === "announcement";
+        const text = kind === "super" ? SUPER_GROUP_NOTICE : ((isAnn ? gp.announcement : gp.intro) ?? "");
         const byName = isAnn && gp.announcement_by ? (memberNick(gp.conv_id, gp.announcement_by) || gp.announcement_by) : "";
         const at = isAnn ? (gp.announcement_at ?? 0) : 0;
-        const meta = isAnn && (byName || at > 0)
-          ? `${byName}${byName && at > 0 ? " · " : ""}${at > 0 ? `${fmtDateTime(at)} 发布` : ""}`
-          : undefined;
+        const meta = kind === "super"
+          ? "本群成员规模较大，部分实时能力已关闭"
+          : (isAnn && (byName || at > 0)
+            ? `${byName}${byName && at > 0 ? " · " : ""}${at > 0 ? `${fmtDateTime(at)} 发布` : ""}`
+            : undefined);
         const close = () => setFullTextModal(null);
         return (
           <GroupTextModal
-            isAnnouncement={isAnn}
+            kind={kind}
             text={text}
             meta={meta}
             canEdit={isAnn && gp.my_role !== "member"}
