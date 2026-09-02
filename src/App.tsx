@@ -2999,6 +2999,11 @@ export default function App() {
                   <span className="convpeer">
                     {c.pinned_at ? <Pin size={12} className="conv-pin" /> : null}
                     {convDisplayLabel(c)}
+                    {/* 「大群」标记：用户在列表里第一个察觉到的异常正是这里——这个群没有在线绿点、
+                        没有「正在输入」。不标出来就会被当成 bug 报上来（SUPERGROUP_DESIGN §9）。
+                        文字 pill 而非图标：标记的价值是**解释**那些消失的能力，图标不自解释；
+                        与聊天页副标题、群资料页说明行、后台列表 pill 同一套语汇。 */}
+                    {c.is_super ? <span className="conv-super-tag">大群</span> : null}
                     {c.muted ? <BellOff size={12} className="conv-mute" /> : null}
                   </span>
                   <span className="convtime">

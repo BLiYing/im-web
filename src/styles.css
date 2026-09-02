@@ -846,6 +846,13 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* 待审入群角标（G3，仅群主/管理员）：小号红色药丸，跟 .detail-badge 同色系但更贴合列表行 */
 .conv-pending-badge { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 8px; background: var(--danger);
   color: #fff; font-size: 11px; font-weight: 600; line-height: 16px; vertical-align: middle; font-variant-numeric: tabular-nums; }
+/* 「大群」标记：中性底色的小 pill，跟在群名后。
+   刻意**不用强调色**——它是一条说明而不是提醒，抢不过未读徽标才对。
+   flex-shrink:0 是要点：长群名截断发生在名字上，标记恒完整；做反了的话，
+   最需要标记的长名字群反而看不到标记。 */
+.conv-super-tag { flex-shrink: 0; margin-left: 4px; padding: 0 5px; border-radius: 4px;
+  background: var(--grouped-bg); color: var(--text-secondary); font-size: 11px;
+  font-weight: 500; line-height: 16px; vertical-align: middle; }
 .badge.muted { background: var(--text-secondary); }
 .badge.dot { min-width: 10px; width: 10px; height: 10px; padding: 0; border-radius: 50%; }
 /* 未读分割线（Telegram 风格的"未读消息"）。 */

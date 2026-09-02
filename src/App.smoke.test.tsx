@@ -97,3 +97,28 @@ describe("App 冒烟：登录 → 会话 → 聊天主链路", () => {
     expect(texts).toEqual(["第一条", "第二条", "第三条"]);
   });
 });
+
+// 会话列表的「大群」标记（SUPERGROUP_DESIGN §9）。
+//
+// 值得单测的理由：这是用户**第一个**察觉到大群与众不同的地方——列表里这个群没有在线绿点、
+// 没有「正在输入」。标记漏了不会有任何报错，只会让人把"功能没了"当成 bug 报上来。
+// 后端早就随 /conversations 下发 is_super，端上此前一直没接（iOS 连模型字段都没有）。
+describe("会话列表：大群标记", () => {
+  it("is_super 的群显示「大群」；普通群与单聊都不显示", async () => {
+    Fake.conversations = [
+      conv({ conv_id: "g_super", is_group: true, name: "两万人群", is_super: true } as never),
+      conv({ conv_id: "g_plain", is_group: true, name: "小群", is_super: false } as never),
+    ];
+    renderApp();
+    fireEvent.click(screen.getByText("免密登录"));
+    await waitFor(() => expect(screen.getByText("两万人群")).toBeInTheDocument());
+
+    // 标记只出现一次：跟在大群那一行，不是每个群都有。
+    // 用 .conv-super-tag 选而不是按文字找——群名/头像首字母圈里也可能出现同样的字。
+    const tags = document.querySelectorAll(".conv-super-tag");
+    expect(tags).toHaveLength(1);
+    expect(tags[0].textContent).toBe("大群");
+    // 标记与群名在同一行内（同一个 .convpeer 容器）——挂错容器会跑到预览行上去。
+    expect(tags[0].closest(".convpeer")?.textContent).toContain("两万人群");
+  });
+});
