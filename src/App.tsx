@@ -135,9 +135,10 @@ const setIfOpen = (r: Record<number, string>, seq: number, text: string): Record
  *  **不写具体人数**：上限是部署级配置，硬编码就会与服务端口径分叉（同 SUPERGROUP_DESIGN §3 两层闸门）。
  *  满员告知块能写数字，是因为它本来就要判 serverConfig 才显示。 */
 const SUPER_GROUP_NOTICE = [
-  "1. 成员上限为超级群配额，成员列表分页加载",
+  "1. 成员上限为超级群配额；成员列表分页加载，搜索走服务端（不是本地过滤）",
   "2. 已读回执、「正在输入」、成员在线态已关闭",
-  "3. 群规模所致，无法改回普通群",
+  "3. 成员进出不再产生群消息（「X 加入了群聊」「A 将 B 移出群聊」等）",
+  "4. 群规模所致，无法改回普通群",
 ].join("\n");
 
 export default function App() {

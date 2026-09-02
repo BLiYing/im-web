@@ -347,11 +347,14 @@ export function DetailPanel(p: DetailPanelProps) {
                       头部副标题的「· 大群」只让人**察觉**，这一行才**解释**为什么已读双勾/正在输入没了。
                       注意它也进了这张卡的显示条件——一个既没公告也没简介的大群，
                       只判 announcement||intro 的话整张卡不出现，而那恰恰是最需要解释的场景。
-                      与 iOS 的 IMChatDetailViewController+About.m 同一行同一口径。 */}
+                      与 iOS 的 IMChatDetailViewController+About.m 同一行同一口径。
+                      「N 项能力」数的是**被关掉的能力**：已读回执/正在输入/在线态/进出群消息 = 4；
+                      全文里的第 1、4 条（上限、不可撤销）不是"关闭"，不计入。
+                      改 SUPER_GROUP_NOTICE 的列表时**记得同步这个数**。 */}
                   {isSuperHere && (
                     <button className="detail-row" onClick={() => openGroupText("super", d.convId)}>
                       <span className="detail-row-ic"><UsersRound size={18} /></span><span>大群</span>
-                      <span className="detail-row-val">已关闭 3 项能力</span><ChevronRight size={16} className="detail-row-chev" />
+                      <span className="detail-row-val">已关闭 4 项能力</span><ChevronRight size={16} className="detail-row-chev" />
                     </button>
                   )}
                 </div>

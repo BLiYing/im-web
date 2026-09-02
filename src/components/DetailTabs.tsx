@@ -214,10 +214,12 @@ export function DetailTabs({
               {!searching && upgradeHint && (
                 <div className="detail-upgrade-note">
                   <div className="detail-upgrade-title">成员已达上限 {upgradeHint.maxMembers}</div>
-                  <div>
-                    升级为大群可容纳至 {upgradeHint.maxSuperMembers} 人，请联系管理员办理。
-                    升级后已读回执与「正在输入」将不再显示，且**不可撤销**。
-                  </div>
+                  <ol className="detail-upgrade-list">
+                    <li>可容纳至 {upgradeHint.maxSuperMembers} 人；成员列表改为分页加载，搜索改走服务端</li>
+                    <li>升级后已读回执、「正在输入」、成员在线态不再显示</li>
+                    <li>升级后成员进出不再产生群消息（「X 加入了群聊」等）</li>
+                    <li>单向操作，升级后不可撤销；需联系管理员办理</li>
+                  </ol>
                   <button className="mini-btn ghost" onClick={() => upgradeHint.onCopyGroupID()}>
                     复制群 ID
                   </button>

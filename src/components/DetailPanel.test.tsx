@@ -171,7 +171,10 @@ describe("DetailPanel · 群聊", () => {
     const p = groupProps({ groupInfos: { g1: gp({ is_super: true }) } });
     const { getByText } = mount(p);
     const row = getByText("大群").closest("button")!;
-    expect(getByText("已关闭 3 项能力")).toBeTruthy();
+    // 预览里的 N 数的是**被关掉的能力**（已读回执/正在输入/在线态/进出群消息 = 4），
+    // 与 SUPER_GROUP_NOTICE 的条数不是一回事（那里还含"上限"和"不可撤销"两条非关闭项）。
+    // 文案定稿见 SUPERGROUP_DESIGN §4.1；改列表时这条断言会提醒你同步 N。
+    expect(getByText("已关闭 4 项能力")).toBeTruthy();
     fireEvent.click(row);
     expect(p.openGroupText).toHaveBeenCalledWith("super", "g1");
   });
