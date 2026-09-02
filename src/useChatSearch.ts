@@ -92,16 +92,19 @@ export function useChatSearch(d: ChatSearchDeps) {
   // 有缺口且在线 → 命中集改由服务端给（§4.9 第 1 项）。本地齐全时这段不发请求，
   // 行为与改造前**逐字一致**——绝大多数会话走的都是那条路。
   const [serverHits, setServerHits] = useState<{ convSeq: number; timestamp: number }[]>([]);
+  // 服务端检索只取一页（上限 50）。命中更多时如实告知（计数写「/ 50+」），
+  // 而不是悄悄截断成 50 条还写「/ 50」——那会让人以为大群里就只有这些命中。
+  const [hitsTruncated, setHitsTruncated] = useState(false);
   const [searchDegraded, setSearchDegraded] = useState(false);
   useEffect(() => {
     // 早退分支的清空必须**幂等**（已空就不换新数组），否则每次清空都是一次多余渲染。
     if (!searchOpen || (!searchNeedle && !searchFrom) || querySource === "local") {
-      setServerHits((h) => (h.length ? [] : h)); setSearchDegraded(false);
+      setServerHits((h) => (h.length ? [] : h)); setSearchDegraded(false); setHitsTruncated(false);
       return;
     }
     if (querySource === "local-degraded") {
       // 离线：给本地结果，但**必须说出来**只搜了已下载的部分——静默残缺才是真正的坑。
-      setServerHits((h) => (h.length ? [] : h)); setSearchDegraded(true);
+      setServerHits((h) => (h.length ? [] : h)); setSearchDegraded(true); setHitsTruncated(false);
       return;
     }
     setSearchDegraded(false);
@@ -114,8 +117,9 @@ export function useChatSearch(d: ChatSearchDeps) {
           if (cancelled) return;
           // 服务端按 conv_seq 倒序返回；本 Hook 通篇按**升序**（0=最早）使用命中集，这里翻过来。
           setServerHits(page.items.map((i) => ({ convSeq: i.conv_seq, timestamp: i.timestamp })).reverse());
+          setHitsTruncated(!!page.has_more);
         })
-        .catch(() => { if (!cancelled) setServerHits([]); });
+        .catch(() => { if (!cancelled) { setServerHits([]); setHitsTruncated(false); } });
     }, 250); // 防抖：输入过程中不要每敲一个字打一次服务端
     return () => { cancelled = true; clearTimeout(timer); };
   }, [searchOpen, searchNeedle, searchFrom, searchQuery, convId, querySource]);
@@ -316,7 +320,7 @@ export function useChatSearch(d: ChatSearchDeps) {
   }, [homeMsgHits, conversations]);
 
   return {
-    searchNeedle, searchHits, searchHitIdx, gotoSearchHit, openInChatSearch, armInChatSearch, closeInChatSearch, searchInputRef,
+    searchNeedle, searchHits, searchHitIdx, hitsTruncated, gotoSearchHit, openInChatSearch, armInChatSearch, closeInChatSearch, searchInputRef,
     searchFrom, searchFromName, searchFromPickerOpen, setSearchFromPickerOpen, searchFromRows, openFromPicker, pickSearchFrom, clearSearchFrom,
     calendarOpen, setCalendarOpen, calendarMonth, setCalendarMonth, activeDays, jumpToDay, jumpToToday, jumpToEarliest, monthLabel,
     // 降级提示（§4.9）：离线 + 本地有缺口时，UI 必须把"只搜了已下载的部分"说出来。

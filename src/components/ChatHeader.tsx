@@ -53,7 +53,7 @@ export function ChatHeader(p: ChatHeaderProps) {
         <ChatSearchBar
           searchInputRef={search.searchInputRef} isGroupChat={isGroupChat}
           searchQuery={searchQuery} setSearchQuery={setSearchQuery} searchNeedle={search.searchNeedle}
-          searchHitCount={search.searchHits.length} searchHitIdx={search.searchHitIdx}
+          searchHitCount={search.searchHits.length} searchHitIdx={search.searchHitIdx} searchHitsTruncated={search.hitsTruncated}
           gotoSearchHit={search.gotoSearchHit} closeInChatSearch={search.closeInChatSearch}
           searchFrom={search.searchFrom} searchFromName={search.searchFromName} clearSearchFrom={search.clearSearchFrom}
           searchFromPickerOpen={search.searchFromPickerOpen} setSearchFromPickerOpen={search.setSearchFromPickerOpen}

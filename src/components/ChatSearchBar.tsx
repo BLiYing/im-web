@@ -13,6 +13,8 @@ export function ChatSearchBar(p: {
   setSearchQuery: (v: string) => void;
   searchNeedle: string;
   searchHitCount: number;
+  /** 命中集被服务端单页上限截断（真实命中更多）→ 计数补 `+`。 */
+  searchHitsTruncated?: boolean;
   searchHitIdx: number;
   gotoSearchHit: (idx: number) => void;
   closeInChatSearch: () => void;
@@ -58,7 +60,7 @@ export function ChatSearchBar(p: {
         />
         {(p.searchNeedle || p.searchFrom) && !p.searchFromPickerOpen && (
           <span className="chat-search-nav">
-            <span className="chat-search-count">{p.searchHitCount ? `${p.searchHitIdx + 1} / ${p.searchHitCount}` : "无匹配"}</span>
+            <span className="chat-search-count">{p.searchHitCount ? `${p.searchHitIdx + 1} / ${p.searchHitCount}${p.searchHitsTruncated ? "+" : ""}` : "无匹配"}</span>
             <button className="icon-btn chat-search-arrow" title="上一条（更旧）" disabled={p.searchHitCount === 0 || p.searchHitIdx <= 0}
               onClick={() => p.gotoSearchHit(p.searchHitIdx - 1)}><ChevronUp size={16} /></button>
             <button className="icon-btn chat-search-arrow" title="下一条（更新）" disabled={p.searchHitCount === 0 || p.searchHitIdx >= p.searchHitCount - 1}
