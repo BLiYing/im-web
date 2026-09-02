@@ -15,6 +15,7 @@ import { FileTypeIcon } from "../FileTypeIcon";
 import { Avatar } from "./Avatar";
 import { QuoteThumb } from "./QuoteThumb";
 import { useChatActions } from "../ChatActionsContext";
+import { unreadBadgeText } from "../unreadBadge";
 
 export type MentionRow = { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string };
 export type AttachItem = { id: string; label: string; accept: string; icon: LucideIcon };
@@ -31,6 +32,8 @@ export interface ComposerProps {
   composerMuteReason: string | null;
   showJump: boolean;
   jumpCount: number;
+  /** ↓N 撞到服务端未读上限（真实值 ≥ jumpCount）→ 角标补 "+"。 */
+  jumpCapped?: boolean;
   editingMsg: ChatMessage | null;
   replyTo: ChatMessage | null;
   selectMode: boolean;
@@ -50,7 +53,7 @@ export interface ComposerProps {
 
 export function Composer(p: ComposerProps) {
   const {
-    convId, peer, uid, isGroupChat, peerLabel, peerBlocked, input, sendKey, composerMuteReason, showJump, jumpCount,
+    convId, peer, uid, isGroupChat, peerLabel, peerBlocked, input, sendKey, composerMuteReason, showJump, jumpCount, jumpCapped,
     editingMsg, replyTo, selectMode, selected, pastedImages, attachPanel, attachItems,
     mentionQuery, mentionFilter, mentionRows, mentionActive, mediaGate, senderLabel, onMentionNavKey,
   } = p;
@@ -131,7 +134,7 @@ export function Composer(p: ComposerProps) {
     <>
       {showJump && convId && (
         <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
-          ↓{jumpCount > 0 && <span className="jump-badge">{jumpCount > 99 ? "99+" : jumpCount}</span>}
+          ↓{jumpCount > 0 && <span className="jump-badge">{unreadBadgeText(jumpCount, jumpCapped)}</span>}
         </button>
       )}
       {peerBlocked && peer && (

@@ -238,6 +238,8 @@ export interface Conversation {
   last_message: ConvLastMessage | null;
   latest_conv_seq: number;
   unread: number;
+  /** 服务端未读计数撞到上限（真实值 ≥ unread）→ 角标补 "+"（OFFLINE_BACKLOG_DESIGN §6.1）。 */
+  unread_capped?: boolean;
   read_seq: number; // 本人已读位点（首条未读 = convSeq > read_seq 的第一条）
   peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表绿✓✓/灰✓）
   /**

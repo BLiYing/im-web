@@ -97,6 +97,9 @@ import { MediaViewer } from "./components/MediaViewer";
 import { GalleryModal } from "./components/modals/GalleryModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import { SYSTEM_UID } from "./sdk/protocol";
+import { unreadBadgeText } from "./unreadBadge";
+import { unreadBelowCount } from "./unreadBelow";
+import { visibleSlice } from "./renderWindow";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
@@ -180,6 +183,9 @@ export default function App() {
   const [entryReadSeq, setEntryReadSeq] = useState(0); // 进会话时的已读位点（精确定位未读分割线，CHAT_UX §4）
   const [showJump, setShowJump] = useState(false); // 右下角"跳到底部"按钮是否显示
   const [jumpCount, setJumpCount] = useState(0); // 按钮上的未读条数
+  // jumpCapped：↓N 的初值来自服务端未读，撞上限时它是"至少这么多"（OFFLINE_BACKLOG_DESIGN §6.1）。
+  // ↓N 一律不数本地：本地有缺口时数出来的必然偏小，而那种错不会报错、只是数字悄悄不对。
+  const [jumpCapped, setJumpCapped] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; m: ChatMessage } | null>(null); // 长按/右键菜单
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
   const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null); // 正在编辑的消息（M4-5，编辑态）
@@ -357,13 +363,21 @@ export default function App() {
   const msgsRef = useRef<HTMLDivElement>(null); // 消息滚动容器
   const messagesRef = useRef<ChatMessage[]>([]); // 当前会话已加载消息镜像（供定义在派生之前的回调读取，如 jumpToSeq）
   const dividerRef = useRef<HTMLDivElement>(null); // 未读分割线（进会话定位用）
-  const histAnchorRef = useRef<{ h: number; t: number } | null>(null); // 上滚加载历史前的滚动锚点（保位）
+  // 上滚加载历史前的保位锚点：seq=当时渲染集最早那条、top=它相对容器顶的偏移。
+  // 窗口是**定长滑动**的（恒 200 条，OFFLINE_BACKLOG_DESIGN §4.7）：取回一页后上沿下移、下沿同步收窄，
+  // scrollHeight 几乎不变，靠「前后 scrollHeight 之差」补偿会算出 0，用户正看的那条被甩到 100 行开外。
+  // 按「同一条消息补偿前后的位置差」保位才对；h/t 仅作该条已不在窗口内时的兜底。
+  const histAnchorRef = useRef<{ seq: number; top: number | null; h: number; t: number } | null>(null);
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
+  const entryUnreadCappedRef = useRef(false); // 该未读数是否撞了服务端计数上限
   const prevMinSeqRef = useRef(0); // 上次渲染的最小 conv_seq（判断顶部是否插了更早历史）
   const prevLenRef = useRef(0); // 上次渲染的消息条数（区分"新增消息"与"原条状态变更"如被拒收）
+  // 区间清单（本地有哪几段）变更计数：渲染切段要同步读 client.rangesOf(convId)，
+  // 而"预热完成""开窗拿回一段"这两种变更不一定伴随消息条数变化，没有它就不会重算。
+  const [rangesTick, setRangesTick] = useState(0);
   const loadingOlderRef = useRef(false); // 是否正在上滚加载更早历史
   const loadingNewerRef = useRef(false); // 是否正在下滚加载更新历史
   const latestSeqRef = useRef(0); // 该会话服务端最新 conv_seq（判断下方是否还有未加载）
@@ -470,7 +484,9 @@ export default function App() {
     for (const c of convs) {
       const local = await client.loadLocal(c.conv_id);
       const continuousCursor = await client.loadSyncCursor(c.conv_id);
-      client.trackConversation(c.conv_id, continuousCursor);
+      // is_super 决定 max_gap=0：超级群正文只在打开会话时按需拉，连上时永不自动补
+      // （SUPERGROUP_DESIGN §5 早有此规定，OFFLINE_BACKLOG_DESIGN §4.5 把它落到 sync 帧上）。
+      client.trackConversation(c.conv_id, continuousCursor, c.is_super === true);
       // 载入删除墓碑（须早于 syncTracked）：被删的 conv_seq 进内存墓碑，onMessage 收到服务端重推时直接丢弃。
       const del = await client.loadDeletedSeqs(c.conv_id);
       if (del.length) deletedByConv.current[c.conv_id] = new Set(del);
@@ -587,6 +603,7 @@ export default function App() {
     setPeerReadSeq((prev) => ({ ...prev, [cid]: Math.max(prev[cid] ?? 0, conv?.group_read_seq ?? 0) }));
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
+    entryUnreadCappedRef.current = conv?.unread_capped === true;
     setEntryReadSeq(readSeq);
     latestSeqRef.current = latestSeq;
     pendingScrollRef.current = true;
@@ -650,6 +667,17 @@ export default function App() {
         // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由 markVisibleRead 读到，看历史时留到滚下去再读。
         // 仅**新追加**才刷会话列表（合并/丢弃不刷）；全量/多页同步连续投递很多条，各自触发的刷新走节流合并。
         if (ingestInbound(m)) scheduleConversationRefresh();
+      },
+      // 一页历史到达（上滑/下滑分页的响应，含出错/空页）：解除该会话的分页忙标志。
+      // 忙标志此前只靠「渲染集边界移动」复位——页里全是本地已有的（去重后一条没新增）、
+      // 已到可见下界回空页、或请求被服务端拒绝时，边界不动、标志永远卡住，上下翻页从此全被当 busy 跳过。
+      // 以「响应到了」为准才可靠；边界移动那条复位仍保留，两者取先到者。
+      // 「本地有哪几段」变了：重算渲染切段（切段判"中间是没下载、还是本就不是消息"要问它）。
+      onRanges: () => setRangesTick((t) => t + 1),
+      onHistoryPage: (cid) => {
+        if (cid !== currentConvRef.current) return;
+        loadingOlderRef.current = false;
+        loadingNewerRef.current = false;
       },
       onAck: (clientMsgId, ok, convSeq, serverTs) => {
         // 按 clientMsgId 换 status/conv_seq/服务器时间戳 + 成功者登记去重集（防 sync/carbon 重复回显），见 applyAck。
@@ -932,6 +960,7 @@ export default function App() {
     setPeerReadSeq((prev) => ({ ...prev, [cid]: Math.max(prev[cid] ?? 0, conv?.peer_read_seq ?? 0) }));
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
+    entryUnreadCappedRef.current = conv?.unread_capped === true;
     setEntryReadSeq(readSeq);
     latestSeqRef.current = latestSeq;
     pendingScrollRef.current = true;
@@ -1272,8 +1301,14 @@ export default function App() {
     // 本地库也没有 → 以它为锚点开一窗。回包由 onWindow 处理（见 handlers），那里再滚动高亮。
     clientRef.current?.requestWindow(pend.convId, pend.seq, WINDOW_SIDE, WINDOW_SIDE);
   }, [jumpToSeq]);
-  // 消息窗口变化（窗口到达 / 分页到达）后推进一步定位。
-  useEffect(() => { driveLocate(); }, [msgsByConv, driveLocate]);
+  // 消息窗口变化后推进一步定位。
+  //
+  // **依赖必须包含 `renderView`（渲染窗口本身），不能只有 `msgsByConv`**：
+  // driveLocate 的「本地库有、只是没渲染」分支走的是 setRenderView 移窗，而移窗**不改**
+  // msgsByConv——只依赖后者的话，effect 不会再跑，pendingLocate 就永远停在那里，
+  // 表现为「点搜索结果没反应」（2026-09-03 实测：有缺口的会话里翻搜索命中定位不过去）。
+  // 目标是否已渲染本来就该由「渲染集变了」来驱动，而渲染集 = msgsByConv 切 renderView。
+  useEffect(() => { driveLocate(); }, [msgsByConv, renderView, driveLocate]);
 
   const locateInChat = useCallback((cid: string, seq: number) => {
     if (!cid || seq <= 0) { setToast("该消息无法定位"); return; }
@@ -1917,15 +1952,15 @@ export default function App() {
   //
   // 按窗口切片。anchor 为空 = 贴最新（待发/失败的 conv_seq=0 消息时间戳是"现在"，
   // 排序后必在最新一批里，故尾部切片自然包含它们，不必额外挑）。
-  const messages = (() => {
-    if (allLocal.length <= renderView.size) return allLocal;
-    if (renderView.anchor === null) return allLocal.slice(-renderView.size);
-    const at = allLocal.findIndex((m) => m.convSeq === renderView.anchor);
-    if (at < 0) return allLocal.slice(-renderView.size); // 锚点已不在本地（被删）→ 回到最新
-    const half = Math.floor(renderView.size / 2);
-    const lo = Math.max(0, at - half);
-    return allLocal.slice(lo, lo + renderView.size);
-  })();
+  // 切片规则连同"不跨缺口"一起收在 renderWindow.ts（带单测）。**必须按连续段切**：
+  // allLocal 是横跨缺口的扁平数组，按下标开窗会把缺口另一侧的旧岛拼到窗口里——
+  // 两段不相邻的历史紧挨着渲染，时间戳还递增，看不出任何异常（§4.7）。
+  // 切段按区间清单判"中间那几个 seq 是没下载、还是本就不成为消息"（msg_op 事件行 / 已删墓碑 /
+  // 对我不可见的行都占 seq 却不是消息）。只看 seq 连号会把它们当缺口，进而把尾段切碎——
+  // 18 条的大群删掉一张图后，尾段只剩最后那条系统消息，界面看着就是空会话（2026-09-03 实测）。
+  void rangesTick; // 清单变更由它驱动重算（值本身不用，读的是 SDK 的当前镜像）
+  const localRanges = clientRef.current?.rangesOf(convId) ?? [];
+  const messages = visibleSlice(allLocal, renderView.anchor, renderView.size, localRanges);
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
   renderViewRef.current = renderView;      // 同上：driveLocate 定义在前，要读当前窗口
   msgsByConvRef.current = msgsByConv;     // 同上：定位要判断目标是否已在本地库
@@ -1937,10 +1972,16 @@ export default function App() {
   // **传 allLocal 而不是 messages**：搜索/日历/发件人候选问的是"整个会话"，不是"现在渲染的那一窗"。
   // W2 引入渲染窗口后一度传了切片，实测「会话内搜索」在 3 万条的群里只命中 98 条（= 窗口条数）——
   // 功能还在、界面照常，结果悄悄错了，这类静默降级最难发现。=====
+  // localComplete / online / getToken：决定"整会话问题"问本地还是问服务端（§4.9 三态）。
+  // localComplete 直接问 SDK 有没有收到过该会话的 too_long——它是"本地有缺口"的权威来源，
+  // 比在 UI 层再算一遍区间可靠（同一事实两处推导迟早分叉）。
+  const localComplete = !clientRef.current?.hasGap(convId);
   const search = useChatSearch({
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
     allMessages: allLocal, convId, groupConvId, uid, groupInfos, conversations,
     locateInChat, setToast,
+    localComplete, online: state === "connected",
+    getToken: () => clientRef.current?.authToken ?? "",
   });
 
   // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
@@ -1986,14 +2027,19 @@ export default function App() {
   // 否则仅 messages.length 不变 → effect 不重跑 → 系统行变高后不贴底（问题1）。
   const tail = messages[messages.length - 1];
   const tailSig = tail && tail.from === uid ? `${tail.status}|${tail.note ?? ""}` : "";
+  // 渲染窗口签名：**不能只依赖 messages.length**。窗口是定长滑动的——取回更早一页后渲染集从
+  // [29602..29801] 变成 [29502..29701]，条数纹丝不动，只看 length 的 effect 根本不重跑：
+  // 忙标志 loadingOlderRef 永远复位不了，之后每次上滑都被当成 busy 跳过，历史就此翻不动
+  //（2026-09-03 libeyond↔user1001 三万条会话实测：停在首页上沿）。
+  const curMin = minSeqOf(messages);
+  const curMax = maxSeqOf(messages);
+  const windowSig = `${curMin}|${curMax}|${messages.length}`;
 
   // 进会话定位 / 新消息贴底 / 顶部插历史保位 / 在上看历史累加跳转计数（纯 DOM 滚动）。
   useLayoutEffect(() => {
     if (phase !== "app" || !convId) return;
     const box = msgsRef.current;
     if (!box) return;
-    const curMin = minSeqOf(messages);
-    const curMax = maxSeqOf(messages);
     // 条数是否增加：新增消息=true；仅原条状态变更（被拒收/ack 改 status/note）=false。
     const grew = messages.length > prevLenRef.current;
     prevLenRef.current = messages.length;
@@ -2010,6 +2056,7 @@ export default function App() {
         wasNearBottomRef.current = nearBottom;
         setShowJump(!nearBottom && entryUnreadRef.current > 0);
         setJumpCount(nearBottom ? 0 : entryUnreadRef.current);
+        setJumpCapped(!nearBottom && entryUnreadCappedRef.current);
       } else {
         box.scrollTop = box.scrollHeight; // 无未读 / 强制到底
         wasNearBottomRef.current = true;
@@ -2026,11 +2073,19 @@ export default function App() {
     if (curMin < prevMinSeqRef.current) loadingOlderRef.current = false;
     if (curMax > prevMaxSeqRef.current) loadingNewerRef.current = false;
 
-    // 顶部插入更早历史 → 用插入前后的 scrollHeight 差补偿，保持视觉位置不跳。
-    if (curMin < prevMinSeqRef.current && curMax <= prevMaxSeqRef.current) {
-      if (histAnchorRef.current) {
-        box.scrollTop = box.scrollHeight - histAnchorRef.current.h + histAnchorRef.current.t;
-        histAnchorRef.current = null;
+    // 上滑取回/展开更早历史 → 保位，视觉位置不跳。
+    // 判据是「上滑意图 + 上沿确实下移」，**不看 curMax**：锚点模式的窗口以锚点居中切片，
+    // 扩窗时下沿也会同步向后长（29702..29901 → 29602..30001），若照旧要求 curMax 不变，
+    // 这一步会掉进下面的"真·新消息"分支——对端消息被数成 ↓100 的假角标、自己的消息则直接把人甩到底。
+    if (histAnchorRef.current && curMin < prevMinSeqRef.current) {
+      const a = histAnchorRef.current;
+      histAnchorRef.current = null;
+      const row = a.seq > 0 ? box.querySelector<HTMLElement>(`.msg-item[data-seq="${a.seq}"]`) : null;
+      if (row && a.top !== null) {
+        // 用户上滑前正看着的那条，补偿后仍在原位（Telegram 同款：按消息保位，不按高度差）。
+        box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top - a.top;
+      } else {
+        box.scrollTop = box.scrollHeight - a.h + a.t; // 那条已不在窗口（被删等）：退回高度差补偿
       }
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
@@ -2044,7 +2099,7 @@ export default function App() {
       // 重新评估「跳底钮」：loadNewer 追加内容后若用户仍视觉贴底，隐藏按钮
       //（早退不重算就会一直显示，即便用户已被自动带回底部）。
       const nearBottomPx = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
-      if (nearBottomPx) { setShowJump(false); setJumpCount(0); }
+      if (nearBottomPx) { setShowJump(false); setJumpCount(0); setJumpCapped(false); }
       return;
     }
 
@@ -2063,18 +2118,20 @@ export default function App() {
         wasNearBottomRef.current = true;
         setShowJump(false);
         setJumpCount(0);
+        setJumpCapped(false);
       }
     } else if (newPeer > 0) {
       if (wasNearBottomRef.current) {
         box.scrollTop = box.scrollHeight;
         setShowJump(false);
         setJumpCount(0);
+        setJumpCapped(false);
       } else {
         setJumpCount((n) => n + newPeer);
         setShowJump(true);
       }
     }
-  }, [phase, convId, messages.length, uid, firstUnreadIdx, tailSig]);
+  }, [phase, convId, windowSig, uid, firstUnreadIdx, tailSig]);
 
   // 图片/视频是异步加载的：贴底 useLayoutEffect 触发时元素高度≈0，加载完成后气泡才撑高，
   // 而依赖数组里没有值随之改变 → effect 不重跑 → 媒体被挤出视口下方（发图/发视频不贴底，问题2）。
@@ -2109,18 +2166,39 @@ export default function App() {
         }
       }, 300);
     }
-    // ↓N = 视口下方仍未读的对端消息数（conv_seq 超过已滚入位点、且是对端消息）。
-    let below = 0;
-    items.forEach((el) => {
-      if (Number(el.dataset.seq) > pendingReadRef.current && el.querySelector(".row.them")) below++;
-    });
-    setJumpCount(below);
+    // ↓N = 视口下方仍未读的对端消息数。
+    //
+    // **数 DOM 只在本地齐全时才对**（IMServer/docs/design/OFFLINE_BACKLOG_DESIGN.md §4.9 第 8 项）：
+    // items 是渲染出来的那一窗（200 条），离线积压留了缺口时，缺口里的消息根本没下载，
+    // 数出来最多就是「窗口条数」——1 万条未读会显示成 ↓195，看着像个正常数字，其实是错的。
+    // 有缺口时改用服务端最新位点减去已滚入位点（O(1)，不依赖本地有多少）。
+    //
+    // **数本地全量、不数 DOM**（2026-09-03 修）：上翻过一页后窗口切到锚点模式，它**不含尾部**，
+    // 于是实时到来的对端消息压根不在 DOM 里——角标恒 0，用户在读历史时完全不知道来了新消息，
+    // 而左侧会话列表的红点却在涨，同一屏两个数打架。角标问的是"下面还有多少没读"，
+    // 那是个关于**整个会话**的问题，按 §4.9 的判据就该用本地全量而不是当前渲染的那一窗。
+    const cid = currentConvRef.current;
+    const localAll = msgsByConvRef.current[cid] ?? [];
+    let loadedBelow = 0;
+    for (const m of localAll) {
+      if (m.convSeq > pendingReadRef.current && m.from !== uidRef.current && countsAsUnread(m.contentType)) loadedBelow++;
+    }
+    const client = clientRef.current;
+    setJumpCount(unreadBelowCount({
+      hasGap: !!client?.hasGap(cid),
+      head: client?.headOf(cid) ?? 0,
+      pendingRead: pendingReadRef.current,
+      loadedBelow,
+    }));
+    setJumpCapped(false); // 这里算的是真实差值/真实条数，不是被服务端计数上限截断的值
   }, [refreshConversations]);
 
   // 进会话/新消息渲染后扫一遍可见消息（覆盖"整屏放得下、不触发滚动"的短会话；滚动另由 onMsgsScroll 处理）。
+  // 依赖里的 `allLocal.length` 不能换成 `messages.length`：锚点模式的窗口不含尾部，
+  // 新消息只进本地全量、不进这一窗，只看窗口条数就永远不重算角标。
   useEffect(() => {
     if (phase === "app" && convId) markVisibleRead();
-  }, [phase, convId, messages.length, markVisibleRead]);
+  }, [phase, convId, messages.length, allLocal.length, markVisibleRead]);
 
   const onMsgsScroll = useCallback(() => {
     const box = msgsRef.current;
@@ -2130,7 +2208,8 @@ export default function App() {
     const list = msgsByConv[cid] ?? [];
     const nearBottomPx = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
     const newest = maxSeqOf(list);
-    const oldest = minSeqOf(list);
+    // 刻意**不再**取 minSeqOf(list) 当"历史边界"：本地全量的最小 seq 在有缺口时
+    // 指向缺口另一侧的旧岛，不是用户正看到的那一段（见下方上滚分支）。
     const moreBelow = newest < latestSeqRef.current; // 下方还有未加载的更新历史
     // 按钮显示只看「视觉贴底」（与 iOS updateJumpButton 对齐）——若 moreBelow=true 亦一并纳入
     // 判定，会出现「用户视觉已在最底部，但按钮仍显」的伪 bug（未读多/大群/进会话瞬间 push 到达时高发）：
@@ -2157,14 +2236,37 @@ export default function App() {
       // 上滚到顶：**先扩渲染窗口**（本地已有的那部分不必再请求），本地也见底了才去拉更早的一页。
       // 分两步是因为本地库常常比渲染窗口大得多——首次进会话的 sync 会把历史全灌进本地库，
       // 那时"往上滚"应该是瞬时展开已有内容，而不是空跑一次网络请求。
-      histAnchorRef.current = { h: box.scrollHeight, t: box.scrollTop }; // 保位，避免视觉跳动
-      const localCount = (msgsByConv[cid] ?? []).length;
-      if (renderView.size < localCount) {
+      const oldestRendered = minSeqOf(messagesRef.current);
+      const topRow = oldestRendered > 0 ? box.querySelector<HTMLElement>(`.msg-item[data-seq="${oldestRendered}"]`) : null;
+      histAnchorRef.current = { // 保位，避免视觉跳动（按这条消息补偿，见 histAnchorRef 定义处）
+        seq: oldestRendered,
+        top: topRow ? topRow.getBoundingClientRect().top - box.getBoundingClientRect().top : null,
+        h: box.scrollHeight, t: box.scrollTop,
+      };
+      // **展开渲染窗口前先确认本地这一段是连着的**（OFFLINE_BACKLOG_DESIGN §4.7）。
+      // 有缺口时 msgsByConv 里存着缺口**两侧**的消息：直接把窗口扩大，缺口另一侧的旧岛
+      // 就会被展开并紧贴着接上来——两段不相邻的历史静默拼在一起，界面照常、时间戳也递增，
+      // 只是中间少了几万条且没有任何提示。此时必须改走服务端翻页，让缺口从边缘逐页收窄。
+      // **判据必须用「当前渲染出来的最早一条」，不能用本地全量的最小 seq**：
+      // 有缺口时本地同时存着缺口两侧的消息，全量最小值是缺口**另一侧**那个旧岛的
+      // （极端情况就是 seq=1），于是「oldest > 1」恒假 → 既不展开窗口也不去服务端拉，
+      // 往上滚什么都不发生（2026-09-03 实测）。渲染窗口的上沿才是"用户正看到的历史边界"。
+      const localAllForConv = msgsByConv[cid] ?? [];
+      const contiguousAbove = localAllForConv.some(
+        (m) => m.convSeq > 0 && m.convSeq === oldestRendered - 1,
+      );
+      const localCount = localAllForConv.length;
+      if (renderView.size < localCount && contiguousAbove) {
         // 扩大窗口（保持当前锚点），把本地已有的更早内容展开出来。
         setRenderView((v) => ({ ...v, size: Math.min(v.size + RENDER_WINDOW_STEP, localCount) }));
-      } else if (oldest > 1) {
+      } else if (oldestRendered > 1) {
         loadingOlderRef.current = true;
-        clientRef.current?.loadOlder(cid, oldest);
+        // **切到锚点模式**：anchor=null 的窗口恒等于"本地最新 size 条"，于是补回来的更早消息
+        // 永远进不了这一窗——屏幕纹丝不动，而 loadingOlderRef 靠"渲染集最小 seq 下降"复位，
+        // 不降就永久卡在"加载中"，之后每次上滑都被当成 busy 跳过（2026-09-03 实测）。
+        // 把锚点钉在用户当前看的顶部那条，新内容就出现在它上方，位置也不会被甩走。
+        setRenderView({ anchor: oldestRendered, size: RENDER_WINDOW_STEP });
+        clientRef.current?.loadOlder(cid, oldestRendered);
       }
     }
   }, [msgsByConv, renderView]);
@@ -2964,7 +3066,7 @@ export default function App() {
           <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={() => setTab("chats")}>会话</button>
           <button className={`tab ${tab === "contacts" ? "active" : ""}`}
             onClick={() => { setTab("contacts"); void refreshFriends(); }}>
-            通讯录{incomingCount > 0 && <span className="tab-badge">{incomingCount > 99 ? "99+" : incomingCount}</span>}
+            通讯录{incomingCount > 0 && <span className="tab-badge">{unreadBadgeText(incomingCount)}</span>}
           </button>
         </div>
         {tab === "chats" ? (
@@ -3021,7 +3123,7 @@ export default function App() {
                   {c.is_group && c.mention_unread ? <span className="conv-mention">[有人@我]</span> : null}
                   {/* 待审入群角标（G3）：仅群主/管理员会收到 pending_count>0，一眼看到有人等待审批。 */}
                   {c.is_group && (c.pending_count ?? 0) > 0
-                    ? <span className="conv-pending-badge">待审 {c.pending_count! > 99 ? "99+" : c.pending_count}</span>
+                    ? <span className="conv-pending-badge">待审 {unreadBadgeText(c.pending_count!)}</span>
                     : null}
                   {convPreview(c)}
                 </div>
@@ -3032,7 +3134,7 @@ export default function App() {
                   屏蔽后与 read 往返彻底解耦，任何时序都不闪。 */}
               {c.conv_id === convId ? null
                 : c.unread > 0
-                ? <span className={`badge ${c.muted && !c.mention_unread ? "muted" : ""}`}>{c.unread > 99 ? "99+" : c.unread}</span>
+                ? <span className={`badge ${c.muted && !c.mention_unread ? "muted" : ""}`}>{unreadBadgeText(c.unread, c.unread_capped)}</span>
                 : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label="未读" /> : null}
             </div>
           ))}
@@ -3210,7 +3312,7 @@ export default function App() {
           {/* 底部区（跳底/拉黑提示/编辑·引用条/多选栏/粘贴条/附件/@面板/输入框）：见 components/Composer（逻辑仍在 App）。 */}
           <Composer
             convId={convId} peer={peer} uid={uid} isGroupChat={isGroupChat} peerLabel={peerLabel} peerBlocked={peerBlocked}
-            input={input} sendKey={sendKey} composerMuteReason={composerMuteReason} showJump={showJump} jumpCount={jumpCount}
+            input={input} sendKey={sendKey} composerMuteReason={composerMuteReason} showJump={showJump} jumpCount={jumpCount} jumpCapped={jumpCapped}
             editingMsg={editingMsg} replyTo={replyTo} selectMode={selectMode} selected={selected} pastedImages={pastedImages}
             attachPanel={attachPanel} attachItems={attachItems} mentionQuery={mentionQuery} mentionFilter={mentionFilter}
             mentionRows={mentionRows} mentionActive={mentionActive} mediaGate={mediaGate} senderLabel={senderLabel} onMentionNavKey={onMentionNavKey}

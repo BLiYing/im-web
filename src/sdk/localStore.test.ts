@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  saveMessage, saveRejected, applyMsgOpLocal, loadConversation,
-  saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage,
-  markMessageDeleted, loadDeletedSeqs, searchMessages,
-} from "./localStore";
+import { saveMessage, saveRejected, applyMsgOpLocal, loadConversation, saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage, markMessageDeleted, loadDeletedSeqs } from "./localStore";
+import { searchMessages } from "./localStore.search";
 import type { ChatMessage, Conversation } from "./protocol";
 
 const msg = (convId: string, seq: number, from: string, content = "x"): ChatMessage => ({

@@ -3,16 +3,19 @@
 // 失败记录 IM.STORE warn，但持久化是增强，绝不阻断收发主流程。
 
 import type { ChatMessage, Conversation, SysSegment } from "./protocol";
+import { addRange, type SeqRange } from "./ranges";
 import type { MentionSpan } from "../mention";
 import { LOG_TAG, logger } from "../logging/logger";
 
 const DB_NAME = "im-web";
 // v4：修「曾中途升到 v3 但 deletions store 没建成」的坏库（HMR 半态/失败升级）——版本不变时 onupgradeneeded 不再触发，
 // 缺的 store 永远补不上；bump 一版强制走一次 onupgradeneeded（`if(!contains)` 幂等，只补缺的、不动已有数据）。
-const DB_VERSION = 4;
-const STORE = "messages";
+// v5：新增 ranges store（离线积压的「本地有哪几段」目录，见 OFFLINE_BACKLOG_DESIGN §4.2）。
+const DB_VERSION = 5;
+export const STORE = "messages";
 const CURSOR_STORE = "sync_cursors";
-const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
+export const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
+export const RANGES_STORE = "conv_ranges";  // 「本地有哪几段」目录：一个会话一行，值是归一化后的区间数组
 
 /**
  * IndexedDB object store 的**单一来源清单**。新增一个 store 只需在此加一项 + bump `DB_VERSION`：
@@ -29,6 +32,7 @@ const STORE_DEFS: StoreDef[] = [
   { name: STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
   { name: CURSOR_STORE, keyPath: "id" },
   { name: DELETIONS_STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
+  { name: RANGES_STORE, keyPath: "id" },
 ];
 
 export interface MsgRecord {
@@ -81,6 +85,20 @@ interface DeletionRecord {
   ownerConv: string; // owner|convId —— 索引：loadConversation 时批量取本会话墓碑
 }
 
+/**
+ * 「本地有哪几段」的持久化行：一个 (owner, conv) 一行。
+ *
+ * 与 SyncCursorRecord 的关系：游标是这张目录的**派生量**（从下界起连续到哪），
+ * 两者都留着是为了向后兼容——老库只有游标，升级后第一次读会由游标反推出首段区间。
+ */
+export interface RangesRecord {
+  id: string;     // owner|convId
+  owner: string;
+  convId: string;
+  ranges: SeqRange[];
+  head?: number;  // 服务端最新位点的最近一次快照（sync_resp 的 head_conv_seq），用于判"齐不齐"
+}
+
 interface SyncCursorRecord {
   id: string;       // owner|convId
   owner: string;
@@ -93,7 +111,7 @@ let dbPromise: Promise<IDBDatabase> | null = null;
 /** 本次连接期望具备的全部 object store（从 STORE_DEFS 派生）——校验拿到的连接是不是「缺 store 的陈旧连接」。 */
 const EXPECTED_STORES = STORE_DEFS.map((s) => s.name);
 
-function openDB(attempt = 0): Promise<IDBDatabase> {
+export function openDB(attempt = 0): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
@@ -130,8 +148,8 @@ function openDB(attempt = 0): Promise<IDBDatabase> {
   return dbPromise;
 }
 
-const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
-const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId}`;
+export const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
+export const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId}`;
 
 /** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。 */
 export async function saveMessage(owner: string, m: ChatMessage): Promise<void> {
@@ -173,6 +191,63 @@ function advanceCursorInStore(store: IDBObjectStore, owner: string, convId: stri
     const previous = Number((req.result as SyncCursorRecord | undefined)?.convSeq) || 0;
     if (convSeq > previous) store.put({ id, owner, convId, convSeq } satisfies SyncCursorRecord);
   };
+}
+
+/**
+ * **整页**补拉消息的原子落库（OFFLINE_BACKLOG_DESIGN §4.8）：一页消息 + 游标推进 + 区间登记
+ * 全部在**同一个事务**里提交。
+ *
+ * 为什么按页而不是按条：不变量仍是「消息未落库则游标/区间绝不越过」，只是把粒度从"每条"
+ * 降到"每页"——页内任一条失败则整页回滚、整页重拉，约束一字不改，而事务数从 N 降到 N/200。
+ * 补拉 10 万条时这是 10 万次事务与 500 次事务的差别。
+ *
+ * advanceTo：本页权威覆盖位点（服务端 covered_conv_seq）；0 表示不推进（调用方判定本页不可信）。
+ * rangeFrom/rangeTo：本页齐全的区间，登记进"本地有哪几段"目录；rangeTo<rangeFrom 表示不登记。
+ */
+export async function saveIncomingPage(
+  owner: string,
+  msgs: ChatMessage[],
+  advanceTo: number,
+  rangeFrom: number,
+  rangeTo: number,
+  head = 0,
+): Promise<boolean> {
+  if (!owner || msgs.length === 0) return true;
+  const convId = msgs[0].convId;
+  const recs = msgs.filter((m) => m.convId && m.convSeq > 0).map((m) => messageRecord(owner, m));
+  if (recs.length === 0) return true;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE, CURSOR_STORE, RANGES_STORE], "readwrite");
+      const messageStore = tx.objectStore(STORE);
+      for (const rec of recs) {
+        const getReq = messageStore.get(rec.id);
+        getReq.onsuccess = () => messageStore.put(mergedRecord(getReq.result as MsgRecord | undefined, rec));
+      }
+      if (advanceTo > 0) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, convId, advanceTo);
+      if (rangeTo >= rangeFrom && rangeTo > 0) {
+        const rangeStore = tx.objectStore(RANGES_STORE);
+        const id = cursorKeyOf(owner, convId);
+        const getReq = rangeStore.get(id);
+        getReq.onsuccess = () => {
+          const prev = getReq.result as RangesRecord | undefined;
+          rangeStore.put({
+            id, owner, convId,
+            ranges: addRange(prev?.ranges ?? [], rangeFrom, rangeTo),
+            head: Math.max(Number(prev?.head) || 0, head),
+          } satisfies RangesRecord);
+        };
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch (error) {
+    // 整页失败 → 游标与区间都没动，下次从原位幂等重拉。宁可重拉，不可漏拉。
+    logger.warn(LOG_TAG.store, "incoming_page_write_failed", { conv_id: convId, count: recs.length, error });
+    return false;
+  }
 }
 
 /**
@@ -321,7 +396,6 @@ export async function advanceSyncCursor(owner: string, convId: string, convSeq: 
   }
 }
 
-/** 取某会话的本地消息（按 conv_seq 升序）。失败记日志并返回空。 */
 export async function loadConversation(owner: string, convId: string): Promise<ChatMessage[]> {
   if (!owner || !convId) return [];
   try {
@@ -373,92 +447,6 @@ export async function loadConversation(owner: string, convId: string): Promise<C
   }
 }
 
-/**
- * 命中判定（与后端 G4 / iOS 口径对齐）：**text 消息的 `content`** 或任意消息的 `caption` 大小写不敏感子串。
- * 媒体/文件消息的 content 是 URL（含服务端生成的文件名片段），**不参与命中**——否则搜索词撞上 URL 片段
- * 会命中「看不见文字」的消息（文件名命中是 P2，做也应按 fileName 字段而非 URL）。
- * 撤回消息（`recalledAt`）不参与命中；删除/自删走墓碑在外层过滤。needle 须已 `toLowerCase`。
- */
-function matchesQuery(rec: MsgRecord, needle: string): boolean {
-  if (rec.recalledAt) return false; // 撤回消息不参与命中
-  const isText = !rec.contentType || rec.contentType === "text";
-  if (isText && rec.content && rec.content.toLowerCase().includes(needle)) return true;
-  if (rec.caption && rec.caption.toLowerCase().includes(needle)) return true;
-  // P2：文件名命中（Q3预算.xlsx）。媒体/文件的 content(URL) 仍不参与。
-  return !!rec.fileName && rec.fileName.toLowerCase().includes(needle);
-}
-
-/**
- * 本地消息搜索（纯本地，SEARCH_DESIGN §7.2）。
- * - **会话内**（`opts.convId`）：走 `ownerConv` 索引 `getAll` 后内存过滤（零新索引）。
- * - **全局**（无 `convId`）：游标遍历整个 `messages` store（仅 `ownerConv` 索引、无内容索引），命中即收。
- *
- * 命中 = `content`/`caption` 大小写不敏感子串（`matchesQuery`）；排除撤回（`recalledAt`）与本地删除墓碑。
- * 结果**按时间倒序**（新→旧，tiebreak `convSeq` 倒序），上限 `limit`。失败记日志并返回空——搜索是增强，绝不抛。
- */
-export async function searchMessages(
-  owner: string,
-  opts: { convId?: string; q: string; limit: number },
-): Promise<MsgRecord[]> {
-  const needle = (opts.q ?? "").trim().toLowerCase();
-  if (!owner || !needle || !opts.limit || opts.limit <= 0) return [];
-  try {
-    const db = await openDB();
-    // 陈旧连接可能缺 deletions store（升级被别标签页阻塞时）——此时不过滤墓碑，也不让事务抛 NotFoundError。
-    const hasDeletions = db.objectStoreNames.contains(DELETIONS_STORE);
-    const stores = hasDeletions ? [STORE, DELETIONS_STORE] : [STORE];
-    return await new Promise<MsgRecord[]>((resolve, reject) => {
-      const tx = db.transaction(stores, "readonly");
-      const msgStore = tx.objectStore(STORE);
-      const deleted = new Set<string>();
-      const collected: MsgRecord[] = [];
-      if (hasDeletions) {
-        const delStore = tx.objectStore(DELETIONS_STORE);
-        // 会话内只取本会话墓碑；全局取全部键。
-        const delReq = opts.convId
-          ? delStore.index("ownerConv").getAllKeys(`${owner}|${opts.convId}`)
-          : delStore.getAllKeys();
-        delReq.onsuccess = () => {
-          for (const k of (delReq.result as IDBValidKey[]) ?? []) deleted.add(String(k));
-        };
-      }
-      if (opts.convId) {
-        const req = msgStore.index("ownerConv").getAll(`${owner}|${opts.convId}`);
-        req.onsuccess = () => {
-          for (const rec of (req.result as MsgRecord[]) ?? []) {
-            if (rec.owner === owner && matchesQuery(rec, needle)) collected.push(rec);
-          }
-        };
-      } else {
-        const cursorReq = msgStore.openCursor();
-        cursorReq.onsuccess = () => {
-          const cursor = cursorReq.result;
-          if (!cursor) return;
-          const rec = cursor.value as MsgRecord;
-          if (rec.owner === owner && matchesQuery(rec, needle)) collected.push(rec);
-          cursor.continue();
-        };
-      }
-      tx.oncomplete = () => {
-        const hits = collected
-          .filter((r) => !deleted.has(r.id))
-          .sort((a, b) => (b.timestamp - a.timestamp) || (b.convSeq - a.convSeq))
-          .slice(0, opts.limit);
-        resolve(hits);
-      };
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "message_search_failed", { conv_id: opts.convId, error });
-    return [];
-  }
-}
-
-/**
- * 本地删除一条消息（对齐 iOS「删除」——服务端无删消息接口，纯本地）：落一条删除墓碑并抹掉消息记录。
- * 墓碑令 `loadConversation` 永久过滤掉它，故刷新 / 后台重同步重新落库也不复现。
- * 传 convSeq（已确认消息）或 clientMsgId（被拒的 convSeq=0 消息，按 saveRejected 的复合键）。
- */
 export async function markMessageDeleted(
   owner: string,
   convId: string,

@@ -6,6 +6,8 @@ import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpd
 import { createProbeWatchdog, installWakeListeners, runWake } from "./wake";
 import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
 import { parseConvBumpItems } from "./convBump";
+import * as groupApi from "./groupApi";
+import * as contactApi from "./contactApi";
 import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
 import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrApi";
 import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
@@ -14,6 +16,8 @@ import { presenceFromFrame, type Presence } from "./presence";
 import { parseSysSegments } from "../sysSegments";
 import { parseMentionSpans, type MentionSpan } from "../mention";
 import * as localStore from "./localStore";
+import { loadRanges, updateRangesHead } from "./localStore.ranges";
+import { addRange, normalizeRanges, type SeqRange } from "./ranges";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, type UploadProgressHandler } from "./http";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
@@ -97,6 +101,18 @@ export interface IMClientHandlers {
    * 调用方据 anchorFound 决定是滚动高亮还是提示"原消息已被删除"。
    */
   onWindow?: (meta: WindowMeta) => void;
+  /**
+   * 一页历史到达（loadOlder / loadNewer / openConversation 发出的单页 sync_req 的响应，含被拒与空页）。
+   * 消息本身已走 onMessage 逐条上屏，这里只告诉 UI「那次请求结束了」——UI 的分页忙标志据此解除，
+   * 不必再靠"渲染集边界动了没"去猜（页里全是本地已有的、或已到可见下界回空页时边界就不会动）。
+   * count=本页实际下发条数（被拒时为 0）。
+   */
+  onHistoryPage?: (convId: string, since: number, count: number) => void;
+  /**
+   * 该会话的「本地有哪几段」变了（预热/整页落库/开窗）。UI 据此重算渲染切段——
+   * 切段要判断"两条消息之间是没下载、还是本就不成为消息"，只能问区间清单。
+   */
+  onRanges?: (convId: string) => void;
   /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
@@ -135,13 +151,33 @@ export class IMClient {
   private tracked = new Set<string>(); // 重连后需增量同步的会话
   private watched: string[] = []; // 当前在线态关注全集（watch），onopen/重连后自动重发
   private syncingConvs = new Set<string>(); // 正在断线补偿/空洞自愈，避免连发消息触发重复 sync_req
+  // 离线积压（OFFLINE_BACKLOG_DESIGN §4.4/§4.5）：
+  private superConvs = new Set<string>();  // 超级群：max_gap=0，正文只在打开会话时按需取，永不自动补拉
+  private headSeq = new Map<string, number>(); // convId -> 服务端最新位点（sync_resp.head_conv_seq / conv_bump.latest_seq）
+  private gapped = new Set<string>();       // 收到过 too_long，即本地对该会话有缺口
+  // 区间清单的**内存镜像**（IndexedDB 里那份为准，这里只为让渲染层能同步读到）。
+  // 渲染切段必须知道"两条消息之间那些 conv_seq 到底是没下载、还是下载过但本就不是一条消息"——
+  // msg_op 事件行、已被「为所有人删除」的墓碑、对我不可见的行都会占掉 conv_seq 却永远不成为消息。
+  // 只看 seq 连不连号会把它们全当成缺口（2026-09-03 实测：18 条的大群里删了一张图，
+  // 尾段被切成"最后那条系统消息"一条，界面看着就是空的）。
+  private convRanges = new Map<string, SeqRange[]>();
+  // delivered 回执合批（§4.8）：回执是**单调位点**，合批零语义损失，而逐条发在补拉 10 万条时
+  // 就是 10 万个上行帧、且服务端每帧要做一次群快照 + 成员鉴权。
+  private pendingReceipts = new Map<string, number>(); // convId -> 待上报的最大 conv_seq
+  private receiptTimer: ReturnType<typeof setTimeout> | null = null;
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
-  private pagedPending = new Set<number>(); // 聊天历史单页请求 seq；与自动补偿请求严格区分
+  // 聊天历史单页请求 seq → {会话, 请求时的 since}。记下 since 是为了在收到该页后
+  // **把这一段登记进区间清单**：用户往上翻一页，本地缺口就收窄一页（§4.7）。
+  private pagedPending = new Map<number, { convId: string; since: number }>();
   private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; mentionSpans?: MentionSpan[]; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string; waveform?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
   private readonly contextBefore = 10; // 进会话时未读分割线上方保留的已读上下文条数
+  // maxGap：连上时**顺手补齐**与**留成缺口**的分水岭（两端同值，CHAT_UX §2 三端契约）。
+  // 2 页 = 400 条：正常用户离线一晚攒的量远在此之下，走的还是老路径，什么都没变；
+  // 只有"10 万条大群"这种会话才会留缺口——而那种会话本来就不该被当作本地齐全。
+  private readonly maxGap = 400;
   private handlers: IMClientHandlers;
 
   constructor(handlers: IMClientHandlers = {}) {
@@ -236,6 +272,14 @@ export class IMClient {
     this.tracked.clear();
     this.syncingConvs.clear();
     this.syncPending.clear();
+    // 离线积压相关的连接级状态：切账号/退出必须一并清，否则新账号会继承上一个账号的
+    // 缺口标记与 head 快照（同一个 convId 在两个账号下可见范围不同，串了就是错的）。
+    if (this.receiptTimer !== null) { clearTimeout(this.receiptTimer); this.receiptTimer = null; }
+    this.pendingReceipts.clear();
+    this.superConvs.clear();
+    this.headSeq.clear();
+    this.convRanges.clear();
+    this.gapped.clear();
     this.pagedPending.clear();
     this.pendingOps.clear();
     this.ws?.close(1000);
@@ -293,230 +337,45 @@ export class IMClient {
     return await this.api(`/api/v1/link-preview?url=${encodeURIComponent(url)}`);
   }
 
-  /** 找人：按 q 搜索用户（昵称/手机号/uid/标签，后端去 phone、排除自己）。 */
-  async searchUsers(q: string, limit = 20): Promise<UserCard[]> {
-    const data = await this.api(`/api/v1/users/search?q=${encodeURIComponent(q)}&limit=${limit}`);
-    return (data?.users ?? []) as UserCard[];
-  }
-
-  /** 好友/申请列表（status 为空=全部：accepted/pending/requested/blocked）。 */
-  async listFriends(status = ""): Promise<FriendEntry[]> {
-    const data = await this.api(`/api/v1/friends${status ? `?status=${encodeURIComponent(status)}` : ""}`);
-    return (data?.friends ?? []) as FriendEntry[];
-  }
-
-  /** 好友动作（申请/同意/拒绝/拉黑/解黑）：POST /api/v1/friends/{action} body {user_id}。 */
-  async friendAction(action: "request" | "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> {
-    await this.api(`/api/v1/friends/${action}`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
-  }
-
-  /**
-   * 发好友申请：POST /api/v1/friends/request。
-   * 返回 true 表示**已直接成为好友、无需对方确认**（对方先申请过我；或我曾单向删除对方而对方仍视我为好友）。
-   * 调用方据此**不要提示「已发送好友申请」**——那会让用户误以为还要等对方通过；刷新界面即可。
-   */
-  async requestFriend(userId: string): Promise<boolean> {
-    const r = await this.api(`/api/v1/friends/request`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
-    return (r as { outcome?: string } | undefined)?.outcome === "accepted";
-  }
-
-  /** 删除好友：DELETE /api/v1/friends/{id}。 */
-  async removeFriend(userId: string): Promise<void> {
-    await this.api(`/api/v1/friends/${encodeURIComponent(userId)}`, { method: "DELETE" });
-  }
-
-  /** 设置好友备注名（空串=清除）：POST /api/v1/friends/remark。 */
-  async setRemark(userId: string, remark: string): Promise<void> {
-    await this.api(`/api/v1/friends/remark`, { method: "POST", body: JSON.stringify({ user_id: userId, remark }) });
-  }
-
-  // ---- 会话管理（M4.5）----
-
-  /** 更新会话级设置（置顶/免打扰/标未读，整体替换）：PUT /api/v1/conversations/{id}/settings。
-   *  注：remark 已从 settings 拆出走 setConvRemark；本端点服务端会保留现有 remark 不清空。 */
-  async updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> {
-    await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/settings`, { method: "PUT", body: JSON.stringify(s) });
-  }
-
-  /** 设置会话备注（G1，仅本人可见、多端同步）：PUT /api/v1/conversations/{id}/remark。留空即清除。
-   *  与设置三开关解耦（各走各端点，互不覆盖）；变更经 conv_update 同步全端。 */
-  async setConvRemark(convId: string, remark: string): Promise<void> {
-    await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/remark`, { method: "PUT", body: JSON.stringify({ remark }) });
-  }
-
-  /** 删除会话（仅本人，记 cleared_at 不删消息）：DELETE /api/v1/conversations/{id}。 */
-  async deleteConversation(convId: string): Promise<void> {
-    await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
-  }
-
-  // ---- 群聊（M3）----
-
-  /** 建群：owner=自己，memberIds=初始成员。返回群资料+成员。 */
-  async createGroup(name: string, memberIds: string[], avatarUrl = ""): Promise<GroupInfo> {
-    return (await this.api("/api/v1/groups", {
-      method: "POST",
-      body: JSON.stringify({ name, avatar_url: avatarUrl, member_ids: memberIds }),
-    })) as GroupInfo;
-  }
-
-  /** 我的群列表。 */
-  async listGroups(): Promise<GroupSummary[]> {
-    const data = await this.api("/api/v1/groups");
-    return (data?.groups ?? []) as GroupSummary[];
-  }
-
-  /** 群资料 + 成员（须为群成员）。 */
-  async fetchGroup(convId: string): Promise<GroupInfo> {
-    return (await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`)) as GroupInfo;
-  }
-
-  /**
-   * 群消息已读/未读名单（M4-8）：**仅消息发送者本人**可调（他人调用服务端回 403）。
-   * `enabled=false` 表示群规模超上限（>2000 人）——read/unread 为空，调用方应隐藏入口而非报错。
-   * 不含读取时刻：已读位点语义是"读到 conv_seq 为止"，无法反推某人何时读到这一条。
-   */
-  async fetchReadReceipts(convId: string, convSeq: number): Promise<{ read: string[]; unread: string[]; enabled: boolean }> {
-    const data = await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/messages/${convSeq}/read-by`);
-    return {
-      read: Array.isArray(data?.read) ? (data.read as string[]) : [],
-      unread: Array.isArray(data?.unread) ? (data.unread as string[]) : [],
-      enabled: data?.enabled === true,
-    };
-  }
-
-  /** 改群资料（群主/管理员）。 */
-  async updateGroup(convId: string, name: string, avatarUrl: string, intro = ""): Promise<void> {
-    // 整体替换语义：name/avatar_url/intro 都回带当前值，省略即清空（后端 G1）。
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`, {
-      method: "PUT", body: JSON.stringify({ name, avatar_url: avatarUrl, intro }),
-    });
-  }
-
-  /** 发布/撤下群公告（G1，群主/管理员）：text 空即撤下。 */
-  async setGroupAnnouncement(convId: string, text: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/announcement`, {
-      method: "PUT", body: JSON.stringify({ text }),
-    });
-  }
-
-  /** 群主/管理员自助全员禁言（G1）：until=0 解除 / -1 永久 / 其余到期毫秒时间戳。 */
-  async setGroupMute(convId: string, until: number): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/mute`, {
-      method: "PUT", body: JSON.stringify({ until }),
-    });
-  }
-
-  /** 我在本群的昵称（G1，任意成员）：空串=清除回退全局昵称。 */
-  async setGroupMyNickname(convId: string, nickname: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/me/nickname`, {
-      method: "PUT", body: JSON.stringify({ nickname }),
-    });
-  }
-
-  /** 群治理开关组（G2，群主/管理员整体替换）。 */
-  async setGroupSettings(convId: string, s: {
-    join_approval: boolean; perm_invite: boolean; perm_edit_info: boolean; perm_pin: boolean; history_visible: boolean;
-  }): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/settings`, {
-      method: "PUT", body: JSON.stringify(s),
-    });
-  }
-
-  /** 单独禁言成员（G2）：until=0 解禁 / -1 永久 / 其余到期毫秒。 */
-  async muteGroupMember(convId: string, userId: string, until: number): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}/mute`, {
-      method: "PUT", body: JSON.stringify({ until }),
-    });
-  }
-
-  /** 移出成员带封禁档（G2）：ban=none|cooldown|forever。 */
-  async removeGroupMemberWithBan(convId: string, userId: string, ban: "none" | "cooldown" | "forever"): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}?ban=${ban}`, { method: "DELETE" });
-  }
-
-  /** 群黑名单列表（G2，群主/管理员）。 */
-  async fetchGroupBans(convId: string): Promise<GroupBan[]> {
-    const data = await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/bans`);
-    return (data?.bans ?? []) as GroupBan[];
-  }
-
-  /** 解除拉黑（G2，群主/管理员）。 */
-  async unbanGroupMember(convId: string, userId: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/bans/${encodeURIComponent(userId)}`, { method: "DELETE" });
-  }
-
-  /** 邀请入群（任意成员可邀）。 */
-  /**
-   * 邀请入群。**返回实际加入的 uid**（服务端 `{added}`）——不是传进去的那批：
-   * 已在群里的人会被服务端跳过，且这属于**幂等成功**而非错误。
-   * 超级群下这事是常态：`GET /groups/{id}` 对超级群只回我自己，端上算不出完整的"已在群里"
-   * 排除集，老成员照样会出现在候选里。调用方须按 added 与所选数量的差给反馈。
-   */
-  async inviteToGroup(convId: string, memberIds: string[]): Promise<string[]> {
-    const d = await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members`, {
-      method: "POST", body: JSON.stringify({ member_ids: memberIds }),
-    }) as { added?: string[] } | undefined;
-    return d?.added ?? [];
-  }
-
-  /** 退群（群主须先转让）。 */
-  async leaveGroup(convId: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/me`, { method: "DELETE" });
-  }
-
-  /** 解散群（仅群主）：DELETE /api/v1/groups/{id} → 广播 dissolve，全体退群。 */
-  async dissolveGroup(convId: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}`, { method: "DELETE" });
-  }
-
-  /** 移除成员（须权限高于对方）。 */
-  async removeGroupMember(convId: string, userId: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}`, { method: "DELETE" });
-  }
-
-  /** 设/撤管理员（仅群主）：role=admin|member。 */
-  async setGroupRole(convId: string, userId: string, role: "admin" | "member"): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/members/${encodeURIComponent(userId)}/role`, {
-      method: "PUT", body: JSON.stringify({ role }),
-    });
-  }
-
-  /** 转让群主（仅群主；原群主降为普通成员）。 */
-  async transferGroup(convId: string, userId: string): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/transfer`, {
-      method: "POST", body: JSON.stringify({ user_id: userId }),
-    });
-  }
-
+  // ---- 找人 / 好友 / 会话设置：无状态 HTTP，实现在 sdk/contactApi.ts ----
+  searchUsers(q: string, limit = 20): Promise<UserCard[]> { return contactApi.searchUsers(this.token, q, limit); }
+  listFriends(status = ""): Promise<FriendEntry[]> { return contactApi.listFriends(this.token, status); }
+  friendAction(action: "request" | "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> { return contactApi.friendAction(this.token, action, userId); }
+  requestFriend(userId: string): Promise<boolean> { return contactApi.requestFriend(this.token, userId); }
+  removeFriend(userId: string): Promise<void> { return contactApi.removeFriend(this.token, userId); }
+  setRemark(userId: string, remark: string): Promise<void> { return contactApi.setRemark(this.token, userId, remark); }
+  updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> { return contactApi.updateConvSettings(this.token, convId, s); }
+  setConvRemark(convId: string, remark: string): Promise<void> { return contactApi.setConvRemark(this.token, convId, remark); }
+  deleteConversation(convId: string): Promise<void> { return contactApi.deleteConversation(this.token, convId); }
+  // ---- 群聊 / 入群（M3~G3）：无状态 HTTP，实现在 sdk/groupApi.ts ----
+  createGroup(name: string, memberIds: string[], avatarUrl = ""): Promise<GroupInfo> { return groupApi.createGroup(this.token, name, memberIds, avatarUrl); }
+  listGroups(): Promise<GroupSummary[]> { return groupApi.listGroups(this.token); }
+  fetchGroup(convId: string): Promise<GroupInfo> { return groupApi.fetchGroup(this.token, convId); }
+  fetchReadReceipts(convId: string, convSeq: number): Promise<{ read: string[]; unread: string[]; enabled: boolean }> { return groupApi.fetchReadReceipts(this.token, convId, convSeq); }
+  updateGroup(convId: string, name: string, avatarUrl: string, intro = ""): Promise<void> { return groupApi.updateGroup(this.token, convId, name, avatarUrl, intro); }
+  setGroupAnnouncement(convId: string, text: string): Promise<void> { return groupApi.setGroupAnnouncement(this.token, convId, text); }
+  setGroupMute(convId: string, until: number): Promise<void> { return groupApi.setGroupMute(this.token, convId, until); }
+  setGroupMyNickname(convId: string, nickname: string): Promise<void> { return groupApi.setGroupMyNickname(this.token, convId, nickname); }
+  setGroupSettings(convId: string, s: {   join_approval: boolean; perm_invite: boolean; perm_edit_info: boolean; perm_pin: boolean; history_visible: boolean; }): Promise<void> { return groupApi.setGroupSettings(this.token, convId, s); }
+  muteGroupMember(convId: string, userId: string, until: number): Promise<void> { return groupApi.muteGroupMember(this.token, convId, userId, until); }
+  removeGroupMemberWithBan(convId: string, userId: string, ban: "none" | "cooldown" | "forever"): Promise<void> { return groupApi.removeGroupMemberWithBan(this.token, convId, userId, ban); }
+  fetchGroupBans(convId: string): Promise<GroupBan[]> { return groupApi.fetchGroupBans(this.token, convId); }
+  unbanGroupMember(convId: string, userId: string): Promise<void> { return groupApi.unbanGroupMember(this.token, convId, userId); }
+  inviteToGroup(convId: string, memberIds: string[]): Promise<string[]> { return groupApi.inviteToGroup(this.token, convId, memberIds); }
+  leaveGroup(convId: string): Promise<void> { return groupApi.leaveGroup(this.token, convId); }
+  dissolveGroup(convId: string): Promise<void> { return groupApi.dissolveGroup(this.token, convId); }
+  removeGroupMember(convId: string, userId: string): Promise<void> { return groupApi.removeGroupMember(this.token, convId, userId); }
+  setGroupRole(convId: string, userId: string, role: "admin" | "member"): Promise<void> { return groupApi.setGroupRole(this.token, convId, userId, role); }
+  transferGroup(convId: string, userId: string): Promise<void> { return groupApi.transferGroup(this.token, convId, userId); }
+  joinGroupByCode(token: string, hello = ""): Promise<GroupInfo> { return groupApi.joinGroupByCode(this.token, token, hello); }
+  fetchJoinRequests(convId: string, status = "pending"): Promise<JoinRequest[]> { return groupApi.fetchJoinRequests(this.token, convId, status); }
+  decideJoinRequest(convId: string, userId: string, accept: boolean): Promise<void> { return groupApi.decideJoinRequest(this.token, convId, userId, accept); }
   // ---- 二维码体系（QRCODE P0）：无状态 HTTP，实现在 sdk/qrApi.ts ----
   qrMyCard(): Promise<QRCard> { return qrMyCard(this.token); }
   qrResetMyCard(): Promise<QRCard> { return qrResetMyCard(this.token); }
   groupQR(convId: string): Promise<QRCard> { return groupQR(this.token, convId); }
   groupQRReset(convId: string): Promise<QRCard> { return groupQRReset(this.token, convId); }
   qrResolve(raw: string): Promise<QRResolved> { return qrResolve(this.token, raw); }
-
-  // ---- 入群路径（G3）----
-
-  /** 凭群码入群（token 可为完整 URL 或裸 token）。成功返回群资料；需审批时抛 300210。 */
-  async joinGroupByCode(token: string, hello = ""): Promise<GroupInfo> {
-    return (await this.api(`/api/v1/groups/join`, {
-      method: "POST", body: JSON.stringify({ token, hello }),
-    })) as GroupInfo;
-  }
-
-  /** 待审入群申请（群主/管理员）；status 空=全部。 */
-  async fetchJoinRequests(convId: string, status = "pending"): Promise<JoinRequest[]> {
-    const q = status ? `?status=${encodeURIComponent(status)}` : "";
-    const data = await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/join-requests${q}`);
-    return (data?.requests ?? []) as JoinRequest[];
-  }
-
-  /** 审批一条入群申请（群主/管理员）：accept=true→approve，false→reject。 */
-  async decideJoinRequest(convId: string, userId: string, accept: boolean): Promise<void> {
-    await this.api(`/api/v1/groups/${encodeURIComponent(convId)}/join-requests/${encodeURIComponent(userId)}`, {
-      method: "POST", body: JSON.stringify({ action: accept ? "approve" : "reject" }),
-    });
-  }
 
   // ---- 收藏（M4-4）：无状态 HTTP，实现在 sdk/favoritesApi.ts ----
   addFavorite(f: FavoriteDraft): Promise<void> { return addFavorite(this.token, f); }
@@ -588,6 +447,16 @@ export class IMClient {
     this.tracked.add(convId);
     if (!this.syncedSeq.has(convId)) this.syncedSeq.set(convId, 0);
     if (newlyTracked) this.sendSyncReq([convId]);
+    // 预热区间镜像：刷新后内存是空的，而"本地有哪几段"只有 IndexedDB 里那份记得。
+    // 不预热的话，重进会话的第一屏又会按 seq 连号去切段，老毛病原样复现。
+    void loadRanges(this.uid, convId).then(({ ranges, head }) => {
+      if (ranges.length > 0) {
+        const merged = normalizeRanges([...(this.convRanges.get(convId) ?? []), ...ranges]);
+        this.convRanges.set(convId, merged);
+        this.handlers.onRanges?.(convId);
+      }
+      if (head > 0) this.headSeq.set(convId, Math.max(this.headSeq.get(convId) ?? 0, head));
+    });
     const since =
       latestSeq > readSeq
         ? Math.max(0, readSeq - this.contextBefore) // 有未读 → 锚到首条未读附近
@@ -624,10 +493,16 @@ export class IMClient {
   }
 
   /** 发一页分页请求：指定游标、单页、不自动向前翻页（由 SYNC_RESP 的 pagedPending 抑制）。 */
+  /**
+   * 发一页历史请求。**刻意不带 `max_gap`**（OFFLINE_BACKLOG_DESIGN §4.4）：
+   * 积压闸门只该闸「连上时的自动补拉」，绝不能闸「用户主动往上翻页」——
+   * 用户滚到顶就是明确要求看这一段，此时回一个 too_long 等于翻不动历史。
+   * 自动补拉走 sendSyncReq（带 max_gap），两条路径就此分开。
+   */
   private requestPage(convId: string, since: number): void {
     if (!this.isSocketOpen()) return;
     const requestSeq = ++this.seq;
-    this.pagedPending.add(requestSeq);
+    this.pagedPending.set(requestSeq, { convId, since });
     this.send({ type: T.SYNC_REQ, seq: requestSeq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
   }
 
@@ -1042,19 +917,47 @@ export class IMClient {
         break;
       case T.SYNC_RESP: {
         const responseSeq = typeof env.seq === "number" ? env.seq : 0;
-        const isPaged = this.pagedPending.has(responseSeq);
+        const paged = this.pagedPending.get(responseSeq);
+        const isPaged = paged !== undefined;
         if (isPaged) this.pagedPending.delete(responseSeq);
         const requestedConvs = this.syncPending.get(responseSeq) ?? [];
         this.syncPending.delete(responseSeq);
         requestedConvs.forEach((convId) => this.syncingConvs.delete(convId));
         for (const conv of d.conversations || []) {
-          for (const m of conv.messages || []) this.processIncoming(m, false);
+          const pageMsgs: ChatMessage[] = [];
+          for (const m of conv.messages || []) this.processIncoming(m, false, (msg) => pageMsgs.push(msg));
           if (isPaged) {
+            // 聊天历史单页请求：**不推游标**（它不参与自动追平），但**要登记区间**——
+            // 服务端的 covered_conv_seq 同样断言了 (since, covered] 已全部下发或对我不可见，
+            // 那正是"这段我齐全"的定义。用户往上翻一页，本地缺口就实实在在收窄一页。
+            const covered = Number(conv.covered_conv_seq) || 0;
+            const since = paged!.since;
+            void localStore.saveIncomingPage(
+              this.uid, pageMsgs, 0, since + 1, covered > since ? covered : 0,
+            );
+            if (covered > since) this.noteRange(paged!.convId, since + 1, covered);
+            this.handlers.onHistoryPage?.(paged!.convId, since, pageMsgs.length);
             // 聊天历史分页只返回一页，不参与自动追平。
             continue;
           }
           const convId = typeof conv.conv_id === "string" ? conv.conv_id : "";
           if (!convId) continue;
+          // head 快照：服务端会话真实最新位点（仅在带了 max_gap 时下发）。↓N 计数与"还差多少"都用它。
+          const head = Number(conv.head_conv_seq) || 0;
+          if (head > 0) {
+            this.headSeq.set(convId, Math.max(this.headSeq.get(convId) ?? 0, head));
+            void updateRangesHead(this.uid, convId, head);
+          }
+          // 积压超过 max_gap（OFFLINE_BACKLOG_DESIGN §4.4）：服务端一条正文都没给，
+          // 只告诉我们"最新到哪了"。**绝不推游标、绝不登记区间**——没下载就不许宣称拿到，
+          // 那一段登记成缺口，之后由 window_req 按需开窗补。
+          if (conv.too_long) {
+            this.gapped.add(convId);
+            logger.info(LOG_TAG.ws, "sync_backlog_too_long", {
+              conv_id: convId, since: this.syncedSeq.get(convId) ?? 0, head,
+            });
+            continue;
+          }
           // 权威覆盖位点：服务端断言 (since, covered] 内每个 conv_seq 要么已下发、要么对本人不可见
           // （G2 history_visible 抬入群下界、「仅为我删除」隐藏项）。据此把游标直接推过这些永远拿不到的
           // 可见性空洞——不能用 latest_conv_seq（只记实际下发的最大序号，会漏跳过的空洞导致游标永久卡死）。
@@ -1063,9 +966,16 @@ export class IMClient {
           const next = nextSyncCursor(before, covered);
           if (next > before) {
             this.updateSynced(convId, next);
-            void localStore.advanceSyncCursor(this.uid, convId, next); // 消息已先落库，再持久化游标
-            if (conv.has_more) this.sendSyncReq([convId]); // 从新游标继续翻页
+            // 整页原子提交：本页消息 + 游标推进 + 区间登记同一个事务（§4.8）。
+            // 事务失败则三者都不动，下次从原位幂等重拉——"消息没落库就绝不越过"在页粒度上照旧成立。
+            this.noteRange(convId, before + 1, next);
+            void localStore.saveIncomingPage(this.uid, pageMsgs, next, before + 1, next, head)
+              .then((okPage) => {
+                if (okPage && conv.has_more) this.sendSyncReq([convId]); // 落库成功才继续翻页
+              });
           }
+          // 追平了就不再是"有缺口"（缺口只会收窄，不会扩大）。
+          if (!conv.has_more && (head === 0 || next >= head)) this.gapped.delete(convId);
         }
         break;
       }
@@ -1088,6 +998,12 @@ export class IMClient {
         break;
       case T.WINDOW_RESP: { // 锚点窗口到达：消息走常规落库，边界信息交给 UI 决定滚动/提示
         for (const m of d.messages || []) this.processIncoming(m, false);
+        // 开窗拿回来的这一段同样"我已齐全"：服务端把 [min, max] 之间对我可见的都给了。
+        // 不登记的话，下次上翻到这一段边缘还会误判成缺口，而且渲染切段会把它切开。
+        {
+          const seqs = (d.messages || []).map((m: { conv_seq?: number }) => Number(m.conv_seq) || 0).filter((n: number) => n > 0);
+          if (seqs.length > 0) this.noteRange(String(d.conv_id ?? ""), Math.min(...seqs), Math.max(...seqs));
+        }
         this.handlers.onWindow?.({
           convId: String(d.conv_id ?? ""),
           anchor: Number(d.anchor) || 0,
@@ -1097,9 +1013,18 @@ export class IMClient {
         });
         break;
       }
-      case T.CONV_BUMP: // 超级群轻量信号（无正文）：刷列表那一行；正文进会话时再 sync
-        this.handlers.onConvBump?.(parseConvBumpItems(d));
+      case T.CONV_BUMP: { // 超级群轻量信号（无正文）：刷列表那一行；正文进会话时再 sync
+        const bumps = parseConvBumpItems(d);
+        // head 快照跟着走（字段注释一直写着 conv_bump.latest_seq，代码此前没接）：
+        // 超级群在线不推全文，不认这一路 head 就永远停在上次 sync 的值，↓N 跟着算错。
+        for (const it of bumps) {
+          if (it.conv_id && it.latest_seq > 0) {
+            this.headSeq.set(it.conv_id, Math.max(this.headSeq.get(it.conv_id) ?? 0, it.latest_seq));
+          }
+        }
+        this.handlers.onConvBump?.(bumps);
         break;
+      }
       case T.CAPS_UPDATE: // 账号级配置版本变更（M4-7）：另一端改了自动下载策略 → 本端重拉
         this.handlers.onCapabilitiesUpdate?.(Number(d.version) || 0);
         break;
@@ -1127,7 +1052,10 @@ export class IMClient {
         const syncConvs = this.syncPending.get(responseSeq) ?? [];
         this.syncPending.delete(responseSeq);
         syncConvs.forEach((convId) => this.syncingConvs.delete(convId));
+        const rejectedPage = this.pagedPending.get(responseSeq);
         this.pagedPending.delete(responseSeq);
+        // 分页请求被拒：也要告诉 UI 这次结束了，否则忙标志卡死、历史再也翻不动。
+        if (rejectedPage) this.handlers.onHistoryPage?.(rejectedPage.convId, rejectedPage.since, 0);
         const cmid = d.client_msg_id;
         // 消息操作被拒（如撤回超时 300008）：回滚提示，不动消息本身。
         const op = cmid ? this.pendingOps.get(cmid) : undefined;
@@ -1181,7 +1109,11 @@ export class IMClient {
     }
   }
 
-  private processIncoming(d: any, healRealtimeGap = true): void {
+  /**
+   * @param collect 非空时**不逐条落库**，而是把消息交给调用方整页写（§4.8）。
+   *   实时路径仍逐条落（一条就是一页，且要立刻持久化）；补拉路径走整页事务。
+   */
+  private processIncoming(d: any, healRealtimeGap = true, collect?: (m: ChatMessage) => void): void {
     const convId = typeof d.conv_id === "string" ? d.conv_id : "";
     const convSeq = Number(d.conv_seq) || 0;
     const prevSynced = this.syncedSeq.get(convId) ?? 0;
@@ -1257,10 +1189,19 @@ export class IMClient {
       });
       this.sendSyncReq([msg.convId]); // since=prevSynced（此刻尚未 update）→ 拉回 [prevSynced+1 .. ]
     }
+    // head 是"服务端最新到哪"的快照。实时消息本身就是新的 head 证据——不推它，
+    // 有缺口会话的 ↓N（head − 已读）会永远停在旧值，看着就是"来了新消息但角标不动"。
+    if (msg.convSeq > 0) {
+      this.headSeq.set(msg.convId, Math.max(this.headSeq.get(msg.convId) ?? 0, msg.convSeq));
+    }
     if (isNextContiguous) this.updateSynced(msg.convId, msg.convSeq);
-    this.sendReceipt(msg.convId, msg.convSeq);
-    // 连续消息与游标同事务提交；非连续消息只落消息，游标仍停在空洞前。
-    void localStore.saveIncomingMessage(this.uid, msg, isNextContiguous);
+    this.sendReceipt(msg.convId, msg.convSeq); // 合批：短窗口内每会话只发一帧最大位点
+    if (collect) {
+      collect(msg); // 整页落库由调用方在本页全部处理完后一次事务提交
+    } else {
+      // 连续消息与游标同事务提交；非连续消息只落消息，游标仍停在空洞前。
+      void localStore.saveIncomingMessage(this.uid, msg, isNextContiguous);
+    }
     this.handlers.onMessage?.(msg);
   }
 
@@ -1280,10 +1221,39 @@ export class IMClient {
   }
 
   /** 登记会话用于（重）连后增量同步。基线只在首次登记时设置，不能用稍后见到的较大值越过空洞。 */
-  trackConversation(convId: string, syncedSeq: number): void {
+  trackConversation(convId: string, syncedSeq: number, isSuper = false): void {
     if (!convId) return;
     this.tracked.add(convId);
+    if (isSuper) this.superConvs.add(convId);
+    else this.superConvs.delete(convId); // 群可能被降级/误标，别让一次错误标记永久粘住
     if (!this.syncedSeq.has(convId)) this.syncedSeq.set(convId, Math.max(0, syncedSeq));
+  }
+
+  /** 登记「[lo, hi] 这一段我已齐全」到内存镜像，并通知 UI 重算渲染切段。
+   *  **只在真的把这一段下发的消息都收下之后才调**——"没下载就不许登记"是这套区间的正确性底座。 */
+  private noteRange(convId: string, lo: number, hi: number): void {
+    if (!convId || hi < lo || hi < 1) return;
+    const before = this.convRanges.get(convId);
+    const next = addRange(before ?? [], lo, hi);
+    this.convRanges.set(convId, next);
+    if (!before || before.length !== next.length || before.some((r, i) => r.lo !== next[i].lo || r.hi !== next[i].hi)) {
+      this.handlers.onRanges?.(convId);
+    }
+  }
+
+  /** 本地已齐全的区间（内存镜像）。渲染切段用它判断"中间那几个 seq 是没下载、还是本就不是消息"。 */
+  rangesOf(convId: string): SeqRange[] {
+    return this.convRanges.get(convId) ?? [];
+  }
+
+  /** 该会话本地是否有缺口（收到过 too_long）。上层据此决定"整会话问题"问本地还是问服务端。 */
+  hasGap(convId: string): boolean {
+    return this.gapped.has(convId);
+  }
+
+  /** 服务端最新位点快照（未知为 0）：↓N 计数与"还差多少"都用它，不数本地。 */
+  headOf(convId: string): number {
+    return this.headSeq.get(convId) ?? 0;
   }
 
   /** 对所有已登记会话发一次增量同步（从各自基线补新消息）。 */
@@ -1321,16 +1291,37 @@ export class IMClient {
     }
   }
 
+  /** 排队一个 delivered 回执（只留最大值），短窗口内合并成一帧。 */
   private sendReceipt(convId: string, upTo: number): void {
-    if (!convId) return;
-    this.send({ type: T.RECEIPT, data: { conv_id: convId, status: "delivered", up_to_conv_seq: upTo } });
+    if (!convId || upTo <= 0) return;
+    if (upTo > (this.pendingReceipts.get(convId) ?? 0)) this.pendingReceipts.set(convId, upTo);
+    if (this.receiptTimer !== null) return;
+    this.receiptTimer = setTimeout(() => this.flushReceipts(), 120);
+  }
+
+  /** 把排队的 delivered 回执各发一帧（每会话只发最大位点）。 */
+  private flushReceipts(): void {
+    if (this.receiptTimer !== null) {
+      clearTimeout(this.receiptTimer);
+      this.receiptTimer = null;
+    }
+    for (const [convId, upTo] of this.pendingReceipts) {
+      this.send({ type: T.RECEIPT, data: { conv_id: convId, status: "delivered", up_to_conv_seq: upTo } });
+    }
+    this.pendingReceipts.clear();
   }
 
   private sendSyncReq(convIds: string[]): void {
     // connect() 在 WebSocket OPEN 之前即可返回；此时不能先占用 in-flight，onopen 会统一补发。
     if (!this.isSocketOpen()) return;
     const pending = convIds.filter((c) => c && !this.syncingConvs.has(c));
-    const cursors = pending.map((c) => ({ conv_id: c, since_conv_seq: this.syncedSeq.get(c) ?? 0 }));
+    // max_gap：超级群恒 0（正文只在打开会话时拉，SUPERGROUP_DESIGN §5），其余给 this.maxGap。
+    // 服务端据此判超限就回 too_long 而不查消息表——"消息因为要显示才下载"的服务端一半。
+    const cursors = pending.map((c) => ({
+      conv_id: c,
+      since_conv_seq: this.syncedSeq.get(c) ?? 0,
+      max_gap: this.superConvs.has(c) ? 0 : this.maxGap,
+    }));
     if (cursors.length === 0) return;
     pending.forEach((c) => this.syncingConvs.add(c));
     const requestSeq = ++this.seq;

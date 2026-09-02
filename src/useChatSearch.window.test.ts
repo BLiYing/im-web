@@ -27,6 +27,9 @@ function mount(over: Partial<ChatSearchDeps> = {}) {
     convId: CONV, groupConvId: CONV, uid: "u1",
     groupInfos: {}, conversations: [],
     locateInChat, setToast: vi.fn(),
+    // 默认「本地齐全 + 在线」= 走本地，与本文件原有断言的前提一致
+    // （新增的服务端分流只在有缺口时才生效，见 useChatSearch.gap.test.ts）。
+    localComplete: true, online: true, getToken: () => "",
     ...over,
   };
   return { ...renderHook((p: ChatSearchDeps) => useChatSearch(p), { initialProps: deps }), deps, locateInChat };

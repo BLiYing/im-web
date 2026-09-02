@@ -54,8 +54,12 @@ export class FakeIMClient {
   watchUsers(...a: unknown[]) { this.rec("watchUsers", ...a); }
   markRead(...a: unknown[]) { this.rec("markRead", ...a); }
   sendTyping() {}
-  loadOlder() {}
-  loadNewer() {}
+  // 同步取值的方法必须显式实现：Proxy 兜底回的是 Promise（恒真），会让 UI 把"本地有缺口"当成常态、
+  // 把 head 当成一个对象。
+  hasGap(): boolean { return false; }
+  headOf(): number { return 0; }
+  loadOlder(...a: unknown[]) { this.rec("loadOlder", ...a); }
+  loadNewer(...a: unknown[]) { this.rec("loadNewer", ...a); }
   async fetchUserPresence() { return { onlineUntil: 0, lastSeen: 0 }; }
   async fetchPinned() { this.rec("fetchPinned"); return FakeIMClient.pinned; }
   sendText(content: string, to: string, convId: string): string {
