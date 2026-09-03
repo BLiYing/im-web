@@ -66,6 +66,28 @@ async function enterWithLatestPage() {
   expect(renderedSeqs()[0]).toBe(HEAD - PAGE + 1);
 }
 
+describe("进会话取哪一窗：判据是**真实未读数**，不是 latest>read", () => {
+  const openArgs = () => (Fake.last!.calls.openConversation ?? []).map((a) => a as [string, number, number, number]);
+
+  it("发送方（unread=0 但读位点远落后于自己发的消息）→ 取最近一页贴底，不锚到旧位点", async () => {
+    // 压测现场：user1001 用脚本往群里灌了 1 万条，那些消息都是**它自己发的**。
+    // 服务端未读计数排除本人消息（CountUnreadSince 带 sender <> ?），故 unread=0，
+    // 但 read_seq 停在灌之前。旧判据 latest>read 成立 → 锚到一万条之前，进会话不贴底、↓N 一大串。
+    Fake.conversations = [makeConv({ latest_conv_seq: HEAD, read_seq: HEAD - 10000, unread: 0 })];
+    await enterChat();
+    const [, readSeq, latestSeq, unread] = openArgs()[0];
+    expect(unread).toBe(0);
+    expect(readSeq).toBe(HEAD - 10000);
+    expect(latestSeq).toBe(HEAD);
+  });
+
+  it("真有未读时仍按未读锚定（别把上面那条修成「永远贴底」）", async () => {
+    Fake.conversations = [makeConv({ latest_conv_seq: HEAD, read_seq: HEAD - 10000, unread: 9000 })];
+    await enterChat();
+    expect(openArgs()[0][3]).toBe(9000);
+  });
+});
+
 describe("↓N 角标：锚点模式（上翻过一页后，窗口不含尾部）", () => {
   const badge = () => document.querySelector(".jump-badge")?.textContent ?? "";
 

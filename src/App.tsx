@@ -612,7 +612,7 @@ export default function App() {
     setJumpCount(0);
     maxReadReportedRef.current = readSeq;
     pendingReadRef.current = readSeq;
-    clientRef.current?.openConversation(cid, readSeq, latestSeq);
+    clientRef.current?.openConversation(cid, readSeq, latestSeq, conv?.unread ?? 0);
     void refreshGroupInfo(cid); // 群资料：标题成员数 / 气泡昵称回退 / 资料面板
     // 进会话即清手动"标未读"（IM 通行做法）；多端经 conv_update 同步。
     if (conv?.marked_unread) {
@@ -970,7 +970,7 @@ export default function App() {
     // 可见即读：已读起点=进入前位点；只有滚入视口超过它的消息才上报（见 markVisibleRead）。
     maxReadReportedRef.current = readSeq;
     pendingReadRef.current = readSeq;
-    clientRef.current?.openConversation(cid, readSeq, latestSeq); // 加载锚点窗口，余下双向分页
+    clientRef.current?.openConversation(cid, readSeq, latestSeq, conv?.unread ?? 0); // 加载锚点窗口，余下双向分页
     // 进会话即清手动"标未读"（IM 通行做法：打开视为已处理）；多端经 conv_update 同步。
     if (conv?.marked_unread) {
       void clientRef.current?.updateConvSettings(cid, { pinned_at: conv.pinned_at ?? 0, muted: !!conv.muted, marked_unread: false }).then(() => refreshConversations()).catch(() => {});
@@ -2290,7 +2290,7 @@ export default function App() {
       setEntryUnread(0);
       forceBottomRef.current = true;
       pendingScrollRef.current = true;
-      clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current);
+      clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current, 0); // 点 ↓ = 我要最新的，无未读语义
     }
     wasNearBottomRef.current = true;
     setShowJump(false);

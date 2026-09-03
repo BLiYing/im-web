@@ -6,6 +6,7 @@ import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpd
 import { createProbeWatchdog, installWakeListeners, runWake } from "./wake";
 import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
 import { parseConvBumpItems } from "./convBump";
+import { entryWindowSince } from "../entryWindow";
 import * as groupApi from "./groupApi";
 import * as contactApi from "./contactApi";
 import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
@@ -438,10 +439,16 @@ export class IMClient {
   }
 
   /** 进会话：建立重连基线 + 加载初始可视窗口（见 CHAT_UX §3）。
-   *  - 有未读（latestSeq>readSeq）：从 readSeq-上下文 起一页，锚定到首条未读；
+   *  - 有未读：从 readSeq-上下文 起一页，锚定到首条未读；
    *  - 无未读：加载最近一页，贴底。
-   *  latestSeq 仅用于选择 UI 首屏窗口，不代表此前消息已经连续持久化。 */
-  openConversation(convId: string, readSeq: number, latestSeq: number): void {
+   *  latestSeq 仅用于选择 UI 首屏窗口，不代表此前消息已经连续持久化。
+   *
+   *  **「有没有未读」必须传真实未读数，不能用 `latestSeq > readSeq` 顶替**（2026-09-03 修）：
+   *  服务端的未读计数排除本人消息（`CountUnreadSince` 带 `sender <> ?`），所以**发送方**的读位点
+   *  天然落后于自己刚发的那一堆——压测灌完 1 万条后，user1001 自己进会话时 unread=0 而
+   *  latest 比 read_seq 大一万，旧判据据此锚到一万条之前的位置：不贴底、↓N 显示一大串，
+   *  用户以为消息没发出去。iOS 一直用的就是真实未读数（entryUnread），此处对齐。 */
+  openConversation(convId: string, readSeq: number, latestSeq: number, unread: number): void {
     if (!convId) return;
     const newlyTracked = !this.tracked.has(convId);
     this.tracked.add(convId);
@@ -457,10 +464,9 @@ export class IMClient {
       }
       if (head > 0) this.headSeq.set(convId, Math.max(this.headSeq.get(convId) ?? 0, head));
     });
-    const since =
-      latestSeq > readSeq
-        ? Math.max(0, readSeq - this.contextBefore) // 有未读 → 锚到首条未读附近
-        : Math.max(0, latestSeq - this.historyPage); // 无未读 → 最近一页
+    const since = entryWindowSince({
+      readSeq, latestSeq, unread, contextBefore: this.contextBefore, historyPage: this.historyPage,
+    });
     this.requestPage(convId, since);
   }
 
