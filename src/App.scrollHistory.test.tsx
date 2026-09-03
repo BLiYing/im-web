@@ -40,6 +40,15 @@ function deliver(lo: number, hi: number) {
   act(() => { for (let s = lo; s <= hi; s++) Fake.last!.handlers.onMessage!(msg(s)); });
 }
 
+/** 把容器钉成「已贴底」的几何，然后派发一次滚动（向下翻页的触发条件）。 */
+function scrollToBottom() {
+  const box = msgs();
+  Object.defineProperty(box, "scrollHeight", { value: 8000, configurable: true });
+  Object.defineProperty(box, "clientHeight", { value: 500, configurable: true });
+  Object.defineProperty(box, "scrollTop", { value: 7500, writable: true, configurable: true });
+  fireEvent.scroll(box);
+}
+
 /** 把容器钉成「在顶部、离底很远」的几何，然后派发一次滚动。 */
 function scrollToTop() {
   const box = msgs();
@@ -50,6 +59,7 @@ function scrollToTop() {
 }
 
 const loadOlderCalls = () => (Fake.last!.calls.loadOlder ?? []).map((a) => a[1] as number);
+const loadNewerCalls = () => (Fake.last!.calls.loadNewer ?? []).map((a) => a[1] as number);
 
 beforeEach(() => {
   localStorage.clear();
@@ -86,6 +96,61 @@ describe("进会话取哪一窗：判据是**真实未读数**，不是 latest>r
     await enterChat();
     expect(openArgs()[0][3]).toBe(9000);
   });
+});
+
+describe("首次登录（read_seq=0）进大群：停在会话开头，一路往下读要接得上", () => {
+  const openArgs = () => (Fake.last!.calls.openConversation ?? []).map((a) => a as [string, number, number, number]);
+
+  beforeEach(() => {
+    // 首次登录的新成员：一条都没读过（read_seq=0）、未读撞服务端上限（10000）、会话最新到 30001。
+    Fake.conversations = [makeConv({ latest_conv_seq: HEAD, read_seq: 0, unread: 10000, unread_capped: true })];
+  });
+
+  it("read_seq=0 且有未读 → 按未读锚定（不是「没有可锚的位点」，别再退回贴底）", async () => {
+    await enterChat();
+    const [, readSeq, latestSeq, unread] = openArgs()[0];
+    expect(readSeq).toBe(0);
+    expect(unread).toBe(10000);
+    expect(latestSeq).toBe(HEAD);
+    // 取哪一窗由 entryWindowSince 决定（见 entryWindow.test.ts）：unread>0 ⇒ since=readSeq-上下文=0，
+    // 即会话开头那一页，而不是 latest-一页。这里钉的是 App 把三个入参**原样**交出去。
+  });
+
+  it("往下翻页：窗口先长到上限再滑动，且每一页都还能继续翻（忙标志复位）", async () => {
+    await enterChat();
+    deliver(1, PAGE);                                   // 首屏 = 会话开头那一页
+    await waitFor(() => expect(renderedSeqs().length).toBe(PAGE));
+    expect(renderedSeqs()[0]).toBe(1);
+
+    // 第 1 次下翻：窗口 200 → 400，上沿仍是 1 ⇒ 新内容纯粹接在下方，位置本就不用补偿。
+    scrollToBottom();
+    await waitFor(() => expect(loadNewerCalls()).toEqual([PAGE]));
+    deliver(PAGE + 1, PAGE * 2);
+    await waitFor(() => expect(renderedSeqs().length).toBe(PAGE * 2));
+    expect(renderedSeqs()[0]).toBe(1);
+
+    // 第 2 次：400 → 600（封顶），上沿依旧是 1。
+    scrollToBottom();
+    await waitFor(() => expect(loadNewerCalls()).toEqual([PAGE, PAGE * 2]));
+    deliver(PAGE * 2 + 1, PAGE * 3);
+    await waitFor(() => expect(renderedSeqs().length).toBe(PAGE * 3));
+    expect(renderedSeqs()[0]).toBe(1);
+
+    // 第 3 次：已封顶 ⇒ 窗口**滑动**，上沿前移、条数不变（忙标志靠窗口签名里的 min 复位，
+    // 不是靠条数——条数在这一步纹丝不动，见下方 ⑤ 那条同源教训）。
+    scrollToBottom();
+    await waitFor(() => expect(loadNewerCalls()).toEqual([PAGE, PAGE * 2, PAGE * 3]));
+    deliver(PAGE * 3 + 1, PAGE * 4);
+    await waitFor(() => expect(renderedSeqs()[0]).toBeGreaterThan(1));
+    expect(renderedSeqs().length).toBe(PAGE * 3);       // 封顶：DOM 不会一路长下去
+    expect(Math.max(...renderedSeqs())).toBe(PAGE * 4);
+
+    // 还能继续（不是滑一次就卡死）。
+    scrollToBottom();
+    await waitFor(() => expect(loadNewerCalls().length).toBe(4));
+    // 注：滑动那一下的**像素级落点**（按同一条消息补偿）在 jsdom 里验不了——
+    // getBoundingClientRect 恒 0。这里只钉「窗口怎么走」，落点靠浏览器手测。
+  }, 30000);
 });
 
 describe("渲染窗口有硬上限：向上翻页只滑动、不无限长", () => {

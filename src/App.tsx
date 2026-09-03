@@ -376,6 +376,11 @@ export default function App() {
   // scrollHeight 几乎不变，靠「前后 scrollHeight 之差」补偿会算出 0，用户正看的那条被甩到 100 行开外。
   // 按「同一条消息补偿前后的位置差」保位才对；h/t 仅作该条已不在窗口内时的兜底。
   const histAnchorRef = useRef<{ seq: number; top: number | null; h: number; t: number } | null>(null);
+  // 向**下**翻页的保位锚点（与 histAnchorRef 对称）。定长窗口贴最新时是「滑动」而不是「变长」：
+  // 取回 [201..400] 后 visibleSlice 给出的是 [201..400]，上一窗 [1..200] 整段从 DOM 里消失，
+  // scrollTop 数值没变、指向的却是 200 条之后的另一条消息——用户一路往下读会**每翻一页跳一页**。
+  // 锚点取窗口**最后一条**：向下翻页只会从顶部丢行，最后一条必然还在，是唯一稳的参照物。
+  const tailAnchorRef = useRef<{ seq: number; top: number } | null>(null);
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
@@ -2100,8 +2105,16 @@ export default function App() {
       return;
     }
 
-    // 下滚分页加载的更新历史（≤ latest）：插在下方，位置不动。
+    // 下滚分页加载的更新历史（≤ latest）：插在下方。
     if (curMax > prevMaxSeqRef.current && curMax <= latestSeqRef.current && wasLoadingNewer) {
+      // 窗口只是变长（上沿没动）⇒ 位置本就不用动；窗口已封顶开始**滑动**（上沿前移）⇒
+      // 顶部那一段从 DOM 里消失、下方内容整体上移，必须按同一条消息摆回去，否则每翻一页跳一页。
+      const a = tailAnchorRef.current;
+      tailAnchorRef.current = null;
+      if (a && curMin > prevMinSeqRef.current) {
+        const row = box.querySelector<HTMLElement>(`.msg-item[data-seq="${a.seq}"]`);
+        if (row) box.scrollTop += row.getBoundingClientRect().top - box.getBoundingClientRect().top - a.top;
+      }
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
       // 重新评估「跳底钮」：loadNewer 追加内容后若用户仍视觉贴底，隐藏按钮
@@ -2244,6 +2257,16 @@ export default function App() {
       setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
     } else if (nearBottomPx && moreBelow && !busy) {
       loadingNewerRef.current = true; // 下滚到底 → 加载更新一页
+      // 保位锚点：窗口末尾那条 + 它距容器顶的偏移（与上滚那一路同一套「按同一条消息补偿」）。
+      const lastRendered = maxSeqOf(messagesRef.current);
+      const lastRow = lastRendered > 0 ? box.querySelector<HTMLElement>(`.msg-item[data-seq="${lastRendered}"]`) : null;
+      tailAnchorRef.current = lastRow
+        ? { seq: lastRendered, top: lastRow.getBoundingClientRect().top - box.getBoundingClientRect().top }
+        : null;
+      // **先把窗口长到上限再谈滑动**（与上滚那一路对称）：没长满时新的一页直接接在下方，
+      // 上沿不动 ⇒ 根本不需要补偿；长满 RENDER_WINDOW_MAX 之后才开始滑，那时才靠锚点摆回去。
+      setRenderView((v) => (v.anchor === null && v.size < RENDER_WINDOW_MAX
+        ? { ...v, size: Math.min(v.size + RENDER_WINDOW_STEP, RENDER_WINDOW_MAX) } : v));
       clientRef.current?.loadNewer(cid, newest);
     } else if (box.scrollTop < 120 && !busy) {
       // 上滚到顶：**先扩渲染窗口**（本地已有的那部分不必再请求），本地也见底了才去拉更早的一页。

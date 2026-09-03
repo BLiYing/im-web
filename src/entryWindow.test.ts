@@ -20,8 +20,16 @@ describe("进会话取哪一窗", () => {
     expect(since).toBeGreaterThan(100019);      // 绝不能落在旧读位点附近
   });
 
-  it("从没读过（readSeq=0）→ 最近一页，不拿 0 当锚点", () => {
-    expect(entryWindowSince({ ...base, readSeq: 0, latestSeq: 900, unread: 900 })).toBe(700);
+  it("从没读过（readSeq=0）且有未读 → 从会话开头起一页，不许贴底", () => {
+    // 首次登录 / 刚入群：read_seq=0 就是"一条都没读过"，首条未读即第一条可见消息。
+    // 这条曾断言成 700（= 最近一页），把 2 万人大群的新成员直接甩到最新一条上，
+    // 再由「可见即读」把十万条未读一次性清零（2026-09-03 实测）。
+    expect(entryWindowSince({ ...base, readSeq: 0, latestSeq: 900, unread: 900 })).toBe(0);
+    expect(entryWindowSince({ ...base, readSeq: 0, latestSeq: 110019, unread: 10000 })).toBe(0);
+  });
+
+  it("从没读过但也没未读（空会话 / 全是自己发的）→ 仍取最近一页贴底", () => {
+    expect(entryWindowSince({ ...base, readSeq: 0, latestSeq: 900, unread: 0 })).toBe(700);
   });
 
   it("会话很短时不出负数", () => {

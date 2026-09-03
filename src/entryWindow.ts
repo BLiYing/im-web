@@ -26,7 +26,12 @@ export interface EntryWindowInput {
  * 无未读 → 最近一页，进会话即贴底。
  */
 export function entryWindowSince({ readSeq, latestSeq, unread, contextBefore, historyPage }: EntryWindowInput): number {
-  // readSeq<=0（从没读过）时没有可锚的位点，按"最近一页"处理。
-  if (unread > 0 && readSeq > 0) return Math.max(0, readSeq - contextBefore);
+  // readSeq<=0 是「一条都没读过」（首次登录、刚入群），**不是"没有可锚的位点"**——
+  // 位点就是 0，首条未读即会话里对我可见的第一条。早先这里加了 `&& readSeq > 0`，
+  // 于是首次登录的新成员被判成"无未读"直接取最近一页：进 2 万人大群停在最新，
+  // 分割线摆在倒数第 200 条上方，紧接着「可见即读」把 read_seq 一路推到 109820——
+  // **十万条未读进一次会话就清零**（2026-09-03 user13028 实测，服务端 read_position 实锤）。
+  // since=0 时服务端会从可见下界（G2 入群位点）起给第一页，故新成员也拿得对。
+  if (unread > 0) return Math.max(0, readSeq - contextBefore);
   return Math.max(0, latestSeq - historyPage);
 }
