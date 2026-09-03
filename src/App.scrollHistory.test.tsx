@@ -88,6 +88,33 @@ describe("进会话取哪一窗：判据是**真实未读数**，不是 latest>r
   });
 });
 
+describe("渲染窗口有硬上限：向上翻页只滑动、不无限长", () => {
+  it("本地很大时连翻多次，渲染行数封顶在 3 页且窗口确实在往前走", async () => {
+    // 现场：本地已有 2000 条（首次 sync 灌进来的），用户一路往上翻。
+    // 改之前是 size += 200 一路加到本地全量——浏览器实测每翻一次 +200 行 / +1400 个 DOM 节点，
+    // 翻 6 次到 1400 行，二十来次就回到 W2 当初要消灭的量级（4199 行 / 29537 节点）。
+    const LOCAL = 2000;
+    Fake.conversations = [makeConv({ latest_conv_seq: LOCAL, read_seq: LOCAL, unread: 0 })];
+    await enterChat();
+    deliver(1, LOCAL);
+    await waitFor(() => expect(renderedSeqs().length).toBe(PAGE));
+
+    // 5 轮：窗口先长到上限（200→400→600），随后每轮滑动半窗（-300）。
+    // 刻意不翻到会话开头——那时上方没得翻了，"每轮都往前走"自然不再成立，与本例要钉的东西无关。
+    let top = renderedSeqs()[0];
+    for (let i = 0; i < 5; i++) {
+      const prevTop = top;
+      scrollToTop();
+      await waitFor(() => expect(renderedSeqs()[0]).toBeLessThan(prevTop)); // 每一轮都真的往前走
+      top = renderedSeqs()[0];
+      // 封顶：本地有 2000 条也不会全渲染出来。
+      expect(renderedSeqs().length).toBeLessThanOrEqual(PAGE * 3);
+    }
+    // 翻了 8 轮，窗口早已越过 600 条的位置，但渲染集始终没超过上限。
+    expect(top).toBeLessThan(LOCAL - PAGE * 3);
+  }, 20000);
+});
+
 describe("↓N 角标：锚点模式（上翻过一页后，窗口不含尾部）", () => {
   const badge = () => document.querySelector(".jump-badge")?.textContent ?? "";
 

@@ -346,6 +346,14 @@ export default function App() {
   // 第一版写成了尾部计数，跳到第 123 条时只能靠把窗口"撑大"到覆盖它——实测直接涨到 3 万条
   // 全渲染，等于没做窗口。正确模型是窗口**移动**：anchor 为空=贴最新，非空=以那条为中心。
   const RENDER_WINDOW_STEP = 200;
+  // 渲染窗口的**硬上限**（3 页，对齐 iOS 的 kIMWindowMaxPages）。
+  //
+  // 窗口在进会话时是 200 条，但向上展开那条路原先是 `size + STEP` 一路加到本地全量——
+  // 实测每上翻一次 +200 行 / +1400 个 DOM 节点，翻 6 次就到 1400 行 / 9802 节点，
+  // 二十来次即回到 W2 当初要消灭的量级（那次现场是 4199 行 / 29537 节点）。
+  // 触顶之后改为**滑动**：以当前顶部那条为锚点重开一窗，等量丢掉下方那截，
+  // 位置由 histAnchorRef 的按消息补偿保住（与取回更早一页同一套）。
+  const RENDER_WINDOW_MAX = RENDER_WINDOW_STEP * 3;
   const [renderView, setRenderView] = useState<{ anchor: number | null; size: number }>(
     { anchor: null, size: RENDER_WINDOW_STEP });
   const renderViewRef = useRef(renderView);               // 稳定回调（driveLocate）里读当前值
@@ -2261,15 +2269,23 @@ export default function App() {
         (m) => m.convSeq > 0 && m.convSeq === oldestRendered - 1,
       );
       const localCount = localAllForConv.length;
-      if (renderView.size < localCount && contiguousAbove) {
-        // 扩大窗口（保持当前锚点），把本地已有的更早内容展开出来。
-        setRenderView((v) => ({ ...v, size: Math.min(v.size + RENDER_WINDOW_STEP, localCount) }));
+      const roomToGrow = Math.min(localCount, RENDER_WINDOW_MAX);
+      if (contiguousAbove && renderView.size < roomToGrow) {
+        // 未触顶：扩大窗口（保持当前锚点），把本地已有的更早内容展开出来。
+        setRenderView((v) => ({ ...v, size: Math.min(v.size + RENDER_WINDOW_STEP, roomToGrow) }));
+      } else if (contiguousAbove) {
+        // 已触顶：**滑动**而不是继续长。以当前顶部那条为锚点重开一窗——visibleSlice 会把它
+        // 摆在窗口中间，于是上方多出半窗、下方等量丢掉，DOM 恒定在上限内。
+        // 不这么做就只剩两条路：要么无限长（回到 W2 之前），要么什么都不做（往上滚不动）。
+        setRenderView({ anchor: oldestRendered, size: RENDER_WINDOW_MAX });
       } else if (oldestRendered > 1) {
         loadingOlderRef.current = true;
         // **切到锚点模式**：anchor=null 的窗口恒等于"本地最新 size 条"，于是补回来的更早消息
         // 永远进不了这一窗——屏幕纹丝不动，而 loadingOlderRef 靠"渲染集最小 seq 下降"复位，
         // 不降就永久卡在"加载中"，之后每次上滑都被当成 busy 跳过（2026-09-03 实测）。
         // 把锚点钉在用户当前看的顶部那条，新内容就出现在它上方，位置也不会被甩走。
+        // 新开的一窗从**基础尺寸**起（随后上滚会再逐级长到 RENDER_WINDOW_MAX）：
+        // 语义统一成"窗口起于 STEP、长到 MAX 封顶"，别在这里直接给上限值。
         setRenderView({ anchor: oldestRendered, size: RENDER_WINDOW_STEP });
         clientRef.current?.loadOlder(cid, oldestRendered);
       }
