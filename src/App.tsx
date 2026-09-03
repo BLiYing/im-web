@@ -2284,9 +2284,11 @@ export default function App() {
         // 永远进不了这一窗——屏幕纹丝不动，而 loadingOlderRef 靠"渲染集最小 seq 下降"复位，
         // 不降就永久卡在"加载中"，之后每次上滑都被当成 busy 跳过（2026-09-03 实测）。
         // 把锚点钉在用户当前看的顶部那条，新内容就出现在它上方，位置也不会被甩走。
-        // 新开的一窗从**基础尺寸**起（随后上滚会再逐级长到 RENDER_WINDOW_MAX）：
-        // 语义统一成"窗口起于 STEP、长到 MAX 封顶"，别在这里直接给上限值。
-        setRenderView({ anchor: oldestRendered, size: RENDER_WINDOW_STEP });
+        // **保持当前窗口大小**，不要重置回 STEP（2026-09-03 实测）：
+        // 重置的话，居中到旧顶部只露出半窗＝100 条新内容，下一次上滑又靠扩窗补 100，
+        // 于是窗口在 200↔400 之间来回抖、每次只前进 100 条——libeyond 在 2 万人大群里
+        // 上滑的观感就是"加载不出更多"。保持尺寸后稳定在「一次上滑 = 一页 200 条」。
+        setRenderView((v) => ({ anchor: oldestRendered, size: v.size }));
         clientRef.current?.loadOlder(cid, oldestRendered);
       }
     }
