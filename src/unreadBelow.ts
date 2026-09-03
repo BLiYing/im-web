@@ -13,6 +13,13 @@ export interface UnreadBelowInput {
   pendingRead: number;
   /** 当前**已渲染**的消息里，位于已滚入位点之下的对端消息数。 */
   loadedBelow: number;
+  /** 本地已下载到的最大 conv_seq。`head` 超过它即证明下方还有没下载的消息——
+   *  这条证据是 O(1) 的，且**不依赖 `hasGap` 这个连接级内存标志**（刷新/重连后它会短暂为空）。
+   *
+   *  **刻意必填**：给个默认值就等于让「没传」静默变成一种判断（默认 0 → 恒判有缺口，
+   *  默认 ∞ → 这条证据恒不生效）。两种默认都会在调用方漏传时悄悄给出错误的数字，
+   *  而本函数存在的全部理由就是不让 ↓N 悄悄算错。 */
+  localNewest: number;
 }
 
 /**
@@ -27,8 +34,13 @@ export interface UnreadBelowInput {
  * head 未知（=0，老服务端或还没收到过带 head 的响应）时退回数本地：宁可偏小，
  * 也不能拿一个没有依据的数字糊弄。
  */
-export function unreadBelowCount({ hasGap, head, pendingRead, loadedBelow }: UnreadBelowInput): number {
-  if (hasGap && head > 0) {
+export function unreadBelowCount({ hasGap, head, pendingRead, loadedBelow, localNewest }: UnreadBelowInput): number {
+  // 两条独立的「本地不全」证据，任一成立都不能数本地：
+  //   · hasGap —— 收到过 too_long（连接级内存标志，刷新/重连后会短暂丢失）；
+  //   · head > localNewest —— 服务端最新位点超过本地最新一条，**O(1) 且不依赖上面那个标志**。
+  // 只认第一条会漏掉一类现场：iOS 侧同款判据曾因此把 1 万条未读显示成 185（= 窗口条数），
+  // 那时窗口「贴着本地最新」，看上去一切正常（2026-09-03 实测）。
+  if ((hasGap || head > localNewest) && head > 0) {
     return head > pendingRead ? head - pendingRead : 0;
   }
   return loadedBelow;

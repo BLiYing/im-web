@@ -2179,8 +2179,12 @@ export default function App() {
     // 那是个关于**整个会话**的问题，按 §4.9 的判据就该用本地全量而不是当前渲染的那一窗。
     const cid = currentConvRef.current;
     const localAll = msgsByConvRef.current[cid] ?? [];
+    // 两个量**一趟扫完**：这段每次滚动都会跑，长会话下本地全量可达十万条，
+    // 为 localNewest 再扫一遍等于把每帧成本翻倍。
     let loadedBelow = 0;
+    let localNewest = 0;
     for (const m of localAll) {
+      if (m.convSeq > localNewest) localNewest = m.convSeq;
       if (m.convSeq > pendingReadRef.current && m.from !== uidRef.current && countsAsUnread(m.contentType)) loadedBelow++;
     }
     const client = clientRef.current;
@@ -2189,6 +2193,7 @@ export default function App() {
       head: client?.headOf(cid) ?? 0,
       pendingRead: pendingReadRef.current,
       loadedBelow,
+      localNewest,
     }));
     setJumpCapped(false); // 这里算的是真实差值/真实条数，不是被服务端计数上限截断的值
   }, [refreshConversations]);

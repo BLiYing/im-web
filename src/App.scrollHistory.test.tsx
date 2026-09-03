@@ -69,6 +69,9 @@ async function enterWithLatestPage() {
 describe("↓N 角标：锚点模式（上翻过一页后，窗口不含尾部）", () => {
   const badge = () => document.querySelector(".jump-badge")?.textContent ?? "";
 
+  // 显式放宽超时：本例要把 600 条消息逐条过一遍 React（进会话 200 + 翻一页 200 + 尾部 1，
+  // 每条都触发 ingest/渲染/可见即读扫描），单独跑约 1.6s，但全量并行时机器负载高，
+  // 默认 5s 会偶发超时。放宽的是**预算**不是断言——断言本身仍然精确。
   it("读历史期间来的对端消息要计入角标，不能等滚回底才看见", async () => {
     await enterWithLatestPage(); // 本地只有 [29802..30001]
 
@@ -84,7 +87,7 @@ describe("↓N 角标：锚点模式（上翻过一页后，窗口不含尾部�
     // 修复前角标只数 DOM、且重算 effect 只看窗口条数 → 纹丝不动，用户毫不知情。
     deliver(HEAD + 1, HEAD + 1);
     await waitFor(() => expect(Number(badge() || 0)).toBe(before + 1));
-  });
+  }, 15000);
 });
 
 describe("上滑翻历史：本地在上沿之上不连续 → 向服务端要一页", () => {
