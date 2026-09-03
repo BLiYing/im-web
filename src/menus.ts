@@ -22,7 +22,7 @@ export type MenuAction<C> = {
 /** 消息菜单上下文：当前消息 + 本人 uid（判断"我发的/对方发的"）。
  *  canPin：能否置顶（G0）。群内 = 群主/管理员（对齐服务端 perm；越权服务端回 300006），单聊 = 任一方。
  *  由调用方按 my_role 算好传入——菜单层不查群资料。 */
-export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean; canPin?: boolean; hasTranscript?: boolean };
+export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean; isSuper?: boolean; canPin?: boolean; hasTranscript?: boolean };
 
 /** 会话菜单上下文：当前会话。 */
 export type ConvCtx = { c: Conversation };
@@ -80,8 +80,10 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
   return [
     // 已读详情（M4-8）：**只对自己发的群消息**显示——只有发送者能看谁读了自己（隐私，服务端另有 403 校验）。
     // 放首位，对齐 iOS 长按菜单顶部的读者行。人数在弹出的名单里显示（菜单构建是同步的，不做异步取数）。
+    // **大群不显示**：超级群整套已读语义是关掉的（SUPERGROUP_DESIGN §4），2 万人"全员已读"永不成立，
+    // 服务端也会回 enabled=false。留着这一行只会让人点了才被告知"人数过多不支持"。
     { id: "readReceipts", label: "已读详情", icon: Eye,
-      visible: (c) => !!c.isGroup && c.m.from === c.uid && c.m.convSeq > 0, run: (c) => h.readReceipts(c.m) },
+      visible: (c) => !!c.isGroup && !c.isSuper && c.m.from === c.uid && c.m.convSeq > 0, run: (c) => h.readReceipts(c.m) },
     // 语音转文字（服务端识别，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md）：只对已发出的 voice 可用。
     // 已展开 → 变「取消转文字」（只收起本地面板，不删服务端结果——缓存是会话共享的）。
     { id: "transcribe", label: "转文字", icon: FileText,

@@ -39,6 +39,8 @@ export interface MessageListProps {
   selected: Set<number>;
   menu: { m: ChatMessage } | null;
   readSeq: number;
+  /** 大群（超级群）：已读语义整套关闭，气泡尾巴不画 ✓/✓✓（SUPERGROUP_DESIGN §4）。 */
+  isSuperGroup?: boolean;
   firstUnreadIdx: number;
   timeFormat: TimeFormat;
   translations: Record<number, string>;
@@ -64,7 +66,7 @@ export interface MessageListProps {
 
 export function MessageList(p: MessageListProps) {
   const {
-    messages, peer, isGroupChat, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
+    messages, peer, isGroupChat, isSuperGroup, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
     timeFormat, translations, transcripts, uploadProgress, dividerRef,
     mediaGate, mediaSrc, senderLabel, localNameOf, senderRole, senderAvatar, renderMentionText, renderMessageText,
     openPeerDetail, handleScanRaw, requestFriendFromNote,
@@ -129,6 +131,9 @@ export function MessageList(p: MessageListProps) {
       {messages.map((m, i) => {
         const mine = m.from === uid;
         const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
+        // 大群里 ✓ 恒为"已送达"、永远变不成 ✓✓（群回执本就不向成员扇出），且超级群已明说关闭已读状态——
+        // 挂一个永不变化的钩子只会让人以为消息没被读到。整条隐藏，与 iOS 同口径。
+        const showTick = mine && m.convSeq > 0 && !isSuperGroup;
         const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
         // Telegram 式连续消息分组（群聊对方）：连续同发送者只首条显名、末条显头像；非首条收紧上间距。
         const grpThem = isGroupChat && !mine;
@@ -262,7 +267,7 @@ export function MessageList(p: MessageListProps) {
             {mine ? (
               m.status === "sending" ? "发送中…"
                 : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
-                  : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>
+                  : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span> : null}</>
             ) : (
               formatTime(m.timestamp, timeFormat)
             )}
@@ -346,7 +351,7 @@ export function MessageList(p: MessageListProps) {
                         ? (m.status === "sending" ? (uploadPaused ? formatTime(m.timestamp, timeFormat) : "发送中…")
                           // 被拒收（有 note）时失败已由红❗+下方系统行表达，角标只显时间，不重复报错（与 iOS 一致）。
                           : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : "未发送 ✗")
-                          : <>{formatTime(m.timestamp, timeFormat)}<span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span></>)
+                          : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span> : null}</>)
                         : formatTime(m.timestamp, timeFormat)}
                     </span>
                   </span>
@@ -394,7 +399,7 @@ export function MessageList(p: MessageListProps) {
                 ) : m.contentType === "voice" ? (
                   // 语音气泡（P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §10）：
                   // ▶ + 波形 + m:ss + 未播红点；单例 audio 同页面一次只播一条。
-                  <VoiceBubble m={m} mine={mine} uid={uid} audioSrc={mediaSrc(m)}
+                  <VoiceBubble m={m} mine={mine} uid={uid} audioSrc={mediaSrc(m)} showTick={showTick}
                                readByPeer={readByPeer} timeFormat={timeFormat} />
                 ) : m.contentType === "file" ? (
                   // 上传中（content 还没有 URL）不渲染成可点下载的 <a>，改显进度条 + 已传/总大小。

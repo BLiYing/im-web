@@ -108,6 +108,8 @@ interface VoiceBubbleProps {
    *  与 .bmeta 共用同一判定（群聊用 group_read_seq「全员已读」播种，见 App.openConversation），
    *  别在气泡里另算一套：曾多带一个 !isGroup 条件，把群里的全员已读 ✓✓ 压成 ✓。 */
   readByPeer?: boolean;
+  /** 是否画 ✓/✓✓。大群关闭已读语义 → false（见 MessageList 的 showTick）。 */
+  showTick?: boolean;
   /** 12/24 小时制（通用设置）；与其它气泡共用 time.ts 的 formatTime，勿手写时分。 */
   timeFormat?: TimeFormat;
 }
@@ -128,7 +130,7 @@ function fmt(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readByPeer = false, timeFormat = "24" }: VoiceBubbleProps) {
+export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readByPeer = false, showTick = true, timeFormat = "24" }: VoiceBubbleProps) {
   const [tick, setTick] = useState(0);
   const waveRef = useRef<HTMLDivElement | null>(null);
   const [barCount, setBarCount] = useState(28);
@@ -252,7 +254,8 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readBy
   // 消息时间/勾（2026-08-27 用户拍板：**独立一行**右对齐，iOS/Web 拉齐；时长行只留时长+倍速）。
   // mini 变体（收藏/详情页语音 tab）不显时间行——外层行本就有独立时间戳，重复即噪音。
   const timeStr = variant === "mini" ? "" : formatTime(m.timestamp, timeFormat);
-  const showsTicks = variant !== "mini" && mine && m.convSeq > 0 && m.status !== "sending" && m.status !== "failed";
+  // showTick=false 时整条不画（大群关闭已读语义，见 MessageList）。
+  const showsTicks = showTick && variant !== "mini" && mine && m.convSeq > 0 && m.status !== "sending" && m.status !== "failed";
 
   return (
     <div className={`voice-bubble${variant === "mini" ? " variant-mini" : ""}`}

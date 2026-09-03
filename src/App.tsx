@@ -3301,7 +3301,7 @@ export default function App() {
           />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
             <MessageList
-                messages={messages} peer={peer} isGroupChat={isGroupChat} uid={uid}
+                messages={messages} peer={peer} isGroupChat={isGroupChat} isSuperGroup={chatIsSuper} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
                 timeFormat={timeFormat} translations={translations} transcripts={transcripts} uploadProgress={uploadProgress} dividerRef={dividerRef}
                 mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} localNameOf={localNameOf} senderRole={senderRole} senderAvatar={senderAvatar}
@@ -3499,13 +3499,13 @@ export default function App() {
       {menu && (
         <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
           {messageActions
-            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
+            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
                 onClick={() => {
                   // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
                   if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
-                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }); setMenu(null);
+                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }); setMenu(null);
                 }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}
