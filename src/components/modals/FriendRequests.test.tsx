@@ -39,6 +39,15 @@ describe("FriendRequestModal（发申请时填验证消息）", () => {
     expect(screen.getByText(`2/${MAX_FRIEND_HELLO}`)).toBeTruthy();
   });
 
+  // autoFocus 会把光标停在预填文案的**最前面**：想在「我是老王」后面补一句的人得先按 End。
+  it("打开即聚焦，且光标落在预填文案末尾", () => {
+    render(<FriendRequestModal name="小明" defaultHello="我是老王" busy={false} onSend={vi.fn()} onClose={vi.fn()} />);
+    const box = screen.getByLabelText(/验证消息/) as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(box);
+    expect(box.selectionStart).toBe("我是老王".length);
+    expect(box.selectionEnd).toBe("我是老王".length);
+  });
+
   it("busy 时按钮禁用（防重复发）", () => {
     render(<FriendRequestModal name="小明" defaultHello="" busy onSend={vi.fn()} onClose={vi.fn()} />);
     expect((screen.getByText("发送中…").closest("button") as HTMLButtonElement).disabled).toBe(true);

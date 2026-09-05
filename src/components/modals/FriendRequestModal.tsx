@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { Modal } from "../Modal";
 
@@ -21,13 +21,22 @@ export function FriendRequestModal({ name, defaultHello, busy, onSend, onClose }
   onClose: () => void;
 }) {
   const [hello, setHello] = useState(defaultHello);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // 光标落到**末尾**再聚焦。`autoFocus` 单用会把光标停在预填文案的最前面，
+  // 于是想改成「我是×××，同事」的人只能先按一下 End——预填值越有用，这个别扭就越常撞上。
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
   return (
     <Modal className="modal friendreq-modal" onClose={onClose}>
       <h3 className="modal-title"><UserPlus size={18} /> 添加好友</h3>
       <div className="friendreq-target">发送给 <b>{name}</b></div>
       <label className="friendreq-label" htmlFor="friendreq-hello">验证消息（选填，对方会看到）</label>
-      <textarea id="friendreq-hello" className="friendreq-input" rows={3} maxLength={MAX_FRIEND_HELLO}
-        value={hello} autoFocus placeholder="说一句，让对方知道你是谁"
+      <textarea id="friendreq-hello" ref={inputRef} className="friendreq-input" rows={3} maxLength={MAX_FRIEND_HELLO}
+        value={hello} placeholder="说一句，让对方知道你是谁"
         onChange={(e) => setHello(e.target.value)} />
       <div className="friendreq-count">{hello.length}/{MAX_FRIEND_HELLO}</div>
       <div className="modal-actions">

@@ -41,7 +41,10 @@ export function ContactsTab(p: ContactsTabProps) {
   return (
     <div className="contacts">
       <div className="newchat">
-        <input value={searchQ} placeholder="对方完整 uid 或手机号"
+        {/* 找人只认**完整 username / 手机号**（后端 SearchUsers 是等值匹配，防枚举）。
+            原文案写「完整 uid」是双重错误：内部 ID 用户根本看不到（docs/UI.md 用户标识），
+            真拿 uid 去搜也搜不到——SQL 里压根没有 user_id 这一路。 */}
+        <input value={searchQ} placeholder="对方用户名或手机号"
           onChange={(e) => setSearchQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
         <button onClick={() => void doSearch()}>搜索</button>

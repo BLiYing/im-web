@@ -2860,9 +2860,10 @@ export default function App() {
   const contactEntries: Row[] = [
     { id: "groups", label: "群聊", icon: Users, iconTint: "blue", chevron: true, onClick: () => void openGroupsModal() },
     // 「新的朋友」独立入口（2026-09-05）：此前它是好友列表上方的一段，好友一多就被挤到看不见，
-    // 而"有人加我"恰恰是需要主动去处理的事。右值显待确认数（0 时不显，别摆一个恒亮的 0）。
+    // 而"有人加我"恰恰是需要主动去处理的事。红色徽标显待确认数（0 时不显，别摆一个恒亮的 0）——
+    // 早先走的是 value（灰色小字），跟"设置项当前值"长得一模一样，一眼扫过去根本不像有待办。
     { id: "friendRequests", label: "新的朋友", icon: UserPlus, iconTint: "green", chevron: true,
-      value: incomingCount > 0 ? unreadBadgeText(incomingCount) : undefined,
+      badge: incomingCount > 0 ? unreadBadgeText(incomingCount) : undefined,
       onClick: () => { setFriendRequests(true); void refreshFriends(); } },
     { id: "official", label: "公众号", icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon("公众号") },
     { id: "service", label: "服务号", icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon("服务号") },

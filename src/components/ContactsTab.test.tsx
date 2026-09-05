@@ -43,10 +43,22 @@ describe("ContactsTab", () => {
     expect(queryByText("4820571639")).toBeNull();
   });
 
+  // 待办数走 .row-badge（红底胶囊），不走 .row-value（灰色小字，语义是"当前值"）。
+  // 早先用 value 渲染，「新的朋友 3」跟设置页的「字号 中」长得一模一样，一眼扫过去不像有待办。
+  it("入口行的待确认数渲染成红色徽标而非灰色右值", () => {
+    const p = base({ contactEntries: [
+      { id: "friendRequests", label: "新的朋友", chevron: true, badge: "3", onClick: vi.fn() },
+    ] });
+    const { container, getByText } = mount(p);
+    const badge = getByText("3");
+    expect(badge.className).toBe("row-badge");
+    expect(container.querySelector(".row-value")).toBeNull();
+  });
+
   it("搜索框回车/按钮 → doSearch；扫一扫 → onScan", () => {
     const p = base();
     const { getByPlaceholderText, getByText, getByTitle } = mount(p);
-    fireEvent.keyDown(getByPlaceholderText("对方完整 uid 或手机号"), { key: "Enter" });
+    fireEvent.keyDown(getByPlaceholderText("对方用户名或手机号"), { key: "Enter" });
     fireEvent.click(getByText("搜索"));
     expect(p.doSearch).toHaveBeenCalledTimes(2);
     fireEvent.click(getByTitle("扫一扫 / 我的二维码")); expect(p.onScan).toHaveBeenCalled();

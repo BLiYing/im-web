@@ -916,6 +916,13 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .row-label { flex: 1; }
 .row-value { color: var(--text-secondary); font-size: 14px; }
 .row-chevron { color: var(--text-secondary); flex-shrink: 0; }
+/* 入口行待办徽标（「新的朋友」待确认数）：红底白字圆角胶囊，与 iOS
+   IMContactsViewController 的入口红点同规格（systemRed / 18 高 / 圆角 9 / 12 号 semibold）。
+   走 --danger 而不是 --unread-badge（蓝）：蓝色胶囊在本站是"未读消息数"，
+   两种含义共用一个颜色，扫一眼分不出是"有人加我"还是"有新消息"。 */
+.row-badge { flex-shrink: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--danger); color: var(--on-accent); font-size: 12px; font-weight: 600; line-height: 18px;
+  text-align: center; font-variant-numeric: tabular-nums; }
 .row-icon { color: var(--text-secondary); flex-shrink: 0; }
 /* iOS 设置图标：圆角色块 + 白字形（对齐 IMSettingsViewController 30×30 / 圆角7 / 白 glyph）。 */
 .row-icon-tile { width: 29px; height: 29px; flex-shrink: 0; border-radius: 7px; display: grid; place-items: center; color: var(--on-media); }
