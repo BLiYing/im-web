@@ -456,6 +456,12 @@ export interface JoinRequest {
 /** 群黑名单一项（G2）。 */
 export interface GroupBan {
   user_id: string;
+  // 被拉黑者资料（后端 group.BanView 同批下发）：黑名单页只能显示这两个，
+  // user_id 是解除拉黑的接口参数，**不得展示**（内部 ID 零 UI 露出，见
+  // ../IMServer/docs/design/ACCOUNT_IDENTITY_REDESIGN.md §7.5）。
+  username?: string;
+  nickname?: string;
+  avatar_url?: string;
   banned_by: string;
   banned_at: number;
   expires_at: number; // 0=永久

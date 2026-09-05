@@ -3825,6 +3825,7 @@ export default function App() {
       {groupBansModal && (
         <GroupBansModal
           bans={groupBansModal.bans}
+          remarks={remarks}
           onUnban={(userId) => void doUnban(groupBansModal.convId, userId)}
           onClose={() => setGroupBansModal(null)}
         />
