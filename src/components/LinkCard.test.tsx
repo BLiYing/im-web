@@ -25,3 +25,33 @@ describe("LinkCard 预览抓取：并发去重 + 负缓存", () => {
     expect(fetchPreview).toHaveBeenCalledTimes(1);
   });
 });
+
+// 卡片异步长出来会把气泡撑高。外面那套「进会话贴底 / 新消息贴底」在卡片出现之前就跑完了，
+// 所以卡片必须主动喊一声，否则最后一条被挤到视口下方（2026-09-05 实测 113px）。
+// **关键是「没有图片时也要喊」**——旧实现只挂 `<img onLoad>`，而多数站点的 OG 预览没有图。
+describe("LinkCard 高度变化要通知 onMediaLoad（贴底才不会被挤掉）", () => {
+  it("预览无图：卡片出现时仍通知一次", async () => {
+    const onMediaLoad = vi.fn();
+    const fetchPreview = async (u: string): Promise<LinkPreview> => ({ url: u, title: "无图标题" });
+    render(<LinkCard url="https://c.example/z" fetchPreview={fetchPreview} onMediaLoad={onMediaLoad} />);
+    await waitFor(() => expect(screen.getByText("无图标题")).toBeTruthy());
+    await waitFor(() => expect(onMediaLoad).toHaveBeenCalled());
+  });
+
+  it("抓不到 og（不出卡片、高度不变）→ 不通知，免得白白把用户拽回底部", async () => {
+    const onMediaLoad = vi.fn();
+    const url = "https://d.example/z";
+    const fetchPreview = async (): Promise<LinkPreview> => { throw new Error("boom"); };
+    render(<LinkCard url={url} fetchPreview={fetchPreview} onMediaLoad={onMediaLoad} />);
+    await waitFor(() => expect(linkPreviewCache.get(url)).toBe(null));
+    expect(onMediaLoad).not.toHaveBeenCalled();
+  });
+
+  it("cardOnly 分支（文本内混排 URL）同样通知", async () => {
+    const onMediaLoad = vi.fn();
+    const fetchPreview = async (u: string): Promise<LinkPreview> => ({ url: u, title: "混排标题" });
+    render(<LinkCard url="https://e.example/z" cardOnly fetchPreview={fetchPreview} onMediaLoad={onMediaLoad} />);
+    await waitFor(() => expect(screen.getByText("混排标题")).toBeTruthy());
+    await waitFor(() => expect(onMediaLoad).toHaveBeenCalled());
+  });
+});

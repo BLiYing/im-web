@@ -29,6 +29,12 @@ export function LinkCard({ url, fetchPreview, onMediaLoad, onOpenInvite, cardOnl
   }, [url, fetchPreview]);
   let host = ""; try { host = new URL(url).hostname; } catch { /* */ }
   const hasCard = !!(p && (p.title || p.image));
+  // 卡片是**异步长出来的**：抓到 OG 之后气泡整体变高，而外面那套"进会话贴底 / 新消息贴底"
+  // 是在卡片出现之前跑完的 → 最后一条被挤到视口下方（2026-09-05 实测 113px，还顺带弹出 ↓ 按钮）。
+  // 只挂 `<img onLoad>` 不够：多数站点的预览**没有图**（本例就是），或图还没解码，
+  // 此时高度已经变了却没有任何人通知外面。故卡片一进 DOM 就通知一次。
+  // onMediaLoad 内部只在"此前处于贴底状态"时才补贴底，不会打断已上滚看历史的用户。
+  useEffect(() => { if (hasCard) onMediaLoad?.(); }, [hasCard, onMediaLoad]);
   const intercept = onOpenInvite && isOwnInviteLink(url, location.origin)
     ? (e: React.MouseEvent) => { e.preventDefault(); onOpenInvite(url); }
     : undefined;
