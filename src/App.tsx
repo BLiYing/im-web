@@ -1210,7 +1210,10 @@ export default function App() {
     // 直接从 conversations 取而不调 peerNick()：那个函数定义在本调用点之后，取值会 TDZ。
     peerPublicName: conversations.find((c) => !c.is_group && c.peer === peer)?.peer_nickname || "",
     myPublicName: myInfo?.nickname || "",
-    myUsername: myInfo?.username || loginName,
+    // **不回落 loginName**：扫码登录时 name 传空串，saveSession 会把登录框里残留的默认值
+    // （"user1001"）当成我的 username 存下来——那可能是**别人的**句柄。而这个值会被写进
+    // 合并转发条目名发给收件人。资料没拉回时宁可让它空着（落到「未命名用户」），也不能给错的。
+    myUsername: myInfo?.username || "",
   });
   // 收藏「来自X」补拉到的个人名片（uid→名片）与"已试过"集合，见下方 useEffect。
   const [favUserCards, setFavUserCards] = useState<Record<string, UserCard>>({});
@@ -1243,9 +1246,15 @@ export default function App() {
   //
   // 写成 **cleanup** 而不是"值变了就停"：cleanup 恰好在「离开旧值」时跑一次，
   // 而在依赖值上判 `if (!x) pause()` 会在首渲染就误停一次，且分不清"关掉"与"换了一个"。
-  useEffect(() => { if (!convId) return; return () => pauseVoicePlayback(); }, [convId]);       // 切/离开会话
-  useEffect(() => { if (!detail) return; return () => pauseVoicePlayback(); }, [detail]);       // 关/切资料卡片（语音页签）
-  useEffect(() => { if (!favorites) return; return () => pauseVoicePlayback(); }, [favorites]); // 关收藏弹窗
+  //
+  // ⚠️ 依赖必须是**「在哪一页」的标识**，不能是承载数据的对象/数组本身：`favorites` 是收藏列表数组，
+  // 翻页追加（loadMoreFavorites）与删一条都会换掉数组身份 → cleanup 触发 → 正在听的语音被莫名暂停。
+  // `detail` 同理（今天只在开/关时赋值，但哪天顺手刷新一下就复现同样的问题）。故都归一成字符串键。
+  const detailKey = detail ? `${detail.convId}|${detail.peer ?? ""}` : "";
+  const favoritesOpen = favorites !== null;
+  useEffect(() => { if (!convId) return; return () => pauseVoicePlayback(); }, [convId]);             // 切/离开会话
+  useEffect(() => { if (!detailKey) return; return () => pauseVoicePlayback(); }, [detailKey]);       // 关/切资料卡片（语音页签）
+  useEffect(() => { if (!favoritesOpen) return; return () => pauseVoicePlayback(); }, [favoritesOpen]); // 关收藏弹窗
 
   // 个人名片簇 → useContactShare（CONTACT_CARD_DESIGN §8）：入口 ① 选好友 + 二次确认发进当前会话；
   // 入口 ②③ 合成一条 contact 消息交给**已有的**转发选择页（故消费 useForward 的 setForwardMode/setForwarding）。

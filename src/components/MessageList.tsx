@@ -257,7 +257,7 @@ export function MessageList(p: MessageListProps) {
         // 语音气泡内部另有自己的 padding，会挤成一坨）——只让外层 bmeta 跳过 voice。
         const isVoiceBubble = m.contentType === "voice";
         // 名片气泡：卡片**本身就是气泡**（与 iOS 一致——那边卡片直接带底色圆角，没有外层气泡），
-        // 时间/勾画在卡片脚注行内，故外层不再渲染 .bmeta、气泡也不画底色（见 .bubble.contact）。
+        // 时间/勾画在卡片脚注行内，故外层不再渲染 .bmeta、气泡也不画底色（见 .bubble.card）。
         const isContactBubble = m.contentType === CONTACT_CONTENT_TYPE;
         // 合并转发卡片同理（2026-09-05 与 iOS 对齐）：iOS 的 IMChatRecordCell 里卡片自己就带
         // 底色圆角尾角、没有外层气泡，时间在卡片脚注行右端。Web 此前是"卡片套在气泡里"——

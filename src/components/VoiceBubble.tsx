@@ -79,6 +79,10 @@ let currentMid = "";
 let currentRelayable = false;
 export function setVoiceRelayResolver(fn: VoiceRelayResolver | null): void { relayResolver = fn; }
 
+/** 单例 audio 本体。**只给测试用**——生产代码一律走下面几个函数，别在别处直接操作它，
+ *  否则 currentSrc/currentMid/接力状态会和真实播放态脱节。 */
+export function voiceAudioElement(): HTMLAudioElement { return audio; }
+
 /** 就地暂停当前语音（保留位点，再点一下接着听）。
  *
  *  用在「离开这条语音所属的那一页」时——切会话、关资料页、关收藏弹窗。语音是**跟着页面**的：
@@ -88,10 +92,6 @@ export function setVoiceRelayResolver(fn: VoiceRelayResolver | null): void { rel
  *  刻意**不**清 `currentSrc/currentMid`：那是 stop 的语义（下次得从头播）。这里只是暂停，
  *  回到那一页气泡仍显示在原进度上，点一下继续。
  *  已暂停/没在播时是 no-op（`audio.pause()` 本身幂等，notify 让 UI 收敛一次也无害）。 */
-/** 单例 audio 本体。**只给测试用**——生产代码一律走上面几个函数，别在别处直接操作它，
- *  否则 currentSrc/currentMid/接力状态会和真实播放态脱节。 */
-export function voiceAudioElement(): HTMLAudioElement { return audio; }
-
 export function pauseVoicePlayback(): void {
   if (audio.paused) return;
   audio.pause();
