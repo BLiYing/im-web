@@ -218,3 +218,36 @@ describe("消息列表：多选态", () => {
     await waitFor(() => expect(msgs().querySelector(".sel-check")).toHaveClass("on"));
   });
 });
+
+// 合并转发卡片：**卡片就是气泡**（与 iOS IMChatRecordCell 一致），时间在卡片脚注行右端。
+// 旧实现是"卡片套在气泡里"——双层底色，时间还掉到卡片外下方（2026-09-05 用户实测报的样式分叉）。
+describe("消息列表：合并转发卡片", () => {
+  const record = JSON.stringify({ t: "群聊的聊天记录", items: [{ n: "小明", ct: "text", c: "你好" }] });
+
+  it("外层气泡不画底色（.bubble.card），时间嵌在 .record-foot 里而不是气泡下方", async () => {
+    await enterChat();
+    await push(recv({ contentType: "chat_record", content: record }));
+    const card = await waitFor(() => {
+      const el = msgs().querySelector(".record-card") as HTMLElement | null;
+      expect(el).toBeInTheDocument();
+      return el!;
+    });
+    const bubble = card.closest(".bubble")!;
+    expect(bubble).toHaveClass("card");                                   // 外层只当容器
+    expect(card.querySelector(".record-foot .bmeta")).toBeInTheDocument(); // 时间在卡片脚注行内
+    expect(bubble.querySelector(":scope > .bmeta")).toBeNull();           // 卡片外不再另画一行
+    expect(card.querySelector(".record-foot")!.textContent).toContain("聊天记录");
+  });
+
+  it("自己发的记录卡也一样（不因收发方向漏掉脚注时间）", async () => {
+    await enterChat();
+    await push(recv({ from: UID, contentType: "chat_record", content: record }));
+    const card = await waitFor(() => {
+      const el = msgs().querySelector(".record-card") as HTMLElement | null;
+      expect(el).toBeInTheDocument();
+      return el!;
+    });
+    expect(card.closest(".row")).toHaveClass("me");
+    expect(card.querySelector(".record-foot .bmeta")).toBeInTheDocument();
+  });
+});

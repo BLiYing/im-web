@@ -259,7 +259,13 @@ export function MessageList(p: MessageListProps) {
         // 名片气泡：卡片**本身就是气泡**（与 iOS 一致——那边卡片直接带底色圆角，没有外层气泡），
         // 时间/勾画在卡片脚注行内，故外层不再渲染 .bmeta、气泡也不画底色（见 .bubble.contact）。
         const isContactBubble = m.contentType === CONTACT_CONTENT_TYPE;
-        // 时间 + 勾的内容抽一份出来：普通气泡放在下方 .bmeta 里，名片气泡嵌进卡片脚注行。
+        // 合并转发卡片同理（2026-09-05 与 iOS 对齐）：iOS 的 IMChatRecordCell 里卡片自己就带
+        // 底色圆角尾角、没有外层气泡，时间在卡片脚注行右端。Web 此前是"卡片套在气泡里"——
+        // 双层底色 + 时间掉到卡片外下方，两端观感分叉。
+        const isRecordBubble = m.contentType === "chat_record";
+        // 卡片型气泡（名片 / 合并转发）：外层气泡不画底色、时间嵌进卡片脚注行。
+        const isCardBubble = isContactBubble || isRecordBubble;
+        // 时间 + 勾的内容抽一份出来：普通气泡放在下方 .bmeta 里，卡片气泡嵌进卡片脚注行。
         // 两处各写一遍迟早漂移（改了"已编辑"标记只改一处之类）。
         const metaNode = (
           <span className="bmeta">
@@ -292,7 +298,7 @@ export function MessageList(p: MessageListProps) {
                         title={m.note || (canResend ? "发送失败，点击重发" : "发送失败")}
                         onClick={() => resendMessage(m)}>!</button>
               )}
-              <div className={`bubble${isMediaBubble ? " media" : ""}${isContactBubble ? " contact" : ""}${menuActive ? " ctx-active" : ""}`}
+              <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${menuActive ? " ctx-active" : ""}`}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                 {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
                 {m.replyToConvSeq ? (
@@ -363,7 +369,13 @@ export function MessageList(p: MessageListProps) {
                       <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
                         <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
                       ))}</div>
-                      <div className="record-foot">聊天记录</div>
+                      {/* 脚注行 = 左「聊天记录」+ 右「时间/勾」，与 iOS IMChatRecordCell 的
+                          `_footer` 与 `_meta` 同排同布局。时间放进卡片内而不是卡片下方，
+                          两端才真正一致（名片卡 .contact-card-foot 早已是这个形态）。 */}
+                      <div className="record-foot">
+                        <span>聊天记录</span>
+                        {metaNode}
+                      </div>
                     </div>
                   ); })()
                 ) : m.contentType === CONTACT_CONTENT_TYPE ? (
@@ -475,7 +487,7 @@ export function MessageList(p: MessageListProps) {
                 {m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? (
                   <div className={`msg-caption${m.contentType === "file" ? " file" : ""}`}>{renderMentionText(m, m.caption)}</div>
                 ) : null}
-                {!isMediaBubble && !isVoiceBubble && !isContactBubble && (
+                {!isMediaBubble && !isVoiceBubble && !isCardBubble && (
                   metaNode
                 )}
               </div>
