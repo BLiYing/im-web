@@ -27,7 +27,7 @@ grandfather_limit() {
   case "$1" in
     src/App.tsx)      echo 3800 ;;  # 2026-09-05 棘轮下调 4000→3800（拆出 chatNaming/convPreview/useGroupOps 后 3735）。
                                     # 4000 那次是「触顶挡了 bug fix→用户拍板放宽」，不是设计值；现在有余量了就收回来。
-    src/sdk/imSdk.ts) echo 1465 ;;  # 2026-08-30 1450→1465：网络恢复秒连。判据(wakeActionFor)+DOM 监听
+    src/sdk/imSdk.ts) echo 1445 ;;  # 2026-09-05 1465→1445：帧→ChatMessage 的解析抽到 sdk/parseMessage.ts（棘轮只降不升）
                                     # 已抽到 sdk/wake.ts，类里只剩 reconnectNow 这个接线口（连接活性本就是
                                     # 本类的职责，再往外拆就是为凑数字硬拆，见 CLAUDE.md 体量红线那条）。
     *)                echo "" ;;

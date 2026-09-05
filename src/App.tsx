@@ -2214,6 +2214,23 @@ export default function App() {
     }
   }, [phase, convId, windowSig, uid, firstUnreadIdx, tailSig]);
 
+  // 窗口停在历史某一段时，把「回到最新」按钮亮出来——**它是唯一的回程**。
+  //
+  // iOS 的 `openLocalWindowAroundConvSeq:` 末尾就有一句 `updateJumpButton`（"窗口离开末尾 → ↓N 要显示"），
+  // Web 一直没有对应动作：`showJump` 只在 `onMsgsScroll` 与进会话的 layout effect 里算，而
+  // **"点置顶跳过去"根本不产生滚动事件**。更要命的是跳到的那一段常常整屏就放得下
+  //（2026-09-05 实测：20000 人大群点置顶落在 13 条的旧岛上，scrollHeight 695 / 视口 650，
+  // 只有 45px 可滚且已在底部）——滚不出事件，`onMsgsScroll` 里那条"贴底且窗口不在本地末尾就回到贴最新"
+  // 的兜底也永远轮不到，用户被彻底困在这一段里，只能切走会话再切回来。这就是用户报的
+  // 「点击置顶消息，无法一次回到消息位置」。
+  //
+  // 判据用**最大 conv_seq** 而非"最后一个元素"，理由同 onMsgsScroll 里那处：本地库按到达顺序存。
+  useEffect(() => {
+    if (phase !== "app" || !convId || renderView.anchor === null) return;
+    if (maxSeqOf(messages) >= maxSeqOf(msgsByConv[convId] ?? [])) return; // 窗口已含本地最新 ⇒ 不算停在历史
+    setShowJump(true);
+  }, [phase, convId, renderView.anchor, windowSig, messages, msgsByConv]);
+
   // 图片/视频是异步加载的：贴底 useLayoutEffect 触发时元素高度≈0，加载完成后气泡才撑高，
   // 而依赖数组里没有值随之改变 → effect 不重跑 → 媒体被挤出视口下方（发图/发视频不贴底，问题2）。
   // 故媒体加载完成后，若此前处于贴底状态则再贴一次底。图片(onLoad)/视频(onLoadedData)共用此回调。

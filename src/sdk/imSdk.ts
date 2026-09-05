@@ -14,10 +14,10 @@ import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrA
 import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
-import { parseSysSegments } from "../sysSegments";
-import { parseMentionSpans, type MentionSpan } from "../mention";
+import { type MentionSpan } from "../mention";
+import { parseIncomingMessage } from "./parseMessage";
 import * as localStore from "./localStore";
-import { loadRanges, updateRangesHead } from "./localStore.ranges";
+import { loadRanges, registerRange, updateRangesHead } from "./localStore.ranges";
 import { addRange, normalizeRanges, type SeqRange } from "./ranges";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, type UploadProgressHandler } from "./http";
@@ -1003,12 +1003,30 @@ export class IMClient {
         this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "", d.result ?? "");
         break;
       case T.WINDOW_RESP: { // 锚点窗口到达：消息走常规落库，边界信息交给 UI 决定滚动/提示
-        for (const m of d.messages || []) this.processIncoming(m, false);
+        const pageMsgs: ChatMessage[] = [];
+        for (const m of d.messages || []) this.processIncoming(m, false, (msg) => pageMsgs.push(msg));
         // 开窗拿回来的这一段同样"我已齐全"：服务端把 [min, max] 之间对我可见的都给了。
         // 不登记的话，下次上翻到这一段边缘还会误判成缺口，而且渲染切段会把它切开。
+        //
+        // **必须连同消息一起落盘**（2026-09-05 实测踩出来的）：此前只 `noteRange` 进内存镜像，
+        // 消息倒是按条进了 IndexedDB。于是刷新一次，这一段的"我已齐全"就没了，而消息还在——
+        // 渲染切段（renderWindow.contiguousSegments）没有清单可依就退回**按 seq 连号**判断，
+        // 被 msg_op 事件行 / 墓碑 / 对我不可见的行一刀刀切成碎岛：20000 人大群里点置顶跳过去，
+        // 本该是开窗取回的那 60 多条，实际只渲染出 seq 1..13 十三条，整屏都放得下。
+        // 上一轮 ↓N 的「区间覆盖」判据同样吃这份清单，刷新后一并失效。
+        // 走 saveIncomingPage 与 sync 那一路同款：消息 + 区间同一个事务；
+        // **advanceTo 传 0**——一窗是会话中间的任意一段，连续同步游标绝不能被它推过去。
         {
+          const convId = String(d.conv_id ?? "");
           const seqs = (d.messages || []).map((m: { conv_seq?: number }) => Number(m.conv_seq) || 0).filter((n: number) => n > 0);
-          if (seqs.length > 0) this.noteRange(String(d.conv_id ?? ""), Math.min(...seqs), Math.max(...seqs));
+          if (seqs.length > 0) {
+            const lo = Math.min(...seqs);
+            const hi = Math.max(...seqs);
+            this.noteRange(convId, lo, hi);
+            const head = this.headSeq.get(convId) ?? 0;
+            if (pageMsgs.length > 0) void localStore.saveIncomingPage(this.uid, pageMsgs, 0, lo, hi, head);
+            else void registerRange(this.uid, convId, lo, hi, head); // 整窗都是 msg_op/墓碑：只落区间
+          }
         }
         this.handlers.onWindow?.({
           convId: String(d.conv_id ?? ""),
@@ -1144,46 +1162,7 @@ export class IMClient {
       if (isNextContiguous) this.updateSynced(convId, convSeq);
       return;
     }
-    const msg: ChatMessage = {
-      serverMsgId: d.server_msg_id,
-      convId: d.conv_id,
-      from: d.from,
-      fromNickname: d.from_nickname || undefined, // 群消息冗余带发送者昵称（空不占字段）
-      fromRole: d.from_role || undefined,         // 群主/管理员气泡徽标兜底（仅 owner/admin 带）
-      content: typeof d.content === "string" ? d.content : "",
-      contentType: d.content_type || "text",
-      fileName: d.file_name || undefined,
-      fileSize: d.file_size !== undefined && Number(d.file_size) >= 0 ? Number(d.file_size) : undefined,
-      caption: typeof d.caption === "string" && d.caption ? d.caption : undefined, // 图文/视频文/文件文随附文本（Telegram 图说模型）
-      convSeq: d.conv_seq || 0,
-      timestamp: d.timestamp || 0,
-      status: "received",
-      // 直加载/同步已带派生状态（服务端冗余下发）：撤回消息直接渲染墓碑，不依赖回放 op 事件。
-      recalledAt: d.recalled_at || undefined,
-      recalledBy: d.recalled_by || undefined,
-      editedAt: d.edited_at || undefined,
-      pinnedAt: d.pinned_at || undefined,
-      replyToConvSeq: d.reply_to_conv_seq || undefined,
-      replySnapshot: d.reply_snapshot || undefined,
-      replyToFrom: d.reply_to_from || undefined,
-      forwardFrom: d.forward_from || undefined,
-      groupId: d.group_id || undefined,
-      posterUrl: d.poster || undefined,
-      mediaW: Number(d.media_w) > 0 ? Number(d.media_w) : undefined,
-      mediaH: Number(d.media_h) > 0 ? Number(d.media_h) : undefined,
-      duration: Number(d.duration) > 0 ? Number(d.duration) : undefined,
-      // 未下载卡片的模糊占位（M4-7）：**只认内联 data:image/ 的 JPEG/PNG**。门控的意义就是"用户点之前绝不碰网络"，
-      // 若放行远程 URL，渲染 <img src> 时会在用户未下载前就去拉对端内容（追踪像素 / 泄漏 IP）——必须挡掉。
-      thumb: typeof d.thumb === "string" && /^data:image\//.test(d.thumb) ? d.thumb : undefined,
-      // voice 振幅指纹（P0，base64）：服务端已校验解码后 ≤120 字节；本地只做类型收口，不再验长度。
-      waveform: typeof d.waveform === "string" ? d.waveform : undefined,
-      // @提及（M4-8）：脏数据安全——只收字符串数组，非数组一律按"未 @ 任何人"。
-      mentions: Array.isArray(d.mentions) ? (d.mentions as unknown[]).filter((x): x is string => typeof x === "string") : undefined,
-      mentionAll: d.mention_all === true || undefined, mentionSpans: parseMentionSpans(d.mention_spans),
-      // 系统消息分段（名字可点 + 换本地显示名）：脏数据安全——非数组/无 text 的项一律丢弃，
-      // 一段都不剩就按"无分段"处理，渲染回退 content 整句（与历史系统消息同款）。
-      sysSegments: parseSysSegments(d.sys_segments),
-    };
+    const msg: ChatMessage = parseIncomingMessage(d);
     // 离线空洞自愈：conv_seq 由服务端连续分配，若收到的序号跳过了已同步位点之后的中间段，
     // 说明中间有未拉到的（离线）消息 → 先用当前（较低）位点 since 补拉缺口，
     // 避免这条实时消息把 synced 推过空洞、造成中间几条被永久漏掉。

@@ -103,6 +103,41 @@ describe("跨窗口定位：一次点击就该到位", () => {
   });
 });
 
+describe("跳到历史之后，必须有回程", () => {
+  // 用户报的就是这一条：「点击置顶消息，无法一次回到消息位置」。
+  // showJump 原先只在 onMsgsScroll 与进会话的 layout effect 里算，而**跳转本身不产生滚动事件**；
+  // 跳到的那一段又常常整屏就放得下（实测 20000 人大群点置顶落在 13 条的旧岛上，
+  // scrollHeight 695 / 视口 650，只剩 45px 可滚且已在底部）——滚不出事件，
+  // onMsgsScroll 里"贴底且窗口不在本地末尾就回到贴最新"的兜底也永远轮不到，
+  // 于是既没有按钮也没有兜底，只能切走会话再切回来。iOS 的 openLocalWindowAroundConvSeq
+  // 末尾一直有一句 updateJumpButton，Web 缺的就是它。
+  it("窗口停在历史某一段 → 「回到最新」按钮必须出现（哪怕那一段整屏放得下）", async () => {
+    Fake.pinned = [pin(PIN_SEQ)];
+    await enterWithTail();
+    await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
+    expect(document.querySelector(".jump-btn")).toBeNull(); // 贴最新时本就不该有
+    serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
+
+    fireEvent.click(document.querySelector(".pin-banner-main")!);
+
+    await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
+    await waitFor(() => expect(document.querySelector(".jump-btn")).toBeInTheDocument());
+  });
+
+  it("点它回到贴最新，按钮随之收起", async () => {
+    Fake.pinned = [pin(PIN_SEQ)];
+    await enterWithTail();
+    await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
+    serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
+    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await waitFor(() => expect(document.querySelector(".jump-btn")).toBeInTheDocument());
+
+    act(() => { fireEvent.click(document.querySelector(".jump-btn")!); });
+    await waitFor(() => expect(renderedSeqs()).toContain(HEAD));
+    await waitFor(() => expect(document.querySelector(".jump-btn")).toBeNull());
+  });
+});
+
 describe("搜索「最早」：锚点 1 号常常不是一条消息", () => {
   /** 打开会话内搜索的日历面板，点「最早」。 */
   async function clickEarliest() {
