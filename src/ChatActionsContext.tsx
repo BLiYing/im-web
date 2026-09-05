@@ -55,7 +55,8 @@ export interface ChatActions {
   onComposerPaste: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   send: () => void;
   /** Web P1 语音：Composer 录制完毕后回调 App 走 uploadVoice + sendMedia contentType=voice。 */
-  sendVoice: (blob: Blob, fileName: string, waveformBase64: string, durationMs: number) => Promise<void>;
+  /** targetConvId：这段语音录制时所属的会话（录音条长驻，切会话后 convId 已经不是它了）。 */
+  sendVoice: (blob: Blob, fileName: string, waveformBase64: string, durationMs: number, targetConvId?: string) => Promise<void>;
   attachAnchorRef: RefObject<HTMLDivElement>;
   fileInputRef: RefObject<HTMLInputElement>;
   mentionPanelRef: RefObject<HTMLDivElement>;

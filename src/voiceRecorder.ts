@@ -118,11 +118,29 @@ export class VoiceRecorder {
 
   pause(): void {
     if (this.recorder && this.recorder.state === "recording") {
+      // 先催一次 dataavailable：不催的话最后不足一个 timeslice（500ms）的音频还压在内部缓冲里，
+      // 预听就缺一小截——"我说完才按的暂停，怎么最后半句没了"。
+      try { this.recorder.requestData(); } catch { /* 个别实现在 pause 边界会抛，忽略即可 */ }
       this.recorder.pause();
       this.paused = true;
       this.pausedAt = performance.now();
       if (this.tickTimer !== null) { window.clearInterval(this.tickTimer); this.tickTimer = null; }
     }
+  }
+
+  /**
+   * 暂停态的「预听」音频：把已录到的片段拼起来（iOS §14 试听的 Web 对应物）。
+   *
+   * 为什么直接拼 chunks 就能播：MediaRecorder 对直播流产出的是**分片**容器（fMP4 / WebM），
+   * 第一片带初始化段、其后每片自成一段——"到目前为止的所有片"本身就是一个可播的文件，
+   * 最终发出去的那份也只是多了 stop() 时 flush 的最后一片。**不另起 MediaRecorder 分段**
+   * （iOS 那套要靠 AVFoundation 合并多个 .m4a，Web 没有对应能力，拼两个完整 MP4 反而播不了）。
+   *
+   * 只在**暂停**时给：录制中拿到的片段随时会被下一片续上，边录边播没有意义。
+   */
+  previewBlob(): Blob | null {
+    if (!this.paused || this.chunks.length === 0) return null;
+    return new Blob(this.chunks, { type: this.mime });
   }
 
   resume(): void {

@@ -2447,13 +2447,17 @@ export default function App() {
   // Web P1 语音：上传 ?as=voice → sendMedia contentType=voice + waveform，**发出即乐观回显一行**
   // （status=sending，applyAck 按 clientMsgId 转 sent/failed）。此前没有回显行，ack patch 落空，
   // 发送后要刷新页面才看得到（2026-08-26 修）。
-  const sendVoice = useCallback(async (blob: Blob, fileName: string, waveformBase64: string, durationMs: number) => {
+  // targetConvId：这段语音**录的时候**属于哪个会话。录音条是长驻组件，在 A 录到一半切到 B 再发送，
+  // 拿"当前会话"就把话发给了 B（用户实测）。调用方传所属会话，缺省才回落到当前会话。
+  const sendVoice = useCallback(async (blob: Blob, fileName: string, waveformBase64: string, durationMs: number, targetConvId?: string) => {
     const client = clientRef.current;
-    const cid = convId;
+    const cid = targetConvId || convId;
     if (!client || !cid) return;
+    // 收件人由**目标会话**推出，不能沿用当前会话的 peer（同上：切走后 peer 已经是别人了）。
+    const to = cid.startsWith("g_") ? "" : (cid.replace(/^u_/, "").split("_u_").find((x) => x !== uid) ?? "");
     try {
       const { url, size } = await client.uploadVoice(blob, fileName);
-      const clientMsgId = client.sendMedia(url, "voice", peer || "", cid, {
+      const clientMsgId = client.sendMedia(url, "voice", to, cid, {
         duration: durationMs, fileSize: size, waveform: waveformBase64,
       });
       appendMsg(cid, {
@@ -2464,7 +2468,7 @@ export default function App() {
     } catch (e) {
       setToast((e as Error).message || "语音发送失败");
     }
-  }, [convId, peer, uid, appendMsg]);
+  }, [convId, uid, appendMsg]);
   const sendVoiceEv = useEvent(sendVoice);
 
   const chatActions = useMemo<ChatActions>(() => ({

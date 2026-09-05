@@ -9,6 +9,7 @@ import { Bookmark, Forward, Mic, Trash2, type LucideIcon, IdCard } from "lucide-
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
 import { VoiceRecorder, voiceRecordingSupported, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
+import { pauseVoicePlayback } from "./VoiceBubble";
 import type { DownloadState } from "../download";
 import { replyPreviewOf } from "../messageContent";
 import { FileTypeIcon } from "../FileTypeIcon";
@@ -73,10 +74,34 @@ export function Composer(p: ComposerProps) {
   const [recordElapsed, setRecordElapsed] = useState(0);
   const [recordAmps, setRecordAmps] = useState<number[]>([]);
   const [voicePaused, setVoicePaused] = useState(false);
+  // 这次录音属于**哪个会话**。录音条与快捷键都按它收口，发送也发到它——
+  // 不记这一位的话，在 A 会话录到一半切到 B，录音条跟着 B 显示，一按发送这段话就发给了 B（用户实测）。
+  const [recordConv, setRecordConv] = useState("");
+  const recordConvRef = useRef("");
+  const [previewing, setPreviewing] = useState(false);   // 暂停态「预听」是否在响
+  const previewRef = useRef<HTMLAudioElement | null>(null);
+  const recordingHere = recording && recordConv === convId;
+
+  /** 停预听并回收 objectURL（暂停键/发送/取消/切会话/卸载都要走它）。 */
+  const stopPreview = useCallback(() => {
+    const a = previewRef.current;
+    previewRef.current = null;
+    if (a) {
+      a.pause();
+      a.onended = null; a.onerror = null;
+      if (a.src.startsWith("blob:")) URL.revokeObjectURL(a.src);
+    }
+    setPreviewing(false);
+  }, []);
 
   const startVoiceRecord = useCallback(async () => {
     if (recording || !voiceProbe.supported) return;
+    // 别的会话还留着一段暂停的录音 → 只有一个 recorder，先丢掉它（recording 为真时按钮不会出现在
+    // 本会话，但从别的会话点麦克风会走到这里）。
+    recorderRef.current?.cancel();
+    stopPreview();
     setRecording(true); setRecordElapsed(0); setRecordAmps([]); setVoicePaused(false);
+    setRecordConv(convId); recordConvRef.current = convId;
     const r = new VoiceRecorder();
     recorderRef.current = r;
     try {
@@ -89,7 +114,8 @@ export function Composer(p: ComposerProps) {
           setRecording(false);
           recorderRef.current = null;
           const name = `voice-${Date.now()}${res.fileExtension}`;
-          void sendVoice(res.blob, name, res.waveformBase64, res.durationMs);
+          // **发到录音所属的那个会话**，不是"当前打开的会话"。
+          void sendVoice(res.blob, name, res.waveformBase64, res.durationMs, recordConvRef.current);
         },
         onCancel: (reason) => {
           setRecording(false);
@@ -107,19 +133,47 @@ export function Composer(p: ComposerProps) {
       recorderRef.current = null;
       setToast((e as Error).message || "无法开始录音");
     }
-  }, [recording, voiceProbe.supported, sendVoice, setToast]);
+  }, [recording, voiceProbe.supported, convId, sendVoice, setToast, stopPreview]);
 
-  const stopVoiceSend = useCallback(() => { recorderRef.current?.stopAndSend(); }, []);
-  const cancelVoice = useCallback(() => { recorderRef.current?.cancel(); }, []);
+  const stopVoiceSend = useCallback(() => { stopPreview(); recorderRef.current?.stopAndSend(); }, [stopPreview]);
+  const cancelVoice = useCallback(() => { stopPreview(); recorderRef.current?.cancel(); }, [stopPreview]);
   const togglePauseVoice = useCallback(() => {
     const r = recorderRef.current; if (!r) return;
-    if (r.isPaused()) { r.resume(); setVoicePaused(false); }
+    if (r.isPaused()) { stopPreview(); r.resume(); setVoicePaused(false); }
     else { r.pause(); setVoicePaused(true); }
-  }, []);
+  }, [stopPreview]);
+
+  /** 暂停态预听已录的部分（iOS 锁定条的迷你播放器同款，见 IMChatViewController+Voice §14）。 */
+  const togglePreview = useCallback(() => {
+    if (previewing) { stopPreview(); return; }
+    const blob = recorderRef.current?.previewBlob();
+    if (!blob) { setToast("还没有录到内容"); return; }
+    pauseVoicePlayback(); // 全站同一时刻只响一路：预听要盖过正在放的语音气泡
+    const a = new Audio(URL.createObjectURL(blob));
+    previewRef.current = a;
+    a.onended = () => stopPreview();
+    a.onerror = () => { stopPreview(); setToast("预听失败"); };
+    setPreviewing(true);
+    void a.play().catch(() => { stopPreview(); setToast("预听失败"); });
+  }, [previewing, stopPreview, setToast]);
+
+  // 切走会话 = 这段录音不再属于眼前这一页：**暂停并留着**，回到原会话还能续录/预听/发送。
+  // 不直接丢弃——一段几分钟的话不该因为点错一下会话就没了；也不能继续跑，否则录音条挂在
+  // 别人的会话上，一按发送就发错人（用户实测）。
+  useEffect(() => {
+    if (!recording || !recordConv || recordConv === convId) return;
+    stopPreview();
+    const r = recorderRef.current;
+    if (r && !r.isPaused()) { r.pause(); setVoicePaused(true); }
+    setToast("已暂停录音，回到原会话可继续或发送");
+  }, [convId, recording, recordConv, stopPreview, setToast]);
+
+  // 卸载兜底：预听的 audio 与 objectURL 不能随组件一起被丢下（声音会继续响）。
+  useEffect(() => () => stopPreview(), [stopPreview]);
 
   // Space 暂停/继续、Esc 取消、Enter 发送（录制中生效，防冲突聊天列表滚动）。
   useEffect(() => {
-    if (!recording) return;
+    if (!recordingHere) return; // 只在录音所属的那个会话里接管键盘（否则在别的会话按 Enter 会把这段发错人）
     const onKey: (e: Event) => void = (e) => {
       const k = e as unknown as { key: string; code?: string; preventDefault(): void };
       if (k.key === "Escape") { k.preventDefault(); cancelVoice(); }
@@ -128,7 +182,7 @@ export function Composer(p: ComposerProps) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [recording, cancelVoice, stopVoiceSend, togglePauseVoice]);
+  }, [recordingHere, cancelVoice, stopVoiceSend, togglePauseVoice]);
 
   return (
     <>
@@ -309,7 +363,8 @@ export function Composer(p: ComposerProps) {
               <button onClick={send} disabled={!convId || composerMuteReason !== null}>发送</button>
             )}
           </footer>
-          {recording && (
+          {/* 录音条只挂在**录音所属的那个会话**上：切走时录音已暂停留底，回来才重新露出。 */}
+          {recordingHere && (
             <div className="voice-recorder-bar" role="dialog" aria-label="录音中">
               <span className="rd" />
               {/* §12 倒数：4:50 起 timer 变红 + 显"还剩 Ns"，到 5:00 自动送出（onMaxReached）。 */}
@@ -325,6 +380,12 @@ export function Composer(p: ComposerProps) {
               </span>
               <button className="rec-btn cancel" type="button" onClick={cancelVoice}>取消</button>
               <button className="rec-btn cancel" type="button" onClick={togglePauseVoice}>{voicePaused ? "继续" : "暂停"}</button>
+              {/* 暂停后才给预听（iOS 锁定条同款）：录制中拿到的片段随时会被续上，边录边听没有意义。 */}
+              {voicePaused && (
+                <button className="rec-btn preview" type="button" onClick={togglePreview}>
+                  {previewing ? "停止" : "预听"}
+                </button>
+              )}
               <button className="rec-btn send" type="button" onClick={stopVoiceSend}>发送</button>
               <span className="rec-hint" style={{ fontSize: 11, opacity: 0.7 }}>
                 <kbd>Space</kbd> 暂停 · <kbd>Esc</kbd> 取消 · <kbd>Enter</kbd> 发送

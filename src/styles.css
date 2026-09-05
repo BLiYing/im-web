@@ -1937,6 +1937,8 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .voice-recorder-bar .rec-btn { padding: 4px 10px; height: 30px; border: 0; border-radius: 8px; cursor: pointer;
   font-size: 12px; font-weight: 600; }
 .voice-recorder-bar .rec-btn.cancel { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+/* 预听（仅暂停态出现）：中性色，别跟"取消"的红或"发送"的蓝抢注意力。 */
+.voice-recorder-bar .rec-btn.preview { background: var(--surface-hover); color: var(--text); }
 .voice-recorder-bar .rec-btn.send { background: linear-gradient(135deg,#3AA0FF,#0A6BE0); color: #fff;
   box-shadow: 0 4px 12px rgba(10,107,224,0.35); }
 .voice-recorder-bar kbd { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10px;
