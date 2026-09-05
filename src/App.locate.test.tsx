@@ -176,8 +176,34 @@ describe("跳到历史之后，往下滚要能回到最新", () => {
     Object.defineProperty(box, "scrollHeight", { value: 8000, configurable: true });
     Object.defineProperty(box, "clientHeight", { value: 500, configurable: true });
     Object.defineProperty(box, "scrollTop", { value: 7500, writable: true, configurable: true });
+    fireEvent.wheel(box, { deltaY: 120 }); // 用户的手：往下拨滚轮
     fireEvent.scroll(box);
 
     await waitFor(() => expect(renderedSeqs()).toContain(HEAD));
+  });
+
+  // 用户三报「仍然没解决」的真根因。定位移窗后浏览器会派发**不是手**的 scroll 事件：
+  // 内容从几千 px 缩成几百 px 时钳位 scrollTop、layout effect / jumpToSeq 赋 scrollTop——
+  // 旧岛整屏放得下时 nearBottom 恒真，上面那条"滚到底回到最新"就把刚跳过去的人当场冲回尾部，
+  // 表现为"点了没反应 / 闪一下又回去了"。隐藏标签页不派发 scroll，前两轮实测都没撞上。
+  it("移窗后的程序性 scroll（钳位/贴底赋值）**不能**把人冲回尾部，↓ 也要留着", async () => {
+    Fake.pinned = [pin(PIN_SEQ)];
+    await enterWithTail();
+    await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
+    serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 12 }); // 一小段：整屏放得下
+    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
+
+    // 浏览器钳位后的几何：内容只比视口高一点点，且已在最底
+    const box = msgsBox();
+    Object.defineProperty(box, "scrollHeight", { value: 695, configurable: true });
+    Object.defineProperty(box, "clientHeight", { value: 650, configurable: true });
+    Object.defineProperty(box, "scrollTop", { value: 45, writable: true, configurable: true });
+    fireEvent.scroll(box); // 没有 wheel/touch：不是用户的手
+
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+    expect(renderedSeqs()).toContain(PIN_SEQ);      // 还在那一段
+    expect(renderedSeqs()).not.toContain(HEAD);
+    expect(document.querySelector(".jump-btn")).toBeInTheDocument(); // 回程按钮没被这次 scroll 收掉
   });
 });

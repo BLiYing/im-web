@@ -17,7 +17,8 @@ import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
-import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
+import { isViewableMedia, msgKey } from "./album";
+import { jumpDomToSeq } from "./messageJump";
 import { formatTime } from "./time";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
@@ -383,6 +384,11 @@ export default function App() {
   const tailAnchorRef = useRef<{ seq: number; top: number } | null>(null);
   const pendingScrollRef = useRef(false); // 刚进会话，待定位到未读/底部
   const wasNearBottomRef = useRef(true); // 追加消息前用户是否贴近底部
+  // 「用户真的在往下滚」的证据：wheel(deltaY>0) / touchmove / 方向键。
+  // scroll 事件本身分不清是手在滚还是程序在滚：定位移窗后浏览器钳位 scrollTop 会派发 scroll、
+  // layout effect / jumpToSeq 赋 scrollTop 也会派发——只看 scroll 就把"跳到历史"当成"用户滚到底
+  // 想回最新"，跳转当场被冲回尾部（2026-09-05 用户三报「仍然没解决」的真根因，见 onMsgsScroll）。
+  const userScrollIntentRef = useRef(false);
   const prevMaxSeqRef = useRef(0); // 上次渲染的最大 conv_seq（判断底部是否来了更新的消息）
   const entryUnreadRef = useRef(0); // 进会话时的未读数（按钮初始计数）
   const entryUnreadCappedRef = useRef(false); // 该未读数是否撞了服务端计数上限
@@ -1290,48 +1296,10 @@ export default function App() {
   const jumpToSeq = useCallback((seq: number) => {
     const box = msgsRef.current;
     if (!box) { setToast("原消息不在当前视图"); return; }
-    const list = messagesRef.current;
-    let el = box.querySelector(`[data-seq="${seq}"]`);
-    // 相册宫格成员：优先定位并高亮**那一格**（tile 带 data-album-seq），而非整条宫格主行。
-    // 主行只有 leader 带 data-seq，非 leader 成员靠 tile 命中；找不到 tile 再回退到主行。目标决策见 resolveJumpTarget。
-    const tgt = resolveJumpTarget(list, seq);
-    if (tgt.kind === "album-tile") {
-      const tile = box.querySelector(`[data-album-seq="${seq}"]`);
-      if (tile) el = tile;
-      else if (!el) el = box.querySelector(`[data-seq="${tgt.leaderSeq}"]`);
-    }
-    if (!el) {
-      // 跳不到分两种，**按模型判定而非 DOM**（宫格从行/未来虚拟化都可能不渲染节点）：
-      // 目标比已加载最早一条还早 → 还没上拉加载到；落在已加载窗口内却缺失 → 已被本地删除。
-      // 窗口内无任何已确认消息（minSeq=0）判不出方向 → 回退通用提示。
-      const earliest = minSeqOf(list);
-      setToast(earliest === 0 ? "原消息不在当前视图"
-        : seq < earliest ? "原消息较早，请上拉加载后重试" : "原消息已被删除");
-      return;
-    }
-    const node = el;
-    const flash = () => {
-      node.classList.add("flash");
-      window.setTimeout(() => node.classList.remove("flash"), 1200);
-    };
-    // 把目标行滚到容器纵向居中。只动 .msgs 自身 scrollTop（不用 scrollIntoView——会连带滚动 html/#root
-    // 把 .app 顶出视口、间距塌陷）。**用瞬时赋值而非 `scrollTo({behavior:"smooth"})`**：本容器上方有大量
-    // 异步布局的媒体（gated 缩略/视频），平滑滚动的动画目标被持续变化的 scrollHeight 打断，远距离目标**滚不动**
-    // （实测 scrollTo smooth 到 5000px 外的目标 scrollTop 纹丝不动）；瞬时赋值可靠命中。
-    const scrollToNode = () => {
-      const r = node.getBoundingClientRect();
-      const br = box.getBoundingClientRect();
-      box.scrollTop = box.scrollTop + (r.top - br.top) - (box.clientHeight - r.height) / 2;
-    };
-    const r0 = node.getBoundingClientRect();
-    const br0 = box.getBoundingClientRect();
-    if (r0.top >= br0.top && r0.bottom <= br0.bottom) { flash(); return; } // 已在视口内 → 直接闪
-    // 跳走后不再「贴底」：否则从底部跳到较早的目标时，下方媒体（视频/图片）异步加载完成会触发
-    // onMediaLoad 把 scrollTop 拽回 scrollHeight，定位当场被冲掉（远距离目标必现，近处目标因差值小看似正常）。
-    wasNearBottomRef.current = false;
-    scrollToNode();
-    // 下一帧再校正一次：抵消滚动后上方媒体继续异步布局造成的目标位移，然后高亮。
-    requestAnimationFrame(() => { scrollToNode(); flash(); });
+    // DOM 部分（找节点 / 居中 / 闪烁 / 跳不到的提示）在 messageJump.ts；这里只供 ref 与回调。
+    // 跳走后不再「贴底」：否则从底部跳到较早的目标时，下方媒体异步加载完成会触发 onMediaLoad
+    // 把 scrollTop 拽回 scrollHeight，定位当场被冲掉。
+    jumpDomToSeq(box, messagesRef.current, seq, { onLeaveTail: () => { wasNearBottomRef.current = false; }, setToast });
   }, []);
 
   // 跨窗口定位：目标不在当前窗口时，**以它为锚点开一窗**（一次请求直达）。
@@ -1363,6 +1331,12 @@ export default function App() {
     // （首次进会话的 sync 常把历史全灌进本地库，那时目标多半就在本地）。
     if (local.some((x) => x.convSeq === seq)) {
       // 把窗口**移到**目标处（不是撑大——撑大会把整个会话渲染出来，第一版就是这么错的）。
+      // 移窗 = 主动离开尾部：先把"贴底"状态清掉，否则新窗一渲染，layout effect 的
+      // 「末条是我发的且原本贴底 → 贴底」会把人按到那一段的底部，onMediaLoad 也会跟着拽。
+      // 同时清掉「用户想往下滚」的意图（见 userScrollIntentRef）——内容从 9000px 缩成 700px 时
+      // 浏览器会把 scrollTop 钳到新上限并**派发一次 scroll 事件**，那不是用户的手。
+      wasNearBottomRef.current = false;
+      userScrollIntentRef.current = false;
       setRenderView({ anchor: seq, size: RENDER_WINDOW_STEP });
       return; // 移窗触发重渲染 → 本 effect 再跑一次，那时走上面的"已在窗口内"分支
     }
@@ -2324,10 +2298,6 @@ export default function App() {
     // 判定，会出现「用户视觉已在最底部，但按钮仍显」的伪 bug（未读多/大群/进会话瞬间 push 到达时高发）：
     // 视觉贴底后 L1792 会自动 loadNewer 追齐，此时不必弹按钮打扰。
     // wasNearBottomRef 语义同源：新内容到来时是否贴底跟随（onMediaLoad / layout effect 共用）。
-    wasNearBottomRef.current = nearBottomPx;
-    setShowJump(!nearBottomPx);
-    if (nearBottomPx) setJumpCount(0);
-
     const busy = loadingOlderRef.current || loadingNewerRef.current;
     const localAll = msgsByConv[cid] ?? [];
     // 窗口是否已经贴到本地最新一条（锚点模式下窗口停在历史某段，下面要靠它判断"该往前移窗了"）。
@@ -2336,11 +2306,25 @@ export default function App() {
     // 恒成立，这一支永远不触发：跳到历史后往下滚就再也回不到最新消息（2026-09-05 实测，
     // 滚到那一段底部纹丝不动）。渲染用的 allLocal 是排过序的副本，localAll 不是。
     const windowAtLocalEnd = renderView.anchor === null || maxSeqOf(messagesRef.current) >= maxSeqOf(localAll);
+    // 「贴底」只在窗口含本地最新时才算数：停在历史某一段的底部**不是**贴底——
+    // 否则一次钳位 scroll 就把 ↓ 收掉、把 wasNearBottom 置真，之后 onMediaLoad 又把人拽到那一段底部。
+    const atTail = nearBottomPx && windowAtLocalEnd;
+    wasNearBottomRef.current = atTail;
+    setShowJump(!atTail);
+    if (atTail) setJumpCount(0);
+
     if (nearBottomPx && !windowAtLocalEnd) {
       // **跳到历史后往下滚**：本地还有更新的内容，只是不在窗口里 → 直接回到"贴最新"模式。
       // 不做这一步的话，用户跳到第 123 条后往下滚会卡在窗口末尾（loadNewer 去问服务端，
       // 而数据本就在本地，什么也不会变），再也回不到最新消息。
-      setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
+      //
+      // **必须是用户的手**（userScrollIntentRef）。定位移窗后有三种不是手的 scroll 事件：
+      // 内容缩短时浏览器钳位 scrollTop、layout effect 贴底赋值、jumpToSeq 自己的赋值——
+      // 它们全在 rAF 之前派发（HTML「update the rendering」里 scroll steps 先于 animation
+      // frame callbacks）。旧岛整屏放得下时 nearBottomPx 恒真，于是刚跳过去就被这一支冲回
+      // 尾部，用户看到的就是"点了没反应 / 闪一下又回去了"（2026-09-05 用户三报「仍然没解决」，
+      // 隐藏标签页不派发 scroll 事件，前两轮实测都没撞上）。
+      if (userScrollIntentRef.current) setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
     } else if (nearBottomPx && moreBelow && !busy) {
       loadingNewerRef.current = true; // 下滚到底 → 加载更新一页
       // 保位锚点：窗口末尾那条 + 它距容器顶的偏移（与上滚那一路同一套「按同一条消息补偿」）。
@@ -3170,7 +3154,10 @@ export default function App() {
             onJumpPinned={() => { jumpToPinned(pinnedShown!.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}
             onOpenPinnedList={() => setPinnedListOpen(true)}
           />
-          <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}>
+          <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}
+            onWheel={(e) => { if (e.deltaY > 0) userScrollIntentRef.current = true; }}
+            onTouchMove={() => { userScrollIntentRef.current = true; }}
+            onKeyDown={(e) => { if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === "End" || e.key === " ") userScrollIntentRef.current = true; }}>
             <MessageList
                 messages={messages} peer={peer} isGroupChat={isGroupChat} isSuperGroup={chatIsSuper} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}

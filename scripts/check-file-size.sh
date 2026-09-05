@@ -25,7 +25,7 @@ WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败�
 #   - src/sdk/imSdk.ts : IM 客户端 API 面（40+ 方法），大而由业务性质决定；如拆按域分（auth/messages/groups/qr）。
 grandfather_limit() {
   case "$1" in
-    src/App.tsx)      echo 3800 ;;  # 2026-09-05 棘轮下调 4000→3800（拆出 chatNaming/convPreview/useGroupOps 后 3735）。
+    src/App.tsx)      echo 3790 ;;  # 2026-09-05 棘轮 4000→3800→3790（jumpToSeq 的 DOM 部分抽到 messageJump.ts 后 3776）。
                                     # 4000 那次是「触顶挡了 bug fix→用户拍板放宽」，不是设计值；现在有余量了就收回来。
     src/sdk/imSdk.ts) echo 1445 ;;  # 2026-09-05 1465→1445：帧→ChatMessage 的解析抽到 sdk/parseMessage.ts（棘轮只降不升）
                                     # 已抽到 sdk/wake.ts，类里只剩 reconnectNow 这个接线口（连接活性本就是
