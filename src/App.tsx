@@ -82,6 +82,7 @@ import { GroupsModal } from "./components/modals/GroupsModal";
 import { FriendRequestsModal } from "./components/modals/FriendRequestsModal";
 import { FriendRequestModal } from "./components/modals/FriendRequestModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
+import { publicNameOf } from "./groupName";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
 import { adminCandidates, transferCandidates } from "./groupAdmin";
 import { useUserProfiles } from "./useUserProfiles";
@@ -1235,12 +1236,12 @@ export default function App() {
   // 群的写操作 + 它们各自的弹窗状态（建群/退群/解散/邀请/黑名单/入群审批/群备注/群头像）→ useGroupOps。
   // 那七个 state 只有这一族操作会读写，此前混在 App 的四十多个 state 里看不出谁和谁是一伙的。
   const {
-    groupsModal, setGroupsModal, createDraft, setCreateDraft, createBusy,
+    groupsModal, setGroupsModal, createDraft, setCreateDraft, createBusy, createAvatarBusy,
     inviteDraft, setInviteDraft, joinReqModal, setJoinReqModal,
     groupBans, groupBansModal, setGroupBansModal,
     openGroupsModal, doDissolveGroup, doCreateGroup, doLeaveGroup,
     openGroupBans, doUnban, openJoinRequests, reloadJoinRequests, decideJoin,
-    doEditGroupRemark, pickGroupAvatar, doInvite,
+    doEditGroupRemark, pickGroupAvatar, pickCreateGroupAvatar, doInvite,
   } = useGroupOps({
     clientRef, setToast, askConfirm, askPrompt, refreshConversations, refreshGroupInfo, doGroupAction,
     openGroupChat, deselect, currentConvRef, loadSuperMembers, setCropReq, setTab, setDetail, setGroupInfos,
@@ -3474,11 +3475,16 @@ export default function App() {
         />
       )}
 
+      {/* 建群两步弹窗：myPublicName 是预填群名的第一位，必须用**公开名**（昵称）而非备注——
+          群名会随建群请求发出去并显示给全群，见 groupName.ts 文件头的隐私红线。 */}
       {createDraft && (
         <CreateGroupModal
           draft={createDraft} accepted={accepted} friendLabel={friendLabel}
-          busy={createBusy} maxInitialMembers={(serverConfig?.max_group_members ?? FALLBACK_MAX_GROUP_MEMBERS) - 1}
+          myPublicName={publicNameOf({ nickname: myInfo?.nickname, username: myInfo?.username, user_id: uid })}
+          busy={createBusy} avatarBusy={createAvatarBusy}
+          maxInitialMembers={(serverConfig?.max_group_members ?? FALLBACK_MAX_GROUP_MEMBERS) - 1}
           onChange={setCreateDraft}
+          onPickAvatar={pickCreateGroupAvatar}
           onCreate={() => void doCreateGroup()}
           onCancel={() => setCreateDraft(null)}
         />

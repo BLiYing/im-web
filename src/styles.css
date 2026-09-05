@@ -1199,6 +1199,39 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .check-row .avatar { width: 32px; height: 32px; font-size: 12px; }
 .checkbox { width: 18px; height: 18px; flex-shrink: 0; border: 2px solid var(--separator); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--on-accent); }
 .checkbox.on { background: var(--accent); border-color: var(--accent); }
+
+/* 建群两步弹窗 · 第二步（头像 + 群名 + 成员 chips）。
+   规格见 docs/design/sketches/GROUP_CREATE_UX_SKETCH.html §07；iOS 对应 IMGroupCreateViewController。
+   第一步沿用 .modal/.check-row/.modal-list 原样，本组样式只服务第二步。 */
+.create-modal { width: 360px; }
+.create-head { display: flex; align-items: center; gap: var(--space-2); }
+.create-step { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
+.create-modal .section-label { padding: 0; }
+.create-profile { display: flex; align-items: center; gap: 14px; }
+/* 复用编辑资料页那套头像按钮（.edit-avatar 家族），只把 96 收成 72 并去掉居中外边距。 */
+.edit-avatar.sm { width: 72px; height: 72px; margin: 0; flex-shrink: 0; }
+.edit-avatar.sm .edit-avatar-inner { width: 72px; height: 72px; font-size: 26px; }
+/* 弹窗底是 --card-bg（不是设置页的 --grouped-bg），角标描边跟着换，否则深色下边缘发灰。 */
+.edit-avatar.sm .edit-cam { width: 26px; height: 26px; border-color: var(--card-bg); }
+.edit-avatar:disabled { opacity: 0.6; cursor: default; }
+.create-name { flex: 1; min-width: 0; position: relative; }
+/* 类选择器而不是 `.create-name input`：容器+裸标签的后代选择器会误伤日后加进来的任何 input（§九）。
+   **必须带 .create-modal 前缀**：既有的 `.modal input`（正是那种反模式）特异度 (0,1,1) 会盖过
+   单个类 (0,1,0)，实测就是这么把 padding-right 打回 12px、让 18/30 压在群名文字上的。 */
+.create-modal .create-name-input { width: 100%; padding: var(--space-2) 46px var(--space-2) var(--space-3);
+  border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--page-bg);
+  color: var(--text); font-size: 15px; }
+.create-modal .create-name-input:focus { outline: none; border-color: var(--accent); }
+.field-count { position: absolute; right: 10px; bottom: 9px; font-size: 12px; color: var(--text-tertiary); pointer-events: none; }
+.member-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.member-chip { display: flex; align-items: center; gap: 6px; padding: 3px 9px 3px 3px; border: 1px solid var(--separator);
+  border-radius: 999px; background: var(--surface); color: var(--text); font-size: 12px; }
+.member-chip .chip-av { width: 20px; height: 20px; font-size: 9px; }
+.member-chip .chip-name { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-chip .chip-x { border: 0; background: none; padding: 0; color: var(--text-tertiary); font-size: 11px; cursor: pointer; }
+.member-chip .chip-x:hover { color: var(--danger); }
+.member-chip.add { padding: 3px 11px; border-style: dashed; color: var(--accent); cursor: pointer; }
+.create-hint { margin: 0; font-size: 12px; color: var(--danger); }
 .mini-btn.wide { display: flex; width: 100%; align-items: center; justify-content: center; gap: 4px; padding: 8px; }
 .mini-btn.wide .menu-icon { color: inherit; }
 
@@ -1512,7 +1545,10 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .settings-row.danger:disabled { color: var(--text-tertiary); }
 
 /* ---- 头像圆形裁切弹窗（方案 C，规格见 docs/UX_SKETCH.html §Web） ---- */
-.avatar-cropper-mask { background: rgba(0,0,0,0.55); }
+/* 裁切窗必须盖在**所有**弹窗之上：它是从别的弹窗（如建群第二步）里拉起来的，
+   而 .modal-mask 都是 z-index:50、同层时后出现的那个赢——建群弹窗在 App.tsx 里排在
+   AvatarCropper 之后，于是裁切窗被埋在下面，点不到「确定」（2026-09-05 浏览器实测发现）。 */
+.avatar-cropper-mask { background: rgba(0,0,0,0.55); z-index: 60; }
 .avatar-cropper { width: 360px; max-width: calc(100vw - 32px); background: var(--surface-elevated);
   border-radius: var(--radius-card); overflow: hidden; box-shadow: 0 24px 60px var(--shadow-strong);
   display: flex; flex-direction: column; }

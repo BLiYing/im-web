@@ -19,6 +19,7 @@ import type { Conversation, GroupBan, GroupInfo, GroupSummary, JoinRequest } fro
 import { errorCode } from "./qr";
 import { LOG_TAG, logger } from "./logging/logger";
 import type { useDialogs } from "./useDialogs";
+import type { CreateGroupDraft } from "./components/modals/CreateGroupModal";
 
 type DialogsApi = ReturnType<typeof useDialogs>;
 
@@ -54,8 +55,9 @@ export function useGroupOps(d: GroupOpsDeps) {
   } = d;
 
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
-  const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
+  const [createDraft, setCreateDraft] = useState<CreateGroupDraft | null>(null); // 建群弹窗（群名 + 选中好友 + 头像，两步）
   const [createBusy, setCreateBusy] = useState(false);
+  const [createAvatarBusy, setCreateAvatarBusy] = useState(false); // 建群第二步：头像上传在途（按钮禁用防重复选图）
   const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
   const [joinReqModal, setJoinReqModal] = useState<{ convId: string; requests: JoinRequest[]; loading: boolean } | null>(null); // 待审入群申请（G3）
   const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null);   // 当前群黑名单（管理面板显示计数）
@@ -94,7 +96,8 @@ export function useGroupOps(d: GroupOpsDeps) {
     if (createDraft.selected.length === 0) { setToast("请至少选择一位好友"); return; }
     setCreateBusy(true);
     try {
-      const info = await clientRef.current!.createGroup(name, createDraft.selected);
+      // 头像随建群一起发：`POST /groups` 的 body 本来就有 avatar_url 位，此前一直传空串。
+      const info = await clientRef.current!.createGroup(name, createDraft.selected, createDraft.avatarUrl ?? "");
       setGroupInfos((prev) => ({ ...prev, [info.conv_id]: info }));
       setCreateDraft(null);
       setGroupsModal(null);
@@ -202,6 +205,33 @@ export function useGroupOps(d: GroupOpsDeps) {
     input.click();
   };
 
+  // 建群第二步的群头像：选图 → 圆形裁切 → 头像专用上传 → 写回草稿（**此刻群还不存在**，
+  // 所以不像 pickGroupAvatar 那样调 updateGroup，只把 URL 存着，等点「创建」时随 POST 一起发）。
+  // 上传失败不阻塞建群——头像是可选项，建完还能在群管理里补。
+  const pickCreateGroupAvatar = () => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = "image/*";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      setCropReq({
+        file,
+        onDone: async (blob) => {
+          setCreateAvatarBusy(true);
+          try {
+            const { url } = await clientRef.current!.uploadAvatar(blob);
+            setCreateDraft((prev) => (prev ? { ...prev, avatarUrl: url } : prev));
+          } catch (e) {
+            setToast(`头像上传失败：${(e as Error).message}`);
+          } finally {
+            setCreateAvatarBusy(false);
+          }
+        },
+      });
+    };
+    input.click();
+  };
+
   // 邀请成员：提交选中的好友。
   const doInvite = async () => {
     if (!inviteDraft || inviteDraft.selected.length === 0) { setToast("请选择要邀请的好友"); return; }
@@ -231,11 +261,11 @@ export function useGroupOps(d: GroupOpsDeps) {
   };
 
   return {
-    groupsModal, setGroupsModal, createDraft, setCreateDraft, createBusy,
+    groupsModal, setGroupsModal, createDraft, setCreateDraft, createBusy, createAvatarBusy,
     inviteDraft, setInviteDraft, joinReqModal, setJoinReqModal,
     groupBans, groupBansModal, setGroupBansModal,
     openGroupsModal, doDissolveGroup, doCreateGroup, doLeaveGroup,
     openGroupBans, doUnban, openJoinRequests, reloadJoinRequests, decideJoin,
-    doEditGroupRemark, pickGroupAvatar, doInvite,
+    doEditGroupRemark, pickGroupAvatar, pickCreateGroupAvatar, doInvite,
   };
 }

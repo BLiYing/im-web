@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { CreateGroupModal } from "./CreateGroupModal";
+import type { CreateGroupDraft } from "./CreateGroupModal";
 import { FriendPickerModal } from "./FriendPickerModal";
 import type { FriendEntry } from "../../sdk/protocol";
 
@@ -73,11 +75,14 @@ describe("FriendPickerModal 名片场景（文案 prop + 选择上限）", () =>
   });
 });
 
+const createBase = {
+  draft: { name: "", selected: [] as string[] } as CreateGroupDraft, accepted: friends, friendLabel,
+  myPublicName: "小明", busy: false, avatarBusy: false, maxInitialMembers: 10,
+  onChange: vi.fn(), onPickAvatar: vi.fn(), onCreate: vi.fn(), onCancel: vi.fn(),
+};
+
 describe("CreateGroupModal 搜索与全选", () => {
-  const base = {
-    draft: { name: "", selected: [] as string[] }, accepted: friends, friendLabel,
-    busy: false, maxInitialMembers: 10, onChange: vi.fn(), onCreate: vi.fn(), onCancel: vi.fn(),
-  };
+  const base = createBase;
 
   it("无搜索词时「全选」= 选中全部（与加搜索前行为一致）", () => {
     const onChange = vi.fn();
@@ -109,5 +114,73 @@ describe("CreateGroupModal 搜索与全选", () => {
     render(<CreateGroupModal {...base} maxInitialMembers={2} onChange={onChange} />);
     fireEvent.click(screen.getByText("全选"));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: ["1001", "1002"] }));
+  });
+});
+
+// 第二步（群资料）是有状态的：draft 由调用方持有，弹窗内部只有 step。
+// 这个壳子替代 App 承担那一半，好让"下一步 → 改名 → ＋添加 → 再下一步"这种整段操作能跑起来。
+function CreateHarness({ initial, myPublicName = "小明" }: { initial: CreateGroupDraft; myPublicName?: string }) {
+  const [draft, setDraft] = useState<CreateGroupDraft>(initial);
+  return <CreateGroupModal {...createBase} draft={draft} myPublicName={myPublicName} onChange={setDraft} />;
+}
+
+describe("CreateGroupModal 两步流", () => {
+  it("「下一步」预填群名：我打头，成员按勾选顺序，且一律用**公开名**不用备注", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001", "1002"] }} />);
+    fireEvent.click(screen.getByText("下一步"));
+    const input = screen.getByPlaceholderText("群聊名称") as HTMLInputElement;
+    // 1001 的备注是「老王」、昵称是 Alice——群名会广播给全群，只能取昵称。
+    expect(input.value).toBe("小明、Alice、Bob");
+  });
+
+  it("手改过群名后，增删成员不再覆盖它", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001", "1002"] }} />);
+    fireEvent.click(screen.getByText("下一步"));
+    const input = screen.getByPlaceholderText("群聊名称") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "周末爬山" } });
+    fireEvent.click(screen.getAllByTitle("移除")[0]); // 删掉一个成员
+    expect((screen.getByPlaceholderText("群聊名称") as HTMLInputElement).value).toBe("周末爬山");
+  });
+
+  it("没手改过群名时，删成员会重算预填名", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001", "1002"] }} />);
+    fireEvent.click(screen.getByText("下一步"));
+    fireEvent.click(screen.getAllByTitle("移除")[0]); // 删掉 1001
+    expect((screen.getByPlaceholderText("群聊名称") as HTMLInputElement).value).toBe("小明、Bob");
+  });
+
+  it("不允许删到 0 人：点最后一位的 ✕ 不移除，只提示", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001"] }} />);
+    fireEvent.click(screen.getByText("下一步"));
+    fireEvent.click(screen.getAllByTitle("移除")[0]);
+    expect(screen.getByText("至少选择一位好友")).toBeTruthy();
+    expect(screen.getAllByTitle("移除").length).toBe(1); // 人还在
+  });
+
+  it("群名清空后「创建」置灰；第一步选 0 人时「下一步」置灰", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001"] }} />);
+    expect((screen.getByText("下一步") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByText("下一步"));
+    expect((screen.getByText("创建") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(screen.getByPlaceholderText("群聊名称"), { target: { value: "   " } });
+    expect((screen.getByText("创建") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("「＋ 添加」与「上一步」都回到第一步，勾选原样还在", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001", "1002"] }} />);
+    fireEvent.click(screen.getByText("下一步"));
+    fireEvent.click(screen.getByText("＋ 添加"));
+    expect(screen.getByText("选择好友（已选 2）")).toBeTruthy();
+    fireEvent.click(screen.getByText("下一步"));
+    fireEvent.click(screen.getByText("上一步"));
+    expect(screen.getByText("选择好友（已选 2）")).toBeTruthy();
+  });
+
+  it("群名超 30 字被就地截断（按 rune 计数）", () => {
+    render(<CreateHarness initial={{ name: "", selected: ["1001"] }} />);
+    fireEvent.click(screen.getByText("下一步"));
+    const input = screen.getByPlaceholderText("群聊名称") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "字".repeat(40) } });
+    expect((screen.getByPlaceholderText("群聊名称") as HTMLInputElement).value.length).toBe(30);
   });
 });

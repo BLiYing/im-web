@@ -5,33 +5,49 @@
 
 ## 当前焦点
 
-> **用户实测第四批 ✅ 2026-09-05**（发送后不滚到最新 / 转文字看不见 / 卡片宽度不齐，三条一起改）。
-> `npm run build` 干净 + **vitest 907 全绿**；卡片宽度与转文字补视口两条**已在浏览器实测**。
+> **建群两步流 ✅ 2026-09-05**（与 iOS 同批落地，后端零改动）。`CreateGroupModal` 拆成两步：
+> ① 好友多选（内容一字未改，按钮「创建」→「**下一步**」）② 群资料——
+> **群头像 / 群名（必填、预填「我、A、B」）/ 成员 chips（可 ✕，不可删到 0）**。
+> 头像走既有 `setCropReq` + `uploadAvatar`，拿到 URL 只写回草稿（**群还不存在**，不像
+> `pickGroupAvatar` 那样调 `updateGroup`），点「创建」时随 `createGroup(…, avatarUrl)` 一起发——
+> **SDK 那个第 4 形参一直在，此前恒传空串**。设计稿见
+> `../IMServer/docs/design/sketches/GROUP_CREATE_UX_SKETCH.html`。
 >
-> **① 在历史里发消息 → 窗口与滚动都不动**（用户："浏览到列表中间时发消息，iOS 会滚到最新，Web 不会"）。
-> 两处同时失效：**(a)** 渲染窗口停在历史某段时，新发的那条落在"最新"那一段、根本不在窗口里；
-> **(b)** 滚动 layout effect 的判据 `lastMine && (grew || wasNearBottom)` 跨窗口移动时必然为假——
-> `grew` 是**按条数比**的，锚点窗（≤600）换到尾窗（200）反而**变短**，而人在历史里 wasNearBottom 也是 false。
-> 修法：**收口到出箱消息的唯一回显入口 `appendMsg`**（文本/媒体/语音/转发/名片都走它）——
-> 目标是当前会话就把窗口拉回贴最新 + 置 `sendStickRef`，layout effect 里**无条件贴底**且早于所有分页保位分支。
-> 此前只有 `send()`（文本）复位窗口，发图/发语音/转发/发名片全没有；顺带去掉 `send()` 里那句，
-> 它连**编辑历史消息**（走 msg_op、不 append）都会把窗口拽回贴最新。回归：`App.locate.test.tsx` 新用例（已验反路）。
+> **两条值得记的**：
+> ① **预填群名只能用公开名（昵称），不能用 `displayNameOf()`（备注优先）**——群名会发到服务端、
+> 进系统消息、显示给全群，用备注＝把私下称呼广播出去（同合并转发标题那次 P0，`docs/UI.md` 红线）。
+> 新 `src/groupName.ts` 因此只收 nickname/username/uid **三件套**；我自己那一位取 `myInfo.nickname`。
+> **成员 chips 上显示的名字仍走 `friendLabel`（认备注）**，两者刻意分叉。
+> ② **「＋ 添加」＝ `setStep(1)`**，与「上一步」同一个动作——不另做加人 UI，
+> 那等于把搜索/全选/上限截断再抄一遍。草稿是唯一状态源（`createDraft` 加了
+> `avatarUrl` / `nameEdited`），来回切不丢；`nameEdited` 为真后增删成员**不再覆盖**用户改过的群名。
 >
-> **② 语音转文字：末条是语音时，转出来的文字挂在视口下沿之外**，必须手动再滑一下才看得见（两端同病）。
-> 面板是**后**长出来的：条数与窗口签名都没变，滚动 effect 这一轮压根不重跑（与媒体加载同一类）。
-> 新 `useVoiceTranscript.ts`（顺带把转文字那一族从 App.tsx 抽出，§7①：`transcripts` 只被这族读写）
-> 里加一个 layout effect：按 `revealDelta`「该行底部露出多少就补多少」——已完整可见则**一步不动**
->（在历史里转写中间某条不该被拽走），行比视口还高时最多补到行顶贴容器顶，**收起不滚**。
-> 浏览器实测：面板展开使行高 +27px，scrollTop 430→446，行底恰好回到容器底沿。
+> 新 CSS 全部只服务第二步（`.create-modal` 360px / `.create-profile` / `.create-name` /
+> `.field-count` / `.member-chip` / `.create-head|step|hint` + `.edit-avatar.sm` 修饰），第一步样式没动。
+> `tsc -b` 干净 + **vitest 922 全绿**（`groupName.test.ts` 9 例与 iOS 用例逐条对应，
+> `GroupPickers.test.tsx` 新增 7 例两步流）。
 >
-> **③ 聊天记录卡片与个人名片不同宽**（220 vs 232，上下相邻一眼看得出）。抽令牌 `--card-bubble-w: 232px`
-> 两处共用（实测两张卡都是 232px）；`docs/design/CONTACT_CARD_DESIGN.md §8.3` 同步。
+> **浏览器实测（用户点名要求）抓到一条 CSS 特异度坑**：计数「18/30」**压在群名文字上**——
+> `.create-name-input` (0,1,0) 被既有的 `.modal input` (0,1,1) 盖过，我留给计数的
+> `padding-right:46px` 被打回 12px。改成 `.create-modal .create-name-input` (0,2,0)。
+> **`.modal input` 正是 CODING_STYLE §九 点名的「容器 + 裸标签」反模式**，这次反过来咬了新代码一口——
+> 以后在 `.modal` 里加控件，选择器一律带上自己那层容器类。
+> 另修：「至少选择一位好友」提示会滞留，改为群名一改就清。
 >
-> **iOS 同批**（`IMChatViewController+Voice.m`）：`im_applyTranscriptText:` 应用前记 `isNearBottom`，
-> 应用后贴底 / 或 `ScrollPositionNone` 最小位移露全该行（`animated:NO`——动画滚动每帧触发
-> `maybeLoadOlder/NewerOnScroll`，插行会把落点带偏）。**按用户要求只编译未跑模拟器**。
->
-> **本轮体量**：App.tsx 3776 → 3756（转文字族抽走 ~50 行、本轮新增 ~30 行），闸棘轮 3790 → **3770**。
+> 实测跑通：两步流全程、预填名（我打头）、末两字头像圈、「＋添加」回第一步且勾选保留、
+> 删成员重算预填名、删到最后一位被拦并红字提示、全空白群名「创建」置灰、建群后弹窗关闭并进新群会话。
+> **用户复测报「设不上群头像」→ 又一条 z-index 坑（已修并验通）**：`AvatarCropper` 与建群弹窗
+> **都用 `.modal-mask`（z-index:50）**，同层时后出现的那个赢——而 `AvatarCropper` 在 `App.tsx` 里
+> 排在建群弹窗**之前**，于是裁切窗被埋在下面，「确定」点不到 → **Web 端群头像根本设不上**。
+> 修法：`.avatar-cropper-mask` 提到 `z-index:60`（它是从别的弹窗里拉起来的，本就该盖在所有弹窗之上）。
+> **这次头像上传真的验通了**：绕开原生文件框——往那个 `<input type=file>` 注入一个 canvas 生成的 File
+> 再派发 change → 裁切窗浮在最上层、「确定」可点 → 拿到 `/avatars/…jpg` → 建群后会话列表那行的头像就是它。
+> 同批：预填群名**不再补「…」**（与 iOS `IMDefaultGroupName` 同步，单测一起改）。
+
+> **上一批（2026-09-05，已提交 `55cc1cd`）**：发消息必回最新一窗并贴底 / 转文字撑高后补进视口 /
+> 记录卡与名片同宽（`--card-bubble-w`）。前两条已在浏览器实测。
+
+> **体量**：App.tsx 3760（本轮 +4：建群弹窗的三个新 prop 与一段注释），闸棘轮仍 **3770**，未动。
 
 ## 下一步
 1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
