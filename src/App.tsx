@@ -6,20 +6,19 @@ import { useMessageStore } from "./useMessageStore";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
-import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type GroupSummary, type Favorite, type PinnedMessage, type GroupBan, type JoinRequest, type UserCard } from "./sdk/protocol";
+import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type PinnedMessage, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionSpans, countsAsUnread, segmentMentions, segmentMentionsBySpans, MENTION_ALL_LABEL } from "./mention";
 import { remarkMap, displayNameOf } from "./remarks";
 import { resolveDetailFollow } from "./detailFollow";
-import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
+import { makeNameResolvers } from "./chatNaming";
 import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
 import { isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import { formatTime } from "./time";
-import { sysSegmentName } from "./sysSegments";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
 import type { DetailTab } from "./components/DetailTabs";
@@ -48,8 +47,9 @@ import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
 import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
+import { useGroupOps } from "./useGroupOps";
 import { useContactShare, CONTACT_MAX_SELECTION } from "./useContactShare";
-import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
+import { convPreview as buildConvPreview } from "./convPreview";
 import { useMentions } from "./useMentions";
 import { useQR } from "./useQR";
 import { useAppearanceSettings } from "./useAppearanceSettings";
@@ -286,21 +286,14 @@ export default function App() {
   const [adminPanelOpen, setAdminPanelOpen] = useState(false); // 群管理 →「管理员」二级面板（群主可增删、管理员只读）
   const [adminPicker, setAdminPicker] = useState<{ convId: string; selected: string[] } | null>(null); // 添加管理员弹窗（多选 ≤5）
   const [transferPicker, setTransferPicker] = useState<string | null>(null); // 选择新群主弹窗（单选即确认）的 conv_id
-  const [groupBans, setGroupBans] = useState<GroupBan[] | null>(null); // 当前群黑名单（管理面板显示计数）
-  const [groupBansModal, setGroupBansModal] = useState<{ convId: string; bans: GroupBan[] } | null>(null); // 黑名单弹窗
   // 二维码体系（QRCODE P0）+ G3 入群 UI 状态。
-  const [joinReqModal, setJoinReqModal] = useState<{ convId: string; requests: JoinRequest[]; loading: boolean } | null>(null);
   const [muteDurationFor, setMuteDurationFor] = useState<{ convId: string; m: GroupMember } | null>(null); // 成员禁言时长选择
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
-  const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
   const [friendRequests, setFriendRequests] = useState(false); // 通讯录「新的朋友」弹窗
   // 「发好友申请」弹窗草稿（全站五个加好友入口共用，见 FriendRequestModal 注释）。
   const [friendReqDraft, setFriendReqDraft] = useState<{ userId: string; name: string } | null>(null);
-  const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
-  const [createBusy, setCreateBusy] = useState(false);
   const [memberMenu, setMemberMenu] = useState<{ x: number; y: number; convId: string; m: GroupMember } | null>(null); // 成员行 ⋯ 菜单
   const memberMenuRef = useRef<HTMLDivElement | null>(null); // 菜单本体：捕获阶段关闭时用来排除菜单内点击
-  const [inviteDraft, setInviteDraft] = useState<{ convId: string; selected: string[] } | null>(null); // 邀请成员弹窗
   // 外观/通用设置簇 → useAppearanceSettings（阶段 8a）：主题/字号/时间格式/发送键/壁纸 + 持久化 effect + isDark。
   const {
     theme, setTheme, isDark, fontSize, setFontSize, timeFormat, setTimeFormat, sendKey, setSendKey,
@@ -1228,6 +1221,21 @@ export default function App() {
     favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites,
     favoriteActions, sendFavoritesToCurrent,
   } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode });
+
+  // 群的写操作 + 它们各自的弹窗状态（建群/退群/解散/邀请/黑名单/入群审批/群备注/群头像）→ useGroupOps。
+  // 那七个 state 只有这一族操作会读写，此前混在 App 的四十多个 state 里看不出谁和谁是一伙的。
+  const {
+    groupsModal, setGroupsModal, createDraft, setCreateDraft, createBusy,
+    inviteDraft, setInviteDraft, joinReqModal, setJoinReqModal,
+    groupBans, groupBansModal, setGroupBansModal,
+    openGroupsModal, doDissolveGroup, doCreateGroup, doLeaveGroup,
+    openGroupBans, doUnban, openJoinRequests, reloadJoinRequests, decideJoin,
+    doEditGroupRemark, pickGroupAvatar, doInvite,
+  } = useGroupOps({
+    clientRef, setToast, askConfirm, askPrompt, refreshConversations, refreshGroupInfo, doGroupAction,
+    openGroupChat, deselect, currentConvRef, loadSuperMembers, setCropReq, setTab, setDetail, setGroupInfos,
+    conversations, groupInfos,
+  });
 
   // 语音**跟着页面走**：离开这条语音所属的那一页就暂停（保留位点，回来点一下接着听）。
   // 三条 cleanup 各管一处——单例 audio 挂在模块上，页面一关组件就卸载了，声音却还在放，
@@ -2586,32 +2594,17 @@ export default function App() {
         f.user_id.toLowerCase().includes(contactFilterQ))
     : accepted;
   const incomingCount = incoming.length;
-  // 四条显示名链统一走 displayNameOf（remarks.ts），末级不再落 uid。
-  const labelOf = (id: string, nick: string, username?: string) => displayNameOf(id, remarks, nick, username);
-  // 好友显示名优先级：备注名 > 昵称 > uid（§头像/显示名规则）。
-  const friendLabel = (f: FriendEntry) => displayNameOf(f.user_id, remarks, f.remark || f.nickname, f.username);
-  // 会话对端显示名优先级：备注 > 昵称 > uid。
-  // 会话列表不下发 username（§7.4），故末级只能到占位——但那也好过露出内部 ID。
-  const convLabel = (c: Conversation) => displayNameOf(c.peer, remarks, c.peer_remark || c.peer_nickname);
-  // 会话列表项显示名/头像（群聊 vs 单聊）。**定义前置**：首页全局搜索派生（homeConvHits）在下方更早处引用，
-  // 若留在原位置会 TDZ「Cannot access 'convDisplayLabel' before initialization」——有会话时输入搜索即白屏（2026-08-20 修）。
-  const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
-  const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
-  // 对端头像/昵称多来源兜底（会话 > 好友 > 任一群成员表 > 搜索结果）：从没聊过的群成员点开单聊/资料卡时
-  // 没有会话行，头像/名字需从其它内存来源回退，否则只显示首字母圈/uid（群里气泡却正常）。
-  // 资料面板拉到的对端名片（uid → Card）：作为 peerSources 的**最高优先级**来源，
-  // 因为它是刚从服务端取的权威值，比会话行/好友表的缓存新。
-  // 末级来源是 useUserProfiles 的解析缓存：优先级最低（会话行/好友表/成员表都比它更贴近当前语境），
-  // 但它是超级群里唯一还有东西的那一层——成员表里根本没有普通成员。
-  const peerSources = () => ({
-    conversations, friends, groups: Object.values(groupInfos),
-    search: [...Object.values(peerCards), ...(searchResults ?? []), ...Object.values(userProfiles.cards)],
+  // 「这个人 / 这个会话在本机叫什么、用哪张头像」的一族只读派生 → chatNaming.ts（纯工厂，可单测）。
+  // **整组一次性解构**而不是各自散在下面：它们互相引用（convDisplayLabel→convLabel、
+  // localNameOf→memberNick、chatTitle→groupRemark…），分散定义时的声明顺序曾踩过 TDZ 白屏
+  //（2026-08-20：homeConvHits 在 convDisplayLabel 之前引用它）。一次拿全就没有顺序问题。
+  const {
+    labelOf, friendLabel, convLabel, convDisplayLabel, convAvatarUrl,
+    peerAvatar, peerNick, peerUsername, groupRemark,
+    memberNick, localNameOf, senderLabel, groupMemberLabel, senderRole, senderAvatar,
+  } = makeNameResolvers({
+    remarks, friends, conversations, groupInfos, peerCards, searchResults, profileCards: userProfiles.cards,
   });
-  const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
-  const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
-  // 公开句柄只有 GET /users/{id} 的权威名片带（好友/会话列表不下发，见 PROTOCOL「用户标识」）。
-  // 拿不到就返回 undefined，由调用方整行隐藏——绝不回退到内部 ID。
-  const peerUsername = (id: string) => peerCards[id]?.username || undefined;
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
   const peerConv = conversations.find((c) => c.peer === peer);
   const peerLabel = peerConv ? convLabel(peerConv) : displayNameOf(peer, remarks, peerNick(peer), peerUsername(peer));
@@ -2644,10 +2637,6 @@ export default function App() {
   })();
 
   const activeGroupConv = groupConvId ? conversations.find((c) => c.conv_id === groupConvId) : undefined;
-  // 群备注（G1，仅本人可见）——**服务端多端同步**：从会话列表状态读该会话的 remark（随 /conversations 拉取，
-  // conv_update 后自动刷新）。定义在 chatTitle/详情用它之前，避免 TDZ。
-  const groupRemark = (cid: string): string =>
-    (conversations.find((c) => c.conv_id === cid)?.remark || "").trim();
   const chatTitle = isGroupChat
     ? (groupRemark(groupConvId) || activeGroupInfo?.name || activeGroupConv?.name || "群聊")
     : peerLabel;
@@ -2664,50 +2653,14 @@ export default function App() {
     ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员${chatIsSuper ? " · 大群" : ""}` : (chatIsSuper ? "大群" : "群聊"))
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
     : presenceText(presence[peer]);
-  // 群成员昵称（气泡回退用）：优先消息自带 from_nickname，其次成员表缓存，最后 uid。
-  const memberNick = (cid: string, id: string): string => {
-    const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
-    // 群昵称优先（G1），回退全局昵称。
-    const local = (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
-    if (local) return local;
-    // 成员表给不出：超级群不下发成员集、发送者已退群。问全局解析器（useUserProfiles，
-    // 缺的会被上面的 unresolvedViewUids effect 批量补上）。仍拿不到就回空串，调用方走自己的兜底。
-    return (userProfiles.cards[id]?.nickname ?? "").trim();
-  };
-  // 群 typing 显示昵称（对齐 iOS `IMChatViewController+Socket.m` `im_navigationSubtitle`）：
-  /** 某人在**本机**的显示名：备注 > 群昵称/全局昵称 > fallback（一般是服务端字面）> uid。
-   *  系统消息里的名字、引用条发送者、typing 副标题共用；会发出去的内容一律不经过这里。 */
-  const localNameOf = (id: string, cid: string, fallback?: string): string =>
-    displayNameOf(id, remarks, memberNick(cid, id) || fallback);
-
-  // 单聊固定"正在输入"；群里覆盖式记最新一位打字者，副标题拼「{昵称} 正在输入」，昵称找不到回退 uid。
-  // 声明放在 memberNick / localNameOf 之后：IIFE 立即执行，二者必须先在作用域里初始化，否则命中 TDZ。
+  // 单聊固定"正在输入"；群里覆盖式记最新一位打字者，副标题拼「{昵称} 正在输入」
+  //（对齐 iOS `IMChatViewController+Socket.m` 的 `im_navigationSubtitle`）。
   const visibleChatSubtitle = (() => {
     if (!convId || !typingConv || typingConv.convId !== convId) return chatSubtitle;
     if (!isGroupChat) return "正在输入";
     // 备注优先（本机显示）：列表/气泡都显备注了，副标题还显真名会显得是另一个人。
     return `${localNameOf(typingConv.uid, convId, typingConv.uid)} 正在输入`;
   })();
-  const senderLabel = (m: ChatMessage): string =>
-    displayNameOf(m.from, remarks, m.fromNickname || memberNick(m.convId, m.from));
-  /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 全局昵称 > uid。
-   *  成员列表/已读回执/成员菜单确认文案都用它；会发出去的内容（@token 等）仍用公开名。 */
-  const groupMemberLabel = (m: { user_id: string; group_nickname?: string; nickname?: string }): string =>
-    displayNameOf(m.user_id, remarks, m.group_nickname || m.nickname);
-  // 发送者在本群的角色（群主/管理员气泡徽标用）：**优先本群成员表的当前角色**（晋升/降级后老消息随之变化，
-  // 微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role（仅 owner/admin 冗余下发）兜底。
-  const senderRole = (m: ChatMessage): "owner" | "admin" | undefined => {
-    const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from);
-    const role = gm?.role ?? m.fromRole;
-    return role === "owner" ? "owner" : role === "admin" ? "admin" : undefined;
-  };
-  // 群成员头像 URL（气泡左侧头像列用）：从群资料成员表按 uid 取；无则空（Avatar 回退首字母圈）。
-  const senderAvatar = (m: ChatMessage): string | undefined => {
-    const url = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
-    // 成员表兜底。**超级群里这是常态而非例外**：成员表只含群主+管理员，
-    // 不兜底的话满屏普通成员的气泡头像全是首字母圈（消息自带 from_nickname 但没有 from_avatar）。
-    return url || userProfiles.cards[m.from]?.avatar_url || undefined;
-  };
   // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordHits（不聚合）=====
   const homeQ = search.homeSearch.trim().toLowerCase();
   const homeConvHits = homeQ ? conversations.filter((c) => convDisplayLabel(c).toLowerCase().includes(homeQ)) : [];
@@ -2741,63 +2694,8 @@ export default function App() {
     if (card) return displayNameOf(f.source_from, remarks, card.nickname, card.username);
     return f.source_from;
   };
-  // 会话列表预览的类型占位。**voice 与 contact 需要 content_type 之外的东西**（时长 / 名片快照里的昵称），
-  // 故 extra 带 content——曾漏给 contact 传 content，预览直接把 {"u":"1002",…} 整串 JSON 显在列表上
-  // （用户实测发现；iOS 侧当时已按 lastContent 处理，两端不一致）。
-  const mediaPreview = (ct: string, extra?: { duration?: number; content?: string }): string | null => {
-    if (ct === "image") return "[图片]";
-    if (ct === "video") return "[视频]";
-    if (ct === "file") return "[文件]";
-    if (ct === "chat_record") return "[聊天记录]";
-    if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(extra?.content);
-    if (ct === "voice") {
-      const ms = extra?.duration ?? 0;
-      const s = Math.max(0, Math.floor(ms / 1000));
-      return `[语音] ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-    }
-    return null;
-  };
-  const convPreview = (c: Conversation): string => {
-    if (!c.last_message) return "（无消息）";
-    // 预览里的人名也走本机显示名（备注 > 群昵称 > 昵称 > uid）——否则列表显真名、点进会话显备注，
-    // 同一句话两副面孔。这里只替换名字，不挂点击（预览是纯文本）。
-    const lastName = (fallback?: string) =>
-      displayNameOf(c.last_message!.from, remarks, fallback || memberNick(c.conv_id, c.last_message!.from));
-    // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
-    if (c.last_message.recalled_at) {
-      const who = c.last_message.from === uid ? "你" : (c.is_group ? lastName(c.last_message.from_nickname) : "对方");
-      return `${who}撤回了一条消息`;
-    }
-    const media = mediaPreview(c.last_message.content_type,
-      { duration: c.last_message.duration, content: c.last_message.content }); // 图片/视频/文件 → [图片]/…；voice 带 m:ss；contact 带昵称
-    // 系统消息：按分段拼，名字换成本机显示名；无分段（历史消息）回退整句。无发送者前缀。
-    if (c.last_message.content_type === "system") {
-      return c.last_message.sys_segments?.length
-        ? c.last_message.sys_segments
-            .map((seg) => (seg.uid
-              // 我自己 → 「我」，与聊天页系统行同口径（sysSegmentName）。
-              ? sysSegmentName(seg.uid, uid, (id) => displayNameOf(id, remarks, memberNick(c.conv_id, id) || seg.text))
-              : seg.text))
-            .join("")
-        : c.last_message.content;
-    }
-    // 图说 caption「有字显字」（Telegram 模型）：图文/视频文/文件文带 caption 时预览直接显 caption，否则回退 [图片]/[视频]/[文件]。
-    const text = c.last_message.caption || media || c.last_message.content;
-    if (!c.is_group) return text;
-    const who = c.last_message.from === uid ? "我" : lastName(c.last_message.from_nickname);
-    return `${who}: ${text}`;
-  };
-
-  // 群动作统一包装：执行 → 刷新群资料 + 会话列表；失败 alert。
-  // 打开「群聊」列表弹窗（通讯录入口）。
-  const openGroupsModal = async () => {
-    try {
-      const list = await clientRef.current?.listGroups();
-      setGroupsModal(list ?? []);
-    } catch (e) {
-      setToast(`加载群列表失败：${(e as Error).message}`);
-    }
-  };
+  // 会话列表预览行 → convPreview.ts（纯派生 + 单测；踩过的坑与口径记在那边）。
+  const convPreview = (c: Conversation): string => buildConvPreview(c, { uid, localNameOf });
 
   // 加载详情页签数据源（本地历史消息，供 媒体/文件/链接 页签过滤）。
   const loadDetailMsgs = (cid: string) => {
@@ -2856,20 +2754,6 @@ export default function App() {
     })();
   };
 
-  // 解散群（仅群主，二次确认）。
-  const doDissolveGroup = (cid: string) => {
-    void (async () => {
-      if (!(await askConfirm("删除并解散该群？所有成员将被移出，且不可恢复。", { okText: "解散", danger: true }))) return;
-      try {
-        await clientRef.current!.dissolveGroup(cid);
-        setDetail(null);
-        setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
-        if (currentConvRef.current === cid) deselect();
-        void refreshConversations();
-      } catch (e) { setToast(`解散失败：${(e as Error).message}`); }
-    })();
-  };
-
   // 点拒收系统行的「发送好友申请」（非好友 200103 的恢复入口，微信式）。
   // 服务端 Request 对「我侧陈旧 accepted」已放行——单向删除后被删方的唯一恢复路径。
   // 与其余四个入口一样走统一的申请弹窗（填验证消息），不直接发。
@@ -2902,156 +2786,12 @@ export default function App() {
     })();
   };
 
-  // 建群：校验 → POST → 进入新群会话。
-  const doCreateGroup = async () => {
-    if (!createDraft) return;
-    const name = createDraft.name.trim();
-    if (!name) { setToast("请输入群名"); return; }
-    if (createDraft.selected.length === 0) { setToast("请至少选择一位好友"); return; }
-    setCreateBusy(true);
-    try {
-      const info = await clientRef.current!.createGroup(name, createDraft.selected);
-      setGroupInfos((prev) => ({ ...prev, [info.conv_id]: info }));
-      setCreateDraft(null);
-      setGroupsModal(null);
-      setTab("chats");
-      await refreshConversations();
-      openGroupChat(info.conv_id);
-    } catch (e) {
-      setToast(`建群失败：${(e as Error).message}`);
-    } finally {
-      setCreateBusy(false);
-    }
-  };
-
-  // 退出群聊（群主会被服务端拦：需先转让）。
-  const doLeaveGroup = async (cid: string) => {
-    if (!(await askConfirm("确定退出该群聊？", { okText: "退出", danger: true }))) return;
-    try {
-      await clientRef.current!.leaveGroup(cid);
-      setDetail(null);
-      setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
-      if (currentConvRef.current === cid) deselect();
-      void refreshConversations();
-    } catch (e) {
-      setToast(`退出失败：${(e as Error).message}`);
-    }
-  };
-
-  // 打开黑名单弹窗（G2）：拉一次列表。
-  const openGroupBans = async (cid: string) => {
-    try {
-      const bans = await clientRef.current!.fetchGroupBans(cid);
-      setGroupBansModal({ convId: cid, bans });
-      setGroupBans(bans);
-    } catch (e) { setToast(`加载黑名单失败：${(e as Error).message}`); }
-  };
-  const doUnban = async (cid: string, userId: string) => {
-    try {
-      await clientRef.current!.unbanGroupMember(cid, userId);
-      const bans = await clientRef.current!.fetchGroupBans(cid);
-      setGroupBansModal({ convId: cid, bans });
-      setGroupBans(bans);
-      setToast("已解除");
-    } catch (e) { setToast(`解除失败：${(e as Error).message}`); }
-  };
-
   // ---- 二维码体系（QRCODE P0）----
 
 
   // ---- 入群审批（G3）----
 
-  const openJoinRequests = async (cid: string) => {
-    setJoinReqModal({ convId: cid, requests: [], loading: true });
-    try {
-      const requests = await clientRef.current!.fetchJoinRequests(cid, ""); // ""=全部（待处理 + 已处理分段）
-      setJoinReqModal({ convId: cid, requests, loading: false });
-    } catch (e) {
-      setJoinReqModal(null);
-      setToast(`加载入群申请失败：${(e as Error).message}`);
-    }
-  };
-  const reloadJoinRequests = async (cid: string) => {
-    try {
-      const requests = await clientRef.current!.fetchJoinRequests(cid, "");
-      setJoinReqModal((m) => (m && m.convId === cid ? { ...m, requests, loading: false } : m));
-    } catch { /* 列表已关或无权限，忽略 */ }
-  };
-  const decideJoin = async (cid: string, userId: string, accept: boolean) => {
-    try {
-      await clientRef.current!.decideJoinRequest(cid, userId, accept);
-      await reloadJoinRequests(cid);
-      void refreshGroupInfo(cid); // 更新 pending_count 角标
-      setToast(accept ? "已同意入群" : "已拒绝");
-    } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
-  };
-
   // 我在本群的昵称（G1，任意成员）：走后端 → 刷新群资料（气泡回退名随之更新）。
-  // 群备注（G1，仅本人可见）：改我看到的群名，**服务端多端同步**（PUT …/remark）。
-  // 成功后重拉会话列表；conv_update 也会把变更同步到本人其它端与本机列表/标题。
-  const doEditGroupRemark = async (gp: GroupInfo) => {
-    const cur = groupRemark(gp.conv_id);
-    const v = await askPrompt("群备注", cur, { placeholder: `${gp.name}（仅自己可见）`, okText: "保存", maxLength: 30 });
-    if (v === null || v.trim() === cur) return;
-    try {
-      await clientRef.current?.setConvRemark(gp.conv_id, v.trim());
-      logger.info(LOG_TAG.app, "group_remark_updated", { conv: gp.conv_id, len: v.trim().length });
-      await refreshConversations(); // 列表状态更新 → chatTitle/列表项/详情行随 remark 重渲染
-    } catch (e) {
-      setToast(`保存备注失败：${(e as Error).message}`);
-    }
-  };
-
-  // 设置群头像（仅群主/管理员，方案 C）：选图 → 圆形裁切 → 头像专用上传 → updateGroup 带新 URL。
-  const pickGroupAvatar = (gp: GroupInfo) => {
-    const input = document.createElement("input");
-    input.type = "file"; input.accept = "image/*";
-    input.onchange = () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setCropReq({
-        file,
-        onDone: async (blob) => {
-          try {
-            setToast("上传中…");
-            const { url } = await clientRef.current!.uploadAvatar(blob);
-            await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url, gp.intro ?? ""));
-            setToast("群头像已更新");
-          } catch (e) { setToast(`设置群头像失败：${(e as Error).message}`); }
-        },
-      });
-    };
-    input.click();
-  };
-
-  // 邀请成员：提交选中的好友。
-  const doInvite = async () => {
-    if (!inviteDraft || inviteDraft.selected.length === 0) { setToast("请选择要邀请的好友"); return; }
-    const { convId: cid, selected } = inviteDraft;
-    try {
-      const added = await clientRef.current!.inviteToGroup(cid, selected);
-      setInviteDraft(null);
-      void refreshGroupInfo(cid);
-      void refreshConversations();
-      // **超级群的成员列表是另一份 state**（superMembers），它只在切群时才重拉。
-      // 不在这里补一发，界面会自相矛盾：副标题刷成「2001 位成员」，列表还是原来那 2000 行。
-      if (groupInfos[cid]?.is_super) void loadSuperMembers(cid, "");
-      // 按**实际加入数**给反馈，而不是按勾选数：已在群里的人会被服务端跳过（幂等，不是错误）。
-      // 超级群下这是常态——端上算不出完整的"已在群里"集合（gp.members 只有我自己）。
-      const skipped = selected.length - added.length;
-      if (added.length === 0) setToast("所选的人都已在群里");
-      else if (skipped > 0) setToast(`已邀请 ${added.length} 人，其余 ${skipped} 人已在群里`);
-    } catch (e) {
-      // 按业务码分支（勿直接透传服务端 message，i18n）：300207 = 被邀请者已被移出/冷却期，
-      // 用邀请场景的第三人称文案，区别于自加群映射表里的第二人称「你已被移出」。
-      if (errorCode(e) === 300207) setToast("该成员已被移出本群，暂时无法再次邀请");
-      // 300204 = 无邀请权（竞态：打开选择器后群主刚开启「仅管理员可邀请」）。后端此码下发英文默认文案，
-      // 且 300204 多场景复用不宜在 FRIENDLY_MESSAGES 一刀切映射，故在此邀请场景就地给中文（对齐 iOS）。
-      else if (errorCode(e) === 300204) setToast("群主已开启「仅管理员可邀请」，你无法邀请成员");
-      else setToast(`邀请失败：${(e as Error).message}`);
-    }
-  };
-
   // 成员行是否显示 ⋯ 管理菜单：不能管自己；owner 管所有人，admin 只管普通成员。
   const canManageMember = (gp: GroupInfo, m: GroupMember): boolean =>
     m.user_id !== uid && (gp.my_role === "owner" || (gp.my_role === "admin" && m.role === "member"));

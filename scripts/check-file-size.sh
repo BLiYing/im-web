@@ -17,11 +17,16 @@ MAX_LINES=${MAX_LINES:-600}           # 未登记文件行数上限（可用环�
 WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败），尽早规划拆分
 
 # 历史欠账（已超 MAX_LINES、待拆分）。值 = 当前行数 + 少量余量，**只准降不准升**。
-#   - src/App.tsx      : 应用外壳，2026-08 系统性拆分至 ~3000（6302 → 4891 → 2960±：9 阶段抽 MessageList/DetailPanel/Composer/ContactsTab/ChatHeader + useChatSearch/useMediaDownload/useMediaSend/useForward/useFavorites/useMentions/useQR/useAppearanceSettings/useFriendOps/useProfileEdit）。剩余=核心 state/连接/滚动核心/菜单表/enterApp 等胶水（§7 不硬抽），见 current_task.md。
+#   - src/App.tsx      : 应用外壳，2026-08 系统性拆分至 ~3000（6302 → 4891 → 2960±：9 阶段抽 MessageList/DetailPanel/Composer/ContactsTab/ChatHeader + useChatSearch/useMediaDownload/useMediaSend/useForward/useFavorites/useMentions/useQR/useAppearanceSettings/useFriendOps/useProfileEdit）。
+#                        2026-09-05 再抽一轮 3995 → 3735：chatNaming（显示名/头像解析，纯工厂 + 13 例）、
+#                        convPreview（会话预览，纯函数 + 9 例）、useGroupOps（群写操作 + 它们自己的 7 个弹窗 state）。
+#                        剩余=核心 state/连接/滚动核心/菜单表/enterApp 等胶水（§7 不硬抽），见 current_task.md。
+#                        **这个数字不是给 App.tsx 留的成长空间**：新功能按 §7 决策树进新文件，触顶就是提醒该开新文件了。
 #   - src/sdk/imSdk.ts : IM 客户端 API 面（40+ 方法），大而由业务性质决定；如拆按域分（auth/messages/groups/qr）。
 grandfather_limit() {
   case "$1" in
-    src/App.tsx)      echo 4000 ;;  # 2026-08-25 用户拍板放宽到 4000（原棘轮下调 5100→…→3000，触顶挡了 bug fix→放宽为准）
+    src/App.tsx)      echo 3800 ;;  # 2026-09-05 棘轮下调 4000→3800（拆出 chatNaming/convPreview/useGroupOps 后 3735）。
+                                    # 4000 那次是「触顶挡了 bug fix→用户拍板放宽」，不是设计值；现在有余量了就收回来。
     src/sdk/imSdk.ts) echo 1465 ;;  # 2026-08-30 1450→1465：网络恢复秒连。判据(wakeActionFor)+DOM 监听
                                     # 已抽到 sdk/wake.ts，类里只剩 reconnectNow 这个接线口（连接活性本就是
                                     # 本类的职责，再往外拆就是为凑数字硬拆，见 CLAUDE.md 体量红线那条）。
