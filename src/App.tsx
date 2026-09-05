@@ -731,14 +731,20 @@ export default function App() {
         if (!pend || pend.convId !== meta.convId) return;
         // 锚点对不上=这帧回的是更早那次开窗（连点了两个定位入口），用了它会跳到上一个目标。
         if (meta.anchor !== pend.seq) return;
-        if (!meta.anchorFound) {
+        // 「最早」不认这条：它的锚点 conv_seq=1 十有八九不是一条消息（msg_op 事件行/墓碑/
+        // 入群前不可见的行都占号），而这一窗**照样带回了最早那一段**，丢掉它才是真的白跑。
+        if (!meta.anchorFound && !pend.earliest) {
           pendingLocateRef.current = null;
           setToast("原消息已被删除");
           return;
         }
-        // 消息刚入库，等它渲染出 DOM 节点再滚动高亮（与既有 jumpToSeq 同套路）。
-        pendingLocateRef.current = null;
-        requestAnimationFrame(() => requestAnimationFrame(() => jumpToSeq(pend.seq)));
+        // 只记「窗口已到」，**滚动交给 driveLocate**（下一次渲染后由 effect 推进）。
+        // 这里直接 jumpToSeq 是错的：开窗只把消息灌进本地库，**渲染窗口还停在贴最新那一段**
+        //（visibleSlice 按 renderView.anchor 切片，没人动过它），目标根本没有 DOM 节点，
+        // 于是第一次点击必然落空——只弹一句"原消息较早，请上拉加载后重试"；再点一次才因为
+        //"本地已有"走到 driveLocate 的移窗分支。这就是「点置顶消息要点两次才过去」
+        //（2026-09-05 实测：置顶横幅 / 搜索「最早」/ 引用条 / 详情页定位全中，它们共用这条路）。
+        pendingLocateRef.current = { ...pend, windowed: true };
       },
       onPresence: (user, p) => setPresence((prev) => ({ ...prev, [user]: p })),
       onTyping: (convId, from) => {
@@ -1333,27 +1339,41 @@ export default function App() {
   // 旧实现是「从最新往前一页页翻，最多 40 页」——40 次往返，翻满还没找到就报出**假的**
   // 「原消息已被删除」（在大群里 8000 条可能只是几小时的量）。现在服务端的 window_resp
   // 直接给出 anchor_found：真没有才说没有。见 IMServer/docs/design/MESSAGE_WINDOW_DESIGN.md。
-  const pendingLocateRef = useRef<{ convId: string; seq: number } | null>(null);
+  // 待完成的一次定位。
+  // `windowed`：已经为它开过一次窗（开过还没有 = 真没有，不再重开，见 driveLocate 末尾）。
+  // `earliest`：「跳到最早」——目标不是某个确定的 conv_seq，而是"会话首条"这个概念，
+  //   开窗回来后才知道它到底是第几号（见 driveLocate 里的重定目标）。
+  type PendingLocate = { convId: string; seq: number; windowed?: boolean; earliest?: boolean };
+  const pendingLocateRef = useRef<PendingLocate | null>(null);
   const WINDOW_SIDE = 60; // 定位时锚点两侧各取多少条（够填满几屏，且一次请求内）
   const driveLocate = useCallback(() => {
     const pend = pendingLocateRef.current;
     if (!pend || pend.convId !== currentConvRef.current) return; // 会话切走 → 交给新一轮 locateInChat
-    if (messagesRef.current.some((x) => x.convSeq === pend.seq)) {
+    const local = msgsByConvRef.current[pend.convId] ?? [];
+    // 「最早」开窗回来后**重定目标**：conv_seq=1 经常不是一条消息——msg_op 事件行（撤回/编辑/
+    // 置顶）、已删墓碑、入群前对我不可见的行都占号却不成为消息。钉死 1 的话，服务端明明把
+    // 最早那一段都给了，客户端却因为 1 号不是消息而无处可落。改成落到**本地实际最早的一条**。
+    const seq = pend.earliest && pend.windowed ? (minSeqOf(local) || pend.seq) : pend.seq;
+    if (messagesRef.current.some((x) => x.convSeq === seq)) {
       pendingLocateRef.current = null;
-      requestAnimationFrame(() => jumpToSeq(pend.seq)); // 已在渲染窗口内：直接滚动高亮
+      requestAnimationFrame(() => jumpToSeq(seq)); // 已在渲染窗口内：直接滚动高亮
       return;
     }
-    // **本地库有、只是没渲染出来** → 扩窗即可，不必请求
+    // **本地库有、只是没渲染出来** → 移窗即可，不必请求
     // （首次进会话的 sync 常把历史全灌进本地库，那时目标多半就在本地）。
-    const local = msgsByConvRef.current[pend.convId] ?? [];
-    if (local.some((x) => x.convSeq === pend.seq)) {
+    if (local.some((x) => x.convSeq === seq)) {
       // 把窗口**移到**目标处（不是撑大——撑大会把整个会话渲染出来，第一版就是这么错的）。
-      setRenderView({ anchor: pend.seq, size: RENDER_WINDOW_STEP });
+      setRenderView({ anchor: seq, size: RENDER_WINDOW_STEP });
       return; // 移窗触发重渲染 → 本 effect 再跑一次，那时走上面的"已在窗口内"分支
     }
-    // 本地库也没有 → 以它为锚点开一窗。回包由 onWindow 处理（见 handlers），那里再滚动高亮。
+    // 开过窗、消息也灌进本地了，却还是找不到 → 锚点是一条**永远不会成为消息的行**
+    // （服务端 anchor_found 只保证 im_message 里有这一行，msg_op 事件行同样在那张表里）。
+    // 必须就此打住：不打住的话本 effect 会一轮轮重开同一个窗，无限往返。
+    if (pend.windowed) { pendingLocateRef.current = null; setToast("原消息已被删除"); return; }
+    // 本地库也没有 → 以它为锚点开一窗。回包只把消息灌进本地库并标记 windowed，
+    // 剩下的移窗/滚动仍旧走这里（见 onWindow 处的说明）。
     clientRef.current?.requestWindow(pend.convId, pend.seq, WINDOW_SIDE, WINDOW_SIDE);
-  }, [jumpToSeq]);
+  }, [jumpToSeq, setToast]);
   // 消息窗口变化后推进一步定位。
   //
   // **依赖必须包含 `renderView`（渲染窗口本身），不能只有 `msgsByConv`**：
@@ -1363,9 +1383,9 @@ export default function App() {
   // 目标是否已渲染本来就该由「渲染集变了」来驱动，而渲染集 = msgsByConv 切 renderView。
   useEffect(() => { driveLocate(); }, [msgsByConv, renderView, driveLocate]);
 
-  const locateInChat = useCallback((cid: string, seq: number) => {
+  const locateInChat = useCallback((cid: string, seq: number, opts?: { earliest?: boolean }) => {
     if (!cid || seq <= 0) { setToast("该消息无法定位"); return; }
-    pendingLocateRef.current = { convId: cid, seq };
+    pendingLocateRef.current = { convId: cid, seq, earliest: opts?.earliest };
     if (cid !== currentConvRef.current) {
       // 详情所属会话未打开（如从通讯录/群成员进的资料页）→ 先打开它，加载窗口后由 effect 定位。
       if (cid.startsWith("g_")) openGroupChat(cid);
@@ -2294,8 +2314,11 @@ export default function App() {
     const busy = loadingOlderRef.current || loadingNewerRef.current;
     const localAll = msgsByConv[cid] ?? [];
     // 窗口是否已经贴到本地最新一条（锚点模式下窗口停在历史某段，下面要靠它判断"该往前移窗了"）。
-    const windowAtLocalEnd = renderView.anchor === null ||
-      messagesRef.current[messagesRef.current.length - 1]?.convSeq === localAll[localAll.length - 1]?.convSeq;
+    // **比最大 conv_seq，不比"最后一个元素"**：localAll 是**到达顺序**（appendTo 一路 push），
+    // 而定位开窗取回的是一段**旧**消息，它们就被追加在数组末尾——于是"窗口末条 === 本地末条"
+    // 恒成立，这一支永远不触发：跳到历史后往下滚就再也回不到最新消息（2026-09-05 实测，
+    // 滚到那一段底部纹丝不动）。渲染用的 allLocal 是排过序的副本，localAll 不是。
+    const windowAtLocalEnd = renderView.anchor === null || maxSeqOf(messagesRef.current) >= maxSeqOf(localAll);
     if (nearBottomPx && !windowAtLocalEnd) {
       // **跳到历史后往下滚**：本地还有更新的内容，只是不在窗口里 → 直接回到"贴最新"模式。
       // 不做这一步的话，用户跳到第 123 条后往下滚会卡在窗口末尾（loadNewer 去问服务端，

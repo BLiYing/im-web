@@ -37,7 +37,7 @@ export interface ChatSearchDeps {
   // 回调 / 常量
   /** **唯一的跳转出口**：窗口内 → 滚动；本地有 → 移窗；都没有 → window_req 开窗。
    *  本 Hook 刻意不持有 jumpToSeq（只滚 DOM 的那个）——搜索命中/日历落点都可能在窗口外。 */
-  locateInChat: (cid: string, seq: number) => void;
+  locateInChat: (cid: string, seq: number, opts?: { earliest?: boolean }) => void;
   setToast: (msg: string | null) => void;
   /** 本会话的本地库是否**齐全**（区间清单覆盖到 head）。false = 有缺口，
    *  此时"整个会话"类问题不能再问本地（OFFLINE_BACKLOG_DESIGN §4.9）。 */
@@ -298,7 +298,10 @@ export function useChatSearch(d: ChatSearchDeps) {
     if (minSeqOf(allMessages) <= 1) { locateInChat(convId, first.convSeq); return; }
     setToast("正在加载更早历史…");
     // 借道统一定位入口：目标不在窗口 → 开窗 → 到达后滚动高亮，与其他定位场景同一条路径。
-    locateInChat(convId, 1);
+    // **带 earliest 标记**：anchor=1 只是"往最前面开一窗"的写法，1 号本身常常不是一条消息
+    //（msg_op 事件行 / 墓碑 / 入群前对我不可见的行都占号）。不带标记的话，服务端明明把最早
+    // 那一段都回来了，客户端却因为"锚点不是消息"报一句假的「原消息已被删除」然后放弃。
+    locateInChat(convId, 1, { earliest: true });
   };
 
   // ===== 首页全局搜索：聊天记录走本地库 searchMessages（防抖 + 结果上限）=====

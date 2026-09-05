@@ -57,6 +57,9 @@ export class FakeIMClient {
   // 同步取值的方法必须显式实现：Proxy 兜底回的是 Promise（恒真），会让 UI 把"本地有缺口"当成常态、
   // 把 head 当成一个对象。
   hasGap(): boolean { return false; }
+  // 同上：渲染切段要读区间清单（"这两条中间缺的号是没下载、还是本就不成为消息"）。
+  // Proxy 兜底回 Promise，会被 visibleSlice 当成一个没有 length 的清单。
+  rangesOf(): { lo: number; hi: number }[] { return []; }
   headOf(): number { return 0; }
   loadOlder(...a: unknown[]) { this.rec("loadOlder", ...a); }
   loadNewer(...a: unknown[]) { this.rec("loadNewer", ...a); }

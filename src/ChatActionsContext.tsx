@@ -17,7 +17,7 @@ export interface ChatActions {
   setInput: Dispatch<SetStateAction<string>>;
   setRecordStack: Dispatch<SetStateAction<ChatRecord[]>>;
   setToast: (msg: string | null) => void;
-  locateInChat: (cid: string, seq: number) => void;
+  locateInChat: (cid: string, seq: number, opts?: { earliest?: boolean }) => void;
   onGateTap: (m: ChatMessage) => void;
   onMediaBubbleTap: (m: ChatMessage, openViewer: () => void) => void;
   openReadyFile: (m: ChatMessage) => Promise<void>;
