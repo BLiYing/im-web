@@ -311,3 +311,83 @@
 - 已读=**可见即读**（已实现，与 iOS 一致）：滚动时按元素 rect 取视口内最大 seq，0.3s 节流 `markRead` + `refreshConversations`；↓N 徽标与左侧列表红点都=视口下方未读数，随滚动递减。preview 实测：进会话 ↓N/红点=44 → 半屏=14 → 滚到底=0/按钮隐藏。
 - 壁纸为内联 SVG 近似，非 Telegram 原涂鸦。
 
+
+
+---
+
+# 归档于 2026-09-05（搜索开错会话 / 合并转发标题口径 / 条目匿名化 · 收藏详情置顶记录卡五项 · 记录卡补齐与语音红点 · 记录卡三后续）
+
+> 从活快照转入（活快照只留当前焦点，见 current_task.md）。
+
+> **三项：会话内搜索开错会话 + 合并转发标题口径 + 条目 `u` 匿名化（2026-08-31，与 iOS 同步；
+> `tsc -b` 干净、`vitest 704` 全绿；**未手测**）**
+>
+> 1. **搜索 pill 静默搜错会话（真 bug）** —— `DetailPanel` 的搜索 pill 调 `openInChatSearch()`，
+>    这函数**不收会话参数**，开的是当前活动会话的搜索；而 `openPeerDetail()` 只设 `detail.convId`、
+>    **不切活动会话**。于是「群里点成员头像 → 资料卡 → 搜索」搜到了那个**群**上，且毫无提示。
+>    现 pill 交出 `(d.convId, d.peer, d.isGroup)`；App 侧目标 ≠ 当前会话就先 `openChat`/`openGroupChat`。
+>    **不能"先切会话再 openInChatSearch"**——`useChatSearch` 的 `[convId]` effect 会把刚开的搜索态关掉
+>    （那是防"关键词泄漏到下一个会话"的既有逻辑）。故新增 `armInChatSearch(targetConvId)` 把"待开"
+>    记在 ref 上，由那个 effect 在切换落定后接手打开。回归见 `DetailPanel.test.tsx`。
+> 2. **合并转发标题收敛到微信口径** —— 原 `useForward.ts` 按条目发送者数量推标题
+>    （一个人「张三 的聊天记录」/ 多人「群聊的聊天记录」），而 iOS 那侧写的是**真实群名**，同一操作两端分叉。
+>    现共用纯函数 `chatRecordTitle`（`messageContent.ts`）：群聊固定「群聊的聊天记录」（不写群名）、
+>    单聊「{对方公开名}和{我的公开名}的聊天记录」。名字从 `App.tsx` 注入（`peer_nickname` + `myInfo.nickname`，
+>    **不是 `peer_remark`**——备注仅本人可见）；**直接从 `conversations` 取而不调 `peerNick()`**，
+>    后者定义在 `useForward` 调用点之后，取值会 TDZ。
+> 3. **条目 `u` 改成卡片内匿名序号 `s1/s2`**（`buildRecordSenderKeys`）—— 原本发的是发送者真 10 位内部 ID，
+>    随卡片到了可能不在群里的收件人手上，而 `GET /users/{id}` 不校验请求方与目标的关系。
+>    **读端零改动**（`recordSenderKey` 本就只做相等比较）；只把 `RecordModal` 的头像色种从 `it.u` 换成 `it.n`
+>    （匿名序号当色种没意义：同一人在两张卡里会换色）。契约见 `../IMServer/docs/PROTOCOL.md`。
+>
+> **未手测**；后端同批加了显示名字符清洗（`internal/textguard`），Web 侧无需配合改动
+> （`maxLength` 计数按 UTF-16 码元、服务端按 rune，方向上客户端更严，刻意不动）。
+
+> **收藏页 / 详情页 / 置顶 / 记录卡 五项 UI 修复（2026-08-30，与 iOS 同步；`tsc -b` + **vitest 681 全绿**
+> （+3：置顶 voice/chat_record 两例、记录条目 voice 预览一例）；**已在浏览器手测通过（2026-08-30）**）**
+>
+> 1. **置顶预览** `src/pinned.ts`：只认 `audio` 不认 `voice`、且无 `chat_record` 分支 → 语音置顶铺一串 URL、
+>    合并转发卡片铺整段 JSON。现统一 `[语音]` / `chatRecordSnippet()` 的 `[聊天记录] 标题`。
+> 2. **收藏「来自X」不再露 10 位内部 ID**：`groupInfos` 只在**打开过**那个群时才有成员表、`friends` 只覆盖好友
+>    → "没聊过的群里、非好友发的收藏"全回退 uid。`App.tsx` 加按需两级补拉 effect（先 `refreshGroupInfo`
+>    拿群昵称，仍缺再 `client.userProfile`），每个 id 只发一次、失败静默。
+>    **effect 与 `favUserCards` state 放在登录早退之前**（hook 数恒定），判据不复用早退之后定义的
+>    `favSourceLabel`（那会 TDZ）。
+> 3. **收藏副行时间与「来自X」拆两行 + 颜色分开**（新 `FavMeta` 组件；`.fav-src` 改 accent，与链接卡来源行同色）：
+>    长备注名会把时间挤没。名片行的「由 X 分享」从 `ContactRow` 副行拆成第三行（`.contact-row-source`）。
+>    顺手去掉链接分类里重复的来源（`DetailLinkItem` 的 `source` prop 与 `FavMeta` 各显一遍）。
+> 4. **详情页链接 tab 时间改 `detailFullDateTime`**（原「今日 HH:mm / 昨天 / M月d日」，同页四 tab 两套语言）；
+>    **文件 tab 补上原本完全没有的时间行**（`.detail-file-time`）。
+> 5. **`.detail-tabs` 横向可滚**：`flex:1` 等分在 6 签时把每格压到放不下两个字。改 `flex:1 0 auto` + `min-width`
+>    + 容器 `overflow-x:auto`（够放时仍等分铺满，同旧行为）。收藏的 `.fav-chips` 本就可滚，无需改。
+> 6. **合并转发记录弹窗**：语音条目原先落 `.record-item-text` 铺裸 URL → 改用 `VoiceBubble variant="mini"`
+>    （与详情页语音 tab / 收藏语音行同一组件）。打包端 `useForward.ts` 补 `d`（时长）/`w`（波形）两个 key
+>    （与 iOS 同约定），老记录无这两项时退化成等高条纹 + 0:00 仍可播。`recordItemPreview` 补 voice 分支。
+>    名片条目 Web 本就是卡片，无需改（iOS 那侧此次才补上）。
+
+> **记录卡补齐 + 语音红点/倍速对齐（2026-08-30 第三批；`tsc -b` + vitest 685 绿；**已手测通过**）**
+> 1. **合并转发条目新增 `ts`/`u`/`a`**（与 iOS 同 key，契约表进了 `../IMServer/docs/PROTOCOL.md`）。
+>    `useForward` 新增注入 `recordSenderAvatar`（头像来源=我自己 `myInfo` / 群成员表 / 会话行对端，
+>    都长在 App，故留在 App 注入）。`RecordModal` 据此显每条时间 + 头像，**连续同一人只显一次**
+>    （判据 `recordSenderKey`，与 iOS `IMRecordSenderKey` 同口径）。老记录缺字段各自降级。
+> 2. **未播红点挪到气泡右上角**（与 iOS 同位置）：原先挤在时长行里跟时长/倍速抢位置。
+>    **倍速胶囊改到时长行右端**（`justify-content: space-between`），也与 iOS 一致。
+> 3. 转文字 Web 仍未实现（P2），故"转文字也消红点"这条只在 iOS 落地。
+>
+> **记录卡三个后续（2026-08-30 用户实测报，已修并**复测通过**；`tsc -b` + vitest 681 绿）**
+> 1. **录音格式红线被绕过（本次 iOS 崩溃的源头）**：`voiceRecordingSupported()` 第一顺位问裸
+>    `audio/mp4`——**Chrome 会把 Opus 塞进 MP4 容器**，探测照样 true，于是录出「扩展名 .m4a、内容是
+>    Opus」的文件。iOS `AVAudioPlayer` 拿到 `framesPerPacket==0` 直接**除零崩整个 App**。
+>    改成：先问点名 AAC 的 mime（`audio/mp4;codecs=mp4a.40.2` → `audio/aac`），裸 `audio/mp4`
+>    只在浏览器**不**支持 `audio/mp4;codecs=opus` 时才用（Safari 属这类）；都不行就置灰 mic。
+>    `voiceRecorder.test.ts` +2 例（Chrome 式误判 / 点名 AAC 优先），并**刻意更新**了那条
+>    「探测抛异常应冒出去」的旧护栏——现在一律兜底成"不支持"。
+> 2. **弹窗正中冒出一个 ▶**：`.play-badge` 是 `position:absolute`，而外层 `.fav-thumb-wrap`
+>    **没有定位**，于是它一路找到最近的定位祖先（`.modal` 本身）。给 wrap 加
+>    `position:relative; display:inline-block`；收藏宫格里 `.fav-icon` 本就 relative，观感不变。
+> 3. **语音无时长**：老记录没有 `d` 字段 → 新增 `RecordVoiceItem`，用一个独立的
+>    `<audio preload="metadata">` 探一次（不碰 VoiceBubble 的模块级播放单例）；`Infinity`/荒唐大数
+>    一律丢弃，宁可不显。新记录直接读 `d`，不走探测。
+
+> **无其它进行中的开发项。** 网络恢复秒连与 `UI_COLOR.md` 收敛（均 2026-08-30）已完成，细节转入
+> `current_task.archive.md`。仍**未做**的是「下一步」里那几件：浏览器手测语音、转文字 P2 调研、列表虚拟化。

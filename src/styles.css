@@ -57,6 +57,10 @@
   --radius-menu: 8px;
   --shadow-menu: 0 4px 16px var(--shadow-strong);
   --app-gap: 16px;
+  /* 卡片型气泡（合并转发「聊天记录」/ 个人名片）的统一宽度。
+     两张卡在同一条消息流里上下相邻，宽度差 12px（220 vs 232）一眼就是没对齐；
+     它们的内部结构（标题+两行预览 / 头像+昵称+ID，再加一条脚注行）本就同族，宽度该同源。 */
+  --card-bubble-w: 232px;
   /* 左栏（会话列表 + 设置面板共用同一列）宽度：随窗口比例伸缩，带上下限，对齐 Telegram Web。 */
   --sidebar-w: clamp(340px, 27vw, 480px);
   --space-1: 4px;
@@ -656,7 +660,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .msg-caption { width: 0; min-width: 100%; box-sizing: border-box; padding: 5px 10px 4px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; font-size: var(--msg-font); }
 .msg-caption.file { padding: 6px 0 0; margin-top: 6px; border-top: 0.5px solid var(--separator); }
 /* 文件文：caption 撑满整行后，时间行（bmeta）落到第三行——推到右侧贴角（对齐草图「时间在 caption 右下」）。 */
-/* 同理：定宽/块级卡片（链接富预览 .link-card 260px、合并转发 .record-card 220px、超长文本 .longtext-card block）
+/* 同理：定宽/块级卡片（链接富预览 .link-card 260px、合并转发 .record-card 见 --card-bubble-w、超长文本 .longtext-card block）
    会把 bmeta 挤到下一行——不加 auto 就停在左下角，与其余气泡的右下角时间不一致。统一推到右下角。 */
 .bubble:has(.msg-caption) > .bmeta,
 .bubble:has(> .link-card) > .bmeta,
@@ -736,7 +740,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 
 /* 合并转发卡片。**两种语境**：聊天气泡里（卡片即气泡，见下方 .bubble > .record-card）、
    合并转发详情弹窗里的套娃 mini 卡（.record-card-nested，保持"卡片"外观不变）。 */
-.record-card { width: 220px; background: var(--card-bg); border: 1px solid var(--separator); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+.record-card { width: var(--card-bubble-w); background: var(--card-bg); border: 1px solid var(--separator); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .record-title { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
 .record-preview { font-size: 12px; color: var(--text-secondary); }
 .record-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -746,9 +750,9 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .record-foot .bmeta { margin: 0; flex-shrink: 0; }
 .record-modal { width: min(520px, 92vw); max-height: 80vh; overflow-y: auto; }
 
-/* 个人名片（contact）——与 .record-card(220px) / .link-card(260px) 同族的定宽块级卡片。
+/* 个人名片（contact）——与 .record-card（同宽，共用 --card-bubble-w）/ .link-card(260px) 同族的定宽块级卡片。
    规格见 IMServer docs/CONTACT_CARD_DESIGN.md §8.3；行 .contact-row 被详情页页签与收藏分类共用。 */
-.contact-card { width: 232px; background: var(--card-bg); border: 1px solid var(--separator);
+.contact-card { width: var(--card-bubble-w); background: var(--card-bg); border: 1px solid var(--separator);
   border-radius: 8px; padding: 10px 12px; cursor: pointer; }
 .contact-card:hover { background: color-mix(in srgb, var(--accent) 6%, var(--card-bg)); }
 /* 脏名片（JSON 非法/缺 u）降级：一行灰字、不可点——不留一张点不动的死卡。 */

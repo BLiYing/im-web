@@ -207,3 +207,35 @@ describe("跳到历史之后，往下滚要能回到最新", () => {
     expect(document.querySelector(".jump-btn")).toBeInTheDocument(); // 回程按钮没被这次 scroll 收掉
   });
 });
+
+describe("在历史里发消息：必须当场回到最新并贴底（CHAT_UX §9）", () => {
+  // 用户 2026-09-05 实测第 1 条：「浏览消息到了列表中间，此时发消息，Web 不滚到最新（iOS 会）」。
+  // 两处同时失效才导致一行滚动都没有：
+  //   ① 渲染窗口停在历史那一段 —— 新发的那条落在"最新"那一段，根本不在窗口里；
+  //   ② 滚动 effect 的贴底判据是 `lastMine && (grew || wasNearBottom)`，而 `grew` 按**条数**比：
+  //      从锚点窗（最多 600 条）换到尾窗（200 条）反而变短，人在历史里 wasNearBottom 也是 false。
+  // 现在统一由 appendMsg（所有出箱路径的本地回显入口）置位 + 布局 effect 无条件贴底。
+  it("窗口停在旧的一段时发文本：窗口拉回最新、自己那条上屏、滚动条贴底", async () => {
+    Fake.pinned = [pin(PIN_SEQ)];
+    await enterWithTail();
+    await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
+    serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
+    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
+    expect(renderedSeqs()).not.toContain(HEAD); // 确实停在旧的那一段
+
+    const box = msgsBox();
+    Object.defineProperty(box, "scrollHeight", { value: 8000, configurable: true });
+    Object.defineProperty(box, "clientHeight", { value: 500, configurable: true });
+    Object.defineProperty(box, "scrollTop", { value: 1200, writable: true, configurable: true });
+
+    const ta = screen.getByPlaceholderText(/输入消息/);
+    fireEvent.change(ta, { target: { value: "在历史里发的一条" } });
+    fireEvent.keyDown(ta, { key: "Enter" });
+
+    await waitFor(() => expect(screen.getByText("在历史里发的一条")).toBeInTheDocument());
+    expect(renderedSeqs()).toContain(HEAD);   // 窗口回到了贴最新那一段
+    expect(box.scrollTop).toBe(8000);         // 贴底（jsdom 不会自己钳位，赋值即断言）
+    expect(document.querySelector(".jump-btn")).toBeNull(); // 已在最新，回程按钮该收掉
+  });
+});

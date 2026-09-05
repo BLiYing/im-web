@@ -19,6 +19,7 @@ import { isOnline, presenceFromConversation, presenceText, type Presence } from 
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
 import { isViewableMedia, msgKey } from "./album";
 import { jumpDomToSeq } from "./messageJump";
+import { useVoiceTranscript } from "./useVoiceTranscript";
 import { formatTime } from "./time";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
@@ -128,13 +129,6 @@ const FALLBACK_MAX_GROUP_MEMBERS = 500;
 
 // 收藏 → 合成 ChatMessage：转发/从收藏发送统一走 sendForwardToTarget（§6，媒体/文件透传 URL 不重传）。
 
-/** convSeq→文本 表的两个通用改法（转写面板用）：删一项 / 仅当该项仍展开时写入。 */
-const omitSeq = (r: Record<number, string>, seq: number): Record<number, string> => {
-  const n = { ...r }; delete n[seq]; return n;
-};
-const setIfOpen = (r: Record<number, string>, seq: number, text: string): Record<number, string> =>
-  (r[seq] === undefined ? r : { ...r, [seq]: text }); // 未展开（用户已取消）就别把面板又拉回来
-
 
 /** 大群说明全文（**升级后**时态）。三条与 docs/design/SUPERGROUP_DESIGN.md §4.1 同源——
  *  那一节是三端唯一真相源（后台升级确认框 / iOS 满员告知行与大群说明行 / Web 满员告知块 / 本常量）。
@@ -174,7 +168,7 @@ export default function App() {
   // 会话消息表 + 去重/墓碑集 + 去重/patch/append/删除方法：收口到 useMessageStore（纯逻辑见 messageStore.ts）。
   const {
     msgsByConv, setMsgsByConv, seenByConv, deletedByConv,
-    appendMsg, patchMsg, removeMsgRow, applyOp, removeSeq, clearConv,
+    appendMsg: appendMsgRaw, patchMsg, removeMsgRow, applyOp, removeSeq, clearConv,
     preload: preloadMsgs, reset: resetMsgStore, ingestInbound, applyAck, markRejected,
   } = useMessageStore();
   const [peer, setPeer] = useState("");
@@ -195,10 +189,6 @@ export default function App() {
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null); // 正在引用回复的目标消息（撤回后清）
   const [editingMsg, setEditingMsg] = useState<ChatMessage | null>(null); // 正在编辑的消息（M4-5，编辑态）
   const [translations, setTranslations] = useState<Record<number, string>>({}); // convSeq -> 译文（挂气泡下，M4-5）
-  // convSeq -> 转写文本（服务端识别）。空串 = 识别中；未定义 = 未展开。
-  // 与 translations 分开：翻译是文本消息的译文，转写是语音的文字，两者可同时存在。
-  const [transcripts, setTranscripts] = useState<Record<number, string>>({});
-  const transcriptsRef = useRef<Record<number, string>>({}); // 同 messagesRef/pinnedRef：稳定回调读当前展开态
   // 合并转发详情弹窗：栈式，支持嵌套「套娃」下钻/返回（栈顶=当前展示层，空=关闭）。
   const [recordStack, setRecordStack] = useState<ChatRecord[]>([]);
   const recordView = recordStack.length > 0 ? recordStack[recordStack.length - 1] : null;
@@ -401,6 +391,10 @@ export default function App() {
   const loadingNewerRef = useRef(false); // 是否正在下滚加载更新历史
   const latestSeqRef = useRef(0); // 该会话服务端最新 conv_seq（判断下方是否还有未加载）
   const forceBottomRef = useRef(false); // jumpToBottom 触发的"强制定位到底"（忽略未读分割线）
+  // 「自己刚发了一条」→ 下一次布局无条件贴底（CHAT_UX §9）。在历史里发消息时，下面滚动 effect 的
+  // `lastMine && (grew || wasNearBottom)` 两个条件会同时不成立：跨窗口移动时 `grew`（按条数比）
+  // 反而变短（锚点窗 600 → 尾窗 200），人在历史里 wasNearBottom 也是 false，于是一行滚动都不发生。
+  const sendStickRef = useRef(false);
   const maxReadReportedRef = useRef(0); // 已上报的最大已读 conv_seq（可见即读，单调不回退）
   const pendingReadRef = useRef(0); // 已滚入视口的最大 conv_seq（节流后上报）
   const readTimerRef = useRef<number | null>(null); // 可见即读上报的节流定时器
@@ -411,6 +405,20 @@ export default function App() {
   const listRefreshTimerRef = useRef<number | null>(null);
   const listRefreshInFlightRef = useRef(false);
   const listRefreshDirtyRef = useRef(false);
+
+  // 出箱消息的本地回显入口（文本/媒体/语音/转发/名片**都**走它，入站走 ingestInbound）：在这单点做
+  // "发送即回到最新"——窗口拉回贴最新 + 置位 sendStickRef。此前只有 send()（文本）复位了窗口，
+  // 发图/发语音/转发/发名片全没有，在历史里发这些同样看不到自己刚发的那条（2026-09-05 用户实测第 1 条）。
+  const appendMsg = useCallback((cid: string, m: ChatMessage) => {
+    if (cid === currentConvRef.current) {
+      sendStickRef.current = true;
+      setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
+    }
+    appendMsgRaw(cid, m);
+  }, [appendMsgRaw]);
+
+  // 语音转文字（展开态表 + 发起/收起 + WS 落地 + 面板撑高后把文字补进视口）：见 useVoiceTranscript.ts。
+  const { transcripts, transcribeMessage, applyRemoteTranscript } = useVoiceTranscript({ clientRef, setToast, setMenu, boxRef: msgsRef });
 
   // 在线态定时重算：服务端**不推下线帧**，对端离线是靠本地租约到期体现的——而"租约到期"是
   // 纯粹的时间流逝，不改变任何 state，React 不会因此重渲染。不自己敲这个心跳的话，用户静止不动时
@@ -827,16 +835,7 @@ export default function App() {
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
       onConvUpdate: () => { scheduleListRefresh(); },
       // 账号级配置变更（M4-7）：另一端改了自动下载策略 → 重拉（零新链路的多端同步）。
-      onVoiceTranscript: (convId, convSeq, status, text) => {
-        // 只在该条仍处于展开态时落文本——用户可能在等结果期间点了「取消转文字」。
-        if (status === "done" && text) {
-          setTranscripts((prev) => setIfOpen(prev, convSeq, text));
-        } else if (status === "failed") {
-          setToast("识别失败，请稍后重试");
-          setTranscripts((prev) => (prev[convSeq] === undefined ? prev : omitSeq(prev, convSeq)));
-        }
-        void convId;
-      },
+      onVoiceTranscript: (convId, convSeq, status, text) => { void convId; applyRemoteTranscript(convSeq, status, text); },
       onCapabilitiesUpdate: (version) => {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
@@ -1079,10 +1078,6 @@ export default function App() {
     const client = clientRef.current;
     const cid = convId;
     if (!client || !cid) return;
-    // **发送即回到最新**：窗口可能正停在历史某段（用户刚从置顶/搜索跳过来），
-    // 不复位的话自己刚发的那条落在最新处、不在窗口里——看起来就像"消息没发出去"。
-    // 微信/Telegram 同样是"发消息即拉回底部"。
-    setRenderView({ anchor: null, size: RENDER_WINDOW_STEP });
     // 先发预览条攒的粘贴件（Web #2）：图片走相册批量通道（≥2 张聚簇成宫格），
     // 文件走既有文件通道（≥8MB 自动分片可暂停续传）；文字随后补发一条文本。
     if (pastedImages.length) {
@@ -1565,34 +1560,6 @@ export default function App() {
     })();
   }, []);
 
-  /**
-   * 语音转文字（服务端识别）。已展开 → 收起（**只收本地面板，不删服务端结果**：
-   * 服务端按音频内容缓存、会话内共享，一个人"取消"不该把别人也能看到的结果删掉）。
-   * 未展开 → 请求：命中缓存立刻出文本；否则先显"识别中…"，结果经 WS voice_transcript 帧到达。
-   */
-  const transcribeMessage = useCallback((m: ChatMessage) => {
-    setMenu(null);
-    if (m.convSeq <= 0) return;
-    if (transcriptsRef.current[m.convSeq] !== undefined) { // 已展开 → 只收面板，不发请求
-      setTranscripts((prev) => omitSeq(prev, m.convSeq));
-      return;
-    }
-    setTranscripts((prev) => ({ ...prev, [m.convSeq]: "" })); // 空串=识别中
-    void (async () => {
-      try {
-        const r = await clientRef.current?.transcribeVoice(m.convId, m.convSeq);
-        if (r && r.status === "done" && r.text) setTranscripts((prev) => setIfOpen(prev, m.convSeq, r.text));
-        // pending：维持"识别中…"，等 WS 帧。
-      } catch (e) {
-        // 业务码文案统一在 FRIENDLY_MESSAGES（api() 已据码本地化 message）；只有非业务错误
-        // （网络/解析）才补前缀，否则会吐出裸的 "Failed to fetch"。
-        const msg = (e as Error).message;
-        setToast(errorCode(e) ? msg : `转文字失败：${msg}`);
-        setTranscripts((prev) => omitSeq(prev, m.convSeq));
-      }
-    })();
-  }, []);
-
   // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
   const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
     setMenu(null);
@@ -2012,7 +1979,6 @@ export default function App() {
   renderViewRef.current = renderView;      // 同上：driveLocate 定义在前，要读当前窗口
   msgsByConvRef.current = msgsByConv;     // 同上：定位要判断目标是否已在本地库
   pinnedRef.current = pinnedByConv; // 同上：WS 回调（onMsgOp）判断撤回/编辑是否命中置顶项要读当前集合
-  transcriptsRef.current = transcripts; // 同上：transcribeMessage 判断"已展开→收起"要读当前值
 
   // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
   // searchOpen/searchQuery 受控注入（见上）；副作用依赖（locateInChat/setToast/客户端）注入进去。
@@ -2090,6 +2056,14 @@ export default function App() {
     // 条数是否增加：新增消息=true；仅原条状态变更（被拒收/ack 改 status/note）=false。
     const grew = messages.length > prevLenRef.current;
     prevLenRef.current = messages.length;
+    // 贴底 + 收掉"↓N"（贴底即读到最新，按钮没有存在的意义）。三处共用：自己发送 / 末条变高 / 收到新消息。
+    const stickBottom = () => {
+      box.scrollTop = box.scrollHeight;
+      wasNearBottomRef.current = true;
+      setShowJump(false);
+      setJumpCount(0);
+      setJumpCapped(false);
+    };
 
     if (pendingScrollRef.current) {
       if (messages.length === 0) return; // 等锚点窗口到达再定位
@@ -2111,8 +2085,21 @@ export default function App() {
       }
       pendingScrollRef.current = false;
       forceBottomRef.current = false;
+      sendStickRef.current = false; // 进会话定位自带落点，别再被上一轮的发送旗子拽一次
       prevMinSeqRef.current = curMin;
       prevMaxSeqRef.current = curMax;
+      return;
+    }
+
+    // 自己刚发了一条（appendMsg 置位）：**无条件贴底**，不看 grew / wasNearBottom。
+    // 必须早于下面的分页保位分支——在历史里发消息时窗口刚被拉回贴最新，curMin/curMax 会同时暴涨，
+    // 与"下滚翻页"的形状撞车，落进那些分支就只保位、不贴底。
+    if (sendStickRef.current && messages.length > 0) {
+      sendStickRef.current = false;
+      stickBottom();
+      prevMinSeqRef.current = curMin;
+      prevMaxSeqRef.current = curMax;
+      if (curMax > latestSeqRef.current) latestSeqRef.current = curMax;
       return;
     }
 
@@ -2168,19 +2155,10 @@ export default function App() {
     if (lastMine) {
       // 新发消息始终贴底；末条状态变更（如被拒收挂系统行致变高）仅在原本贴底时贴底，
       // 不打断已上滚看历史的用户（CHAT_UX §9）。
-      if (grew || wasNearBottomRef.current) {
-        box.scrollTop = box.scrollHeight;
-        wasNearBottomRef.current = true;
-        setShowJump(false);
-        setJumpCount(0);
-        setJumpCapped(false);
-      }
+      if (grew || wasNearBottomRef.current) stickBottom();
     } else if (newPeer > 0) {
       if (wasNearBottomRef.current) {
-        box.scrollTop = box.scrollHeight;
-        setShowJump(false);
-        setJumpCount(0);
-        setJumpCapped(false);
+        stickBottom();
       } else {
         setJumpCount((n) => n + newPeer);
         setShowJump(true);
