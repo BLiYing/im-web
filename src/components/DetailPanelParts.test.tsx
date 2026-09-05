@@ -196,7 +196,7 @@ describe("MemberMenu", () => {
     const { getByText } = withServices(makeServices(),
       <MemberMenu menu={{ x: 10, y: 10, convId: "g1", m: member() }} gp={gp({ my_role: "owner" })}
         uid="u1" friends={friends} menuRef={createRef<HTMLDivElement>()}
-        onClose={onClose} onOpenChat={onOpenChat} onFriendAction={vi.fn()} onMutePick={vi.fn()}
+        onClose={onClose} onOpenChat={onOpenChat} onMutePick={vi.fn()}
         memberLabel={(m) => m.group_nickname || m.nickname || m.user_id} />);
     expect(getByText("发送消息")).toBeTruthy();
     expect(getByText("设为管理员")).toBeTruthy();
@@ -209,7 +209,7 @@ describe("MemberMenu", () => {
     const { getByText, queryByText } = withServices(makeServices(),
       <MemberMenu menu={{ x: 10, y: 10, convId: "g1", m: member({ user_id: "u3" }) }} gp={gp()}
         uid="u1" friends={friends} menuRef={createRef<HTMLDivElement>()}
-        onClose={vi.fn()} onOpenChat={vi.fn()} onFriendAction={vi.fn()} onMutePick={vi.fn()}
+        onClose={vi.fn()} onOpenChat={vi.fn()} onMutePick={vi.fn()}
         memberLabel={(m) => m.group_nickname || m.nickname || m.user_id} />);
     expect(getByText("添加好友")).toBeTruthy();
     expect(queryByText("发送消息")).toBeNull();

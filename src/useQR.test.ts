@@ -11,7 +11,8 @@ function mount(client: Record<string, unknown> = {}, over: Partial<QRDeps> = {})
   const c = { qrResolve: vi.fn(async () => ({ kind: "user", user_id: "u9" })), qrMyCard: vi.fn(async () => ({ code: "c1" })), groupQR: vi.fn(async () => ({ code: "g" })),
     qrResetMyCard: vi.fn(async () => ({ code: "c2" })), groupQRReset: vi.fn(async () => ({ code: "g2" })), joinGroupByCode: vi.fn(async () => ({ name: "测试群", conv_id: "g1" })), requestFriend: vi.fn(async () => true), ...client };
   const deps: QRDeps = { phase: "app", uid: "u1", myInfo: { nickname: "我", avatar_url: "" }, groupInfos: {}, clientRef: fakeClientRef(c), setToast: vi.fn(),
-    openChat: vi.fn(), openGroupChat: vi.fn(), refreshFriends: vi.fn(async () => {}), refreshConversations: vi.fn(async () => []), openPeerDetailRef: { current: vi.fn() }, ...over };
+    openChat: vi.fn(), openGroupChat: vi.fn(), refreshConversations: vi.fn(async () => []), openPeerDetailRef: { current: vi.fn() },
+    askFriendRequest: vi.fn(), ...over };
   return { ...renderHook(() => useQR(deps)), deps, c };
 }
 describe("useQR", () => {

@@ -18,13 +18,14 @@ export interface QRDeps {
   setToast: (msg: string | null) => void;
   openChat: (peer: string) => void;
   openGroupChat: (cid: string) => void;
-  refreshFriends: () => Promise<void>;
   refreshConversations: () => Promise<unknown>;
   openPeerDetailRef: MutableRefObject<(peer: string) => void>;
+  /** 打开「发好友申请」弹窗（扫码结果的加好友按钮走它）。 */
+  askFriendRequest: (userId: string, name: string) => void;
 }
 
 export function useQR(d: QRDeps) {
-  const { phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshFriends, refreshConversations, openPeerDetailRef } = d;
+  const { phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshConversations, openPeerDetailRef, askFriendRequest } = d;
   const [qrScan, setQrScan] = useState(false); // 扫一扫浮层
   const [qrCardModal, setQrCardModal] = useState<{ title: string; subtitle: string; name: string; avatarUrl?: string; card: QRCard; canReset: boolean; kind: "me" | "group"; convId?: string } | null>(null);
   const [qrResult, setQrResult] = useState<{ data: QRResolved | { kind: "expired" }; raw: string } | null>(null);
@@ -107,11 +108,8 @@ export function useQR(d: QRDeps) {
 
   // 扫码结果的动作集：加好友 / 发消息 / 看资料 / 加群 / 进群。
   const qrResultActions = {
-    onAddFriend: async (peer: string) => {
-      const became = await clientRef.current!.requestFriend(peer);
-      setToast(became ? "已添加为好友" : "已发送好友申请");
-      void refreshFriends();
-    },
+    // 只开弹窗：填完验证消息由 App 的统一路径发出（吐司/刷新也在那边，见 FriendRequestModal 的渲染点）。
+    onAddFriend: (peer: string, name: string) => askFriendRequest(peer, name),
     onMessage: (peer: string) => openChat(peer),
     onViewProfile: (peer: string) => openPeerDetailRef.current(peer),
     onEnterGroup: (cid: string) => openGroupChat(cid),

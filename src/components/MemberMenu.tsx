@@ -6,7 +6,7 @@ import { useGroupActions } from "../useGroupActions";
 // 群成员管理 ⋯ 菜单（按角色矩阵显隐；服务端仍二次校验）。从 App 抽出的展示组件。
 // 群写操作走 useAppServices()+useGroupActions（doGroupAction 骨架）；发消息/加好友/禁言时长弹窗等碰 App 态的
 // 动作由 props 注入。DOM/className/定位逐字一致（行为等价）。
-export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenChat, onFriendAction, onMutePick, memberLabel }: {
+export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenChat, onMutePick, memberLabel }: {
   menu: { x: number; y: number; convId: string; m: GroupMember };
   gp: GroupInfo;
   uid: string;
@@ -14,13 +14,12 @@ export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenCha
   menuRef: Ref<HTMLDivElement>;
   onClose: () => void;
   onOpenChat: (userId: string) => void;
-  onFriendAction: (userId: string, fn: () => Promise<void>) => void;
   /** 成员在本机确认文案里的显示名：备注 > 群昵称 > 昵称 > uid。 */
   memberLabel: (m: GroupMember) => string;
   onMutePick: (sel: { convId: string; m: GroupMember }) => void;
 }) {
   const services = useAppServices();
-  const { clientRef, setToast, askConfirm } = services;
+  const { clientRef, askConfirm, askFriendRequest } = services;
   const { doGroupAction } = useGroupActions(services);
   const cid = menu.convId;
   const m = menu.m;
@@ -35,11 +34,9 @@ export function MemberMenu({ menu, gp, uid, friends, menuRef, onClose, onOpenCha
       {!isSelf && isMemberFriend && (
         <button onClick={() => { onClose(); onOpenChat(m.user_id); }}>发送消息</button>
       )}
+      {/* 加好友走全站统一的「发好友申请」弹窗（填验证消息），不直接调接口。 */}
       {!isSelf && !isMemberFriend && (
-        <button onClick={() => { onClose(); onFriendAction(m.user_id, async () => {
-          const becameFriend = await clientRef.current!.requestFriend(m.user_id);
-          if (!becameFriend) { setToast("已发送好友申请"); } // 直接成为好友时不吐司（见 requestFriend 注释）
-        }); }}>添加好友</button>
+        <button onClick={() => { onClose(); askFriendRequest(m.user_id, memberLabel(m)); }}>添加好友</button>
       )}
       {gp.my_role === "owner" && m.role === "member" && (
         <button onClick={() => run(() => clientRef.current!.setGroupRole(cid, m.user_id, "admin"))}>设为管理员</button>

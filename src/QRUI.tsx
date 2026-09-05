@@ -280,7 +280,9 @@ export function QRScannerModal(props: { onRaw: (raw: string) => void; onClose: (
 // ---- 扫码结果分支（user / group / unknown / expired）----
 
 export type QRResultActions = {
-  onAddFriend: (uid: string) => Promise<void>;
+  /** 加好友：**只负责打开申请弹窗**（填验证消息后由 App 发出），不在这里直接发请求——
+   *  全站五个加好友入口都走同一个弹窗，少走一次就少一次理由。 */
+  onAddFriend: (uid: string, name: string) => void;
   onMessage: (uid: string) => void;
   onViewProfile: (uid: string) => void;
   onJoinGroup: (hello: string) => Promise<void>; // 需审批的群带申请附言
@@ -319,9 +321,9 @@ function ExpiredBranch({ onClose }: { onClose: () => void }) {
 
 function UserBranch({ card, actions, onClose }: { card: QRUserCard; actions: QRResultActions; onClose: () => void }) {
   const a = userCardAction(card);
-  const [busy, setBusy] = useState(false);
-  const primary = async () => {
-    if (a.kind === "add") { setBusy(true); try { await actions.onAddFriend(card.user_id); onClose(); } finally { setBusy(false); } }
+  // 三条分支现在都是**同步**的（加好友只是开申请弹窗），没有在途请求可等，故不再有 busy 态。
+  const primary = () => {
+    if (a.kind === "add") { actions.onAddFriend(card.user_id, card.nickname || (card.username ? `@${card.username}` : "未命名用户")); onClose(); }
     else if (a.kind === "message") { actions.onMessage(card.user_id); onClose(); }
     else { actions.onViewProfile(card.user_id); onClose(); }
   };
@@ -336,7 +338,7 @@ function UserBranch({ card, actions, onClose }: { card: QRUserCard; actions: QRR
         </div>
       </div>
       <div className="modal-actions qr-branch-actions">
-        <button className="mini-btn wide" disabled={busy} onClick={primary}>{busy ? "处理中…" : a.label}</button>
+        <button className="mini-btn wide" onClick={primary}>{a.label}</button>
         {a.kind !== "self" && <button className="mini-btn ghost wide" onClick={() => { actions.onViewProfile(card.user_id); onClose(); }}>查看资料</button>}
       </div>
     </div>

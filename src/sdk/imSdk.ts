@@ -341,8 +341,8 @@ export class IMClient {
   // ---- 找人 / 好友 / 会话设置：无状态 HTTP，实现在 sdk/contactApi.ts ----
   searchUsers(q: string, limit = 20): Promise<UserCard[]> { return contactApi.searchUsers(this.token, q, limit); }
   listFriends(status = ""): Promise<FriendEntry[]> { return contactApi.listFriends(this.token, status); }
-  friendAction(action: "request" | "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> { return contactApi.friendAction(this.token, action, userId); }
-  requestFriend(userId: string): Promise<boolean> { return contactApi.requestFriend(this.token, userId); }
+  friendAction(action: "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> { return contactApi.friendAction(this.token, action, userId); }
+  requestFriend(userId: string, hello = ""): Promise<boolean> { return contactApi.requestFriend(this.token, userId, hello); }
   removeFriend(userId: string): Promise<void> { return contactApi.removeFriend(this.token, userId); }
   setRemark(userId: string, remark: string): Promise<void> { return contactApi.setRemark(this.token, userId, remark); }
   updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> { return contactApi.updateConvSettings(this.token, convId, s); }

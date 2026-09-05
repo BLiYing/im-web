@@ -77,6 +77,8 @@ import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
 import { PinnedListModal } from "./components/modals/PinnedListModal";
 import { GroupsModal } from "./components/modals/GroupsModal";
+import { FriendRequestsModal } from "./components/modals/FriendRequestsModal";
+import { FriendRequestModal } from "./components/modals/FriendRequestModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
 import { adminCandidates, transferCandidates } from "./groupAdmin";
@@ -108,7 +110,7 @@ import {
   Trash2, BellOff, Menu,
   Pin,
   Search, FileText, MessageCircle, X, Forward,
-  ChevronDown, ChevronUp, QrCode, IdCard } from "lucide-react";
+  ChevronDown, ChevronUp, QrCode, IdCard, UserPlus } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
@@ -290,6 +292,9 @@ export default function App() {
   const [muteDurationFor, setMuteDurationFor] = useState<{ convId: string; m: GroupMember } | null>(null); // 成员禁言时长选择
   const [detailMore, setDetailMore] = useState(false);  // 详情「更多」菜单开合
   const [groupsModal, setGroupsModal] = useState<GroupSummary[] | null>(null); // 通讯录「群聊」列表弹窗
+  const [friendRequests, setFriendRequests] = useState(false); // 通讯录「新的朋友」弹窗
+  // 「发好友申请」弹窗草稿（全站五个加好友入口共用，见 FriendRequestModal 注释）。
+  const [friendReqDraft, setFriendReqDraft] = useState<{ userId: string; name: string } | null>(null);
   const [createDraft, setCreateDraft] = useState<{ name: string; selected: string[] } | null>(null); // 建群弹窗（群名 + 选中好友）
   const [createBusy, setCreateBusy] = useState(false);
   const [memberMenu, setMemberMenu] = useState<{ x: number; y: number; convId: string; m: GroupMember } | null>(null); // 成员行 ⋯ 菜单
@@ -1156,11 +1161,15 @@ export default function App() {
   // 应用级稳定服务（见 AppServicesContext）。**必须在所有 early return 之前调用**（Rules of Hooks）。
   // 依赖全是 ref/setter/空依赖 useCallback → 身份恒定，此 memo 事实上只在挂载时建一次，消费组件不会因它
   // 重渲染。别塞高频 state（§七）。
+  // 打开「发好友申请」弹窗。**稳定身份**（setState 恒定），可以安全进 services。
+  const askFriendRequest = useCallback((userId: string, name: string) => {
+    setFriendReqDraft({ userId, name });
+  }, []);
   const services = useMemo<AppServices>(() => ({
     clientRef, setToast, comingSoon, askConfirm, askPrompt,
-    refreshConversations, refreshFriends, refreshGroupInfo, refreshDownloadSettings,
+    refreshConversations, refreshFriends, refreshGroupInfo, refreshDownloadSettings, askFriendRequest,
   }), [setToast, comingSoon, askConfirm, askPrompt,
-       refreshConversations, refreshFriends, refreshGroupInfo, refreshDownloadSettings]);
+       refreshConversations, refreshFriends, refreshGroupInfo, refreshDownloadSettings, askFriendRequest]);
 
   // 群资料写操作簇：收口到 useGroupActions（只吃 services）。仍留 App 的 pickGroupAvatar/doEditGroupRemark 复用 doGroupAction。
   // App 仍用到的：doGroupAction（pickGroupAvatar 复用）、doEditAnnouncement（全文视图「编辑」）、doEditMyGroupNickname（详情主视图）。
@@ -2439,7 +2448,7 @@ export default function App() {
   // 二维码簇 → useQR（阶段 7c）：openPeerDetail 定义在早退后，经 ref 注入（定义处回写 .current）。
   const openPeerDetailRef = useRef<(peer: string) => void>(() => {});
   const { qrScan, setQrScan, qrCardModal, setQrCardModal, qrResult, setQrResult, handleScanRaw, openMyCard, openGroupCard, resetQRCard, qrResultActions } =
-    useQR({ phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshFriends, refreshConversations, openPeerDetailRef });
+    useQR({ phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshConversations, openPeerDetailRef, askFriendRequest });
 
   // 收藏「来自X」缺名补齐（**必须在登录早退之前**：hook 数每次渲染要一致）。
   // groupInfos 只在**打开过**那个群时才有成员表，friends 又只覆盖好友——于是"没聊过的群里、
@@ -2548,6 +2557,9 @@ export default function App() {
   const friendStatus = new Map(friends.map((f) => [f.user_id, f.blocked ? "blocked" : f.status]));
   const blockedSet = new Set(friends.filter((f) => f.blocked).map((f) => f.user_id));
   const incoming = friends.filter((f) => f.status === "pending"); // 别人申请我，待我同意/拒绝
+  // 我申请别人、待对方通过。「新的朋友」页要显示它——只显示 incoming 的话，
+  // 发起方点完「加好友」就再也看不到这件事的下文（自己写了什么理由、对方通过了没有）。
+  const outgoing = friends.filter((f) => f.status === "requested").sort((a, b) => b.updated_at - a.updated_at);
   const accepted = friends.filter((f) => f.status === "accepted").sort((a, b) => b.updated_at - a.updated_at);
   // 本地过滤好友：命中备注 / 昵称 / uid 任一（子串，大小写不敏感）。空串=不过滤。
   const contactFilterQ = contactFilter.trim().toLowerCase();
@@ -2848,15 +2860,9 @@ export default function App() {
 
   // 点拒收系统行的「发送好友申请」（非好友 200103 的恢复入口，微信式）。
   // 服务端 Request 对「我侧陈旧 accepted」已放行——单向删除后被删方的唯一恢复路径。
-  // 已直接成为好友时**不吐司**「已发送好友申请」——那会误导用户以为还要等对方通过。
-  const requestFriendFromNote = async (target: string) => {
-    try {
-      const becameFriend = await clientRef.current!.requestFriend(target);
-      await refreshFriends();
-      setToast(becameFriend ? "已重新成为好友" : "已发送好友申请");
-    } catch (e) {
-      setToast((e as Error).message || "好友申请发送失败");
-    }
+  // 与其余四个入口一样走统一的申请弹窗（填验证消息），不直接发。
+  const requestFriendFromNote = (target: string) => {
+    askFriendRequest(target, displayNameOf(target, remarks, peerNick(target), peerUsername(target)));
   };
 
   // 单聊拉黑/取消拉黑（拉黑二次确认）。
@@ -3092,6 +3098,11 @@ export default function App() {
   // 通讯录顶部入口行（数据驱动）。
   const contactEntries: Row[] = [
     { id: "groups", label: "群聊", icon: Users, iconTint: "blue", chevron: true, onClick: () => void openGroupsModal() },
+    // 「新的朋友」独立入口（2026-09-05）：此前它是好友列表上方的一段，好友一多就被挤到看不见，
+    // 而"有人加我"恰恰是需要主动去处理的事。右值显待确认数（0 时不显，别摆一个恒亮的 0）。
+    { id: "friendRequests", label: "新的朋友", icon: UserPlus, iconTint: "green", chevron: true,
+      value: incomingCount > 0 ? unreadBadgeText(incomingCount) : undefined,
+      onClick: () => { setFriendRequests(true); void refreshFriends(); } },
     { id: "official", label: "公众号", icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon("公众号") },
     { id: "service", label: "服务号", icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon("服务号") },
   ];
@@ -3199,7 +3210,7 @@ export default function App() {
         <ContactsTab
           searchQ={searchQ} setSearchQ={setSearchQ} doSearch={doSearch} onScan={() => setQrScan(true)} contactEntries={contactEntries} contactsScrollRef={contactsScrollRef}
           searchResults={searchResults} friendStatus={friendStatus} labelOf={labelOf} openFriendChat={openFriendChat} busyUser={busyUser} doFriendAction={doFriendAction}
-          incoming={incoming} accepted={accepted} filteredAccepted={filteredAccepted} contactFilter={contactFilter} setContactFilter={setContactFilter} contactFilterQ={contactFilterQ}
+          accepted={accepted} filteredAccepted={filteredAccepted} contactFilter={contactFilter} setContactFilter={setContactFilter} contactFilterQ={contactFilterQ}
           friendLabel={friendLabel} presence={presence} setFriendMenu={setFriendMenu}
         />
         )}
@@ -3650,6 +3661,38 @@ export default function App() {
 
       {/* 黑名单已从独立 Modal 收编为「隐私与安全 → 已屏蔽的用户」子面板（BlockedListPanel），此处不再渲染。 */}
 
+      {/* 「新的朋友」列表：通讯录入口（群聊下方）。见 components/modals/FriendRequestsModal。 */}
+      {friendRequests && (
+        <FriendRequestsModal
+          incoming={incoming} outgoing={outgoing} labelOf={friendLabel} busyUser={busyUser}
+          onAccept={(id) => void doFriendAction(id, () => clientRef.current!.friendAction("accept", id))}
+          onReject={(id) => void doFriendAction(id, () => clientRef.current!.friendAction("reject", id))}
+          onClose={() => setFriendRequests(false)}
+        />
+      )}
+
+      {/* 「发好友申请」弹窗：全站五个加好友入口共用（见 FriendRequestModal 注释）。 */}
+      {friendReqDraft && (
+        <FriendRequestModal
+          name={friendReqDraft.name}
+          // 预填「我是<我的昵称>」：这是**发出去**的内容，故取公开昵称而不是任何本地显示名。
+          defaultHello={myInfo?.nickname ? `我是${myInfo.nickname}` : ""}
+          busy={busyUser === friendReqDraft.userId}
+          onSend={(hello) => {
+            const { userId } = friendReqDraft;
+            setFriendReqDraft(null);
+            void doFriendAction(userId, async () => {
+              // 已直接成为好友（对方先申请过我 / 我曾单向删除对方而对方仍视我为好友）→ **不吐司**
+              // 「已发送好友申请」，那会误导用户以为还要等对方通过；doFriendAction 的 refreshFriends
+              // 会让界面立即切成好友态。
+              const became = await clientRef.current!.requestFriend(userId, hello);
+              setToast(became ? "已添加为好友" : "已发送好友申请");
+            });
+          }}
+          onClose={() => setFriendReqDraft(null)}
+        />
+      )}
+
       {/* 「群聊」列表 / 建群弹窗：见 components/modals/GroupsModal · CreateGroupModal。 */}
       {groupsModal !== null && (
         <GroupsModal
@@ -3692,7 +3735,7 @@ export default function App() {
           openTransferPicker={(cid) => setTransferPicker(cid)}
           revokeAdmin={(cid, m) => void doRevokeAdmin(cid, m.user_id, groupMemberLabel(m))}
           setContactDraft={setContactDraft} setInviteDraft={setInviteDraft} setMemberMenu={setMemberMenu} setFileMenu={setFileMenu}
-          doFriendAction={doFriendAction} openChat={openChat} openInChatSearch={(targetConvId, targetPeer, targetIsGroup) => {
+          openChat={openChat} openInChatSearch={(targetConvId, targetPeer, targetIsGroup) => {
             // 目标会话就是当前会话 → 直接开；否则**先切过去**（微信式：点搜索直接进那个会话的搜索态），
             // armInChatSearch 记下待办，切换落定后由 useChatSearch 的 [convId] effect 打开。
             search.armInChatSearch(targetConvId);
@@ -3813,7 +3856,7 @@ export default function App() {
       {memberMenu && groupInfos[memberMenu.convId] && (
         <MemberMenu menu={memberMenu} gp={groupInfos[memberMenu.convId]} uid={uid} friends={friends} memberLabel={groupMemberLabel}
           menuRef={memberMenuRef} onClose={() => setMemberMenu(null)} onOpenChat={openChat}
-          onFriendAction={(userId, fn) => void doFriendAction(userId, fn)} onMutePick={setMuteDurationFor} />
+          onMutePick={setMuteDurationFor} />
       )}
 
       {/* 禁言时长选择（G2）：见 components/modals/MuteDurationModal（until 时间戳在此算）。 */}

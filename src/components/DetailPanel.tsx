@@ -95,7 +95,6 @@ export interface DetailPanelProps {
   setMemberMenu: (v: { x: number; y: number; convId: string; m: GroupMember }) => void;
   setFileMenu: (v: { x: number; y: number; m: ChatMessage }) => void;
   // —— 动作 ——
-  doFriendAction: (userId: string, fn: () => Promise<void>) => Promise<void>;
   openChat: (peer: string) => void;
   /** 在**该资料卡对应的会话**里开搜索（不是当前打开的那个会话）。
    *  从群成员头像进来的单聊资料卡，convId 是与该成员的单聊——此前这里不传参，
@@ -128,11 +127,11 @@ export function DetailPanel(p: DetailPanelProps) {
     groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
     onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
-    doFriendAction, openChat, openInChatSearch, doClearHistory, doToggleBlock, doRemoveFriend, doLeaveGroup, doDissolveGroup,
+    openChat, openInChatSearch, doClearHistory, doToggleBlock, doRemoveFriend, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail, serverConfig,
   } = p;
-  const { clientRef, setToast, comingSoon } = useAppServices();
+  const { clientRef, setToast, comingSoon, askFriendRequest } = useAppServices();
   const { setViewer, onGateTap, onPassiveMediaError, openReadyFile, fetchLinkPreview } = useChatActions();
   // 成员搜索：只对群会话有意义（单聊没有成员表）。恒走服务端 ?q=，理由见 useMemberSearch 头注释。
   // token 每次渲染现取，**不在组件里存副本**——登录路径三条，副本必然漂移。
@@ -264,13 +263,11 @@ export function DetailPanel(p: DetailPanelProps) {
 
               {/* ---- 操作排 pills ---- */}
               <div className="detail-pills">
+                {/* 加好友走全站统一的「发好友申请」弹窗（填验证消息），不直接调接口——
+                    少走一次就少一次理由，收件人那边又变回"只有一个名字"。 */}
                 {!isSystemPeer && !d.isGroup && !detailPeerIsFriend && (
-                  <button className="detail-pill" onClick={() => void doFriendAction(d.peer!, async () => {
-                    // 已直接成为好友（我曾单向删除对方而对方仍视我为好友）→ 不吐司，doFriendAction 的
-                    // refreshFriends 会让操作排/卡片立即恢复；说「已发送申请」反而误导要等对方通过。
-                    const becameFriend = await clientRef.current!.requestFriend(d.peer!);
-                    if (!becameFriend) { setToast("已发送好友申请"); }
-                  })}><UserPlus size={20} /><span>加好友</span></button>
+                  <button className="detail-pill" onClick={() => askFriendRequest(d.peer!, title)}>
+                    <UserPlus size={20} /><span>加好友</span></button>
                 )}
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
                   <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>

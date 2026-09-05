@@ -320,6 +320,9 @@ export interface FriendEntry {
   updated_at: number;
   /** 黑名单标记，与 status 正交：我把对方拉黑了。拉黑的好友 status 仍为 accepted、仍在好友列表（带此标记）。 */
   blocked?: boolean;
+  /** 好友申请的**验证消息**（申请理由）：只在 status=pending/requested 时有值，accepted 后服务端清空。
+   *  老服务端/老数据不带它，端上按"没写理由"渲染，不要显示空引号或占位符。 */
+  hello?: string;
 }
 
 /** 群成员角色（对齐后端 store.GroupRole*）。 */

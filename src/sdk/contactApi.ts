@@ -27,8 +27,9 @@ export async function listFriends(token: string, status = ""): Promise<FriendEnt
   return (data?.friends ?? []) as FriendEntry[];
 }
 
-/** 好友动作（申请/同意/拒绝/拉黑/解黑）：POST /api/v1/friends/{action} body {user_id}。 */
-export async function friendAction(token: string, action: "request" | "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> {
+/** 好友动作（同意/拒绝/拉黑/解黑）：POST /api/v1/friends/{action} body {user_id}。
+ *  **不含 request**：发申请要带验证消息且要读 outcome，走下面的 requestFriend。 */
+export async function friendAction(token: string, action: "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> {
   await api(token, `/api/v1/friends/${action}`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
 }
 
@@ -37,8 +38,8 @@ export async function friendAction(token: string, action: "request" | "accept" |
  * 返回 true 表示**已直接成为好友、无需对方确认**（对方先申请过我；或我曾单向删除对方而对方仍视我为好友）。
  * 调用方据此**不要提示「已发送好友申请」**——那会让用户误以为还要等对方通过；刷新界面即可。
  */
-export async function requestFriend(token: string, userId: string): Promise<boolean> {
-  const r = await api(token, `/api/v1/friends/request`, { method: "POST", body: JSON.stringify({ user_id: userId }) });
+export async function requestFriend(token: string, userId: string, hello = ""): Promise<boolean> {
+  const r = await api(token, `/api/v1/friends/request`, { method: "POST", body: JSON.stringify({ user_id: userId, hello }) });
   return (r as { outcome?: string } | undefined)?.outcome === "accepted";
 }
 

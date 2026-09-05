@@ -24,7 +24,6 @@ export interface ContactsTabProps {
   openFriendChat: (id: string) => void;
   busyUser: string | null;
   doFriendAction: (userId: string, fn: () => Promise<void>) => Promise<void>;
-  incoming: FriendEntry[];
   accepted: FriendEntry[];
   filteredAccepted: FriendEntry[];
   contactFilter: string;
@@ -37,8 +36,8 @@ export interface ContactsTabProps {
 
 export function ContactsTab(p: ContactsTabProps) {
   const { searchQ, setSearchQ, doSearch, onScan, contactEntries, contactsScrollRef, searchResults, friendStatus, labelOf, openFriendChat,
-    busyUser, doFriendAction, incoming, accepted, filteredAccepted, contactFilter, setContactFilter, contactFilterQ, friendLabel, presence, setFriendMenu } = p;
-  const { clientRef } = useAppServices();
+    busyUser, doFriendAction, accepted, filteredAccepted, contactFilter, setContactFilter, contactFilterQ, friendLabel, presence, setFriendMenu } = p;
+  const { clientRef, askFriendRequest } = useAppServices();
   return (
     <div className="contacts">
       <div className="newchat">
@@ -79,7 +78,7 @@ export function ContactsTab(p: ContactsTabProps) {
                       <button className="mini-btn ghost" disabled>已拉黑</button>
                     ) : (
                       <button className="mini-btn" disabled={busyUser === u.user_id}
-                        onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("request", u.user_id))}>加好友</button>
+                        onClick={() => askFriendRequest(u.user_id, labelOf(u.user_id, u.nickname, u.username))}>加好友</button>
                     )}
                   </div>
                 </div>
@@ -88,26 +87,8 @@ export function ContactsTab(p: ContactsTabProps) {
           </>
         )}
 
-        {incoming.length > 0 && (
-          <>
-            <div className="section-label">新的朋友（{incoming.length}）</div>
-            {incoming.map((f) => (
-              <div key={`p-${f.user_id}`} className="convitem static">
-                <Avatar url={f.avatar_url} label={labelOf(f.user_id, f.nickname, f.username)} seed={f.user_id} />
-                <div className="convbody">
-                  <div className="convpeer">{labelOf(f.user_id, f.nickname, f.username)}</div>
-                  <div className="convlast">请求加你为好友</div>
-                </div>
-                <div className="row-actions">
-                  <button className="mini-btn" disabled={busyUser === f.user_id}
-                    onClick={() => void doFriendAction(f.user_id, () => clientRef.current!.friendAction("accept", f.user_id))}>同意</button>
-                  <button className="mini-btn ghost" disabled={busyUser === f.user_id}
-                    onClick={() => void doFriendAction(f.user_id, () => clientRef.current!.friendAction("reject", f.user_id))}>拒绝</button>
-                </div>
-              </div>
-            ))}
-          </>
-        )}
+        {/* 「新的朋友」已移到顶部入口行（群聊下方）→ FriendRequestsModal（2026-09-05）。
+            此处不再内联渲染：好友一多它就被挤到看不见，而"有人加我"恰恰要主动去处理。 */}
 
         <div className="section-label with-action friends-head">
           <span>好友（{contactFilterQ ? `${filteredAccepted.length}/${accepted.length}` : accepted.length}）</span>

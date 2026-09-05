@@ -44,7 +44,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     onClose: vi.fn(), setDetailTab: vi.fn(), setDetailMore: vi.fn(), setManageOpen: vi.fn(),
     setAdminPanelOpen: vi.fn(), openAdminPicker: vi.fn(), openTransferPicker: vi.fn(), revokeAdmin: vi.fn(),
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),
-    doFriendAction: vi.fn(async () => {}), openChat: vi.fn(), openInChatSearch: vi.fn(),
+    openChat: vi.fn(), openInChatSearch: vi.fn(),
     doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doRemoveFriend: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),
     setConvPinned: vi.fn(), setConvMuted: vi.fn(), openGroupText: vi.fn(), openGroupCard: vi.fn(async () => {}),
     doEditMyGroupNickname: vi.fn(async () => {}), doEditGroupRemark: vi.fn(async () => {}), pickGroupAvatar: vi.fn(),

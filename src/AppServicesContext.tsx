@@ -25,6 +25,10 @@ export interface AppServices {
   refreshFriends: () => Promise<void>;
   refreshGroupInfo: (cid: string) => Promise<GroupInfo | null>;
   refreshDownloadSettings: () => Promise<void>;
+  /** 打开「发好友申请」弹窗（填验证消息后发出）。全站加好友入口都走它，**别直接调 requestFriend**——
+   *  少走一次就少一次理由，收件人那边又变回"只有一个名字"。name 是对方显示名，由调用方按各自的
+   *  备注/昵称口径算好（这里拿不到 remarks 表）。 */
+  askFriendRequest: (userId: string, name: string) => void;
 }
 
 const AppServicesContext = createContext<AppServices | null>(null);

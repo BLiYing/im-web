@@ -61,7 +61,7 @@ export interface MessageListProps {
   // 定义在 App 的 login 早退之后（不能进 useMemo 化 context，否则 TDZ）
   openPeerDetail: (uid: string) => void;
   handleScanRaw: (raw: string) => Promise<void>;
-  requestFriendFromNote: (target: string) => Promise<void>;
+  requestFriendFromNote: (target: string) => void;
 }
 
 export function MessageList(p: MessageListProps) {
@@ -243,7 +243,7 @@ export function MessageList(p: MessageListProps) {
                 <div className="sys-note">
                   <span>{notedMember.note}</span>
                   {notedMember.noteCode === 200103 && peer && (
-                    <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>发送好友申请</button>
+                    <button className="sys-note-action" onClick={() => requestFriendFromNote(peer)}>发送好友申请</button>
                   )}
                 </div>
               )}
