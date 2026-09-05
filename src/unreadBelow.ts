@@ -20,6 +20,20 @@ export interface UnreadBelowInput {
    *  默认 ∞ → 这条证据恒不生效）。两种默认都会在调用方漏传时悄悄给出错误的数字，
    *  而本函数存在的全部理由就是不让 ↓N 悄悄算错。 */
   localNewest: number;
+  /** 本地区间清单是否**完整覆盖** `(pendingRead, head]` —— 即"已滚入位点到服务端最新位点之间，
+   *  服务端给过的每一个 conv_seq 本地都有"。调用方用 `coversSpan(rangesOf(conv), pendingRead+1, head)` 算。
+   *
+   *  为什么需要这条、而 head 与"本地最新一条"比不够（2026-09-05 实测）：
+   *  `msg_op` 事件行、「为所有人删除」的墓碑、对我不可见的行**都会占掉一个 conv_seq 却永远不成为消息**。
+   *  20000 人大群里最后一条恰是 `op=pin` 事件行（head=110031，最后一条真消息 110030），
+   *  于是滚到底再往上滑，`head > localNewest` 恒成立、`head − pendingRead` 恒等于 1 ——
+   *  ↓ 按钮永远挂着一条根本不存在的未读（iOS/Web 同现场，两端同一份判据）。
+   *
+   *  区间清单记的正是「服务端给过了」的范围，登记时**含**这些不渲染的行（见 imSdk 的 convRanges 注释
+   *  与 iOS `handleWindowResp` 的 spanLo/spanHi），所以它才是这个问题的正确判据。
+   *  覆盖住就说明**下面一件不缺**，`loadedBelow` 是精确值——此时连 `hasGap` 都不必看：
+   *  缺口若存在也在已滚入位点**之上**，与"下面还有多少"无关。 */
+  coveredBelowFrontier: boolean;
 }
 
 /**
@@ -34,7 +48,11 @@ export interface UnreadBelowInput {
  * head 未知（=0，老服务端或还没收到过带 head 的响应）时退回数本地：宁可偏小，
  * 也不能拿一个没有依据的数字糊弄。
  */
-export function unreadBelowCount({ hasGap, head, pendingRead, loadedBelow, localNewest }: UnreadBelowInput): number {
+export function unreadBelowCount({ hasGap, head, pendingRead, loadedBelow, localNewest, coveredBelowFrontier }: UnreadBelowInput): number {
+  // 先看**正面证据**：已滚入位点到 head 之间服务端给过的都在本地 → 下面一件不缺，数本地就是精确值。
+  // 这条优先于下面两条"本地不全"的间接证据——它们都是拿 seq 连不连号在猜，而 conv_seq 里混着
+  // msg_op 事件行/墓碑/对我不可见的行，猜出来会凭空多几条（见 coveredBelowFrontier 注释）。
+  if (head > 0 && coveredBelowFrontier) return loadedBelow;
   // 两条独立的「本地不全」证据，任一成立都不能数本地：
   //   · hasGap —— 收到过 too_long（连接级内存标志，刷新/重连后会短暂丢失）；
   //   · head > localNewest —— 服务端最新位点超过本地最新一条，**O(1) 且不依赖上面那个标志**。

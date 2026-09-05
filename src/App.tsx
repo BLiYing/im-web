@@ -99,6 +99,7 @@ import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import { SYSTEM_UID } from "./sdk/protocol";
 import { unreadBadgeText } from "./unreadBadge";
 import { unreadBelowCount } from "./unreadBelow";
+import { coversSpan } from "./sdk/ranges";
 import { visibleSlice } from "./renderWindow";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -2210,12 +2211,18 @@ export default function App() {
       if (m.convSeq > pendingReadRef.current && m.from !== uidRef.current && countsAsUnread(m.contentType)) loadedBelow++;
     }
     const client = clientRef.current;
+    const head = client?.headOf(cid) ?? 0;
+    // 「已滚入位点到 head 之间，服务端给过的本地都有吗」——区间清单里**含** msg_op 事件行/墓碑等
+    // "占了 conv_seq 却不是消息"的行，所以这才是「下面还缺不缺东西」的正确判据（见 unreadBelow.ts）。
+    const coveredBelowFrontier = head > 0
+      && coversSpan(client?.rangesOf(cid) ?? [], pendingReadRef.current + 1, head);
     setJumpCount(unreadBelowCount({
       hasGap: !!client?.hasGap(cid),
-      head: client?.headOf(cid) ?? 0,
+      head,
       pendingRead: pendingReadRef.current,
       loadedBelow,
       localNewest,
+      coveredBelowFrontier,
     }));
     setJumpCapped(false); // 这里算的是真实差值/真实条数，不是被服务端计数上限截断的值
   }, [refreshConversations]);
