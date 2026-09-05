@@ -1206,6 +1206,7 @@ export default function App() {
     // 直接从 conversations 取而不调 peerNick()：那个函数定义在本调用点之后，取值会 TDZ。
     peerPublicName: conversations.find((c) => !c.is_group && c.peer === peer)?.peer_nickname || "",
     myPublicName: myInfo?.nickname || "",
+    myUsername: myInfo?.username || loginName,
   });
   // 收藏「来自X」补拉到的个人名片（uid→名片）与"已试过"集合，见下方 useEffect。
   const [favUserCards, setFavUserCards] = useState<Record<string, UserCard>>({});

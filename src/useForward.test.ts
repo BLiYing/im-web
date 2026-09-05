@@ -14,7 +14,7 @@ function mount(over: Partial<ForwardDeps> = {}) {
   const deps: ForwardDeps = {
     uid: "u1", peer: "u2", groupConvId: "", clientRef: fakeClientRef(client), setToast: vi.fn(),
     appendMsg: vi.fn(), msgsByConv: {}, groupInfos: {}, recordSenderAvatar: () => undefined,
-    peerPublicName: "小明", myPublicName: "我自己",
+    peerPublicName: "小明", myPublicName: "我自己", myUsername: "myhandle",
     selected: new Set(), setMenu: vi.fn(), exitSelectMode: vi.fn(), ...over,
   };
   return { ...renderHook(() => useForward(deps)), deps, client };
@@ -126,5 +126,30 @@ describe("useForward", () => {
     act(() => result.current.forwardSelected());
     expect(result.current.forwarding?.map((m) => m.convSeq)).toEqual([1, 3]);
     expect(result.current.forwardMode).toBe("each");
+  });
+});
+
+// 合并转发条目名是**打包时烧进 JSON、原样发给收件人**的，不能放只在本机成立的称呼。
+// 旧实现把自己的条目写死「我」，收件人打开卡片看到的就是一排「我」（2026-09-05 用户实测）。
+describe("合并转发条目名：自己那一支必须是公开名，不是「我」", () => {
+  const recordOf = (client: { sendMedia: ReturnType<typeof vi.fn> }) =>
+    JSON.parse(client.sendMedia.mock.calls[0][0] as string) as { t: string; items: { n: string }[] };
+
+  it("自己发的条目用自己的昵称", () => {
+    const { result, client } = mount();
+    act(() => result.current.setForwardMode("merged"));
+    act(() => result.current.setForwarding([msg({ from: "u1", content: "我说的" }), msg({ from: "u2", content: "他说的" })]));
+    act(() => result.current.sendForwardToTarget(conv()));
+    const rec = recordOf(client);
+    expect(rec.items.map((i) => i.n)).toEqual(["我自己", "小明"]);
+    expect(rec.items.map((i) => i.n)).not.toContain("我");
+  });
+
+  it("昵称为空时退到 @句柄，仍不落内部 ID", () => {
+    const { result, client } = mount({ myPublicName: "" });
+    act(() => result.current.setForwardMode("merged"));
+    act(() => result.current.setForwarding([msg({ from: "u1", content: "我说的" })]));
+    act(() => result.current.sendForwardToTarget(conv()));
+    expect(recordOf(client).items[0].n).toBe("@myhandle");
   });
 });

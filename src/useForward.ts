@@ -7,6 +7,7 @@ import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type GroupInfo } from "./sdk/protocol";
 import { toggleCapped } from "./selection";
+import { displayNameNoRemark } from "./remarks";
 import { fileNameFromContent, chatRecordTitle, buildRecordSenderKeys, type RecordItem } from "./messageContent";
 
 export const MAX_FORWARD_TARGETS = 9;
@@ -27,13 +28,15 @@ export interface ForwardDeps {
    *  群聊不用这两个值（标题固定「群聊的聊天记录」，不写群名），见 chatRecordTitle。 */
   peerPublicName: string;
   myPublicName: string;
+  /** 我的公开句柄（@xxx 的 xxx）：昵称为空时合并转发条目名的次级兜底，见 nameOf。 */
+  myUsername: string;
   selected: Set<number>;
   setMenu: (v: null) => void;
   exitSelectMode: () => void;
 }
 
 export function useForward(d: ForwardDeps) {
-  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, recordSenderAvatar, peerPublicName, myPublicName, selected, setMenu, exitSelectMode } = d;
+  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, recordSenderAvatar, peerPublicName, myPublicName, myUsername, selected, setMenu, exitSelectMode } = d;
   const [forwarding, setForwarding] = useState<ChatMessage[] | null>(null); // 待转发的消息（打开会话选择器；null=关闭）
   const [forwardMode, setForwardMode] = useState<"each" | "merged">("each"); // 逐条 / 合并转发
   const [forwardMulti, setForwardMulti] = useState(false); // 转发选择器：多选目标会话模式（对齐 iOS「多选」）
@@ -62,10 +65,17 @@ export function useForward(d: ForwardDeps) {
     if (!client || !msgs) return;
     const mode = msgsArg ? "each" : forwardMode;
     const to = target.is_group ? "" : target.peer;
-    // 发送者显示名：自己→uid；否则群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退 uid。
+    // 发送者显示名：条目名会**原样发给收件人**，所以这里只能取公开名。
+    // 群成员昵称（直接读 groupInfos 状态，避免依赖后声明的 memberNick）→ 回退「未命名用户」；
     // 末级不落 m.from：那是 10 位随机内部 ID，出现在合并转发卡片里既难看也无意义。
-    // 自己的条目直接标「我」，与聊天搜索侧同口径。
-    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? "我" : (m.fromNickname || gm?.group_nickname || gm?.nickname || "未命名用户"); };
+    //
+    // ⚠️ 自己那一支**曾经写死「我」**（2026-08-30 为了替掉更早的一串内部 ID）——那是错的：
+    // 「我」是**看的人**才成立的称呼，而这个字符串是打包时就烧进 JSON、原样发出去的。
+    // 于是收件人打开卡片，看到的是一排「我」而不是发送者是谁（2026-09-05 用户实测）。
+    // 与备注同一条纪律：只在本机渲染时成立的名字，绝不能进入会发出去的内容（docs/UI.md 隐私红线）。
+    // 改为自己的公开显示名（昵称 → @username → 未命名用户），与其他条目同一口径。
+    const myRecordName = displayNameNoRemark(myPublicName, myUsername);
+    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? myRecordName : (m.fromNickname || gm?.group_nickname || gm?.nickname || "未命名用户"); };
     const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean, groupId?: string, extra?: Partial<ChatMessage>) =>
       appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}), ...(extra ?? {}) });
 
