@@ -100,6 +100,7 @@ import { GalleryModal } from "./components/modals/GalleryModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import { SYSTEM_UID } from "./sdk/protocol";
 import { unreadBadgeText } from "./unreadBadge";
+import { pauseVoicePlayback } from "./components/VoiceBubble";
 import { unreadBelowCount } from "./unreadBelow";
 import { coversSpan } from "./sdk/ranges";
 import { visibleSlice } from "./renderWindow";
@@ -1227,6 +1228,17 @@ export default function App() {
     favoriteMessage, favoriteSelected, openFavorites, openFavoritesPick, closeFavorites,
     favoriteActions, sendFavoritesToCurrent,
   } = useFavorites({ clientRef, setToast, setMenu, setAttachPanel, saveMessageToDisk, conversations, currentConvRef, setForwardMode, setForwarding, sendForwardToTarget, msgsByConv, selected, exitSelectMode });
+
+  // 语音**跟着页面走**：离开这条语音所属的那一页就暂停（保留位点，回来点一下接着听）。
+  // 三条 cleanup 各管一处——单例 audio 挂在模块上，页面一关组件就卸载了，声音却还在放，
+  // 用户找不到任何暂停按钮（2026-09-05 用户反馈）。与 iOS `pauseOnLeavingScreen` 同语义。
+  //
+  // 写成 **cleanup** 而不是"值变了就停"：cleanup 恰好在「离开旧值」时跑一次，
+  // 而在依赖值上判 `if (!x) pause()` 会在首渲染就误停一次，且分不清"关掉"与"换了一个"。
+  useEffect(() => { if (!convId) return; return () => pauseVoicePlayback(); }, [convId]);       // 切/离开会话
+  useEffect(() => { if (!detail) return; return () => pauseVoicePlayback(); }, [detail]);       // 关/切资料卡片（语音页签）
+  useEffect(() => { if (!favorites) return; return () => pauseVoicePlayback(); }, [favorites]); // 关收藏弹窗
+
   // 个人名片簇 → useContactShare（CONTACT_CARD_DESIGN §8）：入口 ① 选好友 + 二次确认发进当前会话；
   // 入口 ②③ 合成一条 contact 消息交给**已有的**转发选择页（故消费 useForward 的 setForwardMode/setForwarding）。
   const {
