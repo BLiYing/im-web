@@ -471,7 +471,11 @@ export interface GroupBan {
 export interface GroupSummary {
   conv_id: string;
   name: string;
+  /** 群主内部 ID：只用来判定「我是不是群主」，**不得展示**（见下两个字段）。 */
   owner: string;
+  /** 群主展示资料（后端 group.Summary 同批下发）：副标题走 `备注 → owner_nickname → @owner_username`。 */
+  owner_nickname?: string;
+  owner_username?: string;
   avatar_url: string;
   created_at: number;
 }

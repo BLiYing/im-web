@@ -3645,7 +3645,7 @@ export default function App() {
       {/* 「群聊」列表 / 建群弹窗：见 components/modals/GroupsModal · CreateGroupModal。 */}
       {groupsModal !== null && (
         <GroupsModal
-          groups={groupsModal} uid={uid}
+          groups={groupsModal} uid={uid} remarks={remarks}
           onCreate={() => setCreateDraft({ name: "", selected: [] })}
           onOpen={(cid) => { setGroupsModal(null); setTab("chats"); openGroupChat(cid); }}
           onClose={() => setGroupsModal(null)}
