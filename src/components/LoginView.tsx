@@ -19,7 +19,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
   onLoginTab: (t: "password" | "qr") => void;
   onLogin: (pwd: string) => void; // 密码登录（空串=免密）
   onRegister: () => void;
-  onQRLogin: (uid: string, token: string) => void;
+  onQRLogin: (uid: string, token: string, refreshToken: string) => void;
 }) {
   // 哪个入口在转圈。三个按钮共用 App 的 authBusy，不记来源就会三个一起转。
   // **必须声明在 restoring 早退之前**——Hook 顺序不能被早退打断。

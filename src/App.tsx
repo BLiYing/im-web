@@ -158,12 +158,13 @@ export default function App() {
   useEffect(() => { uidRef.current = uid; }, [uid]);
   const [password, setPassword] = useState(""); // 登录密码（空=走开发期免密）
   const restoreRef = useRef(loadSession()); // 待静默重登的已存会话（含 uid + username）
+  const refreshRef = useRef(""); // 本会话手上那枚续期凭据：落盘用（替代此前存在本地的明文密码）
   const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
   const [authErr, setAuthErr] = useState(""); // 登录/注册错误文案
   const [loginTab, setLoginTab] = useState<"password" | "qr">("password"); // 登录页页签：密码 / 扫码
   // 扫码登录待入场会话：poll 领到 {uid,token} 后先 setUid 再由 effect 用新 uid 闭包跑 enterApp。
-  const pendingQrRef = useRef<{ uid: string; token: string } | null>(null);
+  const pendingQrRef = useRef<{ uid: string; token: string; refresh: string } | null>(null);
   const [qrTrigger, setQrTrigger] = useState(0);
   const [state, setState] = useState<ConnState>("disconnected");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -673,11 +674,12 @@ export default function App() {
 
   // token 非空=扫码登录路径（无密码，走 connectWithToken）；否则密码/免密登录。
   // name 是 **username**（登录凭据）；token 非空则走扫码会话（此时 knownUid 是票据带回的内部 ID）。
-  const enterApp = useCallback(async (name: string, pwd: string, token?: string, knownUid?: string) => {
+  const enterApp = useCallback(async (name: string, pwd: string, token?: string, knownUid?: string, refresh = "") => {
     if (!name && !knownUid) {
       setAuthErr("请填写用户名");
       return;
     }
+    refreshRef.current = refresh;
     setAuthBusy(true);
     setAuthErr("");
     // 防「被自己上一次登录踢下线」：先断旧 client，否则同 device_id 再登被 upsert 顶替，旧 client 拿撤销 token 探活得 100101 触发 logout 把新会话一起踢回登录页。
@@ -845,6 +847,8 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
+      // 续期凭据变化（登录下发 / 改密轮换 / 已死清空）→ 记下并尽快落盘；uid 尚未定时由入场末尾那次 saveSession 兜住。
+      onRefreshToken: (t) => { refreshRef.current = t; if (uidRef.current) saveSession({ uid: uidRef.current, username: name || loginName, refresh: t, token }); },
       // 鉴权失效分两类处理：
       // ① 100101 吊销/被踢下线 → 强制退登，直接跳登录页（不给可取消弹窗——被踢是不可协商的，
       //    「边看本地边被踢」自相矛盾）；原因写到登录页顶部红字。与 iOS 握手 401 直跳登录对齐。
@@ -869,8 +873,8 @@ export default function App() {
     clientRef.current = client;
     setLogContext(name || knownUid || ""); // 让后续每条 dev 日志带上账号标签（登录后换成内部 ID）
     try {
-      if (token) await client.connectWithToken(knownUid || "", token); // 扫码登录：票据已带内部 ID
-      else await client.connect(name, pwd); // 首次登录失败（密码错误等）会抛错
+      if (token) await client.connectWithToken(knownUid || "", token, refresh); // 扫码登录：票据已带内部 ID
+      else await client.connect(name, pwd, refresh); // 首次登录失败（密码错误等）会抛错
     } catch (e) {
       const code = (e as { code?: number }).code;
       const cached = client.cachedConversations();
@@ -880,7 +884,7 @@ export default function App() {
         clientRef.current = client;
         setConversations(cached);
         await preloadLocal(cached);
-        saveSession({ uid: knownUid || uid, username: name || loginName, pwd, token });
+        saveSession({ uid: knownUid || uid, username: name || loginName, refresh: refreshRef.current, token });
         setAuthBusy(false);
         setPhase("app");
         return;
@@ -919,7 +923,7 @@ export default function App() {
     void restoreDownloadState(myUID); // 回灌解门控记录 / 失效标记 / Cache Storage 已下载文件（见 useMediaDownload）
     // 保持登录：刷新后静默重登（Web #4）。扫码登录存 token（无密码，过期即回登录）。
     // **username 必须一起存**：重登走 /login，而它只认 username。
-    saveSession({ uid: myUID, username: name || loginName, pwd, token });
+    saveSession({ uid: myUID, username: name || loginName, refresh: refreshRef.current, token });
     setAuthBusy(false);
     setPhase("app");
   }, [uid, loginName, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
@@ -934,7 +938,7 @@ export default function App() {
     setUid(r.uid);
     uidRef.current = r.uid;
     setLoginName(r.username);
-    void enterApp(r.username, r.pwd, r.token, r.uid).finally(() => setRestoring(false));
+    void enterApp(r.username, r.legacyPwd ?? "", r.token, r.uid, r.refresh).finally(() => setRestoring(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -943,7 +947,7 @@ export default function App() {
     const p = pendingQrRef.current;
     if (!p || phase !== "login" || uid !== p.uid) return;
     pendingQrRef.current = null;
-    void enterApp("", "", p.token, p.uid);
+    void enterApp("", "", p.token, p.uid, p.refresh);
   }, [uid, phase, qrTrigger, enterApp]);
 
   // 注册账号（用户名 + 昵称 + 密码≥6位）→ 成功后直接登录。
@@ -2579,8 +2583,8 @@ export default function App() {
         authErr={authErr} authBusy={authBusy} loginTab={loginTab}
         onUid={setLoginName} onNickname={setNickname} onPassword={setPassword} onLoginTab={setLoginTab}
         onLogin={(pwd) => void enterApp(loginName, pwd)} onRegister={() => void doRegister()}
-        onQRLogin={(loginUid, token) => {
-          pendingQrRef.current = { uid: loginUid, token };
+        onQRLogin={(loginUid, token, refreshToken) => {
+          pendingQrRef.current = { uid: loginUid, token, refresh: refreshToken };
           setUid(loginUid);
           setQrTrigger((n) => n + 1); // uid 不变时也强制触发入场 effect
         }}

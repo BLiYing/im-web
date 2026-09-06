@@ -426,6 +426,9 @@ export interface QRLoginTicket {
 export interface QRLoginPollResult {
   state: QRLoginState;
   token?: string; // 仅 confirmed 首次领取时带
+  /** 长效续期凭据，与 token 同批一次性下发（2026-09-06 起）。**可能缺**——会话登记降级、
+   *  或后端尚未升级；缺了本会话就退化成"这枚 token 24h 用完即回登录页"。 */
+  refresh_token?: string;
   uid?: string; // scanned/confirmed 时回显，供 Web 确认账号
   nickname?: string;
 }

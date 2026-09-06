@@ -5,49 +5,38 @@
 
 ## 当前焦点
 
-> **建群两步流 ✅ 2026-09-05**（与 iOS 同批落地，后端零改动）。`CreateGroupModal` 拆成两步：
-> ① 好友多选（内容一字未改，按钮「创建」→「**下一步**」）② 群资料——
-> **群头像 / 群名（必填、预填「我、A、B」）/ 成员 chips（可 ✕，不可删到 0）**。
-> 头像走既有 `setCropReq` + `uploadAvatar`，拿到 URL 只写回草稿（**群还不存在**，不像
-> `pickGroupAvatar` 那样调 `updateGroup`），点「创建」时随 `createGroup(…, avatarUrl)` 一起发——
-> **SDK 那个第 4 形参一直在，此前恒传空串**。设计稿见
-> `../IMServer/docs/design/sketches/GROUP_CREATE_UX_SKETCH.html`。
+> **接上 `refresh_token`，登录寿命与 iOS 对齐 ✅ 2026-09-06**。此前 Web 的「保持登录」是
+> **localStorage 里存明文密码、每次重连重放**——iOS 2026-09-03 就换掉了，Web 一直没跟。
+> 存密码的真问题不是"泄露风险大一点"，而是攻击者拿到的是**密码**而不是会话：
+> 「设备管理 / 注销某台设备」对它完全失效（注销掉的只是会话，对方用密码立刻重登）。
 >
-> **两条值得记的**：
-> ① **预填群名只能用公开名（昵称），不能用 `displayNameOf()`（备注优先）**——群名会发到服务端、
-> 进系统消息、显示给全群，用备注＝把私下称呼广播出去（同合并转发标题那次 P0，`docs/UI.md` 红线）。
-> 新 `src/groupName.ts` 因此只收 nickname/username/uid **三件套**；我自己那一位取 `myInfo.nickname`。
-> **成员 chips 上显示的名字仍走 `friendLabel`（认备注）**，两者刻意分叉。
-> ② **「＋ 添加」＝ `setStep(1)`**，与「上一步」同一个动作——不另做加人 UI，
-> 那等于把搜索/全选/上限截断再抄一遍。草稿是唯一状态源（`createDraft` 加了
-> `avatarUrl` / `nameEdited`），来回切不丢；`nameEdited` 为真后增删成员**不再覆盖**用户改过的群名。
+> 顺带修掉一条没人报过的坑：**HTTP 层没有任何 token 生命周期管理**。`this.token` 是登录那一刻
+> 拿到的，除非 WS 断线重连没有任何代码去换它；而 WS 长连接建立后服务端**不复查 token**
+> （只在握手校验）。于是页面连开超过 24h 时，WS 收发照常、所有 REST 开始报「登录已失效」，
+> 既不跳登录也不重签，要等 WS 真断一次才自愈。
 >
-> 新 CSS 全部只服务第二步（`.create-modal` 360px / `.create-profile` / `.create-name` /
-> `.field-count` / `.member-chip` / `.create-head|step|hint` + `.edit-avatar.sm` 修饰），第一步样式没动。
-> `tsc -b` 干净 + **vitest 922 全绿**（`groupName.test.ts` 9 例与 iOS 用例逐条对应，
-> `GroupPickers.test.tsx` 新增 7 例两步流）。
+> 三处改动：
+> ① **`session.ts` 存 `refresh` 不存 `pwd`**。老会话里那份明文密码作为**只读迁移垫片**
+> （`legacyPwd`）换一次凭据，`saveSession` 的新结构里压根没有这个字段，换完即从磁盘消失。
+> ② **新模块 `sdk/tokenSession.ts`** 收所有取 token 的判据：探活 → 续期 → 才轮到凭据登录
+> （三条路的优先级即安全序）。**两条不能丢**：探活 `/devices` 必须先于一切（否则密码会话重连
+> 直接 `/login` 会重新签发新会话，把「踢下线」自愈掉）；**续期被明确拒绝时不再回退密码登录**
+> （服务端认定这条会话已死，拿密码重登只会把「已被注销」洗成「又登上了」）。
+> 放新文件不只是为了 `imSdk.ts` 的行数预算（1445，改前 1442，只剩 3 行）——这些判据是可注入
+> 依赖的纯决策，脱开 WebSocket 就能单测。
+> ③ **`sdk/http.ts` 的 `callJson` 撞 `100102` 自动续期重试一次**。拦在这一层是因为 `imSdk.ts` 里
+> 有 58 处 `this.token`，其中 51 处是 `xxxApi(this.token, …)` 的一行转发——逐个改成"取新鲜 token"
+> 会把方法体从 1 行撑到 3 行、直接撞穿预算；而那些模块**最终都汇到这一个函数**。
+> 只重试一次、只重放可重放的请求（`Request` 对象与 `FormData` 不救）、**只救本就带
+> `Authorization` 的请求**（免鉴权接口不该被偷偷补一个 Bearer 头再发一遍）。
 >
-> **浏览器实测（用户点名要求）抓到一条 CSS 特异度坑**：计数「18/30」**压在群名文字上**——
-> `.create-name-input` (0,1,0) 被既有的 `.modal input` (0,1,1) 盖过，我留给计数的
-> `padding-right:46px` 被打回 12px。改成 `.create-modal .create-name-input` (0,2,0)。
-> **`.modal input` 正是 CODING_STYLE §九 点名的「容器 + 裸标签」反模式**，这次反过来咬了新代码一口——
-> 以后在 `.modal` 里加控件，选择器一律带上自己那层容器类。
-> 另修：「至少选择一位好友」提示会滞留，改为群名一改就清。
+> 后端配套改了一处（IMServer 仓）：**扫码登录也签凭据**，`qr/login/poll` 的 `confirmed` 首次领取里
+> 跟 `token` 同批一次性下发。原先刻意不签（"签而不用等于白放一枚长期凭据"）——那是 Web 还没接
+> 续期接口时的判断；不改的话扫码会话仍被 access token 的 24h 顶死、隔天必须重扫。
 >
-> 实测跑通：两步流全程、预填名（我打头）、末两字头像圈、「＋添加」回第一步且勾选保留、
-> 删成员重算预填名、删到最后一位被拦并红字提示、全空白群名「创建」置灰、建群后弹窗关闭并进新群会话。
-> **用户复测报「设不上群头像」→ 又一条 z-index 坑（已修并验通）**：`AvatarCropper` 与建群弹窗
-> **都用 `.modal-mask`（z-index:50）**，同层时后出现的那个赢——而 `AvatarCropper` 在 `App.tsx` 里
-> 排在建群弹窗**之前**，于是裁切窗被埋在下面，「确定」点不到 → **Web 端群头像根本设不上**。
-> 修法：`.avatar-cropper-mask` 提到 `z-index:60`（它是从别的弹窗里拉起来的，本就该盖在所有弹窗之上）。
-> **这次头像上传真的验通了**：绕开原生文件框——往那个 `<input type=file>` 注入一个 canvas 生成的 File
-> 再派发 change → 裁切窗浮在最上层、「确定」可点 → 拿到 `/avatars/…jpg` → 建群后会话列表那行的头像就是它。
-> 同批：预填群名**不再补「…」**（与 iOS `IMDefaultGroupName` 同步，单测一起改）。
-
-> **上一批（2026-09-05，已提交 `55cc1cd`）**：发消息必回最新一窗并贴底 / 转文字撑高后补进视口 /
-> 记录卡与名片同宽（`--card-bubble-w`）。前两条已在浏览器实测。
-
-> **体量**：App.tsx 3760（本轮 +4：建群弹窗的三个新 prop 与一段注释），闸棘轮仍 **3770**，未动。
+> `tsc -b` 干净 + **vitest 961 全绿**（+28：`tokenSession.test.ts` 14 / `http.test.ts` 救援 7 /
+> `session.test.ts` 迁移 7）。**未跑浏览器**：没验「老会话迁移后 localStorage 里密码消失」，
+> 也没真等 24h 验救援路径（单测里是拿假后端模拟 100102 的）。
 
 ## 下一步
 1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
@@ -73,6 +62,11 @@
 - 虚拟化暂回退为普通滚动列表。
 - 本地落库/空洞自愈/连续游标：IndexedDB 按 owner 隔离、同事务。
 - 免密登录需后端 `-dev-login`；dev 建的号无法再走密码登录。
+- **登录寿命口径（2026-09-06）**：access token 24h；`refresh_token` 180 天绝对寿命、**续期不刷新**，
+  唯一轮换点是改密码（`changePassword` 必须接住响应里那枚新的，不接住本地这枚当场作废、
+  下次冷启动就被弹回登录页）。**WS 连着 ≠ token 有效**——服务端只在握手校验，别拿连接状态当续期依据。
+- **凭据存在 localStorage**（XSS 可读，与存密码相比仍是净改善：可吊销、不能改密码、不能登其它端）。
+  更强的做法是 httpOnly cookie，需要后端配套，未做。
 
 ## 关联工程 / 常用命令
 - 后端 `/Users/liying/IOSProject/IMServer`；iOS `/Users/liying/IOSProject/IMProgram`。

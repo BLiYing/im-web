@@ -20,7 +20,9 @@ import * as localStore from "./localStore";
 import { loadRanges, registerRange, updateRangesHead } from "./localStore.ranges";
 import { addRange, normalizeRanges, type SeqRange } from "./ranges";
 import { LOG_TAG, logger } from "../logging/logger";
-import { tracedFetch, tracedUpload, fetchEnvelope, callJson, type UploadProgressHandler } from "./http";
+import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, type UploadProgressHandler } from "./http";
+// isAuthCode：「鉴权失败类错误码」判据（对齐 errcode / iOS IMIsAuthErrorCode），与续期同源，故同住一个模块。
+import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
 import { friendlyMessage } from "./errcode";
 import * as voiceApi from "./voiceApi";
@@ -78,6 +80,9 @@ export interface IMClientHandlers {
   /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。
    *  code 为业务码，供 UI 区分处理：100101 吊销/被踢=强制退登（直接跳登录），100102 过期=可留看本地缓存。 */
   onAuthError?: (msg: string, code?: number) => void;
+  /** 续期凭据变了，**须立刻落盘**：登录下发、改密码轮换（新的一枚）、或凭据已死（空串=清掉）。
+   *  端上存它而不是明文密码——密码不可吊销，"注销某台设备"对存密码的客户端完全无效。 */
+  onRefreshToken?: (refreshToken: string) => void;
   /** 某条消息被服务端拒收（如被拉黑）：把该 client_msg_id 标记为发送失败并提示原因。
    *  code 为服务端业务码（200102 被拉黑 / 200103 非好友 …），UI 据此决定是否给恢复入口。 */
   onMsgRejected?: (clientMsgId: string, msg: string, code: number) => void;
@@ -118,11 +123,6 @@ export interface IMClientHandlers {
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
 
-/** 是否"鉴权失败"类错误码（对齐 errcode / iOS IMIsAuthErrorCode）→ 退回登录，而非当网络问题重试。 */
-function isAuthCode(code: number | undefined): boolean {
-  return code === 200001 || code === 200002 || code === 200003 || code === 100101 || code === 100102;
-}
-
 /** 收藏列表每页条数。滚到底自动加载下一页（见 useFavorites）。 */
 export const FAVORITES_PAGE_SIZE = 60;
 
@@ -135,6 +135,19 @@ export class IMClient {
   private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
   private sessionToken = ""; // 扫码登录标记（置位=本会话无密码可回退）：重连探活失效时无法 /login 自愈，一律回登录
   private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
+  /** 长效续期凭据（180 天绝对寿命）：免密换新 access token，替代"把明文密码存本地反复重放"。
+   *  两类会话都有（密码登录由 /login 下发，扫码登录由 qr/login/poll 一次性下发）。 */
+  private refreshToken = "";
+  /** 过期救援（单飞）：HTTP 层撞 100102 时调。凭据已死 → 擦掉 + 停重连 + 回登录页。 */
+  private renewToken = createRenewer({
+    getRefreshToken: () => this.refreshToken,
+    onRenewed: (token) => { this.token = token; },
+    onDead: (code, message) => {
+      this.refreshToken = ""; this.handlers.onRefreshToken?.("");
+      this.manualClose = true; // 别让"凭据已死"退化成一次临时抖动被自动重连盖过去
+      this.handlers.onAuthError?.(message || "登录已失效，请重新登录", code);
+    },
+  });
 
   /** 当前 JWT（只读），给不挂在 IMClient 上的无状态 HTTP 模块用（sdk/serverConfigApi.ts 等）。
    *  **别在外面另存一份**：登录路径有密码/免密/扫码三条，各自拿到 token 的时机不同，
@@ -198,7 +211,7 @@ export class IMClient {
    *  **入参是 username（公开句柄），不是内部 ID**——登录接口只认前者。
    *  真正的身份（10 位内部 ID）由登录响应带回并写进 this.uid，之后一切 conv_id 推导、
    *  本地库分区、接口参数都用它。见 IMServer/docs/ACCOUNT_IDENTITY_REDESIGN.md。 */
-  async connect(username: string, password = ""): Promise<void> {
+  async connect(username: string, password = "", refreshToken = ""): Promise<void> {
     if (this.uid && this.username !== username) {
       // IMClient 是可复用 SDK；切换账号时绝不能沿用上个 uid 的会话游标。
       this.syncedSeq.clear();
@@ -214,17 +227,19 @@ export class IMClient {
     }
     this.username = username;
     this.password = password;
+    this.refreshToken = refreshToken;
     this.sessionToken = ""; // 密码登录路径：清掉可能残留的扫码 token，避免重连误用旧会话
     this.manualClose = false;
     this.clearReconnectTimer();
+    setTokenRescue(this.renewToken); // HTTP 层撞 100102 即自动续期重试（见 sdk/http.ts callJson）
     this.wakeStop ??= installWakeListeners((r) => this.reconnectNow(r));
-    logger.info(LOG_TAG.ws, "connect_requested", { username });
+    logger.info(LOG_TAG.ws, "connect_requested", { username, via: refreshToken ? "refresh" : "credential" });
     await this.openSocket(true);
   }
 
   /** 用扫码登录换来的 JWT 直接建立会话（无密码）。
    *  断线重连复用该 token 并做一次鉴权探活：被踢下线/过期(auth 码)即回登录，网络失败继续重试。 */
-  async connectWithToken(uid: string, token: string): Promise<void> {
+  async connectWithToken(uid: string, token: string, refreshToken = ""): Promise<void> {
     if (this.uid && this.uid !== uid) {
       // 与 connect() 同款切账号清理：绝不沿用上个 uid 的游标/在途状态。
       this.syncedSeq.clear();
@@ -241,8 +256,10 @@ export class IMClient {
     this.password = "";
     this.sessionToken = token;
     this.token = token;
+    this.refreshToken = refreshToken; // 2026-09-06 起扫码登录也下发；空=老票据，仍是 24h 会话
     this.manualClose = false;
     this.clearReconnectTimer();
+    setTokenRescue(this.renewToken);
     this.wakeStop ??= installWakeListeners((r) => this.reconnectNow(r));
     logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid, via: "qr_login" });
     await this.openSocket(true);
@@ -286,6 +303,8 @@ export class IMClient {
     this.ws?.close(1000);
     this.ws = null;
     this.sessionToken = ""; // 退出后不再复用扫码 token
+    this.refreshToken = "";  // 长效凭据同样不留：否则残留的在途请求还能续出一枚新 token
+    setTokenRescue(null);
     this.setState("disconnected");
   }
 
@@ -327,10 +346,13 @@ export class IMClient {
    *  成功后服务端会**自动下线本账号其它全部设备**（只保留当前，安全默认），无需前端再调 revoke-others。
    *  失败抛带 .code 的 Error（200002=旧密码错，100001/参数类=强度不足等），文案已本地化。 */
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    await this.api("/api/v1/users/me/password", {
+    const data = await this.api("/api/v1/users/me/password", {
       method: "POST",
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
     });
+    // 改密时服务端**轮换本机这枚续期凭据**（唯一的轮换点），新的一枚只在这次响应里出现。
+    // 不接住的话本地那枚当场作废，下次冷启动就被弹回登录页——刚在本机改完密码就要重登。
+    if (typeof data?.refresh_token === "string" && data.refresh_token) this.adoptRefreshToken(data.refresh_token);
   }
 
   /** 链接富预览：抓取 URL 的 OG 元信息（后端带 SSRF 防护 + 缓存）。失败抛错，调用方回退纯链接。 */
@@ -847,40 +869,21 @@ export class IMClient {
     };
   }
 
-  /** 取本次（重）连要用的 token。首次登录走 POST /api/v1/login（password 真账号 / 空=免密直签）。
-   *
-   *  **重连关键**：有现成 token（扫码会话，或密码会话重连时上一枚）时**先拿它探活 /devices**，
-   *  在重登之前发现吊销——否则密码会话重连直接 /login 会重新签发新会话，把「踢下线」自愈掉。
-   *   - 探活 code=0：复用该 token（顺带省一次 /login）。
-   *   - code=100101 吊销：一律抛（两类会话都强制回登录）。
-   *   - 其它失效（如 100102 过期）：扫码会话无密码救不了→抛回登录；**密码会话**才落到下面 /login 自愈。
+  /** 取本次（重）连要用的 token：判据与三条路（探活 / 续期 / 凭据登录）全在 `sdk/tokenSession.ts`。
    *  抛出的 auth 码由 openSocket 现有分支路由到 onAuthError；网络失败抛非 auth 错，继续重连。 */
   private async fetchToken(password: string): Promise<{ token: string; uid: string }> {
-    if (this.token) {
-      const probe = await fetchEnvelope("/api/v1/devices", {
-        headers: { Authorization: `Bearer ${this.token}` },
-      });
-      if (probe.code === 0) return { token: this.token, uid: this.uid }; // 仍有效，复用（身份不变）
-      if (probe.code === 100101 || this.sessionToken) {
-        // 100101 吊销(两类会话)；或扫码会话无密码、任何失效都救不了 → 回登录。
-        const e = new Error(friendlyMessage(probe.code, probe.message || "登录已失效")) as Error & { code?: number };
-        e.code = probe.code;
-        throw e;
-      }
-      // 密码会话 + 非吊销（如 100102 过期）→ 落下去用 /login 重新签发（自愈）。
-    }
-    const body = await fetchEnvelope<{ token?: string; uid?: string }>("/api/v1/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: this.username, password, platform: "web", device_id: webDeviceId(), device_name: webDeviceName() }),
-    });
-    if (body.code !== 0 || !body.data?.token || !body.data?.uid) {
-      const e = new Error(friendlyMessage(body.code, body.message || "登录失败")) as Error & { code?: number };
-      e.code = body.code; // 带上业务码，供重连区分 鉴权失败 vs 网络失败
-      throw e;
-    }
-    // data.uid 是服务端分配的内部 ID；首次登录前本端并不知道自己是谁。
-    return { token: body.data.token, uid: body.data.uid };
+    const got = await acquireToken({
+      token: this.token, refreshToken: this.refreshToken, username: this.username, password,
+      qrSession: !!this.sessionToken, device: { deviceId: webDeviceId(), deviceName: webDeviceName() },
+    }, this.uid);
+    if (got.refreshToken) this.adoptRefreshToken(got.refreshToken); // 只有 /login 下发；触发登录的入口不止一处，故收口在此
+    return { token: got.token, uid: got.uid };
+  }
+
+  /** 收下一枚新的续期凭据：内存记一份，并通知外层落盘（App 存 localStorage）。 */
+  private adoptRefreshToken(token: string): void {
+    this.refreshToken = token;
+    this.handlers.onRefreshToken?.(token);
   }
 
   private onFrame(raw: string): void {

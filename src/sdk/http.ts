@@ -147,13 +147,55 @@ export async function fetchEnvelope<T = any>(input: RequestInfo | URL, init?: Re
   }
 }
 
+/** token 过期救援：由 IMClient 注册（`sdk/tokenSession.ts` 的单飞续期器）。返回新 token，空串=救不了。 */
+type TokenRescue = () => Promise<string>;
+let tokenRescue: TokenRescue | null = null;
+
+/**
+ * 注册/注销「过期即续期」钩子。登录时装、退出登录时传 null 拆掉——**拆是必须的**：
+ * 留着的话退出后残留的在途请求还能拿旧凭据续出一枚新 token 来。
+ */
+export function setTokenRescue(fn: TokenRescue | null): void { tokenRescue = fn; }
+
+const CODE_TOKEN_EXPIRED = 100102;
+
+/** 这一发请求能否原样重放。不可重放就不救（宁可把 100102 抛给调用方，也不发半个请求出去）：
+ *  `Request` 对象的 body 是一次性流；`FormData`/`Blob` 同理（上传另有其路，不走 callJson）。
+ *  另要求原请求本就带 Authorization——免鉴权接口（/login、/qr/login/poll、注册）不该被我们
+ *  偷偷补上一个 Bearer 头再发一遍。 */
+function replayable(input: RequestInfo | URL, init?: RequestInit): boolean {
+  if (typeof input !== "string") return false;
+  if (!new Headers(init?.headers).has("Authorization")) return false;
+  const body = init?.body;
+  return body == null || typeof body === "string";
+}
+
+/** 换掉 Authorization 头，其余原样（大小写不敏感，Headers 自己会归一）。 */
+function withBearer(init: RequestInit | undefined, token: string): RequestInit {
+  const headers = new Headers(init?.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  return { ...init, headers };
+}
+
 /**
  * fetchEnvelope + 信封解包：`code!==0` 抛带业务码的 Error（`.code` 挂在 error 上供调用方按码分支，
  * 如 100002 限流、200110 二维码失效、300210 入群待审），`.message` 已本地化为中文（走 friendlyMessage
  * 码表 → 未收录码回退服务端原文）。这是 SDK 调用点的默认解包方式。
+ *
+ * **撞上 100102 会自动续期并重试一次**（2026-09-06）。为什么拦在这一层：IMClient 里有 58 处
+ * `this.token`，其中 51 处是 `xxxApi(this.token, …)` 的一行转发，逐个改成"取新鲜 token"会把
+ * 方法体从 1 行撑到 3 行、直接撞穿 `imSdk.ts` 的行数预算；而那些模块**最终都汇到这个函数**。
+ * 在此之前，页面连续开着超过 24h（WS 长连接不复查 token，服务端只在握手校验）后所有 REST 都会
+ * 开始报"登录已失效"，且没有任何代码去换 token——要等 WS 真断一次重连才自愈。
+ *
+ * 只重试**一次**：重试后仍 100102 说明续期本身没能给出可用 token，再转就是死循环。
  */
 export async function callJson(input: RequestInfo | URL, init?: RequestInit): Promise<any> {
-  const body = await fetchEnvelope(input, init);
+  let body = await fetchEnvelope(input, init);
+  if (body.code === CODE_TOKEN_EXPIRED && tokenRescue && replayable(input, init)) {
+    const fresh = await tokenRescue();
+    if (fresh) body = await fetchEnvelope(input, withBearer(init, fresh));
+  }
   if (body.code !== 0) {
     const err = new Error(friendlyMessage(body.code, body.message ?? "")) as Error & { code?: number };
     err.code = body.code;

@@ -406,7 +406,7 @@ function UnknownBranch({ text }: { text: string }) {
 // UI 相位：loading=正在申请票据；error=申请失败；其余直接映射票据状态机。
 type LoginPhase = "loading" | "error" | QRLoginState;
 
-export function QRLoginTab(props: { onLogin: (uid: string, token: string) => void }) {
+export function QRLoginTab(props: { onLogin: (uid: string, token: string, refreshToken: string) => void }) {
   const { onLogin } = props;
   const [phase, setPhase] = useState<LoginPhase>("loading");
   const [img, setImg] = useState("");
@@ -454,7 +454,7 @@ export function QRLoginTab(props: { onLogin: (uid: string, token: string) => voi
         }
         if (res.state === "confirmed" && res.token && res.uid) {
           setPhase("confirmed");
-          onLoginRef.current(res.uid, res.token); // 父组件会切到 app 相位并卸载本组件
+          onLoginRef.current(res.uid, res.token, res.refresh_token ?? ""); // 父组件会切到 app 相位并卸载本组件
           return;
         }
         if (res.state === "expired" || res.state === "rejected" || res.state === "consumed") {
