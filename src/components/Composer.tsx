@@ -5,7 +5,7 @@
 // - reactive 值（input/replyTo/editingMsg/selectMode/pastedImages/mentionRows…）走 props。
 // 护栏：Composer.test.tsx + App.smoke.test.tsx（发消息主链路）。
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { Bookmark, Forward, Mic, Trash2, type LucideIcon, IdCard } from "lucide-react";
+import { Bookmark, Flag, Forward, Mic, Trash2, type LucideIcon, IdCard } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
 import { VoiceRecorder, voiceRecordingSupported, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
@@ -39,6 +39,10 @@ export interface ComposerProps {
   replyTo: ChatMessage | null;
   selectMode: boolean;
   selected: Set<number>;
+  /** 多选批量举报可否点击：所选**全是同一个对方**发的才回该发送者 uid，否则 null（按钮置灰）。 */
+  reportableSender: string | null;
+  /** 置灰原因二选一：所选里含我自己发的（true）还是跨了多个发送者（false）。只用于灰态提示文案。 */
+  reportHasMine: boolean;
   pastedImages: { file: File; url: string; kind: "image" | "video" | "file" }[];
   attachPanel: boolean;
   attachItems: AttachItem[];
@@ -55,11 +59,11 @@ export interface ComposerProps {
 export function Composer(p: ComposerProps) {
   const {
     convId, peer, uid, isGroupChat, peerLabel, peerBlocked, input, sendKey, composerMuteReason, showJump, jumpCount, jumpCapped,
-    editingMsg, replyTo, selectMode, selected, pastedImages, attachPanel, attachItems,
+    editingMsg, replyTo, selectMode, selected, reportableSender, reportHasMine, pastedImages, attachPanel, attachItems,
     mentionQuery, mentionFilter, mentionRows, mentionActive, mediaGate, senderLabel, onMentionNavKey,
   } = p;
   const {
-    setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, deleteSelected,
+    setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, reportSelected, deleteSelected,
     removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, openContactPicker, onFilePicked,
     setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, send,
     sendVoice, setToast,
@@ -224,11 +228,17 @@ export function Composer(p: ComposerProps) {
         </div>
       )}
       {selectMode ? (
-        // 多选态工具栏（M4-3）：批量 转发/收藏/删除——独立圆形 Liquid Glass 按钮、无工具栏背景（与 iOS 拉齐）。
+        // 多选态工具栏（M4-3）：批量 转发/举报/收藏/删除——独立圆形 Liquid Glass 按钮、无工具栏背景（与 iOS 拉齐）。
         <footer className="select-bar">
           <button className="link-inline" onClick={() => { setDelConfirm(false); exitSelectMode(); }}>取消</button>
           <span className="select-count">已选 {selected.size}</span>
           <button className="sel-action" title="转发" aria-label="转发" disabled={selected.size === 0} onClick={forwardSelected}><Forward size={22} aria-hidden="true" /></button>
+          {/* 举报（2026-09-06）：仅当所选**全是同一个对方**发的才可点，否则**置灰不隐藏**——
+              隐藏会让栏内按钮数随勾选变化，每勾一下按钮就左右跳一次。灰态的原因用 title 说明
+              （鼠标悬停即见；disabled 按钮不触发 onClick，没法靠点击提示）。 */}
+          <button className="sel-action" title={reportableSender || selected.size === 0 ? "举报"
+                    : reportHasMine ? "不能举报自己的消息" : "一次只能举报同一个人的消息"}
+                  aria-label="举报" disabled={!reportableSender} onClick={reportSelected}><Flag size={22} aria-hidden="true" /></button>
           <button className="sel-action" title="收藏" aria-label="收藏" disabled={selected.size === 0} onClick={favoriteSelected}><Bookmark size={22} aria-hidden="true" /></button>
           {/* 删除：点按不直接删，先在按钮**上方**弹「仅为我删除」确认气泡，点它才删（与 iOS 拉齐）。 */}
           <span className="sel-del-wrap">

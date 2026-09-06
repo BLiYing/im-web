@@ -38,7 +38,7 @@ import {
   replyPreviewOf,
   parseChatRecord, copyImageToClipboard,
   syntheticViewerMessage, minSeqOf, type ChatRecord,
-  splitTextByURL,
+  splitTextByURL, SELECT_MAX,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { HomeSearchResults } from "./components/HomeSearchResults";
@@ -51,6 +51,7 @@ import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
 import { useGroupOps } from "./useGroupOps";
 import { useContactShare, CONTACT_MAX_SELECTION } from "./useContactShare";
+import { useReport } from "./useReport";
 import { convPreview as buildConvPreview } from "./convPreview";
 import { useMentions } from "./useMentions";
 import { useQR } from "./useQR";
@@ -218,6 +219,9 @@ export default function App() {
   useEffect(() => { setVideoUnplayable(false); setVideoStarted(false); }, [viewedKey]);
   const [selectMode, setSelectMode] = useState(false); // 多选态
   const [selected, setSelected] = useState<Set<number>>(new Set()); // 已选消息的 convSeq 集合
+  // selected 的「最新值」镜像：勾选上限闸要在一轮同步的多次 toggle 里累计计数（见 toggleSelected）。
+  const selectedRef = useRef<Set<number>>(selected);
+  selectedRef.current = selected; // 每次渲染同步：enter/exitSelectMode 等外部 setSelected 也随之生效
   const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
   const contactsScrollRef = useRef<HTMLDivElement>(null); // 通讯录滚动容器（好友列表虚拟化的滚动父，见 VirtualList）
   const [contactFilter, setContactFilter] = useState(""); // 通讯录本地过滤（按备注/昵称/uid 即时筛已有好友；桌面端替代 iOS 的 A–Z 索引尺）
@@ -1195,8 +1199,20 @@ export default function App() {
     setSelected(new Set(m && m.convSeq > 0 ? [m.convSeq] : []));
   }, []);
   const exitSelectMode = useCallback(() => { setSelectMode(false); setSelected(new Set()); }, []);
+  // 勾选上限闸（2026-09-06）：**用 ref 同步推进**，不能读 `selected` 这个 state。
+  // 相册整组全选在 MessageList 里是一轮 N 次 toggleSelected（见 toggleAlbumGroup），同一次渲染内
+  // `selected` 不会变——按 state 判上限的话，98 条时勾一个 10 张的相册，10 次全看到 98<100 全放行，
+  // 最终 108 条。ref 在本函数里同步前进，后续几次才看得见前面刚加进去的。
   const toggleSelected = useCallback((seq: number) => {
-    setSelected((prev) => { const n = new Set(prev); n.has(seq) ? n.delete(seq) : n.add(seq); return n; });
+    const next = new Set(selectedRef.current);
+    if (next.has(seq)) {
+      next.delete(seq); // 取消勾选永远放行
+    } else {
+      if (next.size >= SELECT_MAX) { setToast(`最多选择 ${SELECT_MAX} 条`); return; }
+      next.add(seq);
+    }
+    selectedRef.current = next;
+    setSelected(next);
   }, []);
   // 相册整组全选/全不选在 MessageList 就地用 toggleSelected 循环实现（见 toggleAlbumGroup），此处不再单列。
   // 转发簇 → useForward（阶段 6）：须在 exitSelectMode/setMenu/useMessageStore/selected/groupInfos 之后。
@@ -1561,25 +1577,12 @@ export default function App() {
     })();
   }, []);
 
-  // 举报（AG-3）：举报某条消息 / 举报发送者。仅对“对方的消息”可用。
-  const reportMessage = useCallback(async (m: ChatMessage, kind: "message" | "user") => {
-    setMenu(null);
-    // 举报确认文案用显示名，不用 m.from（内部 ID）——让用户确认"举报谁"时看到一串随机数字毫无意义。
-    const what = kind === "message" ? "举报这条消息" : `举报用户 ${displayNameOf(m.from, remarks, m.fromNickname)}`;
-    const reason = await askPrompt(what, "", { placeholder: "请填写举报理由", okText: "提交举报" });
-    if (reason === null) return; // 取消
-    try {
-      if (kind === "message") {
-        // 用 (conv_id, conv_seq) 定位消息：客户端无需持有 server_msg_id（本地库存的是复合键）。
-        await clientRef.current?.report("message", String(m.convSeq), reason, m.convId);
-      } else {
-        await clientRef.current?.report("user", m.from, reason);
-      }
-      setToast("举报已提交，感谢反馈。");
-    } catch (e) {
-      setToast(`举报失败：${(e as Error).message}`);
-    }
-  }, []);
+  // 举报簇（AG-3）→ useReport：长按菜单举报这条 / 资料页举报这个人 / 多选批量举报同一发送者的多条。
+  const { reportMsg, reportPeer, reportSelected, reportableSender, reportHasMine } = useReport({
+    clientRef, uid, remarks, askPrompt, setToast, setMenu,
+    convId, msgsByConv, selected, selectMode, exitSelectMode,
+  });
+
 
   // ---- 已登录设备（P2）：状态 + 加载/踢下线操作 ----
   const { devices, devicesOpen, setDevicesOpen, devicesErr, revokingSid, loadDevices, revokeDevice, revokeOtherDevices, resetDevices } =
@@ -1735,13 +1738,12 @@ export default function App() {
       // 聊天菜单的「删除」在渲染层按锚点特判 → requestDelete（两档子菜单/仅删自己/本地删，需菜单 x/y）；
       // 此 handler 不经 a.run 触发，仅为 buildMessageActions 的类型契约占位（requestDelete 内部另直接用 deleteMessage 处理 convSeq<=0）。
       delete: deleteMessage,
-      reportMsg: (m) => void reportMessage(m, "message"),
-      reportUser: (m) => void reportMessage(m, "user"),
+      reportMsg,
       cancelSend: cancelSendMessage,
       transcribe: transcribeMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMessage, cancelSendMessage, transcribeMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMsg, cancelSendMessage, transcribeMessage, comingSoon],
   );
 
   // 全屏文本阅读器：Esc 关闭（点蒙层/✕ 已在 JSX 处理）。
@@ -2413,6 +2415,7 @@ export default function App() {
   const forwardSelectedEv = useEvent(forwardSelected);
   const deleteSelectedEv = useEvent(deleteSelected);
   const favoriteSelectedEv = useEvent(favoriteSelected);
+  const reportSelectedEv = useEvent(reportSelected);
   const removePastedImageEv = useEvent(removePastedImage);
   const cancelAttachCloseEv = useEvent(cancelAttachClose);
   const scheduleAttachCloseEv = useEvent(scheduleAttachClose);
@@ -2457,7 +2460,8 @@ export default function App() {
     retryUpload: retryUploadEv, resendMessage: resendMessageEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
     onMediaLoad: onMediaLoadEv, pendingFilesRef,
     jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
-    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, favoriteSelected: favoriteSelectedEv, removePastedImage: removePastedImageEv,
+    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, favoriteSelected: favoriteSelectedEv,
+    reportSelected: reportSelectedEv, removePastedImage: removePastedImageEv,
     cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
     openFavoritesPick: openFavoritesPickEv, openContactPicker: openContactPickerEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
     setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, send: sendEv,
@@ -3150,7 +3154,8 @@ export default function App() {
           <Composer
             convId={convId} peer={peer} uid={uid} isGroupChat={isGroupChat} peerLabel={peerLabel} peerBlocked={peerBlocked}
             input={input} sendKey={sendKey} composerMuteReason={composerMuteReason} showJump={showJump} jumpCount={jumpCount} jumpCapped={jumpCapped}
-            editingMsg={editingMsg} replyTo={replyTo} selectMode={selectMode} selected={selected} pastedImages={pastedImages}
+            editingMsg={editingMsg} replyTo={replyTo} selectMode={selectMode} selected={selected}
+            reportableSender={reportableSender} reportHasMine={reportHasMine} pastedImages={pastedImages}
             attachPanel={attachPanel} attachItems={attachItems} mentionQuery={mentionQuery} mentionFilter={mentionFilter}
             mentionRows={mentionRows} mentionActive={mentionActive} mediaGate={mediaGate} senderLabel={senderLabel} onMentionNavKey={onMentionNavKey}
           />
@@ -3519,7 +3524,7 @@ export default function App() {
             if (targetConvId === convId) return;
             if (targetIsGroup) openGroupChat(targetConvId); else openChat(targetPeer);
           }}
-          doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doRemoveFriend={doRemoveFriend} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
+          doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doReportPeer={reportPeer} doRemoveFriend={doRemoveFriend} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
           setConvPinned={setConvPinned} setConvMuted={setConvMuted} openGroupText={openGroupText} openGroupCard={openGroupCard}
           doEditMyGroupNickname={doEditMyGroupNickname} doEditGroupRemark={doEditGroupRemark} pickGroupAvatar={pickGroupAvatar}
           openJoinRequests={openJoinRequests} openGroupBans={openGroupBans} openPeerDetail={openPeerDetail}

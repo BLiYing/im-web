@@ -54,8 +54,7 @@ export interface MessageHandlers {
   pin: (m: ChatMessage, pinned: boolean) => void;
   delete: (m: ChatMessage) => void;
   readReceipts: (m: ChatMessage) => void;
-  reportMsg: (m: ChatMessage) => void;
-  reportUser: (m: ChatMessage) => void;
+  reportMsg: (m: ChatMessage) => void; // 举报这条消息（2026-09-06 合并后菜单里唯一的举报入口；举报人本身在资料页）
   cancelSend: (m: ChatMessage) => void;
   /** 语音转文字（服务端识别）；hasTranscript 为真时该动作是"取消转文字"（只收本地面板）。 */
   transcribe: (m: ChatMessage) => void;
@@ -73,7 +72,7 @@ export interface ConversationHandlers {
 
 /**
  * 构建消息右键菜单项（固定顺序，与 iOS messageActionsForMessage:mine: 对齐）：
- * 复制 / 引用 / 转发 / 收藏 / 撤回 / 多选 / 翻译 / 举报消息 / 举报发送者 / 删除。
+ * 复制 / 引用 / 转发 / 收藏 / 撤回 / 多选 / 翻译 / 举报 / 删除。
  * 危险项「删除」放最后（destructive-last，防误触，两端一致）。未接后端的项调用 h.comingSoon(label) 弹"开发中"提示。
  */
 export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[] {
@@ -115,8 +114,10 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
     { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
-    { id: "reportMsg", label: "举报消息", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
-    { id: "reportUser", label: "举报发送者", icon: Flag, visible: (c) => c.m.from !== c.uid, run: (c) => h.reportUser(c.m) },
+    // 举报（2026-09-06 由「举报消息 / 举报发送者」合并为单项）：对用户来说这本就是同一个动作，
+    // 两个入口只让人犹豫选哪个；而消息类工单的信息是用户类的**超集**——服务端已按 (conv_id, conv_seq)
+    // 反查发送者，管理员的一键禁言/封号照常落到那个人身上。「只举报这个人」的入口保留在资料页。
+    { id: "report", label: "举报", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
     // 取消发送：仅本人、仍在发送/失败的媒体/文件出箱行（convSeq=0，尚未发出去；发出去后走撤回）。
     // 限 image/video/file——文本 sending 是 WS 帧已发出等 ack，无上传可取消，列出来会误导。与 iOS 同语义。
     { id: "cancelSend", label: "取消发送", icon: XCircle,

@@ -45,7 +45,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     setAdminPanelOpen: vi.fn(), openAdminPicker: vi.fn(), openTransferPicker: vi.fn(), revokeAdmin: vi.fn(),
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),
     openChat: vi.fn(), openInChatSearch: vi.fn(),
-    doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doRemoveFriend: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),
+    doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doReportPeer: vi.fn(), doRemoveFriend: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),
     setConvPinned: vi.fn(), setConvMuted: vi.fn(), openGroupText: vi.fn(), openGroupCard: vi.fn(async () => {}),
     doEditMyGroupNickname: vi.fn(async () => {}), doEditGroupRemark: vi.fn(async () => {}), pickGroupAvatar: vi.fn(),
     openJoinRequests: vi.fn(async () => {}), openGroupBans: vi.fn(async () => {}), openPeerDetail: vi.fn(),
@@ -126,6 +126,15 @@ describe("DetailPanel · 单聊", () => {
     expect(p.doClearHistory).toHaveBeenCalledWith("u_u1_u_u2");
     fireEvent.click(getByText("拉黑"));
     expect(p.doToggleBlock).toHaveBeenCalledWith("u2", true);
+  });
+  // 举报入口（2026-09-06）：长按菜单把「举报消息/举报发送者」合并成一项后，举报**人本身**
+  // 只剩资料页这一个入口——这条用例守住它别被顺手删掉（删了等于整个能力没了）。
+  it("更多菜单：举报 → doReportPeer(peer)", () => {
+    const p = base({ detailMore: true });
+    const { getByText } = mount(p);
+    fireEvent.click(getByText("举报"));
+    // 昵称必须一起传出去：只给 uid 的话确认弹窗显示一串内部随机数字，用户不知道在举报谁。
+    expect(p.doReportPeer).toHaveBeenCalledWith("u2", "小明");
   });
   // 删除好友此前只在通讯录左滑里有，资料卡的「更多」里找不到（2026-08-30 补齐，末位·破坏性）。
   it("更多菜单：删除好友 → doRemoveFriend(peer)；非好友时该项不存在", () => {

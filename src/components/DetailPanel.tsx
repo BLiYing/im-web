@@ -9,7 +9,7 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
-  IdCard, UsersRound,
+  IdCard, UsersRound, Flag,
 } from "lucide-react";
 import type { GroupTextKind } from "./modals/GroupTextModal";
 import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, GroupMember } from "../sdk/protocol";
@@ -102,6 +102,9 @@ export interface DetailPanelProps {
   openInChatSearch: (targetConvId: string, peer: string, isGroup: boolean) => void;
   doClearHistory: (cid: string) => void;
   doToggleBlock: (peer: string, block: boolean) => void;
+  /** 举报这个人（target_type=user，含填理由弹窗）。长按菜单合并后，人本身的举报只剩这一个入口。
+   *  **必须把昵称一起传出去**：只给 uid 的话确认弹窗会显示一串内部随机数字，用户不知道自己在举报谁。 */
+  doReportPeer: (peer: string, nickname?: string | null) => void;
   /** 删除好友（含二次确认）。删完保持面板打开——好友态刷新后本页自动切成非好友视图。 */
   doRemoveFriend: (peer: string) => void;
   doLeaveGroup: (cid: string) => Promise<void>;
@@ -127,7 +130,7 @@ export function DetailPanel(p: DetailPanelProps) {
     groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
     onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
-    openChat, openInChatSearch, doClearHistory, doToggleBlock, doRemoveFriend, doLeaveGroup, doDissolveGroup,
+    openChat, openInChatSearch, doClearHistory, doToggleBlock, doReportPeer, doRemoveFriend, doLeaveGroup, doDissolveGroup,
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail, serverConfig,
   } = p;
@@ -295,6 +298,12 @@ export function DetailPanel(p: DetailPanelProps) {
                       <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
                       {!isSystemPeer && !d.isGroup && (
                         <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
+                      )}
+                      {/* 举报这个人（target_type=user）。2026-09-06 长按菜单把「举报消息/举报发送者」合并成
+                          单个「举报消息」后，**针对人本身**的举报只剩这一个入口——删掉那一项时若不在这里补上，
+                          等于静默丢掉了一整个能力（合并前两端资料页都没有举报）。系统通知会话不给。 */}
+                      {!isSystemPeer && !d.isGroup && d.peer && (
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doReportPeer(d.peer!, detailPeerNickname); }}><Flag size={16} className="menu-icon" />举报</button>
                       )}
                       {d.isGroup && (
                         <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />退出群组</button>

@@ -391,11 +391,13 @@ export class IMClient {
     return (data?.translation ?? "") as string;
   }
 
-  /** 举报（AG）：POST /api/v1/reports。targetType=message|user|group。 */
-  async report(targetType: "message" | "user" | "group", targetId: string, reason: string, convId = ""): Promise<void> {
+  /** 举报（AG）：POST /api/v1/reports。targetType=message|user|group。
+   *  `convSeqs` 非空 = 多选态批量举报同一发送者的多条（2026-09-06）：服务端按**首条**作处置锚点
+   *  合成**一张**工单（勾 N 条不会刷出 N 张单），≤100 条且 convId 必填；此时 targetId 传首条即可。 */
+  async report(targetType: "message" | "user" | "group", targetId: string, reason: string, convId = "", convSeqs?: number[]): Promise<void> {
     await this.api("/api/v1/reports", {
       method: "POST",
-      body: JSON.stringify({ target_type: targetType, target_id: targetId, conv_id: convId, reason }),
+      body: JSON.stringify({ target_type: targetType, target_id: targetId, conv_id: convId, reason, ...(convSeqs?.length ? { target_seqs: convSeqs } : {}) }),
     });
   }
 

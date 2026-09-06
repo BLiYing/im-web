@@ -39,6 +39,7 @@ export interface ChatActions {
   forwardSelected: () => void;
   deleteSelected: () => void;
   favoriteSelected: () => void; // 多选批量收藏（与 iOS 拉齐）
+  reportSelected: () => void;   // 多选批量举报（所选须同一发送者；2026-09-06，与 iOS 拉齐）
   removePastedImage: (i: number) => void;
   cancelAttachClose: () => void;
   scheduleAttachClose: () => void;

@@ -81,6 +81,28 @@ export const isSearchableMessage = (m: Pick<ChatMessage, "convSeq"> & { recalled
  *  与 iOS isSelectableMessage: 同语义。 */
 export const selectableInMultiSelect = (m: ChatMessage): boolean => isSearchableMessage(m);
 
+/** 多选一次最多勾几条（2026-09-06）。**一道闸管住转发/收藏/举报三件事**，不给每个动作各设一个数字：
+ *  三套阈值＝三套文案，用户记不住、我们也难维护。不限的话「选 200 条 × 9 个会话」会串行发出 1800 条。
+ *  与 iOS `kIMSelectionMaxCount` 拉齐；服务端另有独立上限（举报 100 条/单、收藏 300 次/分）。 */
+export const SELECT_MAX = 100;
+
+/** 这批已选消息能否作为「批量举报」的对象：能则回那个**唯一发送者的 uid**，否则回 null。
+ *
+ *  三个条件缺一不可：非空、不含我自己发的、全部来自同一个人。第三条是产品口径也是后端口径——
+ *  服务端只按首条反查处置对象，混着两个人的证据会让管理员的一键封号落到"第一条那个人"头上。
+ *  与 iOS `reportableSenderForMessages:` 同语义。 */
+export function reportableSenderOf(msgs: Pick<ChatMessage, "convSeq" | "from">[], uid: string): string | null {
+  if (msgs.length === 0) return null;
+  let sender: string | null = null;
+  for (const m of msgs) {
+    if (m.convSeq <= 0) return null;            // 未发出的本地件没有 conv_seq，服务端定位不到
+    if (!m.from || m.from === uid) return null; // 含我自己 → 不可举报
+    if (sender === null) sender = m.from;
+    else if (sender !== m.from) return null;    // 跨发送者 → 不可举报
+  }
+  return sender;
+}
+
 /** 消息列表里的最小 conv_seq（发送中的 0 不计；空列表返回 0）。供定位/搜索「最早」翻页判据用。 */
 export function minSeqOf(messages: ChatMessage[]): number {
   let m = 0;

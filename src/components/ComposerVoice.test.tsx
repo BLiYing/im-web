@@ -76,7 +76,8 @@ function base(over: Partial<ComposerProps> = {}): ComposerProps {
   return {
     convId: "c1", peer: "u2", uid: "u1", isGroupChat: false, peerLabel: "小明", peerBlocked: false,
     input: "", sendKey: "enter", composerMuteReason: null, showJump: false, jumpCount: 0,
-    editingMsg: null, replyTo: null, selectMode: false, selected: new Set(), pastedImages: [],
+    editingMsg: null, replyTo: null, selectMode: false, selected: new Set(),
+    reportableSender: null, reportHasMine: false, pastedImages: [],
     attachPanel: false, attachItems: [{ id: "image", label: "图片或视频", accept: "image/*", icon: ImageIcon }],
     mentionQuery: null, mentionFilter: "", mentionRows: [], mentionActive: 0,
     mediaGate: () => undefined, senderLabel: (m) => m.from, onMentionNavKey: () => false,

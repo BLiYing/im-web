@@ -13,7 +13,7 @@ import type { ChatMessage } from "../sdk/protocol";
 function actions(over: Partial<ChatActions> = {}): ChatActions {
   return {
     setInput: vi.fn(), locateInChat: vi.fn(), jumpToBottom: vi.fn(), unblock: vi.fn(async () => {}),
-    setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), favoriteSelected: vi.fn(), deleteSelected: vi.fn(),
+    setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), favoriteSelected: vi.fn(), reportSelected: vi.fn(), deleteSelected: vi.fn(),
     removePastedImage: vi.fn(), cancelAttachClose: vi.fn(), scheduleAttachClose: vi.fn(), setAttachPanel: vi.fn(),
     pickFile: vi.fn(), openFavoritesPick: vi.fn(), onFilePicked: vi.fn(), setMentionFilter: vi.fn(), pickMention: vi.fn(),
     setMentionActive: vi.fn(), onInputChange: vi.fn(), onComposerPaste: vi.fn(), send: vi.fn(),
@@ -30,7 +30,8 @@ function base(over: Partial<ComposerProps> = {}): ComposerProps {
   return {
     convId: "c1", peer: "u2", uid: "u1", isGroupChat: false, peerLabel: "小明", peerBlocked: false,
     input: "", sendKey: "enter", composerMuteReason: null, showJump: false, jumpCount: 0,
-    editingMsg: null, replyTo: null, selectMode: false, selected: new Set(), pastedImages: [],
+    editingMsg: null, replyTo: null, selectMode: false, selected: new Set(),
+    reportableSender: null, reportHasMine: false, pastedImages: [],
     attachPanel: false, attachItems: [{ id: "image", label: "图片或视频", accept: "image/*", icon: ImageIcon }],
     mentionQuery: null, mentionFilter: "", mentionRows: [], mentionActive: 0,
     mediaGate: () => undefined, senderLabel: (m) => m.from, onMentionNavKey: () => false,
@@ -88,6 +89,34 @@ describe("Composer", () => {
     fireEvent.click(getByText("取消")); expect(a.exitSelectMode).toHaveBeenCalled();
     rerender(<ChatActionsProvider value={a}><Composer {...base({ selectMode: true, selected: new Set() })} /></ChatActionsProvider>);
     expect((getByLabelText("转发") as HTMLButtonElement).disabled).toBe(true);
+  });
+  // 举报钮（2026-09-06）：仅当所选**全是同一个对方**发的才可点，否则**置灰不隐藏**——
+  // 隐藏会让栏内按钮数随勾选变化、每勾一下按钮就左右跳。
+  it("多选态举报钮：同一发送者可点；含自己/跨发送者置灰且给出原因，但按钮始终在场", () => {
+    const a = actions();
+    const sel = new Set([1, 2]);
+    const { getByLabelText, rerender } = mount(base({ selectMode: true, selected: sel, reportableSender: "u2" }), a);
+    const btn = () => getByLabelText("举报") as HTMLButtonElement;
+    expect(btn().disabled).toBe(false);
+    fireEvent.click(btn()); expect(a.reportSelected).toHaveBeenCalled();
+
+    const remount = (over: Partial<ComposerProps>) =>
+      rerender(<ChatActionsProvider value={a}><Composer {...base({ selectMode: true, selected: sel, ...over })} /></ChatActionsProvider>);
+
+    // 含我自己发的 → 灰 + 说清原因（disabled 按钮不触发 onClick，故原因走 title）。
+    remount({ reportableSender: null, reportHasMine: true });
+    expect(btn().disabled).toBe(true);
+    expect(btn().title).toBe("不能举报自己的消息");
+
+    // 跨发送者 → 灰 + 另一条原因。
+    remount({ reportableSender: null, reportHasMine: false });
+    expect(btn().disabled).toBe(true);
+    expect(btn().title).toBe("一次只能举报同一个人的消息");
+
+    // 0 选中：全栏皆灰，此时不单独解释举报（其余三钮同样是灰的）。
+    rerender(<ChatActionsProvider value={a}><Composer {...base({ selectMode: true, selected: new Set(), reportableSender: null })} /></ChatActionsProvider>);
+    expect(btn().disabled).toBe(true);
+    expect(btn().title).toBe("举报");
   });
   it("粘贴预览条：图片缩略 + 文件名；✕ → removePastedImage(i)", () => {
     const a = actions();
