@@ -110,6 +110,36 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
       "服务端确认（发送态消失）",
     );
     say("[e2e] ✓ 服务端已确认（发送态消失）");
+
+    // ⑥ 媒体相对路径。**这是选方案 B 的核心理由，所以必须验，不能只写在文档里**：
+    // 消息与头像里存的是 /uploads、/avatars 相对路径（服务端不知道端可达的 host 故不绝对化，
+    // 同一条约定见 im-android 的 data/MediaUrl.kt）。同源层在，它们就该照常加载。
+    //
+    // ⚠️ **不能数 DOM 里的 <img>**：代理前缀漏一条时，Avatar 的 onError 会把 <img> 摘掉换首字母，
+    // 于是「一张都没有」——第一版检查就是这么把自己骗过去的（变异测试抓到）。
+    // 改从 performance 资源表里取真实请求过的 URL，再重新 fetch 一次看 content-type。
+    const media = (await win.webContents.executeJavaScript(`(async () => {
+      const hits = performance.getEntriesByType('resource')
+        .map((e) => e.name)
+        .filter((n) => /\\/(uploads|avatars)\\//.test(n));
+      if (!hits.length) return { total: 0 };
+      const url = hits[0];
+      try {
+        const r = await fetch(url, { cache: 'no-store' });  // 绕开 HTTP 缓存：前几轮成功加载过的图会替坏掉的代理背书
+        return { total: hits.length, url, status: r.status, type: r.headers.get('content-type') || '' };
+      } catch (e) {
+        return { total: hits.length, url, status: 0, type: 'FETCH FAILED: ' + e.message };
+      }
+    })()`)) as { total: number; url?: string; status?: number; type?: string };
+    if (media.total === 0) {
+      say("[e2e] – 相对路径媒体：本轮一次都没请求过，跳过（不算失败，但也没验到）");
+    } else if (media.status === 200 && (media.type ?? "").startsWith("image/")) {
+      say(`[e2e] ✓ 相对路径媒体可达：${media.total} 个请求，抽验 ${media.url} → ${media.status} ${media.type}`);
+    } else {
+      say(`[e2e] ✗ 相对路径媒体拿到的不是图片：${media.url} → ${media.status} ${media.type}`);
+      say("[e2e]   同源层的代理前缀漏了一条——去和仓库根 vite.config.ts 的 proxy 逐条对");
+      return 5;
+    }
   } catch (e) {
     say(`[e2e] ✗ ${String(e instanceof Error ? e.message : e)}`);
     say("[e2e]   后端没起或没开 -dev-login？cd ../../IMServer && ./scripts/dev.sh --no-tail");

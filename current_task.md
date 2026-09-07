@@ -5,34 +5,36 @@
 
 ## 当前焦点
 
-> **D2 Electron 外壳骨架 🚧 2026-09-07（晚）—— `desktop/`（新增）**。Electron 44 + electron-builder 26。
-> **它不是第五个客户端**：界面与 SDK 全部来自仓库根 `src/`，本目录只出窗口 + 身份。
+> **D2 Electron 外壳骨架 ✅ 2026-09-07（晚）—— `desktop/`（新增）**。Electron 44 + electron-builder 26。
+> **它不是第五个客户端**：界面与 SDK 全部来自仓库根 `src/`，本目录只出窗口 + 身份 + 本地同源层。
+> **`src/` 零改动**。
 >
-> **桥当前只给身份两项**（`deviceId`/`deviceName`，contract=1），其余能力一概不实现——
-> `platform/desktop.ts` 会逐能力回退 web。这不是过渡期的将就，是长期形状：外壳与页面各自发版，
-> 桥落后于页面是常态。`deviceId` 落 `userData/device.json`，写盘失败**不阻断登录**（与 web 侧
-> localStorage 那条降级同口径，已在 SYMMETRY 登记）。
+> **本地同源层是本轮的关键决定**（IMServer `DESKTOP_DESIGN.md` §7.5 方案 B）。原本要走方案 A
+> （桥注入绝对 base URL + 改 `sdk/http.ts`），实测两条把它否了：① **后端没有任何 CORS**
+> （从 `:5173` 打绝对 `http://localhost:8080/api/v1/login` → `Failed to fetch`，打相对 → HTTP 400），
+> A 还得外加 CORS 垫片；② 消息里存的媒体地址本身是相对的（`/uploads`、`/avatars`），A 要改 **29 个渲染点**。
+> B 让打包版与 dev **同源、同路径、同行为**，两件事一件都不用做。
+> 实现 `desktop/src/main/localServer.ts`：Node 自带 `http`/`net`，**零新依赖**，WS 走裸 TCP 隧道，
+> 只绑 `127.0.0.1` + 临时端口，`will-quit` 关掉。
 >
-> **两个无人值守自检**（走的与真实启动完全同一条路，不绕开 `createWindow`）：
-> `npm run smoke` 查桥/平台判定/身份一致/后端可达；`npm run e2e` 走 **D2 验收链路**——
-> 登录 → 会话列表 → 打开会话 → 发一条 → 等服务端确认。e2e **只往名字含「冒烟测试」的会话发**
-> （`IM_E2E_CONV` 可改），找不到就失败退出，**绝不退化成「挑第一个会话发」**。
+> **⚠️ 新的对称点**：`localServer.ts` 的 `PROXY_PREFIXES` 必须与 `vite.config.ts` 的 `proxy` 逐条一致
+> ——写第一版就漏了 `/avatars`。已登记进 IMServer `docs/SYMMETRY.md`（两条）。
 >
-> **实测**：dev 模式 `npm run e2e` **exit 0**（会话列表 22 行、发出上屏、发送态消失）；
-> `npm run pack` 出未签名 `.app`（293 MB / x86_64，`dist/` 随包 30 项）。
+> **桥只给身份两项**（`deviceId`/`deviceName`，contract=1），其余能力由 `platform/desktop.ts` 逐能力回退 web。
+> `deviceId` 落 `userData/device.json`，写盘失败**不阻断登录**（与 web 侧 localStorage 那条降级同口径）。
 >
-> **⚠️ 打包版够不着后端（新发现，D2 未完成的部分）**：本仓 API 全是相对路径
-> （`sdk/http.ts` 用 `location.origin` 拼），dev 靠 Vite 代理；打包后 `origin=file://`，
-> `fetch('/api/v1/login')` 直接 `Failed to fetch`。修法 A/B/C 待拍板，见 IMServer
-> `docs/design/DESKTOP_DESIGN.md` §7.5——**倾向 A（桥注入 base URL）但要动 `sdk/http.ts`，
-> 那是三端共用口径的层，没拍板前不动**。
+> **两个无人值守自检**（走与真实启动完全同一条路）：`npm run smoke` 查桥/平台判定/身份一致/**后端可达**；
+> `npm run e2e` 走 D2 验收链路 + **抽验相对路径媒体的 content-type**。e2e 只往名字含「冒烟测试」的会话发
+> （`IM_E2E_CONV` 可改），找不到就失败退出。`IM_FORCE_LOCAL_SERVER=1` 可不重新打包就验同源层。
 >
-> **自检自己也出过一次「fail-open」**：`process.exitCode = code` + `app.quit()` 实测退出码恒 0，
-> 明明报红却 exit 0。已改 `app.exit(code)` 并双向验过（打包版 1 / dev 版 0）。
-> 门禁 fail-open 比没有门禁更糟——它让人以为验过了。
+> **打包版实测全绿**：`--smoke` 与 `--e2e` 均 **exit 0**——登录 → 会话列表 22 行 → 打开会话 → 发一条 →
+> 服务端确认 → 相对路径媒体 `200 image/jpeg`。未签名 `.app` 300 MB / x86_64。
 >
-> 顺带：`scripts/check-file-size.sh` 原先只扫 `src`，`desktop/src` 是盲区，已加 `SCAN_ROOTS`
-> （目录不存在时跳过，避免 find 报错让门禁 fail-open）。
+> **本轮自己踩了三个 fail-open，全部修掉并变异验过**：① `process.exitCode + app.quit()` 退出码恒 0
+> （改 `app.exit(code)`）；② `check-file-size.sh` 只扫 `src`，`desktop/src` 是盲区（加 `SCAN_ROOTS`）；
+> ③ **媒体检查自己 fail-open**——代理漏前缀时 `Avatar` 的 `onError` 把 `<img>` 摘掉换首字母，
+> 检查数到 0 张判成「跳过」。改从 `performance` 资源表取证 + `fetch(no-store)` 看 content-type，
+> 同时把服务器的静态兜底改成**带扩展名一律 404**（不再把 HTML 当图片发）。现在去掉 `/avatars` 立刻 exit 5。
 
 > **D1 平台适配层 `src/platform/` ✅ 2026-09-07**（桌面端方案见 IMServer `docs/design/DESKTOP_DESIGN.md`）。
 > 桌面端与浏览器版**共用本仓 src/**，只有少数几件事按宿主分流——这一层就是那几件事的收口处。

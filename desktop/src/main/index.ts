@@ -8,16 +8,30 @@ import { join } from "node:path";
 import { BRIDGE_CONTRACT, deviceName, stableDeviceId } from "./identity";
 import { runSmoke } from "./smoke";
 import { runE2E } from "./e2e";
+import { startLocalServer, type LocalServerHandle } from "./localServer";
 
 /** 开发时加载 Vite dev server（吃热更新），打包后加载随包的 dist/。
  *  `IM_DEV_URL` 允许压测/多实例时指向别的端口，与后端 dev.sh 的用法对齐。 */
 const DEV_URL = process.env.IM_DEV_URL || "http://localhost:5173";
 
 /** 未打包时 dist/ 在仓库根：out/main → out → desktop → im-web。打包后由 electron-builder 放进 app 根。 */
-function prodIndexHtml(): string {
-  return app.isPackaged
-    ? join(app.getAppPath(), "dist/index.html")
-    : join(__dirname, "../../..", "dist/index.html");
+function distDir(): string {
+  return app.isPackaged ? join(app.getAppPath(), "dist") : join(__dirname, "../../..", "dist");
+}
+
+/** 后端地址。与仓库根 vite.config.ts 的 `IM_SERVER_TARGET` **同名同默认**，压测/多后端联调时口径一致。 */
+function backendOrigin(): string {
+  return process.env.IM_SERVER_TARGET || "http://localhost:8080";
+}
+
+/**
+ * 打包后不能直接 loadFile(dist/index.html)：`file://` 下 im-web 的相对路径 API 全部打不出去
+ * （实测 origin=file:// → fetch('/api/…') Failed to fetch），而后端又没有 CORS。
+ * 故起一个本地同源层（方案 B，见 localServer.ts 顶部与 DESKTOP_DESIGN §7.5）。
+ * `IM_FORCE_LOCAL_SERVER=1` 让未打包时也走这条，便于不重新打包就验证它。
+ */
+function useLocalServer(): boolean {
+  return app.isPackaged || process.env.IM_FORCE_LOCAL_SERVER === "1";
 }
 
 /** `--smoke`：无人值守自检（见 smoke.ts）。走的与真实启动**完全同一条路**——
@@ -49,10 +63,13 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+let localServer: LocalServerHandle | null = null;
+
 app.whenReady().then(async () => {
   const win = createWindow();
-  const target = app.isPackaged ? prodIndexHtml() : DEV_URL;
-  const load = app.isPackaged ? win.loadFile(target) : win.loadURL(target);
+  if (useLocalServer()) localServer = await startLocalServer(distDir(), backendOrigin());
+  const target = localServer ? localServer.url : DEV_URL;
+  const load = win.loadURL(target);
 
   if (smokeMode || e2eMode) {
     const say = (s: string): void => { process.stdout.write(`${s}\n`); };
@@ -67,9 +84,13 @@ app.whenReady().then(async () => {
 
   app.on("activate", () => {
     // macOS：Dock 图标被点、且没有窗口时重开一个（系统惯例，不是可选项）。
-    if (BrowserWindow.getAllWindows().length === 0) createWindow().loadURL(DEV_URL);
+    // **必须用同一个 target**——写死 DEV_URL 会让打包版重开的窗口打到不存在的 :5173。
+    if (BrowserWindow.getAllWindows().length === 0) createWindow().loadURL(target);
   });
 });
+
+// 本地服务是常驻资源，进程退出必须关掉——否则测试里反复起停会攒住端口与 fd。
+app.on("will-quit", () => { localServer?.close(); localServer = null; });
 
 app.on("window-all-closed", () => {
   // macOS 的惯例是关窗不退应用；Windows/Linux 关窗即退。
