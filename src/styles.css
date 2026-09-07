@@ -295,7 +295,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .row.me { margin-left: auto; align-items: flex-end; }   /* 块级 + margin-left:auto → 靠右 */
 .row.them { margin-right: auto; align-items: flex-start; }
 /* 气泡：行内 flex 让时间/勾贴在右下角（Telegram 风格），文本主色（深色自动转白）。 */
-.bubble { padding: 6px 10px; border-radius: var(--radius-bubble); display: inline-flex; flex-wrap: wrap;
+/* 左右内边距 12（UI_SPEC §3，与 iOS _text leading/trailing 同值；2026-09-07 从 10 拉齐）。 */
+.bubble { padding: 6px 12px; border-radius: var(--radius-bubble); display: inline-flex; flex-wrap: wrap;
   align-items: flex-end; max-width: 100%; color: var(--text); box-shadow: 0 1px 1px var(--shadow-soft); }
 .me .bubble { background: var(--bubble-me); border-bottom-right-radius: var(--space-1); }
 .them .bubble { background: var(--bubble-them); border-bottom-left-radius: var(--space-1); }
@@ -850,7 +851,9 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* 列表「我发的最后一条」已读双勾：对端已读→绿 ✓✓，否则→灰 ✓。 */
 .convck { color: var(--text-secondary); }
 .convck.read { color: var(--check-read); }
-.badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--unread-badge); color: var(--on-accent); font-size: 11px; line-height: 18px; text-align: center; }
+/* 未读徽标高 20（UI_SPEC §2，与 iOS _badge.heightAnchor 同值；2026-09-07 从 18 拉齐）。
+   注意 .row-badge（「新的朋友」待办）仍是 18——那对的是 iOS 通讯录入口红点，不是这个。 */
+.badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--unread-badge); color: var(--on-accent); font-size: 11px; line-height: 20px; text-align: center; }
 /* 会话管理指示（M4.5）：置顶左侧强调条、置顶/免打扰小图标、免打扰红点转灰、手动标未读小圆点。 */
 .convitem.pinned { box-shadow: inset 3px 0 0 var(--accent); }
 .conv-pin { color: var(--accent); vertical-align: -1px; margin-right: 3px; }
@@ -1168,8 +1171,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .sender-row .role-badge { margin-left: 0; flex: none; vertical-align: 0; }
 /* 群聊对方消息 Telegram 式布局：左侧头像列 + 昵称/气泡竖排；头像贴末条气泡底，连续同发送者仅末条显示。 */
 .them-wrap { display: flex; align-items: flex-end; gap: 6px; max-width: 100%; }
-.avatar-col { width: 28px; flex-shrink: 0; align-self: flex-end; }       /* 空占位也保留头像列宽，连续消息气泡对齐 */
-.bubble-avatar { width: 28px; height: 28px; font-size: 11px; }
+/* 群内发送者头像 30（UI_SPEC §3，与 iOS IMBubbleCell _avatar 同值；2026-09-07 从 28 拉齐）。
+   占位列必须同步改，否则连续消息的气泡左缘会与带头像那条错开 2px。 */
+.avatar-col { width: 30px; flex-shrink: 0; align-self: flex-end; }       /* 空占位也保留头像列宽，连续消息气泡对齐 */
+.bubble-avatar { width: 30px; height: 30px; font-size: 11px; }
 .them-stack { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
 /* 连续段非首条：收紧与上一条的间距，视觉成组。 */
 .msg-item.grouped { padding-top: 0; }

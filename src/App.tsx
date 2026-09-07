@@ -20,7 +20,7 @@ import { buildMessageActions, buildConversationActions, type MenuAction, type Me
 import { isViewableMedia, msgKey } from "./album";
 import { jumpDomToSeq } from "./messageJump";
 import { useVoiceTranscript } from "./useVoiceTranscript";
-import { formatTime } from "./time";
+import { conversationTime } from "./time";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
 import type { DetailTab } from "./components/DetailTabs";
@@ -2957,7 +2957,7 @@ export default function App() {
                         {c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "✓✓ " : "✓ "}
                       </span>
                     )}
-                    {c.last_message ? formatTime(c.last_message.timestamp, timeFormat) : ""}
+                    {c.last_message ? conversationTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>
                 </div>
                 <div className="convlast">
