@@ -41,6 +41,12 @@ fail=0
 warn=0
 
 echo "== 单文件行数体检（默认上限 ${MAX_LINES}；历史欠账见脚本内 GRANDFATHER；不含 *.test.*）=="
+# 扫描根。desktop/ 是 D2 起的外壳工程（Electron 主进程 / preload），它同样会长成上帝文件——
+# 本脚本原先只扫 src，desktop/src 是盲区。desktop/ 未创建时（其它 clone / D2 之前）跳过，
+# 否则 find 会对不存在的路径报错并让整个门禁 fail-open。
+SCAN_ROOTS=(src)
+[ -d desktop/src ] && SCAN_ROOTS+=(desktop/src)
+
 while IFS= read -r f; do
   lines=$(wc -l < "$f" | tr -d ' ')
   gf=$(grandfather_limit "$f")
@@ -55,7 +61,7 @@ while IFS= read -r f; do
       warn=1
     fi
   fi
-done < <(find src -type f \( -name "*.ts" -o -name "*.tsx" \) \
+done < <(find "${SCAN_ROOTS[@]}" -type f \( -name "*.ts" -o -name "*.tsx" \) \
            ! -name "*.test.ts" ! -name "*.test.tsx" ! -name "*.d.ts" | sort)
 
 echo ""

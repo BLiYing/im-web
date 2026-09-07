@@ -1,0 +1,78 @@
+// Electron 主进程：建窗口、决定加载哪份页面、把身份交给 preload。
+//
+// D2 的验收目标只有一条：**登录 → 会话列表 → 收发一条消息**。所以这里刻意只做窗口与身份，
+// 托盘 / 通知 / 自启 / 单实例锁 / 关闭最小化统统归 D4——那些每加一件都要在两个平台各验一次，
+// 混进 D2 会让「骨架到底通没通」失去判据。
+import { app, BrowserWindow } from "electron";
+import { join } from "node:path";
+import { BRIDGE_CONTRACT, deviceName, stableDeviceId } from "./identity";
+import { runSmoke } from "./smoke";
+import { runE2E } from "./e2e";
+
+/** 开发时加载 Vite dev server（吃热更新），打包后加载随包的 dist/。
+ *  `IM_DEV_URL` 允许压测/多实例时指向别的端口，与后端 dev.sh 的用法对齐。 */
+const DEV_URL = process.env.IM_DEV_URL || "http://localhost:5173";
+
+/** 未打包时 dist/ 在仓库根：out/main → out → desktop → im-web。打包后由 electron-builder 放进 app 根。 */
+function prodIndexHtml(): string {
+  return app.isPackaged
+    ? join(app.getAppPath(), "dist/index.html")
+    : join(__dirname, "../../..", "dist/index.html");
+}
+
+/** `--smoke`：无人值守自检（见 smoke.ts）。走的与真实启动**完全同一条路**——
+ *  自检若绕开 createWindow，它证明不了任何东西。唯一的差别是不把窗口显出来。 */
+const smokeMode = process.argv.includes("--smoke");
+/** `--e2e`：D2 的验收链路自检（见 e2e.ts）。同样不显窗口。 */
+const e2eMode = process.argv.includes("--e2e");
+
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 1180,
+    height: 800,
+    minWidth: 720,        // 再窄下去 im-web 的双栏（侧栏 + 聊天）会挤成一坨
+    minHeight: 560,
+    show: false,          // 先隐藏，ready-to-show 再显——否则用户会看到一闪而过的白屏
+    webPreferences: {
+      preload: join(__dirname, "../preload/index.js"),
+      contextIsolation: true,   // 与 nodeIntegration:false 一起，是「桥只有一座」的强制手段
+      nodeIntegration: false,
+      // 身份两项作为**值**同步交给 preload（见 identity.ts 顶部的理由）。
+      additionalArguments: [
+        `--im-contract=${BRIDGE_CONTRACT}`,
+        `--im-device-id=${stableDeviceId()}`,
+        `--im-device-name=${deviceName()}`,
+      ],
+    },
+  });
+  win.once("ready-to-show", () => { if (!smokeMode && !e2eMode) win.show(); });
+  return win;
+}
+
+app.whenReady().then(async () => {
+  const win = createWindow();
+  const target = app.isPackaged ? prodIndexHtml() : DEV_URL;
+  const load = app.isPackaged ? win.loadFile(target) : win.loadURL(target);
+
+  if (smokeMode || e2eMode) {
+    const say = (s: string): void => { process.stdout.write(`${s}\n`); };
+    const code = e2eMode ? await runE2E(win, load, say) : await runSmoke(win, target, load);
+    // **必须 app.exit(code)，不能 `process.exitCode = code` + app.quit()**：后者实测退出码恒为 0
+    // （2026-09-07 打包版自检明明报红却 exit 0）。门禁 fail-open 比没有门禁更糟——
+    // 它会让人以为验过了。同理见 IMServer scripts/check-*.sh 的 --selftest。
+    app.exit(code);
+    return;
+  }
+  await load;
+
+  app.on("activate", () => {
+    // macOS：Dock 图标被点、且没有窗口时重开一个（系统惯例，不是可选项）。
+    if (BrowserWindow.getAllWindows().length === 0) createWindow().loadURL(DEV_URL);
+  });
+});
+
+app.on("window-all-closed", () => {
+  // macOS 的惯例是关窗不退应用；Windows/Linux 关窗即退。
+  // D4 会把 macOS 这条改成「关闭 = 最小化到托盘」，那时两平台都要重验。
+  if (process.platform !== "darwin") app.quit();
+});

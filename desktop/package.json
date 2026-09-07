@@ -1,0 +1,21 @@
+{
+  "name": "im-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "IM 桌面端外壳（Electron）。界面与 SDK 来自仓库根的 src/，本包只提供窗口与宿主能力。",
+  "main": "out/main/index.js",
+  "scripts": {
+    "compile": "tsc -b",
+    "dev": "npm run compile && electron .",
+    "smoke": "npm run compile && electron . --smoke",
+    "pack": "npm run compile && electron-builder --dir --config electron-builder.yml",
+    "e2e": "npm run compile && electron . --e2e"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.9.3"
+  }
+}

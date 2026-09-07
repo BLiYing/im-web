@@ -1,0 +1,27 @@
+# 打包配置。D2 只求「mac 出一个未签名包」，签名 / 公证 / 自动更新归 D6。
+appId: com.libeyond.imdesktop
+productName: IM Desktop
+directories:
+  output: release
+  buildResources: resources
+# 页面来自仓库根的 dist/（vite build 的产物）——桌面端与浏览器版共用同一份源码，
+# 这里是那句话在打包环节的落点：不复制源码，只复制构建产物。
+files:
+  - out/**/*
+  - package.json
+  # 页面本体：仓库根 `npm run build` 的产物。**不复制源码，只复制构建产物**——
+  # 「桌面端与浏览器版共用一份源码」这句话在打包环节的落点就是这三行。
+  - from: ../dist
+    to: dist
+    filter:
+      - "**/*"
+extraResources: []
+extraMetadata:
+  main: out/main/index.js
+asar: true
+mac:
+  category: public.app-category.social-networking
+  target:
+    - dir            # D2 只出 .app 目录，不做 dmg——dmg 要图标/背景/布局，属 D6
+  identity: null     # 未签名：D2 的验收是「能起来」，不是「能分发」
+extraFiles: []

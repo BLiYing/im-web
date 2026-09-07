@@ -5,6 +5,35 @@
 
 ## 当前焦点
 
+> **D2 Electron 外壳骨架 🚧 2026-09-07（晚）—— `desktop/`（新增）**。Electron 44 + electron-builder 26。
+> **它不是第五个客户端**：界面与 SDK 全部来自仓库根 `src/`，本目录只出窗口 + 身份。
+>
+> **桥当前只给身份两项**（`deviceId`/`deviceName`，contract=1），其余能力一概不实现——
+> `platform/desktop.ts` 会逐能力回退 web。这不是过渡期的将就，是长期形状：外壳与页面各自发版，
+> 桥落后于页面是常态。`deviceId` 落 `userData/device.json`，写盘失败**不阻断登录**（与 web 侧
+> localStorage 那条降级同口径，已在 SYMMETRY 登记）。
+>
+> **两个无人值守自检**（走的与真实启动完全同一条路，不绕开 `createWindow`）：
+> `npm run smoke` 查桥/平台判定/身份一致/后端可达；`npm run e2e` 走 **D2 验收链路**——
+> 登录 → 会话列表 → 打开会话 → 发一条 → 等服务端确认。e2e **只往名字含「冒烟测试」的会话发**
+> （`IM_E2E_CONV` 可改），找不到就失败退出，**绝不退化成「挑第一个会话发」**。
+>
+> **实测**：dev 模式 `npm run e2e` **exit 0**（会话列表 22 行、发出上屏、发送态消失）；
+> `npm run pack` 出未签名 `.app`（293 MB / x86_64，`dist/` 随包 30 项）。
+>
+> **⚠️ 打包版够不着后端（新发现，D2 未完成的部分）**：本仓 API 全是相对路径
+> （`sdk/http.ts` 用 `location.origin` 拼），dev 靠 Vite 代理；打包后 `origin=file://`，
+> `fetch('/api/v1/login')` 直接 `Failed to fetch`。修法 A/B/C 待拍板，见 IMServer
+> `docs/design/DESKTOP_DESIGN.md` §7.5——**倾向 A（桥注入 base URL）但要动 `sdk/http.ts`，
+> 那是三端共用口径的层，没拍板前不动**。
+>
+> **自检自己也出过一次「fail-open」**：`process.exitCode = code` + `app.quit()` 实测退出码恒 0，
+> 明明报红却 exit 0。已改 `app.exit(code)` 并双向验过（打包版 1 / dev 版 0）。
+> 门禁 fail-open 比没有门禁更糟——它让人以为验过了。
+>
+> 顺带：`scripts/check-file-size.sh` 原先只扫 `src`，`desktop/src` 是盲区，已加 `SCAN_ROOTS`
+> （目录不存在时跳过，避免 find 报错让门禁 fail-open）。
+
 > **D1 平台适配层 `src/platform/` ✅ 2026-09-07**（桌面端方案见 IMServer `docs/design/DESKTOP_DESIGN.md`）。
 > 桌面端与浏览器版**共用本仓 src/**，只有少数几件事按宿主分流——这一层就是那几件事的收口处。
 > 五个文件、四条硬规矩写在 `platform/types.ts` 顶部；`docs/SYMMETRY.md` 已登记（提交时会念）。
