@@ -311,6 +311,10 @@ export function Composer(p: ComposerProps) {
                 </div>
               )}
             </div>
+            {/* 隐藏的文件选择器：三仓共用一个 input，`accept` 与 `multiple` **由 useMediaSend#pickFile
+                按入口逐次赋值**（「图片或视频」= 多选，相册宫格靠它凑 ≥2 件；「文件」= 单选），
+                所以这里刻意**不写死 multiple**——写死就没法按入口区分了，且会与 pickFile 争着写同一个属性。
+                （React 不管它没在 JSX 里出现的属性，命令式赋的值能扛过重渲染，见 useMediaSend.test.ts。） */}
             <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={onFilePicked} />
             {/* @提及面板（M4-8，仅群聊）：贴输入框上方的内联下拉，边打字边过滤。
                 支持 ↑/↓ 移动、Enter/Tab 选中、Esc 关闭（见 composer 的 onKeyDown）。

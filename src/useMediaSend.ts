@@ -14,6 +14,7 @@ import { convIdFor, type ChatMessage } from "./sdk/protocol";
 import { chunkedTaskFor } from "./sdk/chunkedUpload";
 import { mediaKindForFile, webCanRenderMedia, MEDIA_PICKER_ACCEPT } from "./fileTypes";
 import { attachmentContentType, shouldSendAsMediaBatch, type AttachmentPickMode } from "./attachments";
+import { planAlbumBatch, albumOverflowToast } from "./albumBatch";
 import { makeTinyThumbFromImage, probeMediaMetadata } from "./media";
 import { captureVideoPoster } from "./videoPoster";
 import { LOG_TAG, logger } from "./logging/logger";
@@ -124,20 +125,28 @@ export function useMediaSend(d: MediaSendDeps) {
 
   // 相册批量发送（M4+）：**选完秒上屏**——每张先用本地 blob URL 占位（≥2 张共享 group_id → 宫格聚簇），
   // 逐张上传后原地替换为服务器 URL 并走 socket 发送（带 group_id）；单张失败标该格不阻塞后续。
+  // **本函数是发送侧 group_id 与 9 件上限的唯一收口**：附件选择器（onFilePicked）与粘贴攒批（App#send）
+  // 都汇到这里，判据本身在纯模块 albumBatch.ts（见那里的注释：别在调用侧再拼一份）。
   const sendMediaBatch = useCallback(async (files: File[], opts?: { convId?: string; groupId?: string; caption?: string; mentions?: string[]; mentionAll?: boolean }) => {
     const client = clientRef.current;
     // opts 用于重试：按原会话/原相册重发（不耦合当前打开的会话）。
     const cid = opts?.convId ?? (peer ? convIdFor(uid, peer) : groupConvId);
     if (!client || !cid || files.length === 0) return;
-    const groupId = opts?.groupId ?? (files.length > 1 ? `alb-${crypto.randomUUID()}` : undefined);
+    // 截到 9 件（三端同值）并定这一批的 group_id。超出的**必须告知**——多发的那几条会真的进对端库，
+    // 却因宫格只有 9 格而两端都不显示，静默丢弃比发不出去更难查（详见 albumBatch.ts#ALBUM_MAX）。
+    const plan = planAlbumBatch(files, { groupId: opts?.groupId, newId: () => crypto.randomUUID() });
+    const overflow = albumOverflowToast(plan.dropped);
+    if (overflow) setToast(overflow);
+    const batch = plan.batch;
+    const groupId = plan.groupId;
     // caption（图文/视频文，Telegram 图说模型）：仅单件时随附（相册不带 caption，见 send()）；挂到唯一那条消息。
     // 配文 @提及同随单件带上（群聊被@强提醒）。
-    const caption = files.length === 1 ? opts?.caption : undefined;
-    const capMentions = files.length === 1 ? opts?.mentions : undefined;
-    const capMentionAll = files.length === 1 ? opts?.mentionAll : undefined;
+    const caption = batch.length === 1 ? opts?.caption : undefined;
+    const capMentions = batch.length === 1 ? opts?.mentions : undefined;
+    const capMentionAll = batch.length === 1 ? opts?.mentionAll : undefined;
     // 图/视频归类走统一入口 mediaKindForFile（含扩展名回退）：MIME 缺失的 .mov 等也能判成 video，
     // 否则乐观气泡会当成 image（<img> 放视频→坏图）且跳过封面/时长探测。null（异常漏进来的）退回 MIME。
-    const locals = files.map((f) => {
+    const locals = batch.map((f) => {
       const mk = mediaKindForFile(f);
       const isVideo = mk === "video" || (mk === null && f.type.startsWith("video/"));
       return { f, isVideo, localId: `outbox-${crypto.randomUUID()}`, blobUrl: URL.createObjectURL(f), posterFile: null as File | null, posterBlobUrl: undefined as string | undefined, meta: { width: 0, height: 0, durationMs: 0 } };

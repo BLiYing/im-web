@@ -5,38 +5,30 @@
 
 ## 当前焦点
 
-> **接上 `refresh_token`，登录寿命与 iOS 对齐 ✅ 2026-09-06**。此前 Web 的「保持登录」是
-> **localStorage 里存明文密码、每次重连重放**——iOS 2026-09-03 就换掉了，Web 一直没跟。
-> 存密码的真问题不是"泄露风险大一点"，而是攻击者拿到的是**密码**而不是会话：
-> 「设备管理 / 注销某台设备」对它完全失效（注销掉的只是会话，对方用密码立刻重登）。
+> **相册宫格发送侧补 9 件上限 ✅ 2026-09-07**。起点是 CLIENT_PARITY 上那条「能渲染宫格、发不出宫格」，
+> 记的根因是「`Composer.tsx` 的 `<input type="file">` 没有 `multiple`」——**这条是误判**。
+> `multiple` 本就没写在 JSX 里，是 `useMediaSend#pickFile` 在 `.click()` 前**按入口逐次赋值**的
+> （「图片或视频」多选、「文件」单选）；React 不管没出现在 JSX 里的属性，命令式赋的值扛得过重渲染。
+> 浏览器实测已证：点「图片或视频」后 live DOM 上 `input.multiple === true`，选 3 张 → 三条消息共享
+> 一个 `alb-` `group_id`（IndexedDB 核对）→ `rowPattern(3)=[1,2]` 一个宫格。发送侧本来就是通的。
 >
-> 顺带修掉一条没人报过的坑：**HTTP 层没有任何 token 生命周期管理**。`this.token` 是登录那一刻
-> 拿到的，除非 WS 断线重连没有任何代码去换它；而 WS 长连接建立后服务端**不复查 token**
-> （只在握手校验）。于是页面连开超过 24h 时，WS 收发照常、所有 REST 开始报「登录已失效」，
-> 既不跳登录也不重签，要等 WS 真断一次才自愈。
+> 真正的缺口在别处：**发送侧没有 9 件上限**。iOS `selectionLimit=9`、Android `MediaPick.LIMIT/AlbumLayout.MAX=9`，
+> Web 一个闸都没有。而 `albumRowPattern(n>9)` 只回 `[3,3,3]`（9 格）、`AlbumGrid` 按行 `slice` 取数——
+> 选 12 张的结果是 **12 条消息真的发出去、真进对端库，但两端都只显示前 9 张**。
+> 这比「发不出去」更难查：发送方以为发了，收件方少看 3 张，谁也不会报错。
 >
-> 三处改动：
-> ① **`session.ts` 存 `refresh` 不存 `pwd`**。老会话里那份明文密码作为**只读迁移垫片**
-> （`legacyPwd`）换一次凭据，`saveSession` 的新结构里压根没有这个字段，换完即从磁盘消失。
-> ② **新模块 `sdk/tokenSession.ts`** 收所有取 token 的判据：探活 → 续期 → 才轮到凭据登录
-> （三条路的优先级即安全序）。**两条不能丢**：探活 `/devices` 必须先于一切（否则密码会话重连
-> 直接 `/login` 会重新签发新会话，把「踢下线」自愈掉）；**续期被明确拒绝时不再回退密码登录**
-> （服务端认定这条会话已死，拿密码重登只会把「已被注销」洗成「又登上了」）。
-> 放新文件不只是为了 `imSdk.ts` 的行数预算（1445，改前 1442，只剩 3 行）——这些判据是可注入
-> 依赖的纯决策，脱开 WebSocket 就能单测。
-> ③ **`sdk/http.ts` 的 `callJson` 撞 `100102` 自动续期重试一次**。拦在这一层是因为 `imSdk.ts` 里
-> 有 58 处 `this.token`，其中 51 处是 `xxxApi(this.token, …)` 的一行转发——逐个改成"取新鲜 token"
-> 会把方法体从 1 行撑到 3 行、直接撞穿预算；而那些模块**最终都汇到这一个函数**。
-> 只重试一次、只重放可重放的请求（`Request` 对象与 `FormData` 不救）、**只救本就带
-> `Authorization` 的请求**（免鉴权接口不该被偷偷补一个 Bearer 头再发一遍）。
+> 判据抽成纯模块 **`src/albumBatch.ts`**（`ALBUM_MAX=9` / `ALBUM_GROUP_ID_PREFIX="alb-"` /
+> `planAlbumBatch` / `albumOverflowToast`），接在 **`sendMediaBatch` 这一个收口**上——附件选择器与
+> 粘贴攒批都汇到它，所以 group_id 与上限**全仓只有这一份**，没有第二处 `alb-` 拼接。
+> 另加一条自洽断言 `albumGridCapacity()`：`albumRowPattern(ALBUM_MAX)` 的格子数必须等于 `ALBUM_MAX`，
+> 把「改了上限没改排布」变成一条会红的测试而不是发出去才发现。
 >
-> 后端配套改了一处（IMServer 仓）：**扫码登录也签凭据**，`qr/login/poll` 的 `confirmed` 首次领取里
-> 跟 `token` 同批一次性下发。原先刻意不签（"签而不用等于白放一枚长期凭据"）——那是 Web 还没接
-> 续期接口时的判断；不改的话扫码会话仍被 access token 的 24h 顶死、隔天必须重扫。
+> `tsc -b` + `npm run build` 干净、**vitest 982 全绿**（+21：`albumBatch.test.ts` 11 / `useMediaSend.test.ts` 5 +
+> 原有 5；新增用例均**先看红过一次**）。浏览器实测两条：3 张 → 一个 `[1,2]` 宫格；12 张 → 只发 9 条
+> （IndexedDB 核对 10–12 未发）+ toast「一次最多发送 9 个，已忽略后面的 3 个」，控制台零报错。
 >
-> `tsc -b` 干净 + **vitest 961 全绿**（+28：`tokenSession.test.ts` 14 / `http.test.ts` 救援 7 /
-> `session.test.ts` 迁移 7）。**未跑浏览器**：没验「老会话迁移后 localStorage 里密码消失」，
-> 也没真等 24h 验救援路径（单测里是拿假后端模拟 100102 的）。
+> **没做**：iOS/Android 那种「选图器里就选不动第 10 张」（Web 用系统选择器，只能事后截断）；
+> 粘贴路径仍限单件（2026-08-19 拍板，未动）；「文件」入口仍是单选（既有行为，未动）。
 
 ## 下一步
 1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
@@ -54,6 +46,13 @@
 - **⏸ 拆 `useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
+- **相册上限 9 是渲染契约，不是偏好**：`albumRowPattern(n>9)` 只有 9 格、`AlbumGrid` 按行 `slice` 取数，
+  第 10 件起**根本不渲染**。所以发送侧必须截断（`albumBatch.ts#ALBUM_MAX`，有自洽断言兜着），
+  否则多发的消息真进对端库却两端都不显示。三端同值（iOS `selectionLimit` / Android `AlbumLayout.MAX`）。
+  ⚠️ **收端不设防**：别的客户端硬塞 >9 个同 `group_id` 的成员，本端仍只显示前 9 个（未做上限提示）。
+- **隐藏 `<input type="file">` 的 `multiple` 刻意不写在 JSX 里**，由 `useMediaSend#pickFile` 按入口赋值
+  （媒体多选 / 文件单选）。看到 JSX 里没有它**不是 bug**——2026-09-07 就照这个"缺 `multiple`"的判断
+  查过一轮，实际是通的。要改多选行为改 `pickFile`，别往 JSX 里加（加了会跟 pickFile 争同一个属性）。
 - **扫自己名片码「查看我的资料」是死路（既有 QR P0 缺陷，未修）**：扫自己的名片码 → resolve 回 relation=self → 结果卡主按钮「查看我的资料」→ `onViewProfile(自己uid)` → `openPeerDetail(peer)`（App.tsx ~3477）因 `peer === uid` 直接 return，弹窗被 onClose 关掉却没打开任何资料页。修法：self 场景改为打开设置页顶部个人资料（`setShowSettings(true)` / `openProfile()`）而非走 peer 抽屉，约 5 行。
 - **一图多码消歧仅 Chrome/Edge 生效**：靠原生 BarcodeDetector；Safari/Firefox 无此 API，退回 jsqr 而 jsqr 对并排多码定位失败 → 多码图识别失败（单码仍可用）。要跨浏览器多码需换 zxing-wasm。见 IMServer `docs/design/QRCODE_DESIGN.md §6`。
 - **File 句柄不能跨刷新持久化**：刷新后进行中的上传作废，无 iOS 式杀进程自动续传（Web 平台限制）。

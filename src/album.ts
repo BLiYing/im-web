@@ -65,7 +65,14 @@ export function resolveJumpTarget(list: ChatMessage[], seq: number): JumpTarget 
   return { kind: "message", seq };
 }
 
-/** 宫格行模式（Telegram 近似）：如 3 → [1,2]=首行 1 大块 + 次行 2 块。9 封顶（selectionLimit=9）。 */
+/**
+ * 宫格行模式（Telegram 近似）：如 3 → [1,2]=首行 1 大块 + 次行 2 块。9 封顶。
+ * 与 iOS `IMAlbumCell#IMAlbumRowPattern` / Android `AlbumLayout.rowPattern` 逐条一致——
+ * 三端排法不同的话，同一组图裁出的构图就不一样，用户会以为发出去的东西被改了。
+ *
+ * ⚠️ n>9 只回 [3,3,3]（9 格），`AlbumGrid` 按行 slice 取数 → **第 10 件起根本不渲染**。
+ * 发送侧因此必须截断，口径在 `albumBatch.ts#ALBUM_MAX`（改一边就去改另一边，那里有条自洽断言）。
+ */
 export function albumRowPattern(n: number): number[] {
   switch (n) {
     case 1: return [1];
