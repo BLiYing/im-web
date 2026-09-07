@@ -15,6 +15,7 @@ import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expir
 import { loadOptedIn, saveOptedIn, optedInKey } from "./optedIn";
 import { fileNameFromContent, isPreviewableFile } from "./messageContent";
 import { LOG_TAG, logger } from "./logging/logger";
+import { platform } from "./platform";
 
 export interface MediaDownloadDeps {
   uid: string;
@@ -143,7 +144,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     const name = m.fileName || fileNameFromContent(m.content);
     const url = dlBlobsRef.current[m.content] || m.content;
     if (isPreviewableFile(name)) {
-      window.open(url, "_blank", "noopener,noreferrer"); // 预览：不 await（保用户手势，避免弹窗拦截），失效则新标签自显 404
+      platform().openExternal(url); // 预览：同步、不 await（保用户手势，避免弹窗拦截），失效则新标签自显 404
       return;
     }
     // 另存：用远端 URL 时先验失效——避免"能看却下不了"只丢一个浏览器下载失败（见铁律 A 讨论）。
@@ -151,9 +152,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
       setToast(m.contentType === "image" ? "图片已失效" : m.contentType === "video" ? "视频已失效" : "文件已失效");
       return;
     }
-    const a = document.createElement("a");
-    a.href = url; a.download = name; a.rel = "noreferrer";
-    document.body.appendChild(a); a.click(); a.remove();
+    await platform().saveFile({ url, name });
   }, []);
 
   /**
@@ -170,9 +169,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
       setToast(m.contentType === "image" ? "图片已失效" : m.contentType === "video" ? "视频已失效" : "文件已失效");
       return;
     }
-    const a = document.createElement("a");
-    a.href = url; a.download = name; a.rel = "noreferrer";
-    document.body.appendChild(a); a.click(); a.remove();
+    await platform().saveFile({ url, name });
   }, []);
 
   /**

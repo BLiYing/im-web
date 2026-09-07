@@ -5,6 +5,34 @@
 
 ## 当前焦点
 
+> **D1 平台适配层 `src/platform/` ✅ 2026-09-07**（桌面端方案见 IMServer `docs/design/DESKTOP_DESIGN.md`）。
+> 桌面端与浏览器版**共用本仓 src/**，只有少数几件事按宿主分流——这一层就是那几件事的收口处。
+> 五个文件、四条硬规矩写在 `platform/types.ts` 顶部；`docs/SYMMETRY.md` 已登记（提交时会念）。
+>
+> **能力面**：`deviceId` / `deviceName` / `saveFile` / `openExternal` / `notify` / `setBadge` /
+> `subscribeWake` / `voiceRecording`。调用点已改走本层：`sdk/imSdk` 的握手身份与唤醒订阅、
+> `sdk/qrLogin` 的 device_id、`useMediaDownload` 的另存×2 与预览、`components/Composer` 的麦克风探测。
+> `webDeviceId`/`webDeviceName` **整段移入** `platform/web.ts`（imSdk 1445→1416，棘轮同步下调）。
+>
+> **两条同步签名是行为不是风格**，改之前先读 `types.ts` 的注释：① `openExternal` 必须同步——
+> 脱离用户手势的调用栈就被弹窗拦截器吃掉；② `deviceId` 必须同步且稳定——`IMClient` 拼登录帧时同步取用，
+> 后端按 `(uid, device_id)` 顶替去重，飘一次就多一条僵尸 session。桌面桥因此要在 **preload 期**
+> 把身份两项作为**值**注入，不能做成异步 IPC。
+>
+> **`notify`/`setBadge` 在 web 恒返回 `false`**——本仓至今没有通知功能（全仓 `new Notification` 0 处），
+> 这是如实上报不是退化，D4 才接实现。**本地消息库（IndexedDB→SQLite）刻意不在 D1 范围**：
+> `sdk/localStore*.ts` 是 700+ 行的面，抽象它是重构不是平移，与「行为零变化」的验收冲突，归 D4。
+>
+> **验证**：`npm run build` 零错误 + **1007 例全绿**；`contract.test.ts` 25 例对 web/desktop
+> 两套实现跑同一组断言，并**做过四次变异验红**（openExternal 改 async / deviceId 不稳定 /
+> 桌面 subscribeWake 不叠加浏览器信号 / web notify 假装成功），还原后全绿。
+> **浏览器实测**（`localhost:5173` 免密登录）：清空 `im.deviceId` → 登录 → 新 UUID 落盘、WS 连上、
+> 会话列表加载；麦克风 `disabled=false`；派发 `online` 拿到 `IM.WS wake action=probe`；
+> 打开两万人大群渲染正常、**console 零错误**。
+>
+> **未实测**：`saveFile` 与 `openExternal` 两条（要真触发一次下载 / 真开一个新标签页，没做）。
+> 它们是逐字搬运且被契约测试覆盖，但「搬对了」和「点下去还好使」不是一回事。
+
 > **相册宫格发送侧补 9 件上限 ✅ 2026-09-07**。起点是 CLIENT_PARITY 上那条「能渲染宫格、发不出宫格」，
 > 记的根因是「`Composer.tsx` 的 `<input type="file">` 没有 `multiple`」——**这条是误判**。
 > `multiple` 本就没写在 JSX 里，是 `useMediaSend#pickFile` 在 `.click()` 前**按入口逐次赋值**的

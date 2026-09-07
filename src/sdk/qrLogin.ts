@@ -2,7 +2,7 @@
 // 登录页未登录、无 IMClient/token，故为模块级函数（与 registerAccount 同源）。语义与状态机全在服务端
 // （internal/qrcode/login.go）；本模块只封装两个免鉴权 REST，poll_key 只在 loginNew 响应里出现一次。
 import { callJson } from "./http";
-import { webDeviceId } from "./imSdk";
+import { platform } from "../platform";
 import type { QRLoginTicket, QRLoginPollResult } from "./protocol";
 
 /** 申请一枚扫码登录票据（免鉴权）：→ {ticket,url,expires_at,poll_key}。
@@ -11,7 +11,7 @@ export async function loginNew(): Promise<QRLoginTicket> {
   return (await callJson("/api/v1/qr/login/new", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ device_id: webDeviceId() }),
+    body: JSON.stringify({ device_id: platform().deviceId() }),
   })) as QRLoginTicket;
 }
 

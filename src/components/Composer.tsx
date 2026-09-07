@@ -8,7 +8,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 import { Bookmark, Flag, Forward, Mic, Trash2, type LucideIcon, IdCard } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
-import { VoiceRecorder, voiceRecordingSupported, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
+import { VoiceRecorder, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
+import { platform } from "../platform";
 import { pauseVoicePlayback } from "./VoiceBubble";
 import type { DownloadState } from "../download";
 import { replyPreviewOf } from "../messageContent";
@@ -72,7 +73,7 @@ export function Composer(p: ComposerProps) {
   const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」）
   // Web P1 语音：AAC 兼容探测 → 麦克风入口置灰/激活；点击开录 → 输入栏 morph 成录制条。
   // ChatActions.sendVoice 上传+发送；Space/Esc/Enter 快捷键在录制条 focus 时接管。
-  const voiceProbe = useMemo(() => voiceRecordingSupported(), []);
+  const voiceProbe = useMemo(() => platform().voiceRecording(), []);
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordElapsed, setRecordElapsed] = useState(0);
@@ -366,7 +367,7 @@ export function Composer(p: ComposerProps) {
                 if (shouldSend) { e.preventDefault(); send(); }
               }} />
             {input.trim().length === 0 && pastedImages.length === 0 ? (
-              // 空框：显麦克风（P1）。voiceRecordingSupported() 探测为 false 的浏览器 → 置灰 + tooltip。
+              // 空框：显麦克风（P1）。platform().voiceRecording() 探测为 false 的宿主 → 置灰 + tooltip。
               // （2026-09-07 实测：Chrome 已支持点名 AAC 的 audio/mp4，第一级探测即命中；置灰分支留给探测失败的浏览器。）
               <button className="mic-btn"
                       disabled={!convId || composerMuteReason !== null || !voiceProbe.supported}

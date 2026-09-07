@@ -3,7 +3,8 @@
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
 import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView, } from "./protocol";
-import { createProbeWatchdog, installWakeListeners, runWake } from "./wake";
+import { createProbeWatchdog, runWake } from "./wake";
+import { platform } from "../platform";
 import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
 import { parseConvBumpItems } from "./convBump";
 import { entryWindowSince } from "../entryWindow";
@@ -232,7 +233,7 @@ export class IMClient {
     this.manualClose = false;
     this.clearReconnectTimer();
     setTokenRescue(this.renewToken); // HTTP 层撞 100102 即自动续期重试（见 sdk/http.ts callJson）
-    this.wakeStop ??= installWakeListeners((r) => this.reconnectNow(r));
+    this.wakeStop ??= platform().subscribeWake((r) => this.reconnectNow(r));
     logger.info(LOG_TAG.ws, "connect_requested", { username, via: refreshToken ? "refresh" : "credential" });
     await this.openSocket(true);
   }
@@ -260,7 +261,7 @@ export class IMClient {
     this.manualClose = false;
     this.clearReconnectTimer();
     setTokenRescue(this.renewToken);
-    this.wakeStop ??= installWakeListeners((r) => this.reconnectNow(r));
+    this.wakeStop ??= platform().subscribeWake((r) => this.reconnectNow(r));
     logger.info(LOG_TAG.ws, "connect_requested", { user_id: uid, via: "qr_login" });
     await this.openSocket(true);
   }
@@ -874,7 +875,7 @@ export class IMClient {
   private async fetchToken(password: string): Promise<{ token: string; uid: string }> {
     const got = await acquireToken({
       token: this.token, refreshToken: this.refreshToken, username: this.username, password,
-      qrSession: !!this.sessionToken, device: { deviceId: webDeviceId(), deviceName: webDeviceName() },
+      qrSession: !!this.sessionToken, device: { deviceId: platform().deviceId(), deviceName: platform().deviceName() },
     }, this.uid);
     if (got.refreshToken) this.adoptRefreshToken(got.refreshToken); // 只有 /login 下发；触发登录的入口不止一处，故收口在此
     return { token: got.token, uid: got.uid };
@@ -1410,36 +1411,6 @@ export async function registerAccount(username: string, password: string, nickna
   }
 }
 
-/** 概括本机为「浏览器 · 系统」，登录时上报作设备名（供设备管理页展示）。尽力而为，非精确。
- *  与后端 webDeviceName(UA) 同源，但浏览器端直接读 navigator，命中率更高。 */
-export function webDeviceName(): string {
-  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent || "";
-  if (!ua) return "网页版";
-  const browser = /Edg\//.test(ua) ? "Edge"
-    : /Chrome\//.test(ua) ? "Chrome"
-    : /Firefox\//.test(ua) ? "Firefox"
-    : /Safari\//.test(ua) ? "Safari" : "浏览器";
-  const os = /Mac OS X|Macintosh/.test(ua) ? "macOS"
-    : /Windows/.test(ua) ? "Windows"
-    : /Android/.test(ua) ? "Android"
-    : /iPhone|iPad/.test(ua) ? "iOS"
-    : /Linux/.test(ua) ? "Linux" : "";
-  return os ? `${browser} · ${os}` : browser;
-}
-
-/** 本机稳定设备 ID（对齐 iOS 的 device_id）：首次生成一枚 UUID 落 localStorage，之后复用。
- *  后端按 (uid, device_id) 顶替去重——没有它，Web 每次刷新/重登都新建一条 session，设备列表会堆满同一台。
- *  localStorage 不可用（隐私模式/禁用）或读写抛错时回退每会话临时 ID，功能降级为不去重，但不崩。 */
-const DEVICE_ID_KEY = "im.deviceId";
-export function webDeviceId(): string {
-  try {
-    const existing = localStorage.getItem(DEVICE_ID_KEY);
-    if (existing) return existing;
-    const id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_ID_KEY, id);
-    return id;
-  } catch {
-    return crypto.randomUUID(); // localStorage 不可用：退化为一次性 ID（不去重，但不阻断登录）
-  }
-}
+// webDeviceName / webDeviceId 已移入 src/platform/web.ts（D1 适配层）——「本机是什么设备」是宿主能力，
+// 桌面端要报 `IM Desktop · macOS 15` 而非 UA 猜测。调用点改走 platform().deviceId() / .deviceName()。
 
