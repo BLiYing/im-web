@@ -26,7 +26,7 @@ describe("voiceRecordingSupported", () => {
     expect(voiceRecordingSupported()).toEqual({ supported: true, mime: "audio/aac", ext: ".aac" });
   });
 
-  it("Chrome 式「audio/mp4 支持但装的是 Opus」→ 不支持（否则录出 iOS 播不了、还会崩的文件）", () => {
+  it("「audio/mp4 支持但装的是 Opus」的浏览器 → 不支持（否则录出 iOS 播不了、还会崩的文件）", () => {
     // @ts-expect-error 测试注入
     globalThis.MediaRecorder = { isTypeSupported: (m: string) => m === "audio/mp4" || m === "audio/mp4;codecs=opus" };
     expect(voiceRecordingSupported().supported).toBe(false);
@@ -38,7 +38,7 @@ describe("voiceRecordingSupported", () => {
     expect(voiceRecordingSupported()).toEqual({ supported: true, mime: "audio/mp4;codecs=mp4a.40.2", ext: ".m4a" });
   });
 
-  it("仅支持 webm/opus（默认 Chrome/Firefox）→ 不支持——绝不产出 iOS 播不了的消息", () => {
+  it("仅支持 webm/opus 的浏览器 → 不支持——绝不产出 iOS 播不了的消息", () => {
     // @ts-expect-error
     globalThis.MediaRecorder = { isTypeSupported: (m: string) => m === "audio/webm;codecs=opus" };
     expect(voiceRecordingSupported().supported).toBe(false);

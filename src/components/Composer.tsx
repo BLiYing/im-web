@@ -366,7 +366,8 @@ export function Composer(p: ComposerProps) {
                 if (shouldSend) { e.preventDefault(); send(); }
               }} />
             {input.trim().length === 0 && pastedImages.length === 0 ? (
-              // 空框：显麦克风（P1）。不支持录制的浏览器（Chrome/Firefox 默认不支持 audio/mp4）→ 置灰 + tooltip。
+              // 空框：显麦克风（P1）。voiceRecordingSupported() 探测为 false 的浏览器 → 置灰 + tooltip。
+              // （2026-09-07 实测：Chrome 已支持点名 AAC 的 audio/mp4，第一级探测即命中；置灰分支留给探测失败的浏览器。）
               <button className="mic-btn"
                       disabled={!convId || composerMuteReason !== null || !voiceProbe.supported}
                       title={voiceProbe.supported ? "点击开始录音" : "当前浏览器不支持录制语音，可在 App 内发送"}
