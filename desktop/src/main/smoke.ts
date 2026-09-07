@@ -16,6 +16,9 @@ interface SmokeReport {
   deviceIdFromBridge: string | null;
   deviceIdFromPlatform: string | null;
   deviceName: string | null;
+  /** 页面自己攒下的 localStorage 键数（`im.` 前缀）。**origin 一变这些全丢**——会话 / 主题 /
+   *  壁纸 / 字号 / 会话列表缓存都在里面。D2 第一版用临时端口，每次启动这里都是 0（D3 实测才照出来）。 */
+  imKeys: number;
   /** 页面的来源。dev 是 http://localhost:5173，打包后是 file:// —— 这一位决定下一位。 */
   origin: string | null;
   /** 后端够不够得着。im-web 的 API 全是相对路径（/api/v1/…，见 sdk/http.ts 用 location.origin 拼），
@@ -42,6 +45,7 @@ const PROBE = `(() => {
     ? "desktop" : "web";
   r.deviceIdFromPlatform = r.platformName === "desktop" ? r.deviceIdFromBridge : localStorage.getItem("im.deviceId");
   r.origin = location.origin;
+  r.imKeys = Object.keys(localStorage).filter((k) => k.startsWith('im.')).length;
   return r;
 })()`;
 
@@ -83,7 +87,7 @@ export async function runSmoke(
   say(`[smoke] bridge=${r.bridgePresent} contract=${r.bridgeContract} platform=${r.platformName}`);
   say(`[smoke] deviceName=${r.deviceName}`);
   say(`[smoke] deviceId(bridge)=${r.deviceIdFromBridge}`);
-  say(`[smoke] origin=${r.origin}`);
+  say(`[smoke] origin=${r.origin}  localStorage(im.*)=${r.imKeys} 个`);
 
   const probe = (await win.webContents.executeJavaScript(BACKEND_PROBE)) as { ok: boolean; detail: string };
   say(`[smoke] 后端可达=${probe.ok}（${probe.detail}）`);

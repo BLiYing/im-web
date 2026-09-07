@@ -45,6 +45,8 @@ const MIME: Record<string, string> = {
 };
 
 export interface LocalServerHandle {
+  /** 实际监听的端口。调用方要把它记下来，下次复用——见下方 startLocalServer 的说明。 */
+  port: number;
   /** 页面该加载的地址，形如 http://127.0.0.1:53412/ */
   url: string;
   close(): void;
@@ -114,9 +116,17 @@ function serveStatic(pathname: string, root: string, res: ServerResponse): void 
 
 /**
  * 起本地同源层。`root` 是 dist 目录，`backendOrigin` 形如 http://localhost:8080。
- * 端口交给系统分配（listen 0）——写死端口会在多开或端口被占时直接起不来。
+ *
+ * **端口必须稳定**：`localStorage` 按 origin 隔离，origin 里带端口——端口每次变，
+ * 登录会话 / 主题 / 壁纸 / 字号 / 会话列表缓存每次启动全丢（D2 第一版的真实下场，
+ * 2026-09-08 做 D3 实测时才照出来）。所以优先复用上次记住的端口；
+ * 被别人占了就退回系统分配并记住新的——那一次会丢会话，但总比起不来强。
  */
-export function startLocalServer(root: string, backendOrigin: string): Promise<LocalServerHandle> {
+export function startLocalServer(
+  root: string,
+  backendOrigin: string,
+  preferredPort = 0,
+): Promise<LocalServerHandle> {
   const backend = new URL(backendOrigin);
   const rootNorm = normalize(root);
 
@@ -150,11 +160,21 @@ export function startLocalServer(root: string, backendOrigin: string): Promise<L
   });
 
   return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    const done = (): void => {
       const addr = server.address();
       if (!addr || typeof addr === "string") { reject(new Error("拿不到本地端口")); return; }
-      resolve({ url: `http://127.0.0.1:${addr.port}/`, close: () => server.close() });
-    });
+      resolve({ port: addr.port, url: `http://127.0.0.1:${addr.port}/`, close: () => server.close() });
+    };
+    const onFirstError = (e: NodeJS.ErrnoException): void => {
+      // 记住的端口被别人占了 → 退回系统分配。其余错误照抛。
+      if (preferredPort && e.code === "EADDRINUSE") {
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", done);
+        return;
+      }
+      reject(e);
+    };
+    server.once("error", onFirstError);
+    server.listen(preferredPort, "127.0.0.1", done);
   });
 }

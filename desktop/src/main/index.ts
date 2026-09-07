@@ -5,10 +5,11 @@
 // 混进 D2 会让「骨架到底通没通」失去判据。
 import { app, BrowserWindow } from "electron";
 import { join } from "node:path";
-import { BRIDGE_CONTRACT, deviceName, stableDeviceId } from "./identity";
+import { BRIDGE_CONTRACT, deviceName, rememberedLocalPort, rememberLocalPort, stableDeviceId } from "./identity";
 import { runSmoke } from "./smoke";
 import { runE2E } from "./e2e";
 import { startLocalServer, type LocalServerHandle } from "./localServer";
+import { runPerf } from "./perf";
 
 /** 开发时加载 Vite dev server（吃热更新），打包后加载随包的 dist/。
  *  `IM_DEV_URL` 允许压测/多实例时指向别的端口，与后端 dev.sh 的用法对齐。 */
@@ -39,6 +40,8 @@ function useLocalServer(): boolean {
 const smokeMode = process.argv.includes("--smoke");
 /** `--e2e`：D2 的验收链路自检（见 e2e.ts）。同样不显窗口。 */
 const e2eMode = process.argv.includes("--e2e");
+/** `--perf`：D3 性能实测（见 perf.ts）。同样不显窗口——显窗口会把合成器开销算进来，那是另一码事。 */
+const perfMode = process.argv.includes("--perf");
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -59,7 +62,7 @@ function createWindow(): BrowserWindow {
       ],
     },
   });
-  win.once("ready-to-show", () => { if (!smokeMode && !e2eMode) win.show(); });
+  win.once("ready-to-show", () => { if (!smokeMode && !e2eMode && !perfMode) win.show(); });
   return win;
 }
 
@@ -67,13 +70,18 @@ let localServer: LocalServerHandle | null = null;
 
 app.whenReady().then(async () => {
   const win = createWindow();
-  if (useLocalServer()) localServer = await startLocalServer(distDir(), backendOrigin());
+  if (useLocalServer()) {
+    localServer = await startLocalServer(distDir(), backendOrigin(), rememberedLocalPort());
+    rememberLocalPort(localServer.port);   // 下次复用同一个端口 → origin 稳定 → localStorage 不丢
+  }
   const target = localServer ? localServer.url : DEV_URL;
   const load = win.loadURL(target);
 
-  if (smokeMode || e2eMode) {
+  if (smokeMode || e2eMode || perfMode) {
     const say = (s: string): void => { process.stdout.write(`${s}\n`); };
-    const code = e2eMode ? await runE2E(win, load, say) : await runSmoke(win, target, load);
+    const code = perfMode ? await runPerf(win, load, say)
+      : e2eMode ? await runE2E(win, load, say)
+      : await runSmoke(win, target, load);
     // **必须 app.exit(code)，不能 `process.exitCode = code` + app.quit()**：后者实测退出码恒为 0
     // （2026-09-07 打包版自检明明报红却 exit 0）。门禁 fail-open 比没有门禁更糟——
     // 它会让人以为验过了。同理见 IMServer scripts/check-*.sh 的 --selftest。

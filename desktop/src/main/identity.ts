@@ -13,10 +13,45 @@ import { join } from "node:path";
 /** 桥契约版本。页面比外壳新时据此判断该不该走某条新路；改桥的对外形状就要 +1。 */
 export const BRIDGE_CONTRACT = 1;
 
-/** deviceId 落在 userData 下——跟着用户配置走，卸载重装前一直是同一台。
- *  对应 web 侧的 localStorage("im.deviceId")，语义相同：一台机器一个稳定 ID。 */
-function deviceIdFile(): string {
+/** 本机状态落在 userData 下——跟着用户配置走，卸载重装前一直是同一份。
+ *  存两样：deviceId（对应 web 侧的 localStorage("im.deviceId")）与本地同源层的端口（见下）。 */
+function stateFile(): string {
   return join(app.getPath("userData"), "device.json");
+}
+
+function readState(): { deviceId?: unknown; localPort?: unknown } {
+  try {
+    return JSON.parse(readFileSync(stateFile(), "utf8")) as { deviceId?: unknown; localPort?: unknown };
+  } catch {
+    return {};   // 首次运行 / 文件损坏 / 无读权限
+  }
+}
+
+function writeState(patch: Record<string, unknown>): void {
+  try {
+    writeFileSync(stateFile(), JSON.stringify({ ...readState(), ...patch }), "utf8");
+  } catch {
+    // 落盘失败：本次会话照常工作，只是下次启动要重来。不阻断，理由见 stableDeviceId。
+  }
+}
+
+/**
+ * 本地同源层上次用的端口。**这一位不是性能优化，是正确性**：
+ * `localStorage` 按 origin 隔离，而 origin 里带端口——端口每次变，登录会话、主题、壁纸、
+ * 字号、会话列表缓存**每次启动全丢**。D2 第一版用临时端口，就是这个下场
+ * （2026-09-08 做 D3 性能实测时照出来的：连着两次启动 origin 从 :61140 变成 :61146，
+ * 登录完再启动仍回登录页）。
+ *
+ * 返回 0 表示「没有记录，随便挑一个」。端口被别人占了会退回临时端口——那一次会丢会话，
+ * 但总比起不来强，且下次会记住新端口。
+ */
+export function rememberedLocalPort(): number {
+  const v = readState().localPort;
+  return typeof v === "number" && v > 1024 && v < 65536 ? v : 0;
+}
+
+export function rememberLocalPort(port: number): void {
+  if (rememberedLocalPort() !== port) writeState({ localPort: port });
 }
 
 /**
@@ -27,19 +62,10 @@ function deviceIdFile(): string {
  * 已在 docs/SYMMETRY.md 登记。
  */
 export function stableDeviceId(): string {
-  const file = deviceIdFile();
-  try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as { deviceId?: unknown };
-    if (typeof raw.deviceId === "string" && raw.deviceId) return raw.deviceId;
-  } catch {
-    // 首次运行 / 文件损坏 / 无读权限：往下走，重新生成一枚。
-  }
+  const existing = readState().deviceId;
+  if (typeof existing === "string" && existing) return existing;
   const id = randomUUID();
-  try {
-    writeFileSync(file, JSON.stringify({ deviceId: id }), "utf8");
-  } catch {
-    // 落盘失败：本次会话仍返回一枚可用 ID，降级为不去重但不阻断登录（同 web 侧）。
-  }
+  writeState({ deviceId: id });   // 落盘失败也返回可用 ID：降级为不去重但不阻断登录（同 web 侧）
   return id;
 }
 
