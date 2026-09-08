@@ -116,7 +116,16 @@ export interface LocalStore {
 
   // ---- 写 ----
 
-  /** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。稀疏字段不得覆盖已存值。 */
+  /**
+   * 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。
+   *
+   * **合并是白名单式的，别写成"全字段保值"**：同一条消息可能先由 ACK/实时帧落库、后由 sync_resp
+   * 再次到达，后到的那份字段更少。只有 `fileName` / `fromNickname` / `fromRole` / `fileSize`（>0 才算）
+   * / `serverMsgId` 这 5 个**不许被稀疏重放覆盖**（各自都对应过一次真实事故）；
+   * 其余字段**以最后一次写入为准**——后到的稀疏负载会把 `thumb`/`caption`/`groupId`/`mentionSpans`
+   * 等抹掉。这不是笔误，是现状；两侧实现必须一致，否则同一次重放 web 抹掉、desktop 留着，
+   * 两端显示就此分叉（`localStore.contract.ts` 里正反两条断言都钉着）。
+   */
   saveMessage(owner: string, m: ChatMessage): Promise<void>;
 
   /**

@@ -32,11 +32,14 @@ export function runLocalStoreContract(store: LocalStore): void {
   describe(`LocalStore 契约 —— ${store.name}`, () => {
     // ---- 隔离 · 幂等 · 合并 ----
 
-    it("按 owner 隔离：同一台机器上另一个账号读不到", async () => {
+    it("按 owner 隔离：同一台机器上另一个账号读不到（读盘 / 全局搜索 / **会话内搜索**）", async () => {
+      // 三条路都要断言。会话内搜索那条容易漏——web 侧因为索引键里已经含 owner 而天然安全，
+      // 但 SQLite 侧写成 `WHERE conv_id = ?` 就会把同机另一账号的消息搜出来。
       const a = newOwner("iso"), b = newOwner("iso");
       await store.saveMessage(a, msg("c1", 1));
       expect(await store.loadConversation(b, "c1")).toEqual([]);
       expect(await store.searchMessages(b, { q: "x", limit: 20 })).toEqual([]);
+      expect(await store.searchMessages(b, { convId: "c1", q: "x", limit: 20 })).toEqual([]);
     });
 
     it("同一 (owner, conv, conv_seq) 幂等覆盖，不产生第二条", async () => {
@@ -63,6 +66,23 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(got.fromNickname).toBe("王铁柱");
       expect(got.fromRole).toBe("admin");
       expect(got.serverMsgId).toBe("snow-1");
+    });
+
+    it("受保护的**只有那 5 个**字段，其余以最后一次写入为准", async () => {
+      // 这条是上一条的反面，一样要钉住：只说「稀疏的不许覆盖」而不说清楚**哪些**，
+      // 两种相反的实现都能全绿——web 抹掉 thumb、desktop 留着 thumb，两端就此分叉。
+      // 这里如实记录现状（合并是白名单式的，不是全字段保值），不是在主张它一定对。
+      const o = newOwner("merge2");
+      await store.saveMessage(o, msg("c1", 1, {
+        contentType: "image", caption: "图说", groupId: "g-1", thumb: "data:image/jpeg;base64,AA",
+        mentionSpans: [{ offset: 0, length: 2, uid: "u-3" }],
+      }));
+      await store.saveMessage(o, msg("c1", 1, { contentType: "image" })); // 稀疏重放
+      const got = (await store.loadConversation(o, "c1"))[0];
+      expect(got.caption).toBeUndefined();
+      expect(got.groupId).toBeUndefined();
+      expect(got.thumb).toBeUndefined();
+      expect(got.mentionSpans).toBeUndefined();
     });
 
     // ---- 读回 ----
@@ -134,24 +154,35 @@ export function runLocalStoreContract(store: LocalStore): void {
 
     // ---- 被拒消息（convSeq=0，服务端永不接受）----
 
-    it("被拒消息按 client_msg_id 落库，还原 failed + 提示 + 媒体字段", async () => {
+    it("被拒消息按 client_msg_id 落库，还原 failed + 提示，且**字段整轮往返**", async () => {
+      // 读回时「已确认」与「被拒」是**两份各自手抄的字段表**——最容易一侧漏抄的形状，
+      // 所以这一条要和 :81 那条一样逐字段比，不能只挑几个媒体字段看。
+      // 漏一个的后果跟已确认那边一样：少 thumb → 磨砂占位退化成斜纹底、少 caption → 图说消失。
       const o = newOwner("rej");
-      await store.saveRejected(o, msg("c1", 0, {
+      const full: ChatMessage = msg("c1", 0, {
         clientMsgId: "cm-img", from: o, content: "/uploads/a.jpg", contentType: "image",
         status: "failed", note: "消息已发出，但被对方拒收了",
-        fileName: "a.jpg", fileSize: 1234, groupId: "g-1", posterUrl: "/uploads/p.jpg",
-        mediaW: 800, mediaH: 600, duration: 3000,
-      }));
+        fromNickname: "王铁柱", fromRole: "admin",
+        fileName: "a.jpg", fileSize: 1234, caption: "会议室白板",
+        mentions: ["u-3"], mentionSpans: [{ offset: 0, length: 3, uid: "u-3" }], mentionAll: true,
+        replyToConvSeq: 4, replySnapshot: "上一条", replyToFrom: "u-2", forwardFrom: "u-1",
+        groupId: "g-1", posterUrl: "/uploads/p.jpg",
+        mediaW: 800, mediaH: 600, duration: 3000, thumb: "data:image/jpeg;base64,AA",
+      });
+      await store.saveRejected(o, full);
       const got = (await store.loadConversation(o, "c1"))[0];
       expect(got.status).toBe("failed");
-      expect(got.convSeq).toBe(0);
+      expect(got.convSeq).toBe(0); // 被拒收永远拿不到 conv_seq，渲染按 timestamp 落位
       expect(got.clientMsgId).toBe("cm-img");
       expect(got.note).toBe("消息已发出，但被对方拒收了");
-      // 被拒的媒体消息必须留住这些：少了就刷新后退化成显示 URL 的文本气泡、相册散架。
-      expect(got.contentType).toBe("image");
-      expect(got.groupId).toBe("g-1");
-      expect(got.posterUrl).toBe("/uploads/p.jpg");
-      expect([got.mediaW, got.mediaH, got.duration, got.fileName]).toEqual([800, 600, 3000, "a.jpg"]);
+      const persisted: (keyof ChatMessage)[] = [
+        "convId", "timestamp", "from", "fromNickname", "fromRole",
+        "content", "contentType", "fileName", "fileSize", "caption",
+        "mentions", "mentionSpans", "mentionAll",
+        "replyToConvSeq", "replySnapshot", "replyToFrom", "forwardFrom",
+        "groupId", "posterUrl", "mediaW", "mediaH", "duration", "thumb",
+      ];
+      for (const k of persisted) expect({ [k]: got[k] }).toEqual({ [k]: full[k] });
     });
 
     it("多条被拒各按各的 client_msg_id 共存，且与已确认消息同会话共存", async () => {
@@ -188,6 +219,16 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.loadDeletedSeqs(o, "c1")).toEqual([]);
     });
 
+    it("删除目标两个都没给时整体忽略——**不许把整个会话删了**", async () => {
+      const o = newOwner("tomb0");
+      await store.saveMessage(o, msg("c1", 1));
+      await store.saveMessage(o, msg("c1", 2));
+      await store.markMessageDeleted(o, "c1", {});
+      await store.markMessageDeleted(o, "c1", { convSeq: 0 });
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([1, 2]);
+      expect(await store.loadDeletedSeqs(o, "c1")).toEqual([]);
+    });
+
     it("墓碑按会话隔离：删了 c1 的第 1 条，不影响 c2 的第 1 条", async () => {
       const o = newOwner("tomb3");
       await store.saveMessage(o, msg("c1", 1));
@@ -208,6 +249,22 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.loadConversation(o, "c1")).toEqual([]);
       expect(await store.loadConversation(o, "c2")).toHaveLength(1);
       expect(await store.loadConversation(other, "c1")).toHaveLength(1);
+    });
+
+    it("清空聊天记录**不动墓碑、不动游标**", async () => {
+      // 归档里那条「删了又冒出来」的另一种走法：先删第 1 条、再清空整个会话，
+      // 若实现顺手把墓碑一起清了，下一次后台重同步第 1 条就复活了。
+      const o = newOwner("clear2");
+      await store.saveMessage(o, msg("c1", 1));
+      await store.saveMessage(o, msg("c1", 2));
+      await store.markMessageDeleted(o, "c1", { convSeq: 1 });
+      await store.advanceSyncCursor(o, "c1", 5);
+      await store.clearMessages(o, "c1");
+      expect(await store.loadSyncCursor(o, "c1")).toBe(5); // 游标是"同步到哪了"，与本地留不留正文无关
+      await store.saveMessage(o, msg("c1", 1)); // 重同步把删掉的那条又推来
+      await store.saveMessage(o, msg("c1", 2)); // 没删过的这条该回来
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([2]);
+      expect(await store.loadDeletedSeqs(o, "c1")).toEqual([1]);
     });
 
     // ---- 连续同步游标 ----
@@ -251,6 +308,13 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.saveIncomingPage(o, [msg("c1", 4), msg("c1", 5)], 0, 4, 0)).toBe(true);
       expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([4, 5]);
       expect(await store.loadSyncCursor(o, "c1")).toBe(0);
+      expect(await store.loadRanges(o, "c1")).toEqual({ ranges: [], head: 0 });
+      // 另一半：上下界都 >0 但**倒过来**。只喂 rangeTo=0 的话，`rangeTo > 0` 那半条件
+      // 独自就挡住了，`rangeTo >= rangeFrom` 删掉照样绿——而它守的是 I1：
+      // 登记一段其实没拿到的区间 → 上层据此跳过补拉 → 那一段永久漏。
+      expect(await store.saveIncomingPage(o, [msg("c1", 6)], 0, 10, 5)).toBe(true);
+      expect(await store.loadRanges(o, "c1")).toEqual({ ranges: [], head: 0 });
+      expect(await store.registerRange(o, "c1", 10, 5)).toEqual([]);
       expect(await store.loadRanges(o, "c1")).toEqual({ ranges: [], head: 0 });
     });
 
@@ -383,11 +447,16 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.searchMessages(o, { convId: "c1", q: "预算", limit: 20 })).toEqual([]);
     });
 
-    it("本地删除（墓碑）的消息不参与命中", async () => {
+    it("本地删除（墓碑）的消息不参与命中——**包括被重同步落回来之后**", async () => {
+      // 删完直接查是**测不出墓碑的**：查不到只是因为消息行本来就被删了。
+      // 墓碑唯一起作用的场景就是"删完之后服务端又推了一遍"，所以这里必须补那一步——
+      // 少了它，实现里漏掉搜索侧的墓碑过滤照样全绿，然后用户删掉的消息会在首页
+      // 「聊天记录」栏重新冒出来（点进去还跳到一条聊天页里根本不显示的消息）。
       const o = newOwner("search4");
       await store.saveMessage(o, msg("c1", 1, { content: "预算A" }));
       await store.saveMessage(o, msg("c1", 2, { content: "预算B" }));
       await store.markMessageDeleted(o, "c1", { convSeq: 1 });
+      await store.saveMessage(o, msg("c1", 1, { content: "预算A" })); // 服务端重同步又落了一遍
       expect((await store.searchMessages(o, { convId: "c1", q: "预算", limit: 20 })).map((r) => r.convSeq))
         .toEqual([2]);
     });
