@@ -73,14 +73,21 @@ export interface Platform {
   /**
    * 发一条系统通知。**返回是否真的发出去了**，调用方据此决定要不要走应用内兜底。
    *
+   * **为什么这两个是异步、而 `deviceId`/`openExternal` 是同步**：那两个有非同步不可的理由
+   * （登录帧同步拼装 / 保住用户手势的调用栈），`notify` 与 `setBadge` 没有——没有任何调用点
+   * 需要在同一个 tick 内拿到结果。而做成同步就得用 `ipcRenderer.sendSync`，它会**阻塞渲染进程**
+   * 等主进程回复；一旦主进程那侧正 `await webContents.executeJavaScript(...)` 等渲染进程
+   * （所有自检模式都这么干），两边互等 → **死锁**。2026-09-08 实测到：D4-2 接上之后
+   * `--e2e` 卡在「会话列表」永不出现，而浏览器版一切正常。
+   *
    * ⚠️ web 侧恒返回 `false`，这**不是退化**——im-web 至今没有任何通知功能
    * （全仓 `new Notification` 为 0 处）。D1 只立接口，实现归 D4；这里返回 false 是如实上报，
    * 不是「暂时坏了」。
    */
-  notify(req: NotifyRequest): boolean;
+  notify(req: NotifyRequest): Promise<boolean>;
 
   /** 设置未读角标（Dock / 任务栏 / 托盘）。返回是否真的设上了；web 恒 false，理由同 `notify`。 */
-  setBadge(count: number): boolean;
+  setBadge(count: number): Promise<boolean>;
 
   /**
    * 订阅「该醒过来看一眼连接」的信号，返回**拆除函数**。
@@ -93,6 +100,29 @@ export interface Platform {
    * 这个坑 2026-08-22 真出过）。
    */
   subscribeWake(onWake: (reason: string) => void): () => void;
+
+  /**
+   * 宿主支不支持「开机自启」这个概念。浏览器恒 false——不是「没做」，是**没有这个概念**，
+   * 设置页据此决定要不要显示那一项（显示一个永远点不动的开关比不显示更糟）。
+   */
+  autoStartSupported(): boolean;
+
+  /** 当前是否开机自启。**读系统的真实状态，不是回显上次设的值**——用户可能在系统设置里手动改过。 */
+  getAutoStart(): boolean;
+
+  /** 设开机自启，返回**设完之后读回来的实际值**。设失败时读回来仍是旧值，调用方据此就知道没设上。 */
+  setAutoStart(on: boolean): boolean;
+
+  /**
+   * 订阅「用户点了系统通知，要打开这个会话」。返回拆除函数。
+   *
+   * 浏览器侧永远不会回调（web 的 `notify` 恒 false，压根没有通知可点），但接口仍存在——
+   * 页面不该写 `if (isDesktop)`，分流在本层。
+   *
+   * 拆除函数必须调：不拆的话换号后旧回调仍挂在 IPC 上，点通知会把已作废的会话打开
+   * （与 `subscribeWake` 那个坑同源，见 sdk/wake.ts 的原注释）。
+   */
+  subscribeOpenConversation(cb: (convId: string) => void): () => void;
 
   /**
    * 本机能不能录出 **iOS 可播** 的语音。

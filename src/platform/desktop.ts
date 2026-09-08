@@ -21,9 +21,14 @@ export interface DesktopBridge {
   openExternal?(url: string): void;
   /** 返回**是否真的发出去了**（见 types.ts 的契约）。系统拒绝通知权限 / 开了勿扰时必须回 false，
    *  否则调用方会以为已通知而跳过应用内兜底，用户什么都看不到。 */
-  notify?(title: string, body: string, convId?: string): boolean;
+  notify?(title: string, body: string, convId?: string): Promise<boolean>;
   /** 同上：真的设上了才回 true。 */
-  setBadge?(count: number): boolean;
+  setBadge?(count: number): Promise<boolean>;
+  autoStartSupported?(): boolean;
+  getAutoStart?(): boolean;
+  /** 返回**设完之后读回来的实际值**，不是回显入参。 */
+  setAutoStart?(on: boolean): boolean;
+  subscribeOpenConversation?(cb: (convId: string) => void): () => void;
   subscribeWake?(onWake: (reason: string) => void): () => void;
   voiceRecording?(): VoiceRecordingSupport;
 }
@@ -64,16 +69,38 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
       bridge.openExternal(url);
     },
 
-    notify(req: NotifyRequest): boolean {
+    async notify(req: NotifyRequest): Promise<boolean> {
       if (!bridge.notify) { fellBack("notify"); return webPlatform.notify(req); }
       // 如实透传桥的结果，**不要无条件 true**（/code-review 抓到）：系统拒了权限或开着勿扰时
       // 谎报成功，调用方就会跳过应用内兜底，用户什么都看不到。
       return bridge.notify(req.title, req.body, req.convId);
     },
 
-    setBadge(count: number): boolean {
+    async setBadge(count: number): Promise<boolean> {
       if (!bridge.setBadge) { fellBack("setBadge"); return webPlatform.setBadge(count); }
       return bridge.setBadge(count);
+    },
+
+    autoStartSupported(): boolean {
+      if (!bridge.autoStartSupported) { fellBack("autoStartSupported"); return webPlatform.autoStartSupported(); }
+      return bridge.autoStartSupported();
+    },
+
+    getAutoStart(): boolean {
+      if (!bridge.getAutoStart) { fellBack("getAutoStart"); return webPlatform.getAutoStart(); }
+      return bridge.getAutoStart();
+    },
+
+    setAutoStart(on: boolean): boolean {
+      if (!bridge.setAutoStart) { fellBack("setAutoStart"); return webPlatform.setAutoStart(on); }
+      return bridge.setAutoStart(on);
+    },
+
+    subscribeOpenConversation(cb: (convId: string) => void): () => void {
+      // 这里**不叠加** web 实现（与 subscribeWake 不同）：web 那份是空的，叠加没有意义，
+      // 叠加反而会让「拆除函数返回了什么」变得不好判断。
+      if (!bridge.subscribeOpenConversation) { fellBack("subscribeOpenConversation"); return () => {}; }
+      return bridge.subscribeOpenConversation(cb);
     },
 
     subscribeWake(onWake: (reason: string) => void): () => void {

@@ -39,6 +39,11 @@ function showWindow(win: BrowserWindow): void {
  * 注意 `win.on("close")` 里**不能**直接 `win.hide()` 就完事：必须 `preventDefault()`，
  * 否则窗口对象会被销毁，下次从托盘点「显示」就没有窗口可显了。
  */
+/** 设托盘 tooltip（未读数就挂在这儿）。托盘还没装时静默忽略——启动早期可能就有未读来了。 */
+export function setTrayTooltip(text: string): void {
+  if (tray && !tray.isDestroyed()) tray.setToolTip(text);
+}
+
 export function installTray(win: BrowserWindow): () => void {
   tray = new Tray(trayIconPath());
   tray.setToolTip("IM Desktop");

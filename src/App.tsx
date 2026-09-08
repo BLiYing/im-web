@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { AppServicesProvider, type AppServices } from "./AppServicesContext";
 import { useGroupActions } from "./useGroupActions";
@@ -9,7 +9,7 @@ import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi"
 import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type PinnedMessage, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
-import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionSpans, countsAsUnread, segmentMentions, segmentMentionsBySpans, MENTION_ALL_LABEL } from "./mention";
+import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionSpans, countsAsUnread } from "./mention";
 import { remarkMap, displayNameOf } from "./remarks";
 import { resolveDetailFollow } from "./detailFollow";
 import { makeNameResolvers } from "./chatNaming";
@@ -29,7 +29,6 @@ import { ContactsTab } from "./components/ContactsTab";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
 import { useEvent } from "./useEvent";
-import { textTier, charCountLabel } from "./longtext";
 import {
   parseDownloadSettings,
 } from "./download";
@@ -38,7 +37,7 @@ import {
   replyPreviewOf,
   parseChatRecord, copyImageToClipboard,
   syntheticViewerMessage, minSeqOf, type ChatRecord,
-  splitTextByURL, SELECT_MAX,
+  SELECT_MAX,
 } from "./messageContent";
 import { Avatar } from "./components/Avatar";
 import { HomeSearchResults } from "./components/HomeSearchResults";
@@ -104,6 +103,9 @@ import { GalleryModal } from "./components/modals/GalleryModal";
 import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import { SYSTEM_UID } from "./sdk/protocol";
 import { unreadBadgeText } from "./unreadBadge";
+import { useDesktopIntegration } from "./useDesktopIntegration";
+import { makeDesktopTitleOf } from "./desktopWiring";
+import { makeMessageTextRenderers } from "./components/messageText";
 import { pauseVoicePlayback } from "./components/VoiceBubble";
 import { unreadBelowCount } from "./unreadBelow";
 import { coversSpan } from "./sdk/ranges";
@@ -114,8 +116,8 @@ import {
   Headphones, 
   Trash2, BellOff, Menu,
   Pin,
-  Search, FileText, MessageCircle, X, Forward,
-  ChevronDown, ChevronUp, QrCode, IdCard, UserPlus } from "lucide-react";
+  Search, MessageCircle, X, Forward,
+  QrCode, IdCard, UserPlus } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
@@ -335,6 +337,8 @@ export default function App() {
   }, [dismissedBanners]);
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
+  // 桌面端集成（角标/通知/自启）。**必须在登录早退之前**（hook 数恒定）；回调经 bindCallbacks 回写。
+  const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current });
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
@@ -700,7 +704,8 @@ export default function App() {
         // 入站落库：本端已删拦截 + 同 conv_seq 去重（命中则合并权威元数据、不新增）见 useMessageStore.ingestInbound。
         // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由 markVisibleRead 读到，看历史时留到滚下去再读。
         // 仅**新追加**才刷会话列表（合并/丢弃不刷）；全量/多页同步连续投递很多条，各自触发的刷新走节流合并。
-        if (ingestInbound(m)) scheduleConversationRefresh();
+        // 只对**真正新追加**的发桌面通知：去重/合并掉的不发，否则同步重推会把历史又通知一遍。
+        if (ingestInbound(m)) { scheduleConversationRefresh(); desktop.notifyInbound(m); }
       },
       // 一页历史到达（上滑/下滑分页的响应，含出错/空页）：解除该会话的分页忙标志。
       // 忙标志此前只靠「渲染集边界移动」复位——页里全是本地已有的（去重后一条没新增）、
@@ -1428,98 +1433,8 @@ export default function App() {
   // 不加会话前缀会让 A 会话 seq-5 与 B 会话 seq-5 撞键、展开态跨会话串号。
   // **优先用 clientMsgId**（本端消息发送中→ack 全程都在，且不随 convSeq 从 0 变 N 而翻转）；
   // 对端消息无 clientMsgId → 退回 seq-N。若两者都无（极少）则空串。
-  const msgTextKey = (m: ChatMessage) => `${m.convId}:${m.clientMsgId ? `c-${m.clientMsgId}` : m.convSeq > 0 ? `seq-${m.convSeq}` : ""}`;
-  const toggleTextExpand = useCallback((key: string) => {
-    setExpandedTexts((prev) => { const nx = new Set(prev); if (nx.has(key)) nx.delete(key); else nx.add(key); return nx; });
-  }, []);
-  // 被 @ 者条目（气泡内 @昵称 高亮 + 点击跳资料）：mentions 是服务端过滤后的 uid，回本地群成员表取昵称；
-  // mention_all 追加「所有人」（uid 空＝仅高亮不可点）。单聊无 mentions，返回空。
-  // 无昵称成员：发送侧回填的 token 就是 `@<uid>`（displayName = nickname || user_id），
-  // 故这里同样回退 uid 才能匹配上——否则 `@1002` 这类既不高亮也点不动（修复用户反馈）。
-  const mentionEntriesFor = (m: ChatMessage): { name: string; uid: string }[] => {
-    const out: { name: string; uid: string }[] = [];
-    if (m.mentionAll) out.push({ name: MENTION_ALL_LABEL, uid: "" });
-    for (const uid of m.mentions ?? []) {
-      out.push({ name: memberNick(m.convId, uid) || uid, uid });
-    }
-    return out;
-  };
-  // 命中词高亮 highlightText 已抽到 ./searchHighlight（纯函数，与首页聊天记录摘要共用）。
-  const highlightSearch = (text: string, keyBase: string): ReactNode =>
-    searchOpen ? highlightText(text, searchQuery, keyBase) : text;
-  // 一段"非提及"文本里的 URL 切成蓝色下划线可点 <a>；无 URL 直接走搜索高亮（原行为）。
-  // 搜索态命中词高亮**不进入** URL 子串（避免 <a> 里嵌 <mark> 的选中/复制怪异）——搜索是临时态，可接受。
-  const renderLinkifiedText = (text: string, keyBase: string): ReactNode => {
-    const parts = splitTextByURL(text);
-    if (parts.length === 1 && parts[0].kind === "t") return highlightSearch(text, keyBase);
-    return parts.map((p, i) => p.kind === "u"
-      ? <a key={`${keyBase}-u${i}`} href={p.text} target="_blank" rel="noopener noreferrer"
-           className="msg-link" onClick={(e) => e.stopPropagation()}>{p.text}</a>
-      : <Fragment key={`${keyBase}-t${i}`}>{highlightSearch(p.text, `${keyBase}-h${i}`)}</Fragment>);
-  };
-  // 把一段文本渲染为高亮 @提及的节点：命中的 `@昵称` token 上色；有 uid 且非多选态时可点 → 跳该成员资料页。
-  // @所有人 无 uid 只高亮不可点。无提及时叠加会话内搜索命中词高亮 + URL 高亮（http(s) → 蓝色下划线可点）。
-  const renderMentionText = (m: ChatMessage, text: string) => {
-    const entries = mentionEntriesFor(m);
-    // **有片段就走片段**（mention_spans，见 PROTOCOL §4.1）：位置由发送方给出，不查任何成员表——
-    // 超级群不下发成员表，老路（拿昵称扫文本）在那里对普通成员必然失效。
-    // 片段与本文对不上（编辑过的老消息 / 脏数据）时 segmentMentionsBySpans 会逐段跳过，
-    // 全跳完就退化成单段普通文本，因此下面仍保留老路作为兜底。
-    const spans = m.mentionSpans ?? [];
-    const bySpan = spans.length > 0 ? segmentMentionsBySpans(text, spans) : null;
-    if (bySpan && bySpan.some((s) => s.mention)) {
-      return bySpan.map((s, i) => {
-        if (!s.mention) return <Fragment key={i}>{renderLinkifiedText(s.text, `sh${i}`)}</Fragment>;
-        if (selectMode || !s.uid) return <span key={i} className="mention-hl">{s.text}</span>;
-        const uid = s.uid;
-        return <span key={i} className="mention-hl mention-tap"
-                     onClick={(e) => { e.stopPropagation(); setTextReader(null); openPeerDetail(uid); }}>{s.text}</span>;
-      });
-    }
-    if (entries.length === 0) return renderLinkifiedText(text, "sh");
-    const uidByName = new Map(entries.map((e) => [e.name, e.uid]));
-    return segmentMentions(text, entries.map((e) => e.name)).map((s, i) => {
-      if (!s.mention) return <Fragment key={i}>{renderLinkifiedText(s.text, `sh${i}`)}</Fragment>;
-      const uid = uidByName.get(s.text.slice(1)); // 去掉 @ 取昵称查 uid
-      if (selectMode || !uid) return <span key={i} className="mention-hl">{s.text}</span>;
-      return <span key={i} className="mention-hl mention-tap"
-                   onClick={(e) => { e.stopPropagation(); setTextReader(null); openPeerDetail(uid); }}>{s.text}</span>;
-    });
-  };
-  // 文本消息内容的三档渲染（阈值见 longtext.ts，与 iOS 统一）：
-  //   short 全显；long 折叠 8 行 + 就地展开；huge 摘要卡 → 全屏阅读器。均对 @昵称 高亮。
-  const renderMessageText = (m: ChatMessage) => {
-    const tier = textTier(m.content);
-    if (tier === "short") return <span className="btext">{renderMentionText(m, m.content)}</span>;
-    // 多选态：整行点击=勾选（见 .row onClick）。此时长文本不接管点击——摘要卡不开阅读器、
-    // 折叠切换也不吞事件，让点击冒泡到行去切换选中（与 iOS `self.selecting` 早返回一致）。
-    if (tier === "huge") {
-      return (
-        <span className="btext longtext-card" onClick={selectMode ? undefined : () => { if (window.getSelection()?.toString()) return; setTextReader(m); setReaderFontStep(0); }} title={selectMode ? undefined : "查看全文"}>
-          <span className="lt-card-head">
-            <span className="lt-card-icon"><FileText size={16} /></span>
-            <span className="lt-card-meta">
-              <span className="lt-card-title">长文本 · {charCountLabel(m.content)}</span>
-              <span className="lt-card-sub">点击查看全文</span>
-            </span>
-          </span>
-          {/* 预览只切前 200 字：卡片仅 3 行可见，全文塞进 DOM 会让每次列表重渲染 diff 数十 KB 文本节点（全文留给阅读器）。 */}
-          <span className="lt-card-preview">{m.content.slice(0, 200)}</span>
-        </span>
-      );
-    }
-    // long：折叠/展开就地切换。
-    const key = msgTextKey(m);
-    const expanded = expandedTexts.has(key);
-    return (
-      <span className="btext">
-        <span className={expanded ? "lt-body" : "lt-body collapsed"}>{renderMentionText(m, m.content)}</span>
-        <span className="lt-toggle" onClick={(e) => { if (selectMode) return; e.stopPropagation(); toggleTextExpand(key); }}>
-          {expanded ? <>收起 <ChevronUp size={13} /></> : <>展开全文 <ChevronDown size={13} /></>}
-        </span>
-      </span>
-    );
-  };
+  // 文本消息的渲染一族（@提及高亮 / URL 可点 / 搜索高亮 / 长文本三档）已整块平移到
+  // components/messageText.tsx；工厂调用在下方 openPeerDetail 之后（它要用那两个回调）。
 
   // 重新拉某会话的置顶集合（G0）。best-effort：拉不到就不显横幅，绝不打断聊天。
   const refreshPinned = useCallback(async (cid: string) => {
@@ -2629,6 +2544,7 @@ export default function App() {
   } = makeNameResolvers({
     remarks, friends, conversations, groupInfos, peerCards, searchResults, profileCards: userProfiles.cards,
   });
+
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。
   const peerConv = conversations.find((c) => c.peer === peer);
   const peerLabel = peerConv ? convLabel(peerConv) : displayNameOf(peer, remarks, peerNick(peer), peerUsername(peer));
@@ -2703,6 +2619,9 @@ export default function App() {
     if (peerId) openChat(peerId);
   };
 
+  // 回写桌面端回调：打开会话直接复用上面的 openConvById（它比另写一份稳，会话不在列表时能还原 peer）。
+  desktop.bindCallbacks({ titleOf: makeDesktopTitleOf(conversations, convDisplayLabel), onOpenConversation: openConvById });
+
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）——convDisplayLabel/convAvatarUrl 已上移至 convLabel 之后（见那里注释）。
   // 收藏来源显示名（副行「来自X」）：本人→我；好友→备注/昵称；群成员→群昵称/昵称；否则 uid（按 UI.md 优先级）。
   const favSourceLabel = (f: Favorite): string => {
@@ -2768,6 +2687,14 @@ export default function App() {
   openPeerDetailRef.current = openPeerDetail; // 供 useQR（早退前调用）在点击时取到早退后定义的函数
 
   // 清空聊天记录（仅本机，对齐 iOS）：清 IndexedDB → 通知聊天区刷新 → 关面板。
+  // 文本渲染一族（原本是本文件里六个互相调用的闭包，见 components/messageText.tsx 顶部）。
+  // 放在这里是因为它要 memberNick 与 openPeerDetail，两者都到上面才声明完。
+  const { renderMentionText, renderMessageText } = makeMessageTextRenderers({
+    memberNick, searchOpen, searchQuery, selectMode, expandedTexts, setExpandedTexts,
+    onOpenReader: (m) => { setTextReader(m); setReaderFontStep(0); },
+    onOpenPeer: (uid) => { setTextReader(null); openPeerDetail(uid); },
+  });
+
   const doClearHistory = (cid: string) => {
     void (async () => {
       if (!(await askConfirm("清空聊天记录？将删除此会话在本机的全部消息，且无法恢复。", { okText: "清空", danger: true }))) return;
@@ -3090,6 +3017,7 @@ export default function App() {
         {generalOpen && (
           <GeneralPanel
             fontSize={fontSize} theme={theme} timeFormat={timeFormat} sendKey={sendKey}
+            autoStart={desktop.autoStart} autoStartSupported={desktop.autoStartSupported} onAutoStart={desktop.setAutoStart}
             onFontSize={setFontSize} onTheme={setTheme} onTimeFormat={setTimeFormat} onSendKey={setSendKey}
             onOpenWallpaper={() => setWallpaperOpen(true)}
             onBack={() => setGeneralOpen(false)}

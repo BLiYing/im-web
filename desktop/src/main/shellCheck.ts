@@ -8,6 +8,8 @@
 import { BrowserWindow } from "electron";
 import { beginQuit, installTray } from "./tray";
 import { readLocalState } from "./identity";
+import { getAutoStart, notify, setBadge } from "./shellCaps";
+import { setTrayTooltip } from "./tray";
 
 /** 轮询到条件成立为止，或超时。**「该发生的事」用它**——成功时立刻返回，不为等待付固定成本。 */
 async function waitUntil(pred: () => boolean, timeoutMs: number): Promise<boolean> {
@@ -60,7 +62,25 @@ export async function runShellCheck(win: BrowserWindow, say: (s: string) => void
     else say("[shell] ✓ 退出闸置上后，关窗真的销毁窗口");
   }
 
-  // ③ 窗口几何应当已被记下（close 时会强制存一次）。
+  // ③ D4-2 的宿主能力：角标 / 通知 / 自启。**都要看真实返回值**——
+  //    这三个的契约是「真的做到了吗」，谎报成功会让页面跳过应用内兜底（/code-review 上一轮的教训）。
+  const badgeOk = setBadge(3, setTrayTooltip);
+  setBadge(0, setTrayTooltip);          // 立刻清掉，别把自检的数字留在 Dock 上
+  if (process.platform === "darwin" && !badgeOk) {
+    fail.push("macOS 上 setBadgeCount 返回 false——Dock 角标没设上");
+  } else {
+    say(`[shell] ✓ 角标 setBadge=${badgeOk}（Windows 无 Dock 角标，false 是正常的）`);
+  }
+
+  // 这一步会真的弹一条系统通知。返回 true 只代表「交给系统了」——用户若在系统设置里
+  // 关了本应用的通知权限，show() 不报错也不显示，Electron 查不到，这条不确定性消不掉。
+  const notifyOk = notify(win.isDestroyed() ? null : win, "IM Desktop 自检", "这是一条自检通知，可忽略", undefined);
+  if (!notifyOk) fail.push("Notification 不可用或 show() 抛了");
+  else say("[shell] ✓ 系统通知已交给系统（会真的弹一条，可忽略；能否显示还取决于系统权限）");
+
+  say(`[shell] · 开机自启当前状态 = ${getAutoStart()}（自检不改它）`);
+
+  // ④ 窗口几何应当已被记下（close 时会强制存一次）。
   const st = readLocalState().windowState as { bounds?: { width?: number } } | undefined;
   if (!st?.bounds?.width) fail.push("窗口状态没落盘——下次启动尺寸会跳回默认");
   else say(`[shell] ✓ 窗口状态已落盘（${st.bounds.width}px 宽）`);

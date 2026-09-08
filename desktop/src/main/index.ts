@@ -3,7 +3,7 @@
 // D2 的验收目标只有一条：**登录 → 会话列表 → 收发一条消息**。所以这里刻意只做窗口与身份，
 // 托盘 / 通知 / 自启 / 单实例锁 / 关闭最小化统统归 D4——那些每加一件都要在两个平台各验一次，
 // 混进 D2 会让「骨架到底通没通」失去判据。
-import { app, BrowserWindow, dialog } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { join } from "node:path";
 import { BRIDGE_CONTRACT, deviceName, rememberedLocalPort, rememberLocalPort, stableDeviceId } from "./identity";
 import { runSmoke } from "./smoke";
@@ -11,7 +11,9 @@ import { runE2E } from "./e2e";
 import { startLocalServer, type LocalServerHandle } from "./localServer";
 import { runPerf } from "./perf";
 import { runShellCheck } from "./shellCheck";
-import { beginQuit, installTray, isQuitting } from "./tray";
+import { checkDistFreshness, freshnessMessage } from "./distFreshness";
+import { beginQuit, installTray, isQuitting, setTrayTooltip } from "./tray";
+import { getAutoStart, notify, setAutoStart, setBadge } from "./shellCaps";
 import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
 
 /** 开发时加载 Vite dev server（吃热更新），打包后加载随包的 dist/。
@@ -91,6 +93,26 @@ function createWindow(): BrowserWindow {
 
 let localServer: LocalServerHandle | null = null;
 
+/**
+ * 桥的 IPC 处理端。
+ *
+ * **`setBadge`/`notify` 走 `handle`（异步），不走 `sendSync`**：sendSync 会阻塞渲染进程等主
+ * 进程回复，而主进程在所有自检模式下都在 `await webContents.executeJavaScript(...)` 等渲染进程
+ * → 互等死锁。2026-09-08 实测到：D4-2 接上后 `--e2e` 卡在「会话列表」永不出现，
+ * 而浏览器版一切正常——因为浏览器里压根没有这条通道。
+ * 开机自启那两个仍用 `on`/sendSync：设置页是用户点出来的，那时主进程没在等渲染进程，且要即时回显。
+ */
+function installBridgeIpc(getWin: () => BrowserWindow | null): void {
+  ipcMain.handle("im:set-badge", (_e, count: unknown) =>
+    setBadge(typeof count === "number" ? count : 0, setTrayTooltip));
+  ipcMain.handle("im:notify", (_e, p: unknown) => {
+    const q = (p ?? {}) as { title?: string; body?: string; convId?: string };
+    return notify(getWin(), String(q.title ?? ""), String(q.body ?? ""), q.convId);
+  });
+  ipcMain.on("im:get-auto-start", (e) => { e.returnValue = getAutoStart(); });
+  ipcMain.on("im:set-auto-start", (e, on: unknown) => { e.returnValue = setAutoStart(on === true); });
+}
+
 /** 启动失败时把话说出来。**没有这个的后果是「窗口永不出现且零报错」**——
  *  show:false + 只在 ready-to-show 才 show()，一旦 whenReady 链里抛了，用户看到的是
  *  「点了图标什么也没发生」。最常见的触发是仓库根没跑 npm run dev（/code-review 抓到）。 */
@@ -106,6 +128,10 @@ function fatal(stage: string, e: unknown): void {
 
 app.whenReady().then(async () => {
   const win = createWindow();
+  // **必须无条件装，且早于页面加载**：页面一渲染就会调 platform().setBadge()，
+  // 而它走的是 ipcRenderer.sendSync——处理端不在，轻则拿到 undefined、重则卡住渲染进程。
+  // 原先只在正常模式装，等于所有自检模式下页面都在对着空通道喊（自检本身反而验不到这条）。
+  installBridgeIpc(() => (win.isDestroyed() ? null : win));
   if (useLocalServer()) {
     try {
       localServer = await startLocalServer(distDir(), backendOrigin(), rememberedLocalPort());
@@ -120,6 +146,16 @@ app.whenReady().then(async () => {
 
   if (smokeMode || e2eMode || perfMode || shellMode) {
     const say = (s: string): void => { process.stdout.write(`${s}\n`); };
+    // **对着旧产物跑出来的绿是假的**。只在「未打包 + 走本地同源层」时判——
+    // dev 模式加载 :5173 是实时源码，打包版的 dist 就是包里那份，都不适用。
+    if (!app.isPackaged && localServer) {
+      const f = checkDistFreshness(distDir(), join(__dirname, "../../..", "src"));
+      if (f.stale) {
+        say(`[stale] ✗ ${freshnessMessage(f)}`);
+        app.exit(7);
+        return;
+      }
+    }
     const code = shellMode ? await runShellCheck(win, say)
       : perfMode ? await runPerf(win, load, say)
       : e2eMode ? await runE2E(win, load, say)

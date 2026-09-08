@@ -69,12 +69,23 @@ export const webPlatform: Platform = {
   },
 
   // im-web 至今没有通知功能（全仓 new Notification 为 0 处）。如实返回 false，不假装做了。
-  notify(_req: NotifyRequest): boolean {
+  async notify(_req: NotifyRequest): Promise<boolean> {
     return false;
   },
 
-  setBadge(_count: number): boolean {
+  async setBadge(_count: number): Promise<boolean> {
     return false;
+  },
+
+  // 浏览器没有「开机自启」这个概念——不是没做，是不适用。设置页据此隐藏那一项。
+  autoStartSupported(): boolean { return false; },
+  getAutoStart(): boolean { return false; },
+  setAutoStart(_on: boolean): boolean { return false; },
+
+  // web 的 notify 恒 false，没有通知可点，所以这个回调永远不会触发。
+  // 仍返回一个可调用的拆除函数，让调用方不必分平台写 cleanup。
+  subscribeOpenConversation(_cb: (convId: string) => void): () => void {
+    return () => {};
   },
 
   subscribeWake(onWake: (reason: string) => void): () => void {

@@ -57,16 +57,31 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     await expect(p.saveFile({ url: "blob:fake", name: "a.zip" })).resolves.toBeUndefined();
   });
 
-  it("notify / setBadge 返回布尔，且如实上报「有没有真的做」", () => {
+  it("notify / setBadge 返回 Promise<boolean>，且如实上报「有没有真的做」", async () => {
     const p = make();
-    expect(typeof p.notify({ title: "t", body: "b" })).toBe("boolean");
-    expect(typeof p.setBadge(3)).toBe("boolean");
+    // **必须是异步**：同步就得用 sendSync，会与「主进程 await 渲染进程」互等死锁（types.ts 有现场记录）。
+    expect(typeof await p.notify({ title: "t", body: "b" })).toBe("boolean");
+    expect(typeof await p.setBadge(3)).toBe("boolean");
   });
 
   it("voiceRecording 返回完整探测形状", () => {
     const p = make();
     const v = p.voiceRecording();
     expect(v).toEqual({ supported: expect.any(Boolean), mime: expect.any(String), ext: expect.any(String) });
+  });
+
+  it("autoStart 三件：supported 为 false 时 get 必须也是 false（不能显示一个点不动的开关）", () => {
+    const p = make();
+    if (!p.autoStartSupported()) expect(p.getAutoStart()).toBe(false);
+    expect(typeof p.setAutoStart(true)).toBe("boolean");
+  });
+
+  it("subscribeOpenConversation 返回可调用的拆除函数（调用方不必分平台写 cleanup）", () => {
+    const p = make();
+    const stop = p.subscribeOpenConversation(() => {});
+    expect(typeof stop).toBe("function");
+    expect(() => stop()).not.toThrow();
+    expect(() => stop()).not.toThrow();   // 重复拆除也不许炸
   });
 
   it("subscribeWake：收得到浏览器 online 信号，拆除后不再回调", () => {
@@ -93,9 +108,9 @@ describe("web 侧特有", () => {
     expect(webPlatform.deviceId()).toBe(first);
   });
 
-  it("notify / setBadge 恒 false —— im-web 至今没有通知功能，如实上报而非假装做了", () => {
-    expect(webPlatform.notify({ title: "t", body: "b" })).toBe(false);
-    expect(webPlatform.setBadge(1)).toBe(false);
+  it("notify / setBadge 恒 false —— im-web 至今没有通知功能，如实上报而非假装做了", async () => {
+    expect(await webPlatform.notify({ title: "t", body: "b" })).toBe(false);
+    expect(await webPlatform.setBadge(1)).toBe(false);
   });
 });
 
@@ -121,23 +136,45 @@ describe("desktop 侧特有", () => {
       ...bareBridge,
       saveFile: async (url, name) => { saved.push(`${url}|${name}`); },
       openExternal: (url) => { opened.push(url); },
-      notify: () => true,
-      setBadge: () => true,
+      notify: async () => true,
+      setBadge: async () => true,
       voiceRecording: () => ({ supported: true, mime: "audio/mp4", ext: ".m4a" }),
     });
     await p.saveFile({ url: "u", name: "n.zip" });
     p.openExternal("https://x/y");
     expect(saved).toEqual(["u|n.zip"]);
     expect(opened).toEqual(["https://x/y"]);
-    expect(p.notify({ title: "t", body: "b" })).toBe(true);
-    expect(p.setBadge(2)).toBe(true);
+    expect(await p.notify({ title: "t", body: "b" })).toBe(true);
+    expect(await p.setBadge(2)).toBe(true);
     expect(p.voiceRecording().supported).toBe(true);
   });
 
-  it("桥说通知没发出去（权限被拒/勿扰）就如实回 false，不许谎报成功", () => {
-    const p = createDesktopPlatform({ ...bareBridge, notify: () => false, setBadge: () => false });
-    expect(p.notify({ title: "t", body: "b" })).toBe(false);   // 谎报 true 会让调用方跳过应用内兜底
-    expect(p.setBadge(3)).toBe(false);
+  it("桥来的 open-conversation 事件要能传到订阅者，拆除后不再传", () => {
+    // 用一个容器持有回调：直接用 let + null 会被 TS 在闭包外窄成 never。
+    const box: { emit: ((id: string) => void) | null } = { emit: null };
+    let stopped = false;
+    const p = createDesktopPlatform({
+      ...bareBridge,
+      subscribeOpenConversation: (cb) => { box.emit = cb; return () => { stopped = true; box.emit = null; }; },
+    });
+    const got: string[] = [];
+    const stop = p.subscribeOpenConversation((id) => got.push(id));
+    box.emit?.("c-42");
+    expect(got).toEqual(["c-42"]);
+    stop();
+    expect(stopped).toBe(true);   // 不拆的话换号后点通知会打开已作废的会话
+  });
+
+  it("setAutoStart 如实透传桥读回来的实际值，不回显入参", () => {
+    // 桥模拟「设不上」：无论传什么，读回来都是 false。
+    const p = createDesktopPlatform({ ...bareBridge, setAutoStart: () => false, getAutoStart: () => false });
+    expect(p.setAutoStart(true)).toBe(false);
+  });
+
+  it("桥说通知没发出去（权限被拒/勿扰）就如实回 false，不许谎报成功", async () => {
+    const p = createDesktopPlatform({ ...bareBridge, notify: async () => false, setBadge: async () => false });
+    expect(await p.notify({ title: "t", body: "b" })).toBe(false);   // 谎报 true 会让调用方跳过应用内兜底
+    expect(await p.setBadge(3)).toBe(false);
   });
 
   it("桥有自己的唤醒源时**叠加**浏览器信号，拆除要两边都拆", () => {

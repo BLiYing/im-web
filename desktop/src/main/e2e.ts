@@ -58,6 +58,14 @@ const OPEN_CONV_JS = `(() => {
 /** 跑一遍验收链路，返回进程退出码（0=通过）。每一步失败都自带「该去看哪儿」。 */
 export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say): Promise<number> {
   const marker = `desktop-e2e ${new Date().toISOString()}`;
+
+  // 渲染进程的报错要转出来。**没有这个的后果是「某一步超时了，但不知道为什么」**——
+  // 页面里一个未捕获异常会让整棵树白屏，而自检看到的只是「元素没出现」，
+  // 两者在输出上长得一模一样（2026-09-08 就为此瞎猜了两轮）。
+  const rendererErrors: string[] = [];
+  win.webContents.on("console-message", (_e, level, message) => {
+    if (level >= 2) rendererErrors.push(message);   // 2=warning, 3=error
+  });
   try {
     await load;
   } catch (e) {
@@ -157,9 +165,44 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
       say("[e2e]   若只是个别 404，那多半是服务端已清理的失效媒体，属正常——本检查已抽到 5 个才判负。");
       return 5;
     }
+
+    // ⑦ D4-2 的桥：页面 → preload → ipcMain → 系统 API 整条打通了吗。
+    //    只验 setBadge（有明确返回值、无可见副作用）；通知不在这里弹，那属 --shell-check。
+    const bridge = (await win.webContents.executeJavaScript(`(async () => {
+      const b = window.imDesktop;
+      if (!b) return { present: false };
+      const set = typeof b.setBadge === 'function' ? await b.setBadge(7) : null;
+      if (typeof b.setBadge === 'function') await b.setBadge(0);   // 立刻清掉，别把 7 留在 Dock 上
+      return { present: true, hasSetBadge: typeof b.setBadge === 'function',
+               hasNotify: typeof b.notify === 'function',
+               hasSubscribe: typeof b.subscribeOpenConversation === 'function',
+               hasAutoStart: typeof b.getAutoStart === 'function', set };
+    })()`)) as { present: boolean; hasSetBadge?: boolean; hasNotify?: boolean;
+                 hasSubscribe?: boolean; hasAutoStart?: boolean; set?: unknown };
+    if (!bridge.present) {
+      say("[e2e] – 桥不在（浏览器模式），跳过 D4-2 桥检查");
+    } else if (!bridge.hasSetBadge || !bridge.hasNotify || !bridge.hasSubscribe
+               || !bridge.hasAutoStart || typeof bridge.set !== "boolean") {
+      say(`[e2e] ✗ D4-2 桥不完整：${JSON.stringify(bridge)}`);
+      say("[e2e]   setBadge 没返回 boolean 通常意味着 ipcMain 处理端没装（invoke 拿不到结果）");
+      return 6;
+    } else {
+      say(`[e2e] ✓ D4-2 桥打通：setBadge/notify/subscribeOpenConversation/autoStart 齐备，setBadge(7)=${bridge.set}`);
+    }
   } catch (e) {
     say(`[e2e] ✗ ${String(e instanceof Error ? e.message : e)}`);
-    say("[e2e]   后端没起或没开 -dev-login？cd ../../IMServer && ./scripts/dev.sh --no-tail");
+    if (rendererErrors.length) {
+      say("[e2e]   渲染进程报了错（多半就是根因，页面白屏与「元素没出现」在输出上一样）：");
+      for (const m of rendererErrors.slice(0, 5)) say(`[e2e]     · ${m}`);
+    } else {
+      say("[e2e]   渲染进程无报错——那更像是后端没起或没开 -dev-login：");
+      say("[e2e]   cd ../../IMServer && ./scripts/dev.sh --no-tail");
+    }
+    try {
+      const body = (await win.webContents.executeJavaScript(
+        `document.body.innerText.slice(0, 200)`)) as string;
+      say(`[e2e]   页面当前文本：${JSON.stringify(body)}`);
+    } catch { /* 页面都取不到文本了，就不追加了 */ }
     return 1;
   }
 

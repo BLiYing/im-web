@@ -3,15 +3,21 @@ import { SubPanel } from "./SubPanel";
 
 /** 通用设置子面板：设置 ▸ 通用设置进入，叠在设置之上。主题已接通真功能，其余先 UI。
  *  纯展示：全部偏好状态与 setter 由 App 注入。 */
-export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, onFontSize, onTheme, onTimeFormat, onSendKey, onOpenWallpaper, onBack }: {
+export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, autoStart, autoStartSupported, onFontSize, onTheme, onTimeFormat, onSendKey, onAutoStart, onOpenWallpaper, onBack }: {
   fontSize: number;
   theme: "light" | "dark" | "system";
   timeFormat: "12" | "24";
   sendKey: "enter" | "cmd";
+  /** 桌面端开机自启的当前状态。**读的是系统真实值**，不是本地偏好（用户可能在系统设置里改过）。 */
+  autoStart: boolean;
+  /** 宿主支不支持这个概念。浏览器恒 false —— 那时整段不渲染，
+   *  显示一个永远点不动的开关比不显示更糟（platform/types.ts 的说明）。 */
+  autoStartSupported: boolean;
   onFontSize: (v: number) => void;
   onTheme: (v: "light" | "dark" | "system") => void;
   onTimeFormat: (v: "12" | "24") => void;
   onSendKey: (v: "enter" | "cmd") => void;
+  onAutoStart: (v: boolean) => void;
   onOpenWallpaper: () => void;
   onBack: () => void;
 }) {
@@ -55,6 +61,22 @@ export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, onFontSize,
             </button>
           ))}
         </div>
+
+        {/* 开机自启：**只在宿主支持时出现**。浏览器版没有这个概念，整段不渲染。 */}
+        {autoStartSupported && (
+          <>
+            <div className="section-label">启动</div>
+            <div className="settings-group">
+              <button type="button" className="radio-row" onClick={() => onAutoStart(!autoStart)}>
+                <span className={`radio-dot${autoStart ? " on" : ""}`} />
+                <span className="radio-text">
+                  <span className="row-label">开机时自动启动</span>
+                  <span className="row-sub">登录系统后在后台启动，收到消息才提示</span>
+                </span>
+              </button>
+            </div>
+          </>
+        )}
     </SubPanel>
   );
 }
