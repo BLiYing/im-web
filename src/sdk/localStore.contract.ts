@@ -17,6 +17,14 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "./protocol";
 import type { LocalStore } from "./localStore.types";
+import { runSearchContract } from "./localStore.contract.search";
+
+/** 拆出去的那部分断言要用的共享件：实现 + 每用例一个新 owner + 消息工厂。 */
+export interface ContractCtx {
+  store: LocalStore;
+  newOwner(tag: string): string;
+  msg(convId: string, convSeq: number, over?: Partial<ChatMessage>): ChatMessage;
+}
 
 /** 跑一遍契约。传进来的实现应当是「可用状态」（已建库/已连上），本函数不负责初始化。 */
 export function runLocalStoreContract(store: LocalStore): void {
@@ -66,6 +74,29 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(got.fromNickname).toBe("王铁柱");
       expect(got.fromRole).toBe("admin");
       expect(got.serverMsgId).toBe("snow-1");
+    });
+
+    it("**整页写**同样走合并：一页稀疏负载不许抹掉已存的昵称/文件名", async () => {
+      // 上一条只走 saveMessage，而稀疏负载真正的来路是 sync_resp 的**整页**与实时帧。
+      // 漏守这条的后果就是那次超级群事故：实时帧先落了昵称，补拉的那一页把它抹成空，
+      // 刷新后整个会话的发件人变「未命名用户」。
+      const o = newOwner("merge-page");
+      await store.saveMessage(o, msg("c1", 1, {
+        fromNickname: "王铁柱", fromRole: "admin", contentType: "file",
+        fileName: "photo.png", fileSize: 7340032, serverMsgId: "snow-1",
+      }));
+      await store.saveIncomingPage(o, [msg("c1", 1, { contentType: "file", fileSize: 0 })], 0, 1, 0);
+      const got = (await store.loadConversation(o, "c1"))[0];
+      expect([got.fromNickname, got.fromRole, got.fileName, got.fileSize, got.serverMsgId])
+        .toEqual(["王铁柱", "admin", "photo.png", 7340032, "snow-1"]);
+    });
+
+    it("**收单条**同样走合并（实时帧那条路）", async () => {
+      const o = newOwner("merge-one");
+      await store.saveMessage(o, msg("c1", 1, { fromNickname: "王铁柱", fileName: "a.png", fileSize: 99 }));
+      await store.saveIncomingMessage(o, msg("c1", 1), true);
+      const got = (await store.loadConversation(o, "c1"))[0];
+      expect([got.fromNickname, got.fileName, got.fileSize]).toEqual(["王铁柱", "a.png", 99]);
     });
 
     it("受保护的**只有那 5 个**字段，其余以最后一次写入为准", async () => {
@@ -398,6 +429,17 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect((await store.loadConversation(o, "c1"))[0].mentionSpans).toBeUndefined();
     });
 
+    it("就地编辑后**检索跟着更新**：搜新词命中、搜旧词不再命中", async () => {
+      // 这是**只可能在 SQLite 侧出现**的一类：web 读时现算命中，而关系实现把命中所需的
+      // 文本冻在写入时的检索列里，编辑却只改了正文 → 搜新词搜不到、搜旧词还在，且不报错。
+      const o = newOwner("op-search");
+      await store.saveMessage(o, msg("c1", 1, { content: "原始的西瓜" }));
+      expect(await store.searchMessages(o, { convId: "c1", q: "西瓜", limit: 20 })).toHaveLength(1);
+      await store.applyMsgOpLocal(o, "c1", 1, { editedAt: 1, content: "改成了菠萝" });
+      expect(await store.searchMessages(o, { convId: "c1", q: "菠萝", limit: 20 })).toHaveLength(1);
+      expect(await store.searchMessages(o, { convId: "c1", q: "西瓜", limit: 20 })).toHaveLength(0);
+    });
+
     it("操作目标不存在时忽略——**不许**凭空新建一行", async () => {
       const o = newOwner("op3");
       await store.applyMsgOpLocal(o, "c1", 7, { recalledAt: 1 });
@@ -411,125 +453,8 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.loadSyncCursor(o, "c1")).toBe(4);
     });
 
-    // ---- 搜索（命中判据是跨端契约）----
-
-    it("会话内：text 正文命中，大小写不敏感，结果新→旧", async () => {
-      const o = newOwner("search");
-      await store.saveMessage(o, msg("c1", 1, { content: "Q3 预算终稿" }));
-      await store.saveMessage(o, msg("c1", 2, { content: "无关内容" }));
-      await store.saveMessage(o, msg("c1", 3, { content: "预算表改好了" }));
-      expect((await store.searchMessages(o, { convId: "c1", q: "预算", limit: 20 })).map((r) => r.convSeq))
-        .toEqual([3, 1]);
-      await store.saveMessage(o, msg("c1", 4, { content: "Hello Budget World" }));
-      expect(await store.searchMessages(o, { convId: "c1", q: "BUDGET", limit: 20 })).toHaveLength(1);
-    });
-
-    it("**两个字的中文必须搜得到**（这条是「不上 FTS5」那个决定的守门人）", async () => {
-      // DESKTOP_DESIGN §7.6.1：FTS5 的 trigram 分词器要 ≥3 字符，「开会」「排期」一律不命中，
-      // 而且是**静默失效**（搜不到 ≠ 报错）。中文搜索绝大多数就是两个字。
-      // 这条红了 = 有人把判据换成了分词匹配，回去读 §7.6.1，别改测试。
-      const o = newOwner("search-cjk");
-      await store.saveMessage(o, msg("c1", 1, { content: "明天下午三点开会" }));
-      expect(await store.searchMessages(o, { convId: "c1", q: "开会", limit: 20 })).toHaveLength(1);
-      expect(await store.searchMessages(o, { convId: "c1", q: "点", limit: 20 })).toHaveLength(1);
-      expect(await store.searchMessages(o, { convId: "c1", q: "下午三点", limit: 20 })).toHaveLength(1);
-    });
-
-    it("大小写不敏感必须覆盖**非 ASCII**（SQL 的 lower() 只认 A-Z，会静默漏）", async () => {
-      // 这条是给 SQLite 实现的。若查询时写成 `WHERE lower(content) LIKE lower(?)`，
-      // SQLite 内建的 lower() **只折叠 ASCII**：`lower('Äpfel')` 原样返回，
-      // 于是「ÄPFEL」搜不到「äpfel」，而且**不报错**——与 FTS5 那个坑同一种静默失效。
-      // 正确做法是落库时用 JS 的 toLowerCase() 算好检索列，判据就与 web 侧逐字相同。
-      const o = newOwner("search-fold");
-      await store.saveMessage(o, msg("c1", 1, { content: "Äpfel und Öl" }));
-      expect(await store.searchMessages(o, { convId: "c1", q: "ÄPFEL", limit: 20 })).toHaveLength(1);
-      expect(await store.searchMessages(o, { convId: "c1", q: "äpfel", limit: 20 })).toHaveLength(1);
-      expect(await store.searchMessages(o, { convId: "c1", q: "öl", limit: 20 })).toHaveLength(1);
-    });
-
-    it("查询词里的 `%` 与 `_` 是**字面量**，不是通配符", async () => {
-      // 同样是给 SQLite 实现的：`LIKE` 的元字符不转义，搜「50%」会变成「50 后面随便什么」，
-      // 搜「a_b」会命中「axb」。web 侧的 `includes` 天然是字面量，所以这个洞只在关系实现里出现。
-      const o = newOwner("search-like");
-      await store.saveMessage(o, msg("c1", 1, { content: "折扣 50%" }));
-      await store.saveMessage(o, msg("c1", 2, { content: "折扣 50 元起" }));
-      await store.saveMessage(o, msg("c1", 3, { content: "变量 a_b" }));
-      await store.saveMessage(o, msg("c1", 4, { content: "变量 axb" }));
-      expect((await store.searchMessages(o, { convId: "c1", q: "50%", limit: 20 })).map((r) => r.convSeq))
-        .toEqual([1]);
-      expect((await store.searchMessages(o, { convId: "c1", q: "a_b", limit: 20 })).map((r) => r.convSeq))
-        .toEqual([3]);
-    });
-
-    it("带标点的文件名照样能搜（FTS5 在这儿会直接报语法错）", async () => {
-      const o = newOwner("search-punct");
-      await store.saveMessage(o, msg("c1", 1, {
-        content: "/uploads/deadbeef.bin", contentType: "file", fileName: "Q3.xlsx",
-      }));
-      expect(await store.searchMessages(o, { convId: "c1", q: "Q3.xlsx", limit: 20 })).toHaveLength(1);
-    });
-
-    it("caption 与 fileName 命中；媒体/文件的 content（URL）**不**参与命中", async () => {
-      // 参与的话，搜索词撞上服务端生成的 URL 片段会命中「看不见文字」的消息。
-      const o = newOwner("search2");
-      await store.saveMessage(o, msg("c1", 1, {
-        content: "/uploads/x.jpg", contentType: "image", caption: "会议室白板预算照片",
-      }));
-      await store.saveMessage(o, msg("c1", 2, {
-        content: "/uploads/deadbeef111.pdf", contentType: "file", fileName: "Q3-预算-终稿.xlsx",
-      }));
-      expect((await store.searchMessages(o, { convId: "c1", q: "预算", limit: 20 })).map((r) => r.convSeq))
-        .toEqual([2, 1]);
-      expect(await store.searchMessages(o, { convId: "c1", q: "deadbeef", limit: 20 })).toEqual([]);
-      expect(await store.searchMessages(o, { convId: "c1", q: "111", limit: 20 })).toEqual([]);
-    });
-
-    it("撤回的消息不参与命中", async () => {
-      const o = newOwner("search3");
-      await store.saveMessage(o, msg("c1", 1, { content: "预算机密" }));
-      await store.applyMsgOpLocal(o, "c1", 1, { recalledAt: 9999, recalledBy: "u-a" });
-      expect(await store.searchMessages(o, { convId: "c1", q: "预算", limit: 20 })).toEqual([]);
-    });
-
-    it("本地删除（墓碑）的消息不参与命中——**包括被重同步落回来之后**", async () => {
-      // 删完直接查是**测不出墓碑的**：查不到只是因为消息行本来就被删了。
-      // 墓碑唯一起作用的场景就是"删完之后服务端又推了一遍"，所以这里必须补那一步——
-      // 少了它，实现里漏掉搜索侧的墓碑过滤照样全绿，然后用户删掉的消息会在首页
-      // 「聊天记录」栏重新冒出来（点进去还跳到一条聊天页里根本不显示的消息）。
-      const o = newOwner("search4");
-      await store.saveMessage(o, msg("c1", 1, { content: "预算A" }));
-      await store.saveMessage(o, msg("c1", 2, { content: "预算B" }));
-      await store.markMessageDeleted(o, "c1", { convSeq: 1 });
-      await store.saveMessage(o, msg("c1", 1, { content: "预算A" })); // 服务端重同步又落了一遍
-      expect((await store.searchMessages(o, { convId: "c1", q: "预算", limit: 20 })).map((r) => r.convSeq))
-        .toEqual([2]);
-    });
-
-    it("limit 截断保留**最新**的那几条", async () => {
-      const o = newOwner("search5");
-      for (let i = 1; i <= 5; i++) await store.saveMessage(o, msg("c1", i, { content: `预算${i}` }));
-      expect((await store.searchMessages(o, { convId: "c1", q: "预算", limit: 2 })).map((r) => r.convSeq))
-        .toEqual([5, 4]);
-    });
-
-    it("全局搜索跨会话命中，并且仍按 owner 隔离", async () => {
-      const o = newOwner("search6"), other = newOwner("search6");
-      await store.saveMessage(o, msg("c1", 1, { content: "预算在 c1" }));
-      await store.saveMessage(o, msg("c2", 1, { content: "预算在 c2" }));
-      await store.saveMessage(o, msg("c2", 2, { content: "无关" }));
-      await store.saveMessage(other, msg("c1", 1, { content: "别人的预算" }));
-      const hits = await store.searchMessages(o, { q: "预算", limit: 20 });
-      expect(hits).toHaveLength(2);
-      expect(new Set(hits.map((r) => r.convId))).toEqual(new Set(["c1", "c2"]));
-    });
-
-    it("空查询 / 纯空白 / limit<=0 一律返回空，不做全表扫", async () => {
-      const o = newOwner("search7");
-      await store.saveMessage(o, msg("c1", 1, { content: "预算" }));
-      expect(await store.searchMessages(o, { convId: "c1", q: "  ", limit: 20 })).toEqual([]);
-      expect(await store.searchMessages(o, { convId: "c1", q: "", limit: 20 })).toEqual([]);
-      expect(await store.searchMessages(o, { convId: "c1", q: "预算", limit: 0 })).toEqual([]);
-    });
+    // ---- 搜索（命中判据是跨端契约）：拆到 localStore.contract.search.ts ----
+    runSearchContract({ store, newOwner, msg });
 
     // ---- 失败只降级，绝不抛 ----
 

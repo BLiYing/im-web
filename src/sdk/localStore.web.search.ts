@@ -77,7 +77,10 @@ export async function searchMessages(owner: string, opts: SearchOptions): Promis
       tx.oncomplete = () => {
         const hits = collected
           .filter((r) => !deleted.has(r.id))
-          .sort((a, b) => (b.timestamp - a.timestamp) || (b.convSeq - a.convSeq))
+          // 第三级 `id` 升序是**必需的**，不是锦上添花：前两级打平时（被拒消息 conv_seq 恒为 0、
+          // 同批落库的时间戳也可能一样），没有最终键就只剩"稳定排序 + 存储顺序"这条**隐式**性质，
+          // 而 SQLite 那侧没有对应物 → 同一个搜索词加 limit 会在两端截出不同的消息。写明它。
+          .sort((a, b) => (b.timestamp - a.timestamp) || (b.convSeq - a.convSeq) || a.id.localeCompare(b.id))
           .slice(0, opts.limit);
         resolve(hits);
       };

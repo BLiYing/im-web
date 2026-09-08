@@ -73,45 +73,7 @@ export function createSchema(db: Database): void {
   db.pragma("foreign_keys = ON");
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
-      id                TEXT PRIMARY KEY,
-      owner             TEXT NOT NULL,
-      conv_id           TEXT NOT NULL,
-      conv_seq          INTEGER NOT NULL,
-      from_uid          TEXT NOT NULL,
-      from_nickname     TEXT,
-      from_role         TEXT,
-      content           TEXT NOT NULL,
-      content_type      TEXT NOT NULL,
-      file_name         TEXT,
-      file_size         INTEGER,
-      caption           TEXT,
-      mentions          TEXT,
-      mention_spans     TEXT,
-      mention_all       INTEGER,
-      sys_segments      TEXT,
-      timestamp         INTEGER NOT NULL,
-      server_msg_id     TEXT,
-      client_msg_id     TEXT,
-      status            TEXT,
-      note              TEXT,
-      recalled_at       INTEGER,
-      recalled_by       TEXT,
-      edited_at         INTEGER,
-      pinned_at         INTEGER,
-      reply_to_conv_seq INTEGER,
-      reply_snapshot    TEXT,
-      reply_to_from     TEXT,
-      forward_from      TEXT,
-      group_id          TEXT,
-      poster_url        TEXT,
-      media_w           INTEGER,
-      media_h           INTEGER,
-      duration          INTEGER,
-      thumb             TEXT,
-      waveform          TEXT,
-      search_content    TEXT NOT NULL DEFAULT '',
-      search_caption    TEXT NOT NULL DEFAULT '',
-      search_file_name  TEXT NOT NULL DEFAULT ''
+      ${MESSAGE_COLUMNS.map(([name, ddl]) => `${name} ${ddl}`).join(",\n      ")}
     );
     CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(owner, conv_id, conv_seq);
     CREATE INDEX IF NOT EXISTS idx_messages_owner ON messages(owner);
@@ -138,6 +100,36 @@ export function createSchema(db: Database): void {
       head    INTEGER NOT NULL DEFAULT 0
     );
   `);
+  migrateColumns(db);
+  db.pragma(`user_version = ${SCHEMA_VERSION}`);
+}
+
+/**
+ * 补齐 `messages` 上缺的列。
+ *
+ * **没有这一步的后果是「加一个字段 → 所有既有安装静默丢掉本地历史」**：
+ * `CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做，而 INSERT 语句列名是从
+ * `MESSAGE_COLUMNS` 派生的——老库少一列，`db.prepare` 当场抛
+ * `table messages has no column named X`，异常冒到 `createSqliteStore` 外面，
+ * 主进程把 store 置成 null，页面**悄悄回落到一个空的 IndexedDB**，只在 stderr 留一行。
+ * 用户看到的是「聊天记录全没了」，而且没有任何报错。
+ * `waveform` 是 2026-09-09 才加的，下一个字段是几周内的事——所以这一步现在就得有。
+ *
+ * 只处理**加列**这一种（本地库是服务端数据的缓存，删列/改类型直接重建更省事）。
+ * 加的列必须可空或带 DEFAULT，否则 SQLite 的 `ALTER TABLE ADD COLUMN` 会拒绝——
+ * 这里显式报出来，别让它变成又一个静默失败。
+ */
+function migrateColumns(db: Database): void {
+  const existing = new Set(
+    (db.pragma("table_info(messages)") as { name: string }[]).map((c) => c.name),
+  );
+  for (const [name, ddl] of MESSAGE_COLUMNS) {
+    if (existing.has(name)) continue;
+    if (/NOT NULL/i.test(ddl) && !/DEFAULT/i.test(ddl)) {
+      throw new Error(`本地库迁移：新列 ${name} 是 NOT NULL 且无 DEFAULT，SQLite 不允许直接 ADD COLUMN`);
+    }
+    db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${ddl.replace(/\s*PRIMARY KEY\s*/i, " ")}`);
+  }
 }
 
 /** SQLite 只认 null，不认 undefined。写入前统一转换。 */
@@ -212,15 +204,59 @@ export function fromRow(row: unknown): MsgRecord {
   };
 }
 
-export const COLUMNS = [
-  "id", "owner", "conv_id", "conv_seq", "from_uid", "from_nickname", "from_role",
-  "content", "content_type", "file_name", "file_size", "caption",
-  "mentions", "mention_spans", "mention_all", "sys_segments", "timestamp",
-  "server_msg_id", "client_msg_id", "status", "note",
-  "recalled_at", "recalled_by", "edited_at", "pinned_at",
-  "reply_to_conv_seq", "reply_snapshot", "reply_to_from", "forward_from",
-  "group_id", "poster_url", "media_w", "media_h", "duration", "thumb", "waveform",
-  "search_content", "search_caption", "search_file_name",
+/**
+ * `messages` 的**单一列定义**：建表、迁移、INSERT 的列清单全从它派生。
+ * 加字段只改这里一处——分散成三处的话，漏一处的表现是上面 `migrateColumns` 注释里那个静默丢数据。
+ */
+const MESSAGE_COLUMNS: readonly (readonly [string, string])[] = [
+  ["id", "TEXT PRIMARY KEY"],
+  ["owner", "TEXT NOT NULL"],
+  ["conv_id", "TEXT NOT NULL"],
+  // **INTEGER 不是 TEXT**：读回按 `ORDER BY conv_seq` 排，落在 TEXT 列上就是字典序，
+  // 第 10 条会排到第 2 条前面（契约里那条用 1/2/10 的用例就是为了在这里报警）。
+  ["conv_seq", "INTEGER NOT NULL"],
+  ["from_uid", "TEXT NOT NULL"],
+  ["from_nickname", "TEXT"],
+  ["from_role", "TEXT"],
+  ["content", "TEXT NOT NULL"],
+  ["content_type", "TEXT NOT NULL"],
+  ["file_name", "TEXT"],
+  ["file_size", "INTEGER"],
+  ["caption", "TEXT"],
+  ["mentions", "TEXT"],
+  ["mention_spans", "TEXT"],
+  ["mention_all", "INTEGER"],
+  ["sys_segments", "TEXT"],
+  ["timestamp", "INTEGER NOT NULL"],
+  ["server_msg_id", "TEXT"],
+  ["client_msg_id", "TEXT"],
+  ["status", "TEXT"],
+  ["note", "TEXT"],
+  ["recalled_at", "INTEGER"],
+  ["recalled_by", "TEXT"],
+  ["edited_at", "INTEGER"],
+  ["pinned_at", "INTEGER"],
+  ["reply_to_conv_seq", "INTEGER"],
+  ["reply_snapshot", "TEXT"],
+  ["reply_to_from", "TEXT"],
+  ["forward_from", "TEXT"],
+  ["group_id", "TEXT"],
+  ["poster_url", "TEXT"],
+  ["media_w", "INTEGER"],
+  ["media_h", "INTEGER"],
+  ["duration", "INTEGER"],
+  ["thumb", "TEXT"],
+  ["waveform", "TEXT"],
+  // 三个小写检索列：判据与 web 的 `toLowerCase().includes()` 逐字相同（理由见 createSchema 上方注释）。
+  ["search_content", "TEXT NOT NULL DEFAULT ''"],
+  ["search_caption", "TEXT NOT NULL DEFAULT ''"],
+  ["search_file_name", "TEXT NOT NULL DEFAULT ''"],
 ] as const;
+
+/** schema 版本。**加列不用动它**（`migrateColumns` 自会补齐）；将来真要改类型/删列时按它分步。 */
+const SCHEMA_VERSION = 1;
+
+/** INSERT 用的列名清单，从上面的单一定义派生。 */
+export const COLUMNS = MESSAGE_COLUMNS.map(([name]) => name);
 
 export type { Row };

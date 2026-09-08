@@ -416,10 +416,20 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       if (!owner || !needle || !opts.limit || opts.limit <= 0) return [];
       return guard("message_search_failed", { conv_id: opts.convId }, [] as MsgRecord[], () => {
         const like = `%${escapeLike(needle)}%`;
+      // 两处 JS 侧隐式做掉、SQL 不会自动做的归一化：
+      // ① 空串 convId 在 web 侧被 `if (opts.convId)` 当成"没给"=全局搜索，
+      //    而 `m.conv_id = ''` 谁也匹配不上 → 静默零结果。
+      // ② `LIMIT 2.5` 在 SQLite 里直接回**零行**（web 的 slice 会当 2 用）——又是搜不到但不报错。
+      const conv = opts.convId || null;
+      const limit = Math.floor(opts.limit);
         // 判据 = 三个小写检索列的子串（落库时用 JS 的 toLowerCase 算好，见 sqliteRows.ts）。
         // **不用 FTS5**：trigram 要 ≥3 字符，「开会」搜不到且静默失效（§7.6.1）。
         // 撤回不参与命中；墓碑走 NOT EXISTS 过滤——漏了它，用户删掉的消息会在搜索里复活。
-        // 排序：时间倒序，同毫秒按 conv_seq 倒序。
+        // 排序：时间倒序，同毫秒按 conv_seq 倒序，**再按记录键升序兜底**。
+        // 最后那一级不是"排得好看"：没有唯一的最终键时，打平的行由存储顺序决定，
+        // 加上 LIMIT 就会**截出与 web 不同的几条消息**——同一个搜索词两端返回不同结果集。
+        // web 侧是稳定排序落在 IndexedDB 主键序上，等价于记录键升序，故这里对齐成 id ASC。
+        // 打平在真实数据里够得着：被拒消息 conv_seq 恒为 0，同批落库的时间戳也可能一样。
         const rows = db.prepare(`
           SELECT m.* FROM messages m
           WHERE m.owner = ?
@@ -429,8 +439,8 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
             AND (m.search_content LIKE @like ESCAPE '\\'
               OR m.search_caption LIKE @like ESCAPE '\\'
               OR m.search_file_name LIKE @like ESCAPE '\\')
-          ORDER BY m.timestamp DESC, m.conv_seq DESC
-          LIMIT @limit`).all(owner, { conv: opts.convId ?? null, like, limit: opts.limit });
+          ORDER BY m.timestamp DESC, m.conv_seq DESC, m.id ASC
+          LIMIT @limit`).all(owner, { conv, like, limit });
         return rows.map(fromRow);
       });
     },
