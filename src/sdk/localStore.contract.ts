@@ -113,6 +113,7 @@ export function runLocalStoreContract(store: LocalStore): void {
         replyToConvSeq: 4, replySnapshot: "上一条", replyToFrom: "u-2", forwardFrom: "u-1",
         groupId: "g-1", posterUrl: "/uploads/p.jpg",
         mediaW: 800, mediaH: 600, duration: 3000, thumb: "data:image/jpeg;base64,AA",
+        waveform: "ChwsPU1e",
       });
       await store.saveMessage(o, full);
       const got = (await store.loadConversation(o, "c1"))[0];
@@ -122,7 +123,7 @@ export function runLocalStoreContract(store: LocalStore): void {
         "mentions", "mentionSpans", "mentionAll", "serverMsgId",
         "recalledAt", "recalledBy", "editedAt", "pinnedAt",
         "replyToConvSeq", "replySnapshot", "replyToFrom", "forwardFrom",
-        "groupId", "posterUrl", "mediaW", "mediaH", "duration", "thumb",
+        "groupId", "posterUrl", "mediaW", "mediaH", "duration", "thumb", "waveform",
       ];
       for (const k of persisted) expect({ [k]: got[k] }).toEqual({ [k]: full[k] });
       expect(got.status).toBe("received");
@@ -168,6 +169,7 @@ export function runLocalStoreContract(store: LocalStore): void {
         replyToConvSeq: 4, replySnapshot: "上一条", replyToFrom: "u-2", forwardFrom: "u-1",
         groupId: "g-1", posterUrl: "/uploads/p.jpg",
         mediaW: 800, mediaH: 600, duration: 3000, thumb: "data:image/jpeg;base64,AA",
+        waveform: "ChwsPU1e",
       });
       await store.saveRejected(o, full);
       const got = (await store.loadConversation(o, "c1"))[0];
@@ -180,7 +182,7 @@ export function runLocalStoreContract(store: LocalStore): void {
         "content", "contentType", "fileName", "fileSize", "caption",
         "mentions", "mentionSpans", "mentionAll",
         "replyToConvSeq", "replySnapshot", "replyToFrom", "forwardFrom",
-        "groupId", "posterUrl", "mediaW", "mediaH", "duration", "thumb",
+        "groupId", "posterUrl", "mediaW", "mediaH", "duration", "thumb", "waveform",
       ];
       for (const k of persisted) expect({ [k]: got[k] }).toEqual({ [k]: full[k] });
     });

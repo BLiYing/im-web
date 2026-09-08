@@ -41,7 +41,7 @@ function messageRecord(owner: string, m: ChatMessage): MsgRow {
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
-    mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration, thumb: m.thumb,
+    mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration, thumb: m.thumb, waveform: m.waveform,
   };
 }
 
@@ -256,7 +256,7 @@ async function loadConversation(owner: string, convId: string): Promise<ChatMess
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
-            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb,
+            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb, waveform: r.waveform,
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
@@ -266,7 +266,7 @@ async function loadConversation(owner: string, convId: string): Promise<ChatMess
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
             replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
-            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb,
+            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb, waveform: r.waveform,
           },
     );
   } catch (error) {

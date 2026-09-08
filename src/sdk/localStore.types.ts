@@ -75,6 +75,11 @@ export interface MsgRecord {
   mediaH?: number;    // 媒体像素高（M4+）
   duration?: number;  // 视频时长毫秒（M4+）：封面左上角角标
   thumb?: string;     // 极小模糊预览 data URI（M4-7）：未下载卡片的磨砂占位。**必须持久化**，否则刷新后门控图退化成中性斜纹底
+  // voice 振幅指纹（base64）：收端不下载音频就能画气泡波形。
+  // **2026-09-09 补**：它是后端下行结构（`protocol.MessageView`）里唯一一个本地没落库的字段——
+  // `parseMessage` 解出来了、落库这一步丢掉，于是刷新后语音气泡的波形退化成等高条纹，
+  // 且 `resend.ts` 重发失败语音时也带不回。空=退化等高条纹（老记录仍是这个样子）。
+  waveform?: string;
 }
 
 /** 「本地有哪几段」目录的一次读取结果（OFFLINE_BACKLOG_DESIGN §4.2）。`head` 是服务端最新位点的最近快照。 */
