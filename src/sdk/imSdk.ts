@@ -63,7 +63,7 @@ export interface MediaSendOptions {
 
 export interface IMClientHandlers {
   onState?: (state: ConnState) => void;
-  onMessage?: (msg: ChatMessage) => void;
+  onMessage?: (msg: ChatMessage, live: boolean) => void;   // live=true 实时 new_msg；false=同步/开窗批量（离线积压、翻页）。**面向用户的提示必须先看这一位**：批量投递是历史，提示它等于把历史重提一遍（桌面端曾因此重连后一次弹几十条通知）
   /** 发送结果：成功时带 server 分配的 convSeq。 */
   onAck?: (clientMsgId: string, ok: boolean, convSeq: number, serverTs?: number) => void;
   /** 对端回执：from 已读/送达到 upToSeq（用于已读双勾）。 */
@@ -1193,7 +1193,7 @@ export class IMClient {
       // 连续消息与游标同事务提交；非连续消息只落消息，游标仍停在空洞前。
       void localStore.saveIncomingMessage(this.uid, msg, isNextContiguous);
     }
-    this.handlers.onMessage?.(msg);
+    this.handlers.onMessage?.(msg, !collect);   // 无 collect = new_msg 实时帧；有 collect = 同步/开窗批量
   }
 
   /** 读取某会话的本地持久化消息（IndexedDB），供 UI 启动时秒载。 */

@@ -35,8 +35,8 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
   const latest = useRef(opts);
   latest.current = opts;
 
-  // ① 未读角标。只在**数字真的变了**时调——setBadge 走同步 IPC（见 desktop 的 installBridgeIpc），
-  //    会阻塞渲染进程，不该每次 conversations 引用变化都打一发。
+  // ① 未读角标。只在**数字真的变了**时调：setBadge 是一次跨进程往返（异步，不阻塞渲染），
+  //    但 conversations 的引用每次刷新都变，不去重就会为同一个数字反复打点。
   const badge = badgeCountOf(opts.conversations);
   const lastBadge = useRef<number | null>(null);
   useEffect(() => {
@@ -45,13 +45,15 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
     void platform().setBadge(badge);   // 异步：不阻塞渲染，理由见 platform/types.ts
   }, [badge]);
 
-  // ② 点系统通知 → 打开会话。**拆除必须做**：不拆的话换号后旧回调仍挂在 IPC 上，
-  //    点通知会把已作废的会话打开（与 sdk/wake.ts 记的那个「不拆就跟着醒」同源）。
+  // ② 点系统通知 → 打开会话。**依赖 selfUid：换号要重装**——旧订阅留着的话，点一条上个账号
+  //    时期的旧通知，convId 在新账号的会话表里找不到，`openConvById` 会回退到「从 conv_id 解析
+  //    peer」，于是给新账号打开一个他未必有的对端会话（/code-review 2026-09-08）。
+  //    这与 sdk/wake.ts 记的「不拆就跟着醒」同源：订阅的生命周期要跟着账号走。
   useEffect(() => {
     return platform().subscribeOpenConversation((convId) => {
       cbRef.current.onOpenConversation(convId);
     });
-  }, []);
+  }, [opts.selfUid]);
 
   const notifyInbound = (m: ChatMessage): void => {
     const o = latest.current;
@@ -70,15 +72,25 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
     void platform().notify({ title: cbRef.current.titleOf(m.convId), body: notifyBodyOf(m), convId: m.convId });
   };
 
-  // 开机自启：**初值读宿主的真实状态**而不是本地偏好——用户可能在系统设置里手动改过，
-  // 回显本地值就会和系统对不上。`setAutoStart` 返回设完读回来的实际值，设失败时开关弹回去。
-  const [autoStart, setAutoStartState] = useState(() => platform().getAutoStart());
+  // 开机自启。**读宿主的真实状态，而且不能只读一次**：用户可能刚去系统设置里手动改过，
+  // 只在挂载时读的话开关会一直停在那一刻的值、与系统不符（/code-review 2026-09-08）。
+  // 故挂载读一次 + **每次窗口重新获得焦点再读一次**——从系统设置切回来正好命中。
+  const [autoStart, setAutoStartState] = useState(false);
+  useEffect(() => {
+    if (!platform().autoStartSupported()) return;
+    let alive = true;
+    const load = (): void => { void platform().getAutoStart().then((v) => { if (alive) setAutoStartState(v); }); };
+    load();
+    window.addEventListener("focus", load);
+    return () => { alive = false; window.removeEventListener("focus", load); };
+  }, []);
 
   return {
     notifyInbound,
     bindCallbacks: (cb) => { cbRef.current = cb; },
     autoStart,
     autoStartSupported: platform().autoStartSupported(),
-    setAutoStart: (on) => setAutoStartState(platform().setAutoStart(on)),
+    // 回填的是**设完读回来的实际值**：设失败（系统不允许）时开关会弹回去，而不是假装设上了。
+    setAutoStart: (on) => { void platform().setAutoStart(on).then(setAutoStartState); },
   };
 }

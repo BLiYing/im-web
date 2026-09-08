@@ -62,6 +62,14 @@ describe("shouldNotify", () => {
     expect(shouldNotify(msg({ from: "me" }), ctx({ muted: true, mentionsMe: true }))).toBe(false);
   });
 
+  it("**群系统消息不通知**——它渲染成居中系统行，且正文会落成「[消息]」，大群里这类事件很密", () => {
+    expect(shouldNotify(msg({ contentType: "system", content: "张三 加入了群聊" }), ctx())).toBe(false);
+  });
+
+  it("已撤回的不通知（同步时可能带着撤回标记过来）", () => {
+    expect(shouldNotify(msg({ recalledAt: Date.now() }), ctx())).toBe(false);
+  });
+
   it("没有 convId 的畸形消息 → 不通知（点了也不知道该开哪个会话）", () => {
     expect(shouldNotify(msg({ convId: "" }), ctx())).toBe(false);
   });

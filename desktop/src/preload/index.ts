@@ -38,10 +38,11 @@ if (contract > 0 && deviceId && deviceName) {
     notify: (title: string, body: string, convId?: string): Promise<boolean> =>
       ipcRenderer.invoke("im:notify", { title, body, convId }) as Promise<boolean>,
     autoStartSupported: (): boolean => process.platform === "darwin" || process.platform === "win32",
-    // 这两个仍同步：设置页开关要立刻反映真实状态，且它们不在消息路径上、调用极少。
-    // 用 sendSync 也安全——设置页是用户点出来的，那时主进程没有在等渲染进程。
-    getAutoStart: (): boolean => ipcRenderer.sendSync("im:get-auto-start") as boolean,
-    setAutoStart: (on: boolean): boolean => ipcRenderer.sendSync("im:set-auto-start", on) as boolean,
+    // 这两个也改 invoke。原先用 sendSync，理由写的是「设置页是用户点出来的，那时主进程没在等
+    // 渲染进程」——**那个理由不成立**：getAutoStart 实际在 React 首次挂载时就被调用（/code-review
+    // 2026-09-08）。挂载那一刻主进程可能正等着页面，同步跨进程调用在那里是自找死锁。
+    getAutoStart: (): Promise<boolean> => ipcRenderer.invoke("im:get-auto-start") as Promise<boolean>,
+    setAutoStart: (on: boolean): Promise<boolean> => ipcRenderer.invoke("im:set-auto-start", on) as Promise<boolean>,
 
     /** 点系统通知后主进程把 convId 递过来。返回拆除函数——页面换号/卸载时必须调，
      *  否则旧回调会攒在 ipcRenderer 上（同 sdk/wake.ts 那个「不拆就跟着醒」的坑）。 */

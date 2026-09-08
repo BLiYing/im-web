@@ -100,7 +100,8 @@ let localServer: LocalServerHandle | null = null;
  * 进程回复，而主进程在所有自检模式下都在 `await webContents.executeJavaScript(...)` 等渲染进程
  * → 互等死锁。2026-09-08 实测到：D4-2 接上后 `--e2e` 卡在「会话列表」永不出现，
  * 而浏览器版一切正常——因为浏览器里压根没有这条通道。
- * 开机自启那两个仍用 `on`/sendSync：设置页是用户点出来的，那时主进程没在等渲染进程，且要即时回显。
+ * **四个都走 `handle`**：开机自启那两个原先用 `on`/sendSync，理由是「设置页是用户点出来的」——
+ * 但 `getAutoStart` 实际在页面挂载时就会被调用，那个理由不成立（/code-review 2026-09-08）。
  */
 function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle("im:set-badge", (_e, count: unknown) =>
@@ -109,8 +110,8 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
     const q = (p ?? {}) as { title?: string; body?: string; convId?: string };
     return notify(getWin(), String(q.title ?? ""), String(q.body ?? ""), q.convId);
   });
-  ipcMain.on("im:get-auto-start", (e) => { e.returnValue = getAutoStart(); });
-  ipcMain.on("im:set-auto-start", (e, on: unknown) => { e.returnValue = setAutoStart(on === true); });
+  ipcMain.handle("im:get-auto-start", () => getAutoStart());
+  ipcMain.handle("im:set-auto-start", (_e, on: unknown) => setAutoStart(on === true));
 }
 
 /** 启动失败时把话说出来。**没有这个的后果是「窗口永不出现且零报错」**——

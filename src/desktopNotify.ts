@@ -46,6 +46,10 @@ export interface NotifyContext {
  */
 export function shouldNotify(msg: ChatMessage, ctx: NotifyContext): boolean {
   if (!msg.convId) return false;
+  // 群系统消息（入群/退群/设管理员…）不通知：它在列表里渲染成居中系统行，本就不是「有人跟你说话」；
+  // 而且它的 content 不是人话，通知正文会落到 default 显示成「[消息]」——大群里这类事件很密。
+  if (msg.contentType === "system") return false;
+  if (msg.recalledAt) return false;   // 已撤回的（同步时可能带着撤回标记过来）
   if (msg.from === ctx.selfUid) return false;                       // 自己发的（含多端抄送）
   if (ctx.windowFocused && msg.convId === ctx.currentConvId) return false; // 正看着这个会话
   if (ctx.windowFocused) return false;                              // 前台：交给应用内的红点/声音

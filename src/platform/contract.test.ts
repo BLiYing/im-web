@@ -70,10 +70,10 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     expect(v).toEqual({ supported: expect.any(Boolean), mime: expect.any(String), ext: expect.any(String) });
   });
 
-  it("autoStart 三件：supported 为 false 时 get 必须也是 false（不能显示一个点不动的开关）", () => {
+  it("autoStart 三件：supported 为 false 时 get 必须也是 false（不能显示一个点不动的开关）", async () => {
     const p = make();
-    if (!p.autoStartSupported()) expect(p.getAutoStart()).toBe(false);
-    expect(typeof p.setAutoStart(true)).toBe("boolean");
+    if (!p.autoStartSupported()) expect(await p.getAutoStart()).toBe(false);
+    expect(typeof await p.setAutoStart(true)).toBe("boolean");
   });
 
   it("subscribeOpenConversation 返回可调用的拆除函数（调用方不必分平台写 cleanup）", () => {
@@ -165,10 +165,10 @@ describe("desktop 侧特有", () => {
     expect(stopped).toBe(true);   // 不拆的话换号后点通知会打开已作废的会话
   });
 
-  it("setAutoStart 如实透传桥读回来的实际值，不回显入参", () => {
+  it("setAutoStart 如实透传桥读回来的实际值，不回显入参", async () => {
     // 桥模拟「设不上」：无论传什么，读回来都是 false。
-    const p = createDesktopPlatform({ ...bareBridge, setAutoStart: () => false, getAutoStart: () => false });
-    expect(p.setAutoStart(true)).toBe(false);
+    const p = createDesktopPlatform({ ...bareBridge, setAutoStart: async () => false, getAutoStart: async () => false });
+    expect(await p.setAutoStart(true)).toBe(false);
   });
 
   it("桥说通知没发出去（权限被拒/勿扰）就如实回 false，不许谎报成功", async () => {

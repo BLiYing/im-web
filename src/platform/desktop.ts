@@ -25,9 +25,9 @@ export interface DesktopBridge {
   /** 同上：真的设上了才回 true。 */
   setBadge?(count: number): Promise<boolean>;
   autoStartSupported?(): boolean;
-  getAutoStart?(): boolean;
+  getAutoStart?(): Promise<boolean>;
   /** 返回**设完之后读回来的实际值**，不是回显入参。 */
-  setAutoStart?(on: boolean): boolean;
+  setAutoStart?(on: boolean): Promise<boolean>;
   subscribeOpenConversation?(cb: (convId: string) => void): () => void;
   subscribeWake?(onWake: (reason: string) => void): () => void;
   voiceRecording?(): VoiceRecordingSupport;
@@ -86,12 +86,12 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
       return bridge.autoStartSupported();
     },
 
-    getAutoStart(): boolean {
+    async getAutoStart(): Promise<boolean> {
       if (!bridge.getAutoStart) { fellBack("getAutoStart"); return webPlatform.getAutoStart(); }
       return bridge.getAutoStart();
     },
 
-    setAutoStart(on: boolean): boolean {
+    async setAutoStart(on: boolean): Promise<boolean> {
       if (!bridge.setAutoStart) { fellBack("setAutoStart"); return webPlatform.setAutoStart(on); }
       return bridge.setAutoStart(on);
     },

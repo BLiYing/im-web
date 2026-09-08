@@ -79,8 +79,8 @@ export const webPlatform: Platform = {
 
   // 浏览器没有「开机自启」这个概念——不是没做，是不适用。设置页据此隐藏那一项。
   autoStartSupported(): boolean { return false; },
-  getAutoStart(): boolean { return false; },
-  setAutoStart(_on: boolean): boolean { return false; },
+  async getAutoStart(): Promise<boolean> { return false; },
+  async setAutoStart(_on: boolean): Promise<boolean> { return false; },
 
   // web 的 notify 恒 false，没有通知可点，所以这个回调永远不会触发。
   // 仍返回一个可调用的拆除函数，让调用方不必分平台写 cleanup。

@@ -700,12 +700,12 @@ export default function App() {
           });
         }
       },
-      onMessage: (m) => {
+      onMessage: (m, live) => {
         // 入站落库：本端已删拦截 + 同 conv_seq 去重（命中则合并权威元数据、不新增）见 useMessageStore.ingestInbound。
         // 可见即读：不在收到时立即标已读；新消息若落在视口内（贴底）会由 markVisibleRead 读到，看历史时留到滚下去再读。
         // 仅**新追加**才刷会话列表（合并/丢弃不刷）；全量/多页同步连续投递很多条，各自触发的刷新走节流合并。
-        // 只对**真正新追加**的发桌面通知：去重/合并掉的不发，否则同步重推会把历史又通知一遍。
-        if (ingestInbound(m)) { scheduleConversationRefresh(); desktop.notifyInbound(m); }
+        // 桌面通知只发**实时且新追加**的：live=false 是同步/开窗的批量投递（离线积压、翻页），弹了等于把历史又通知一遍。
+        if (ingestInbound(m)) { scheduleConversationRefresh(); if (live) desktop.notifyInbound(m); }
       },
       // 一页历史到达（上滑/下滑分页的响应，含出错/空页）：解除该会话的分页忙标志。
       // 忙标志此前只靠「渲染集边界移动」复位——页里全是本地已有的（去重后一条没新增）、

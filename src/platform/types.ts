@@ -107,11 +107,16 @@ export interface Platform {
    */
   autoStartSupported(): boolean;
 
-  /** 当前是否开机自启。**读系统的真实状态，不是回显上次设的值**——用户可能在系统设置里手动改过。 */
-  getAutoStart(): boolean;
+  /**
+   * 当前是否开机自启。**读系统的真实状态，不是回显上次设的值**——用户可能在系统设置里手动改过。
+   *
+   * **异步**：它会在页面挂载时就被调用（不只是打开设置页时），那一刻主进程可能正在等渲染进程，
+   * 同步跨进程调用在那里是自找死锁；且首屏路径上不该插一次同步往返。
+   */
+  getAutoStart(): Promise<boolean>;
 
   /** 设开机自启，返回**设完之后读回来的实际值**。设失败时读回来仍是旧值，调用方据此就知道没设上。 */
-  setAutoStart(on: boolean): boolean;
+  setAutoStart(on: boolean): Promise<boolean>;
 
   /**
    * 订阅「用户点了系统通知，要打开这个会话」。返回拆除函数。
