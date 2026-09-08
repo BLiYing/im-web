@@ -11,6 +11,7 @@
 // **只往 `IM_E2E_CONV`（默认「冒烟测试」）匹配的会话发**，找不到就失败退出——
 // 绝不退化成「挑第一个会话发」，那会把测试消息发进真实会话甚至大群。
 import type { BrowserWindow } from "electron";
+import { getNotifyCount } from "./shellCaps";
 
 const TARGET_CONV = process.env.IM_E2E_CONV || "冒烟测试";
 const STEP_TIMEOUT_MS = 15_000;
@@ -104,6 +105,18 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
     await waitFor(win, `document.querySelector('.msgs')`, "消息列表容器");
     say(`[e2e] ✓ 打开会话「${TARGET_CONV}」`);
 
+    // ③b **批量投递不许产生系统通知**。打开会话会经 `window_resp` 一次投递一整页历史，
+    //     而自检模式窗口不显示（`document.hasFocus()` 为 false），所以「窗口在前台」那道
+    //     排除不生效——修复前这里每条历史都会弹一条通知（离线积压同理，只是更多）。
+    //     这是唯一能观测到「弹没弹」的地方：通知弹出与否，从页面里看不见。
+    const afterOpen = getNotifyCount();
+    if (afterOpen > 0) {
+      say(`[e2e] ✗ 打开会话就弹了 ${afterOpen} 条系统通知——批量投递被当成了实时消息`);
+      say("[e2e]   看 imSdk 的 onMessage(live) 这一位有没有被调用方漏掉（App.tsx 的 onMessage）");
+      return 8;
+    }
+    say("[e2e] ✓ 批量投递（一页历史）未产生系统通知");
+
     // ④ 发一条。marker 带时间戳，重跑不会和上一次的混淆。
     await win.webContents.executeJavaScript(TYPE_JS(marker));
     await win.webContents.executeJavaScript(PRESS_ENTER_JS);
@@ -124,6 +137,14 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
       "服务端确认（发送态消失 + 无失败徽标）",
     );
     say("[e2e] ✓ 服务端已确认（发送态消失，且列表无失败徽标）");
+
+    // 自己发的也不该弹（多端抄送会把它推回来）。到这里累计仍应为 0。
+    const afterSend = getNotifyCount();
+    if (afterSend > 0) {
+      say(`[e2e] ✗ 自己发一条就弹了 ${afterSend} 条通知——shouldNotify 的「自己发的」那道排除没生效`);
+      return 8;
+    }
+    say("[e2e] ✓ 自己发的消息未产生系统通知");
 
     // ⑥ 媒体相对路径。**这是选方案 B 的核心理由，所以必须验，不能只写在文档里**：
     // 消息与头像里存的是 /uploads、/avatars 相对路径（服务端不知道端可达的 host 故不绝对化，

@@ -8,6 +8,11 @@ import { app, BrowserWindow, Notification } from "electron";
 /** 主进程 → 渲染进程的事件通道。preload 那侧同名订阅（见 preload/index.ts）。 */
 export const IPC_OPEN_CONVERSATION = "im:open-conversation";
 
+/** 本进程内一共真的弹了几条通知。**只给自检用**——`--e2e` 靠它断言「批量投递不产生通知」，
+ *  那是没有别的观测手段的：通知弹没弹，从页面里看不见。 */
+let notifyCount = 0;
+export function getNotifyCount(): number { return notifyCount; }
+
 /**
  * 未读角标。
  *
@@ -51,6 +56,7 @@ export function notify(
       if (convId) win.webContents.send(IPC_OPEN_CONVERSATION, convId);
     });
     n.show();
+    notifyCount += 1;
     return true;
   } catch {
     return false;
