@@ -1,0 +1,16 @@
+{
+  // 测试专用：只做类型检查（noEmit），不参与 out/ 产物。
+  //
+  // 与 tsconfig.json 的唯一实质差别是**去掉 rootDir**——`test/` 里的契约测试要 import
+  // im-web 的 `src/sdk/localStore.contract.ts`，而构建那份把 rootDir 钉在 desktop/src，
+  // 跨边界会 TS6059。构建产物仍然只由 tsconfig.json 决定，主进程一行浏览器代码都不会被编进去。
+  // 顺带补 DOM lib：被 import 的那几个 im-web 文件在类型层引用了浏览器类型。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": null,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

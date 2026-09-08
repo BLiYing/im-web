@@ -41,6 +41,12 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     expect(p.deviceName()).toBeTruthy();
   });
 
+  it("localStore()：没有本地库桥时返回 null（两端都回落 IndexedDB）", () => {
+    // 裸桥没有 localStore，web 更没有——两边都该是 null。返回一个"半残的 store"
+    // 比返回 null 危险得多：那会让同一份数据分裂在 SQLite 与 IndexedDB 两处。
+    expect(make().localStore()).toBeNull();
+  });
+
   it("name 与 isDesktop 必须自洽", () => {
     const p = make();
     expect(p.isDesktop).toBe(p.name === "desktop");
@@ -219,5 +225,19 @@ describe("platform() 单一判定点", () => {
     try {
       expect(platform()).toBe(a);   // 桥不会在运行中凭空长出来；前后不一致比慢一点难查得多
     } finally { delete window.imDesktop; }
+  });
+});
+
+describe("桌面本地库的接线（D4-3b）", () => {
+  /** 一座带本地库的桥。方法体不重要——这里验的是"接没接上"，语义由 localStore.desktop.test.ts 跑契约。 */
+  const storeBridge = { call: async () => undefined };
+
+  it("桥带了本地库 → localStore() 给出实现，name 是 desktop-sqlite", () => {
+    const p = createDesktopPlatform({ ...bareBridge, localStore: storeBridge });
+    expect(p.localStore()?.name).toBe("desktop-sqlite");
+  });
+
+  it("桥没有本地库（裸桥）→ null，页面整体回落 IndexedDB", () => {
+    expect(createDesktopPlatform({ ...bareBridge, localStore: { nope: 1 } }).localStore()).toBeNull();
   });
 });

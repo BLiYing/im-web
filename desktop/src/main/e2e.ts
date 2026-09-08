@@ -57,7 +57,13 @@ const OPEN_CONV_JS = `(() => {
 })()`;
 
 /** 跑一遍验收链路，返回进程退出码（0=通过）。每一步失败都自带「该去看哪儿」。 */
-export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say): Promise<number> {
+export async function runE2E(
+  win: BrowserWindow,
+  load: Promise<void>,
+  say: Say,
+  /** 主进程的本地库（D4-3b）。null = 没开起来，⑤ 会失败——理由见那一步的注释。 */
+  store: { name: string; countMessagesWithContent(needle: string): number } | null,
+): Promise<number> {
   const marker = `desktop-e2e ${new Date().toISOString()}`;
 
   // 渲染进程的报错要转出来。**没有这个的后果是「某一步超时了，但不知道为什么」**——
@@ -76,7 +82,17 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
   }
 
   try {
-    // ① 登录。已有会话（localStorage 里留着 token）就直接跳过。
+    // ① 登录。**不能只看"此刻有没有登录页"**——页面刚加载完时两种状态都还没落定，
+    //    而 localStorage 里留着的 token 可能早被服务端吊销了（100101 session revoked），
+    //    那时登录页要等一次失败的 /token/refresh 之后才出现。先判早的那一眼，
+    //    就会得出「已有会话，跳过登录」然后卡死在等会话列表——**而且报错指向的是会话列表，
+    //    根因却在登录**（2026-09-09 实测踩到：查了半天页面白屏，实际是会话被吊销了）。
+    //    正确做法：等两种终态之一真的出现，再决定走哪条路。
+    await waitFor(
+      win,
+      `document.body.innerText.includes('IM Web 登录') || document.querySelectorAll('.convitem').length > 0`,
+      "登录页或会话列表（等页面落定）",
+    );
     const loggedIn = (await win.webContents.executeJavaScript(
       `!document.body.innerText.includes('IM Web 登录')`,
     )) as boolean;
@@ -226,6 +242,30 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
     } catch { /* 页面都取不到文本了，就不追加了 */ }
     return 1;
   }
+
+  // ⑤ **本地库真的是主进程 SQLite 吗**。
+  //    这一步不能省：`platform().localStore()` 返回 null 时页面会**静默回落 IndexedDB**，
+  //    而上面每一步照样全绿——桌面端跑着浏览器那套库，没有任何征兆。这正是本仓反复栽的
+  //    那类 fail-open（§4.6.1~§4.6.4 四条都是同一个形状）。所以查的是**磁盘上那个库里有没有东西**，
+  //    而不是问页面"你用的哪套"——问页面等于让被测者自证。
+  if (!store) {
+    say("[e2e] ✗ 主进程没有本地库实例——页面这会儿跑的是 IndexedDB，D4-3b 等于没接上");
+    return 9;
+  }
+  if (store.name !== "desktop-sqlite") {
+    say(`[e2e] ✗ 本地库实现不对：${store.name}`);
+    return 9;
+  }
+  // 查的是**本轮刚发的那条 marker**，不是总行数：库在 userData 里是持久的，
+  // 数总行数会被上一轮遗留的数据喂饱，把桥整个打断也恒真（头一版就是这么写的，
+  // 变异验证当场抓到——护栏自己 fail-open 比没有护栏更糟）。
+  const rows = store.countMessagesWithContent(marker);
+  if (rows <= 0) {
+    say(`[e2e] ✗ 本轮发的那条消息没进 SQLite（命中 ${rows} 条）——页面回落了 IndexedDB`);
+    say("[e2e]   查 platform().localStore()：桥少了 localStore.call 就会整体回落");
+    return 9;
+  }
+  say(`[e2e] ✓ 本地库是主进程 SQLite：本轮那条 marker 已落库（命中 ${rows} 条）`);
 
   say(`[e2e] ✓ D2 验收链路走通：登录 → 会话列表 → 收发一条消息（marker: ${marker}）`);
   return 0;

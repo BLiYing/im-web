@@ -6,7 +6,7 @@
 // **命中判据是跨端契约**（后端 G4 / iOS / SQLite 实现必须一致），定义与「为什么不上 FTS5」
 // 见 localStore.types.ts 的 `searchMessages`。
 
-import { type MsgRecord, type SearchOptions } from "./localStore.types";
+import { searchableFields, type MsgRecord, type SearchOptions } from "./localStore.types";
 import { openDB, STORE, DELETIONS_STORE } from "./localStore.web.db";
 import { LOG_TAG, logger } from "../logging/logger";
 
@@ -17,12 +17,13 @@ import { LOG_TAG, logger } from "../logging/logger";
  * 撤回消息（`recalledAt`）不参与命中；删除/自删走墓碑在外层过滤。needle 须已 `toLowerCase`。
  */
 function matchesQuery(rec: MsgRecord, needle: string): boolean {
-  if (rec.recalledAt) return false; // 撤回消息不参与命中
-  const isText = !rec.contentType || rec.contentType === "text";
-  if (isText && rec.content && rec.content.toLowerCase().includes(needle)) return true;
-  if (rec.caption && rec.caption.toLowerCase().includes(needle)) return true;
-  // P2：文件名命中（Q3预算.xlsx）。媒体/文件的 content(URL) 仍不参与。
-  return !!rec.fileName && rec.fileName.toLowerCase().includes(needle);
+  if (rec.recalledAt) return false; // 撤回消息不参与命中（**状态**判断，不在 searchableFields 里）
+  // 「哪几段文本参与」的规则是两侧共用的一份（localStore.types.ts），不在这里重写——
+  // SQLite 实现拿同一个函数算落库时的检索列，规则就不可能分叉。
+  const f = searchableFields(rec);
+  return f.content.toLowerCase().includes(needle)
+    || f.caption.toLowerCase().includes(needle)
+    || f.fileName.toLowerCase().includes(needle);
 }
 
 /**

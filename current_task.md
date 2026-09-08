@@ -5,52 +5,44 @@
 
 ## 当前焦点
 
-> **D4-3a ✅ 2026-09-09：`sdk/localStore*.ts` 抽成能力接口 + web 实现逐字平移 + 契约测试**
-> （方案 `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.6；桌面端 D4-3b 要把它换成主进程 SQLite）。
+> **D4-3 收工 ✅ 2026-09-09：本地消息库 = 能力接口 + 双实现**（web=IndexedDB / 桌面=主进程 SQLite）。
+> 方案 `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.6，那里记着落地形态与三条实测结论。
 >
-> 现在是三层，**加方法/改语义前先读 `localStore.types.ts` 的注释**：
->
-> | 文件 | 是什么 |
+> | 层 | 文件 |
 > |---|---|
-> | `localStore.types.ts` | 契约：15 个异步方法 + 记录形状 + 键的形状（纯类型，无运行时依赖） |
-> | `localStore.web.db.ts` | web 地基：连接 / schema / 游标。**新增 object store 现在改这里**（CODING_STYLE §九 那条已跟着改） |
-> | `localStore.web{,.ranges,.search}.ts` | web 实现（原三个文件逐字平移）+ 末尾装配出 `webLocalStore` |
-> | `localStore{,.ranges,.search}.ts` | 门面：19 个同名导出转发给选中的实现；**选实现只在 `pickStore()` 一处** |
-> | `localStore.contract.ts` | 两侧共跑的 39 条断言，**不在 `*.test.ts` 里**——好让 `desktop/` 那个独立工程也能 import |
+> | 契约（15 方法 + 记录形状 + 键形状 + 方法清单） | `sdk/localStore.types.ts` |
+> | web 实现 | `sdk/localStore.web{,.db,.ranges,.search}.ts` |
+> | 桌面代理（转发到桥） | `sdk/localStore.desktop.ts` |
+> | 门面 + **唯一选择点** `pickStore()` | `sdk/localStore{,.ranges,.search}.ts` |
+> | 契约断言（两侧共跑，44 条） | `sdk/localStore.contract.ts` |
+> | 主进程 SQLite | `desktop/src/main/sqlite{Store,Rows}.ts` |
 >
-> **调用点一处没动**（`imSdk.ts`/`App.tsx`/`useChatSearch.ts` 仍是原来的 import），原有 37 条
-> localStore 用例逐字未改仍绿——那就是「行为没变」的证据。地基之所以单拆一层：装配点要 import
-> 区间与搜索、它们又要 import 地基，写在一起就是一圈运行时循环依赖（同 `platform/types.ts` 那个理由）。
+> **同一组断言现在跑三遍**：web(IndexedDB) / 桌面 SQLite（在 `desktop/` 的 vitest 里）/
+> 经回环桥的代理（`structuredClone` 模拟 IPC 序列化，专抓"跨进程那一跳丢了东西"）。
 >
-> **契约里两条是红线守门人**：「两个字的中文必须搜得到」钉住「不上 FTS5」的结论
-> （trigram 要 ≥3 字符，「开会」搜不到且**静默失效**）；「字段整轮往返」钉住 SQLite 逐列建表
-> 最容易漏的那类（少 `groupId` 相册散架、少 `thumb` 门控图退化、少 `mentionSpans` @ 不再高亮）。
+> **三条动手后才知道的事**（细节见 §7.6.4）：
+> ① **主进程引不了 im-web 的运行时代码**（TS6059 + 依赖图会把 protocol/mention/listSearch 拖进来）
+>    → 合并白名单 / 搜索字段规则 / 区间代数在 SQLite 侧各有一份平行实现，已登记进 SYMMETRY，
+>    护栏是共跑的契约 + 桥两侧白名单对齐测试 + `LOCAL_STORE_METHODS` 的编译期穷尽性检查。
+> ② **preload 跑在 sandbox 里，不许 import 相对路径的模块**——头一版引了共享模块，
+>    `npm run e2e` 当场白屏（module not found → 桥没挂上）。现在 preload 一个方法名都不写。
+> ③ **搜索不能用 SQL 的 `lower()`**（只折叠 ASCII，「ÄPFEL」搜不到「äpfel」且不报错，
+>    与 FTS5 同一种静默失效）→ 落库时用 JS 的 `toLowerCase()` 算好三个检索列。`LIKE` 的 `%`/`_` 也必须转义。
 >
-> **按 §九「新增的测试必须先看它红一次」写了个变异验证器**，逐条改坏实现跑契约：8 个变异全被抓。
-> 第 2 个变异当场抓到**契约测试自己的一个洞**——「按 conv_seq 升序」原来用个位数序号，而记录键
-> 是字符串、字典序恰好等于数字序，把 `sort` 删掉照样绿；换成 1/2/10 才真的在守。
+> **验证**：`npm run build` 零错误；`npm test` 108 文件 1100+ 例全绿；`desktop && npm test` 58 例全绿；
+> **`npm run e2e` 全绿**，并新增一步查「本轮那条 marker 真的落进了 SQLite 文件」——
+> 头一版写成「数总行数>0」，被变异验证抓到（库是持久的，上一轮遗留的数据让它恒真，
+> 把桥打断也照样绿）。变异跑批：web 17 个 + SQLite 15 个，全部被抓。
 >
-> **`/code-review` 复查后又修了 8 条**——全在契约层，全是「用例名声称在守、其实没在守」。
-> 最典型的一条：「墓碑消息不参与搜索」原来是删完就查，而查不到只是因为消息行本来就被删了；
-> 墓碑唯一起作用的场景是「删完之后服务端又推了一遍」，补上那一步才真的在守。
-> 变异验证同步扩到 17 个全绿，过程中又发现两条变异**打在了冗余那一层**
-> （`rec.owner === owner` 在 web 侧冗余，真正的强制点是索引键；「倒过来的区间」被守了三遍），
-> 改成打真正的强制点才证明得了断言承重——这两条对 D4-3b 有实义：SQLite 侧那些冗余层可能一层都不存在。
->
-> **顺带修掉一个老账：`waveform` 从来没落过库**。它是后端下行结构里唯一一个本地没持久化的字段，
-> `parseMessage` 解出来了、落库那步丢掉，于是刷新后语音气泡的波形退化成等高条纹，
-> `resend.ts` 重发失败语音也带不回。现已落库并进了契约的往返清单。
->
-> 验证：`npm run build` 零错误；`npm test` **108 文件 1074+ 例全绿**；`check-file-size.sh` 通过。
-> **未做浏览器实测**——纯结构平移 + 一个字段的落库，但按仓规这不等于验过。
+> **未做浏览器/真机手测**：语音波形刷新后还在不在、桌面版换号后旧库会不会串，都要眼睛看。
 
 > 更早的已完成块已移入 [current_task.archive.md](current_task.archive.md)（只读归档）。
 
 ## 下一步
-0. **D4-3b：主进程 SQLite 实现 + 桥**（判据已备好：照 `sdk/localStore.types.ts` 实现一套
-   `LocalStore`，让 `localStore.contract.ts` 那 39 条对它也跑绿，再把 `pickStore()` 改成
-   `desktopLocalStore() ?? webLocalStore`）。三个雷都写在接口注释里：**整页写必须是一次 IPC**、
-   **字段逐列建全**、**`LIKE` 不许换成 FTS5 分词**。既有 IndexedDB 数据**不迁移**（DESKTOP_DESIGN §7.6.3）。
+0. **桌面版手测本地库**（D4-3b 已过 e2e，但有三件要眼睛看的）：① 发一条语音 → 重启应用 →
+   波形还在不在（`waveform` 是这轮才补上落库的）；② 换号后不串库（SQLite 按 owner 隔离，
+   但没在真机上验过两个账号来回切）；③ **首次升级会清空本地缓存**——既有 IndexedDB 数据
+   不迁移是刻意取舍（§7.6.3），表现是「离线冷启动可浏览」断一次、消息从服务端重新同步。
 1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
 2. 语音转文字**结果链路**未在本地验通（本轮实测停在「识别中…」，服务端识别多半没配）——排一次后端 `internal/transcribe` 配置再复测。
 3. 群内已读细化（随主线）。

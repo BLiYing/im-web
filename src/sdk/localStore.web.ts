@@ -14,7 +14,7 @@ import type { ChatMessage, Conversation, MsgOpPatch } from "./protocol";
 import { addRange } from "./ranges";
 import { LOG_TAG, logger } from "../logging/logger";
 import {
-  cursorKeyOf, keyOf, rejectedKeyOf,
+  cursorKeyOf, keyOf, mergeRecords, rejectedKeyOf,
   type DeleteTarget, type LocalStore,
 } from "./localStore.types";
 import {
@@ -42,18 +42,6 @@ function messageRecord(owner: string, m: ChatMessage): MsgRow {
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
     mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration, thumb: m.thumb, waveform: m.waveform,
-  };
-}
-
-function mergedRecord(existing: MsgRow | undefined, rec: MsgRow): MsgRow {
-  return {
-    ...existing,
-    ...rec,
-    fileName: rec.fileName || existing?.fileName,
-    fromNickname: rec.fromNickname || existing?.fromNickname,
-    fromRole: rec.fromRole || existing?.fromRole,
-    fileSize: rec.fileSize !== undefined && rec.fileSize > 0 ? rec.fileSize : existing?.fileSize ?? rec.fileSize,
-    serverMsgId: rec.serverMsgId || existing?.serverMsgId,
   };
 }
 
@@ -87,7 +75,7 @@ async function saveIncomingPage(
       const messageStore = tx.objectStore(STORE);
       for (const rec of recs) {
         const getReq = messageStore.get(rec.id);
-        getReq.onsuccess = () => messageStore.put(mergedRecord(getReq.result as MsgRow | undefined, rec));
+        getReq.onsuccess = () => messageStore.put(mergeRecords(getReq.result as MsgRow | undefined, rec));
       }
       if (advanceTo > 0) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, convId, advanceTo);
       if (rangeTo >= rangeFrom && rangeTo > 0) {
@@ -127,7 +115,7 @@ async function saveIncomingMessage(owner: string, m: ChatMessage, advanceCursor:
       const tx = db.transaction([STORE, CURSOR_STORE], "readwrite");
       const messageStore = tx.objectStore(STORE);
       const getReq = messageStore.get(rec.id);
-      getReq.onsuccess = () => messageStore.put(mergedRecord(getReq.result as MsgRow | undefined, rec));
+      getReq.onsuccess = () => messageStore.put(mergeRecords(getReq.result as MsgRow | undefined, rec));
       if (advanceCursor) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, m.convId, m.convSeq);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -208,7 +196,7 @@ async function put(owner: string, rec: MsgRow): Promise<void> {
         const existing = getReq.result as MsgRow | undefined;
         // 同一服务端消息可能先由 ACK/实时帧落库、后由 sync_resp 再次到达。
         // 后到的稀疏负载不能把已经确认的文件名/字节数覆盖为空或 0。
-        store.put(mergedRecord(existing, rec));
+        store.put(mergeRecords(existing, rec));
       };
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);

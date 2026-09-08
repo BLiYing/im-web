@@ -101,6 +101,53 @@ export interface SearchOptions {
   limit: number;
 }
 
+/**
+ * 稀疏重放的合并规则——**两侧实现共用这一份，别各写各的**。
+ *
+ * 同一条消息可能先由 ACK/实时帧落库、后由 sync_resp 再次到达，后到的那份字段更少。
+ * 下面这 5 个字段**不许被稀疏负载覆盖**（每个都对应过一次真实事故，最贵的是昵称那条：
+ * 超级群资料只下发本人，抹掉后整个会话的发件人变「未命名用户」）；其余字段以最后一次
+ * 写入为准。
+ *
+ * 抽成共用函数不是为了省行数，是因为它**没法靠断言盯住**：白名单里少一个字段、或者
+ * SQLite 侧把它翻译成 SQL 时 `NULLIF`/`COALESCE` 写反，表现都是「刷新后某样东西没了」。
+ * 让两侧跑同一份代码，这类分叉在结构上就不可能发生。
+ */
+export function mergeRecords<T extends MsgRecord>(existing: T | undefined, rec: T): T {
+  return {
+    ...existing,
+    ...rec,
+    fileName: rec.fileName || existing?.fileName,
+    fromNickname: rec.fromNickname || existing?.fromNickname,
+    fromRole: rec.fromRole || existing?.fromRole,
+    fileSize: rec.fileSize !== undefined && rec.fileSize > 0 ? rec.fileSize : existing?.fileSize ?? rec.fileSize,
+    serverMsgId: rec.serverMsgId || existing?.serverMsgId,
+  };
+}
+
+/**
+ * 一条消息里**参与搜索命中的那几段文本**——同样是两侧共用的一份（与后端 G4 / iOS 对齐）。
+ *
+ * 规则：`content` **仅 text 消息**参与；`caption` 与 `fileName` 任意类型都参与。
+ * 媒体/文件的 content 是 URL，**不参与**——否则搜索词撞上服务端生成的 URL 片段，
+ * 会命中一条「看不见文字」的消息。
+ *
+ * web 侧拿它做内存子串比对；SQLite 侧拿它算出落库时的小写检索列（那样 `LIKE` 的判据
+ * 与 JS 的 `toLowerCase().includes()` **逐字相同**——不能直接用 SQL 的 `lower()`，
+ * 它只认 ASCII，`lower('Äpfel')` 原样返回，于是「ÄPFEL」搜不到「äpfel」而且不报错）。
+ * 撤回不参与命中，那是**状态**判断、不在本函数里（见各实现的 WHERE / 过滤）。
+ */
+export function searchableFields(rec: Pick<MsgRecord, "content" | "contentType" | "caption" | "fileName">): {
+  content: string; caption: string; fileName: string;
+} {
+  const isText = !rec.contentType || rec.contentType === "text";
+  return {
+    content: isText ? rec.content ?? "" : "",
+    caption: rec.caption ?? "",
+    fileName: rec.fileName ?? "",
+  };
+}
+
 /** 消息记录键：已确认消息按 (owner, conv, conv_seq) 唯一，重复落库幂等覆盖。 */
 export const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
 
@@ -110,6 +157,35 @@ export const rejectedKeyOf = (owner: string, convId: string, clientMsgId: string
 
 /** 每会话一行的记录键（连续游标、区间目录共用）。 */
 export const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId}`;
+
+/**
+ * `LocalStore` 的全部方法名。**桥的白名单以它为准**（桌面端 D4-3b）。
+ *
+ * 放在契约文件里而不是代理文件里，是因为它得能被 `desktop/` 那个独立工程 import——
+ * 本文件只有 `import type`，跨过去不会带进任何浏览器侧运行时代码（§7.4）。
+ *
+ * 下面那行 `_MethodsAreExhaustive` 是**编译期护栏**：给 `LocalStore` 加了方法却忘了加进
+ * 这份清单，`tsc` 当场报错。没有它的话，漏加的表现是「桌面端那一个方法静默不工作」——
+ * 页面调它 → 主进程白名单不认 → 返回 undefined → 代理按兜底值处理，一路没有报错。
+ */
+export const LOCAL_STORE_METHODS = [
+  "saveMessage", "saveIncomingMessage", "saveIncomingPage", "saveRejected",
+  "applyMsgOpLocal", "markMessageDeleted", "clearMessages", "advanceSyncCursor",
+  "registerRange", "updateRangesHead",
+  "loadConversation", "loadDeletedSeqs", "loadSyncCursor", "loadRanges", "searchMessages",
+] as const;
+
+export type LocalStoreMethod = (typeof LOCAL_STORE_METHODS)[number];
+
+/** 编译期穷尽性检查：`LocalStore` 的方法必须与上面的清单一一对应，多一个少一个都报错。 */
+type _MethodsAreExhaustive =
+  [Exclude<Exclude<keyof LocalStore, "name">, LocalStoreMethod>] extends [never]
+    ? [Exclude<LocalStoreMethod, Exclude<keyof LocalStore, "name">>] extends [never]
+      ? true
+      : { 错误: "清单里有 LocalStore 上不存在的方法" }
+    : { 错误: "LocalStore 新增了方法，但没加进 LOCAL_STORE_METHODS" };
+const _methodsCheck: _MethodsAreExhaustive = true;
+void _methodsCheck;
 
 /**
  * 本地消息库的能力面。**所有方法都异步**——IndexedDB 本来就是异步的，桌面端还要跨进程，

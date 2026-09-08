@@ -14,6 +14,7 @@
 import type { ChatMessage, MsgOpPatch } from "./protocol";
 import type { DeleteTarget, LocalStore } from "./localStore.types";
 import { webLocalStore } from "./localStore.web";
+import { platform } from "../platform";
 
 export type { LocalStore, MsgRecord, DeleteTarget, RangesSnapshot, SearchOptions } from "./localStore.types";
 export { keyOf, cursorKeyOf, rejectedKeyOf } from "./localStore.types";
@@ -23,12 +24,13 @@ export { saveConversations, loadConversations } from "./localStore.web";
 let cached: LocalStore | null = null;
 
 /**
- * 选一次实现。**D4-3a 只有 web 一种**：desktop 的 SQLite 实现（D4-3b）就位后，这里变成
- * `desktopLocalStore() ?? webLocalStore`——桥不可用 / 桥半残一律回落 IndexedDB（它在 Electron
- * 里照样能跑，§7.6.4 的「逐能力回退」）。
+ * 选一次实现。桌面端（D4-3b）走主进程 SQLite，其余一律 IndexedDB。
+ *
+ * **这里不判断"我是不是桌面端"**——那个判断全仓只有 `platform/index.ts` 一处（§7.3 ③）。
+ * 本函数只问平台层"有没有本地库实现"，桥不在、桥半残、跑在浏览器里，答案都是 null。
  */
 function pickStore(): LocalStore {
-  return webLocalStore;
+  return platform().localStore() ?? webLocalStore;
 }
 
 /**

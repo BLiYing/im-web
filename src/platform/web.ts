@@ -92,6 +92,9 @@ export const webPlatform: Platform = {
     return installWakeListeners(onWake);
   },
 
+  /** 浏览器没有别的本地库可选，恒 null → 回落 IndexedDB（那本来就是 web 的实现）。 */
+  localStore: () => null,
+
   voiceRecording(): VoiceRecordingSupport {
     return voiceRecordingSupported();
   },

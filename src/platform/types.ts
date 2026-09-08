@@ -12,6 +12,8 @@
 //
 // **同步 / 异步不是风格问题，是行为**：下面每个同步方法都有非它不可的理由，改签名前先读那条注释。
 
+import type { LocalStore } from "../sdk/localStore.types";
+
 /** `voiceRecordingSupported()` 的探测结果。语义与红线由 `src/voiceRecorder.ts` 拥有，这里只透传。 */
 export interface VoiceRecordingSupport {
   supported: boolean;
@@ -37,9 +39,8 @@ export interface NotifyRequest {
  * 宿主能力面。**只登记真的会按宿主分流的能力**——接口膨胀等于把「一份源码」偷偷拆成两份。
  *
  * 不在本接口里（刻意）：
- * - **本地消息库**（IndexedDB → SQLite）：`src/sdk/localStore*.ts` 是 700+ 行的面，
- *   抽象它不是「逐字平移」而是重构，与 D1「im-web 行为零变化」的验收冲突。**归 D4**，
- *   届时按 DESKTOP_DESIGN §4.5 换 SQLite + FTS5。`SYMMETRY.md` 已就此登记过 localStore*.ts。
+ * - ~~本地消息库~~ **已于 D4-3b 加入**（见下 `localStore()`）。接口本身仍然只有一个方法，
+ *   那 15 个存储方法在 `sdk/localStore.types.ts` 的 `LocalStore` 里，本层只负责"取哪一套"。
  * - **窗口 / 托盘 / 开机自启 / 单实例锁**：没有共享调用方，只有外壳自己用，留在 `desktop/src/main/`。
  *   唯一会被共享代码驱动的是托盘未读角标，那就是 `setBadge`。
  */
@@ -128,6 +129,19 @@ export interface Platform {
    * （与 `subscribeWake` 那个坑同源，见 sdk/wake.ts 的原注释）。
    */
   subscribeOpenConversation(cb: (convId: string) => void): () => void;
+
+  /**
+   * 取本地消息库的宿主实现；**没有就返回 `null`**，由 `sdk/localStore.ts` 回落 IndexedDB。
+   *
+   * 为什么这一项在平台层而不是让 sdk 自己去摸桥：`window.imDesktop` 的唯一调用方必须是
+   * `platform/desktop.ts`（§7.3 ②），而"我是不是桌面端"的判断必须只有一处（§7.3 ③）。
+   * 本方法就是这两条规矩与本地库的交点——sdk 那边只问"有没有"，不问"我在哪"。
+   *
+   * ⚠️ **返回的是整套还是 null，没有中间态**：桥少任何一个存储方法都返回 null。
+   * 逐方法回退在别的能力上是对的（通知没实现就退回浏览器通知），在本地库上是灾难——
+   * 14 个方法写 SQLite、1 个读 IndexedDB，等于同一份数据分裂在两个库里。
+   */
+  localStore(): LocalStore | null;
 
   /**
    * 本机能不能录出 **iOS 可播** 的语音。

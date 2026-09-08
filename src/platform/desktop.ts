@@ -5,6 +5,7 @@
 // 这个逐能力回退不是过渡期的将就，是长期形状——外壳与页面各自发版，桥落后于页面是常态。
 import type { NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
 import { webPlatform } from "./web";
+import { createDesktopLocalStore } from "../sdk/localStore.desktop";
 import { LOG_TAG, logger } from "../logging/logger";
 
 /**
@@ -30,6 +31,9 @@ export interface DesktopBridge {
   setAutoStart?(on: boolean): Promise<boolean>;
   subscribeOpenConversation?(cb: (convId: string) => void): () => void;
   subscribeWake?(onWake: (reason: string) => void): () => void;
+  /** 本地消息库（D4-3b）。类型故意是 unknown：形状校验在 `createDesktopLocalStore` 里做，
+   *  那边少一个方法就整体返回 null。 */
+  localStore?: unknown;
   voiceRecording?(): VoiceRecordingSupport;
 }
 
@@ -110,6 +114,15 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
       if (!bridge.subscribeWake) { fellBack("subscribeWake"); return stopWeb; }
       const stopBridge = bridge.subscribeWake(onWake);
       return () => { stopBridge(); stopWeb(); };
+    },
+
+    localStore() {
+      // 桥没有本地库、或者少了任何一个方法 → null，`sdk/localStore.ts` 回落 IndexedDB
+      // （它在 Electron 里照样能跑）。这是 §7.1 那条「逐能力回退」在本地库上的形态：
+      // 回退的粒度是**整套库**，不是单个方法。
+      const store = createDesktopLocalStore(bridge.localStore);
+      if (!store) fellBack("localStore");
+      return store;
     },
 
     voiceRecording(): VoiceRecordingSupport {

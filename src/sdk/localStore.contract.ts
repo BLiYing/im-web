@@ -129,6 +129,22 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(got.status).toBe("received");
     });
 
+    it("缺省字段读回是 `undefined` 而不是 `null`", async () => {
+      // 关系型实现里 NULL 是天然产物，忘了转就会一路漏成 null。看着无害（都是假值），
+      // 但它会让**整套契约的比对失去意义**——`toEqual` 眼里 null ≠ undefined，
+      // 而上层的 `mentionAll === undefined`、以及任何 JSON 往返都会跟着变。
+      // 上面那条「字段整轮往返」把每个字段都填满了，**照不到这条路**；这里专走空字段。
+      const o = newOwner("nulls");
+      await store.saveMessage(o, msg("c1", 1)); // 只有必填字段
+      const got = (await store.loadConversation(o, "c1"))[0];
+      for (const k of ["fileName", "fileSize", "caption", "mentions", "mentionSpans", "mentionAll",
+        "sysSegments", "fromNickname", "fromRole", "recalledAt", "recalledBy", "editedAt", "pinnedAt",
+        "replyToConvSeq", "replySnapshot", "replyToFrom", "forwardFrom", "groupId", "posterUrl",
+        "mediaW", "mediaH", "duration", "thumb", "waveform"] as (keyof ChatMessage)[]) {
+        expect({ [k]: got[k] }).toEqual({ [k]: undefined });
+      }
+    });
+
     it("系统消息分段落库：不然刷新后系统消息退回「显真实昵称、名字不可点」", async () => {
       const o = newOwner("sys");
       await store.saveMessage(o, msg("c1", 1, {
@@ -417,6 +433,32 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.searchMessages(o, { convId: "c1", q: "开会", limit: 20 })).toHaveLength(1);
       expect(await store.searchMessages(o, { convId: "c1", q: "点", limit: 20 })).toHaveLength(1);
       expect(await store.searchMessages(o, { convId: "c1", q: "下午三点", limit: 20 })).toHaveLength(1);
+    });
+
+    it("大小写不敏感必须覆盖**非 ASCII**（SQL 的 lower() 只认 A-Z，会静默漏）", async () => {
+      // 这条是给 SQLite 实现的。若查询时写成 `WHERE lower(content) LIKE lower(?)`，
+      // SQLite 内建的 lower() **只折叠 ASCII**：`lower('Äpfel')` 原样返回，
+      // 于是「ÄPFEL」搜不到「äpfel」，而且**不报错**——与 FTS5 那个坑同一种静默失效。
+      // 正确做法是落库时用 JS 的 toLowerCase() 算好检索列，判据就与 web 侧逐字相同。
+      const o = newOwner("search-fold");
+      await store.saveMessage(o, msg("c1", 1, { content: "Äpfel und Öl" }));
+      expect(await store.searchMessages(o, { convId: "c1", q: "ÄPFEL", limit: 20 })).toHaveLength(1);
+      expect(await store.searchMessages(o, { convId: "c1", q: "äpfel", limit: 20 })).toHaveLength(1);
+      expect(await store.searchMessages(o, { convId: "c1", q: "öl", limit: 20 })).toHaveLength(1);
+    });
+
+    it("查询词里的 `%` 与 `_` 是**字面量**，不是通配符", async () => {
+      // 同样是给 SQLite 实现的：`LIKE` 的元字符不转义，搜「50%」会变成「50 后面随便什么」，
+      // 搜「a_b」会命中「axb」。web 侧的 `includes` 天然是字面量，所以这个洞只在关系实现里出现。
+      const o = newOwner("search-like");
+      await store.saveMessage(o, msg("c1", 1, { content: "折扣 50%" }));
+      await store.saveMessage(o, msg("c1", 2, { content: "折扣 50 元起" }));
+      await store.saveMessage(o, msg("c1", 3, { content: "变量 a_b" }));
+      await store.saveMessage(o, msg("c1", 4, { content: "变量 axb" }));
+      expect((await store.searchMessages(o, { convId: "c1", q: "50%", limit: 20 })).map((r) => r.convSeq))
+        .toEqual([1]);
+      expect((await store.searchMessages(o, { convId: "c1", q: "a_b", limit: 20 })).map((r) => r.convSeq))
+        .toEqual([3]);
     });
 
     it("带标点的文件名照样能搜（FTS5 在这儿会直接报语法错）", async () => {

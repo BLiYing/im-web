@@ -15,6 +15,8 @@ import { checkDistFreshness, freshnessMessage } from "./distFreshness";
 import { beginQuit, installTray, isQuitting, setTrayTooltip } from "./tray";
 import { getAutoStart, notify, setAutoStart, setBadge } from "./shellCaps";
 import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
+import { createSqliteStore, type SqliteStore } from "./sqliteStore";
+import { IPC_STORE, isStoreMethod } from "../shared/storeIpc";
 
 /** 开发时加载 Vite dev server（吃热更新），打包后加载随包的 dist/。
  *  `IM_DEV_URL` 允许压测/多实例时指向别的端口，与后端 dev.sh 的用法对齐。 */
@@ -92,6 +94,8 @@ function createWindow(): BrowserWindow {
 }
 
 let localServer: LocalServerHandle | null = null;
+/** 本地消息库（D4-3b）。打不开时保持 null，渲染侧会整体回落 IndexedDB。 */
+let store: SqliteStore | null = null;
 
 /**
  * 桥的 IPC 处理端。
@@ -114,6 +118,34 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle("im:set-auto-start", (_e, on: unknown) => setAutoStart(on === true));
 }
 
+/**
+ * 本地消息库通道（D4-3b）：渲染进程的 15 个方法都从这一发 invoke 进来。
+ *
+ * **必须走白名单**（`isStoreMethod`），不能直接 `store[method]`——那等于把渲染进程的任意
+ * 属性访问转发给主进程对象，`close` 之类不该暴露的东西也就跟着能调了。
+ *
+ * **绝不把异常抛回渲染进程**：契约那条「失败只降级不抛」在跨进程之后更要紧——
+ * ipcRenderer.invoke 的 reject 会变成页面里的 unhandled rejection，而持久化只是增强，
+ * 不该让收发主流程跟着断。实现内部已经逐个 guard 过，这里是最后一道。
+ */
+function installStoreIpc(getStore: () => SqliteStore | null): void {
+  ipcMain.handle(IPC_STORE, async (_e, payload: unknown) => {
+    const p = (payload ?? {}) as { method?: unknown; args?: unknown };
+    const store = getStore();
+    if (!store || !isStoreMethod(p.method)) {
+      process.stderr.write(`[im-desktop] store 通道拒绝：method=${String(p.method)} store=${!!store}\n`);
+      return undefined;
+    }
+    const args = Array.isArray(p.args) ? p.args : [];
+    try {
+      return await (store[p.method] as (...a: unknown[]) => Promise<unknown>)(...args);
+    } catch (e) {
+      process.stderr.write(`[im-desktop] store ${p.method} 抛了：${e instanceof Error ? e.message : String(e)}\n`);
+      return undefined;
+    }
+  });
+}
+
 /** 启动失败时把话说出来。**没有这个的后果是「窗口永不出现且零报错」**——
  *  show:false + 只在 ready-to-show 才 show()，一旦 whenReady 链里抛了，用户看到的是
  *  「点了图标什么也没发生」。最常见的触发是仓库根没跑 npm run dev（/code-review 抓到）。 */
@@ -133,6 +165,17 @@ app.whenReady().then(async () => {
   // 而它走的是 ipcRenderer.sendSync——处理端不在，轻则拿到 undefined、重则卡住渲染进程。
   // 原先只在正常模式装，等于所有自检模式下页面都在对着空通道喊（自检本身反而验不到这条）。
   installBridgeIpc(() => (win.isDestroyed() ? null : win));
+  // 本地库落 userData（跟着用户配置走，卸载重装前一直是同一份）。
+  // **既有 IndexedDB 数据不迁移**（§7.6.3 的取舍）：换过去等于本地缓存清空一次、
+  // 消息从服务端重新同步——不丢数据，但「离线冷启动可浏览」会断一次。
+  // 打不开就让 store 保持 null，通道会拒绝、渲染侧整体回落 IndexedDB（它在 Electron 里照样能跑）。
+  try {
+    store = createSqliteStore(join(app.getPath("userData"), "messages.db"));
+  } catch (e) {
+    process.stderr.write(`[im-desktop] 本地库打不开，回落 IndexedDB：${e instanceof Error ? e.message : String(e)}\n`);
+    store = null;
+  }
+  installStoreIpc(() => store);
   if (useLocalServer()) {
     try {
       localServer = await startLocalServer(distDir(), backendOrigin(), rememberedLocalPort());
@@ -159,7 +202,7 @@ app.whenReady().then(async () => {
     }
     const code = shellMode ? await runShellCheck(win, say)
       : perfMode ? await runPerf(win, load, say)
-      : e2eMode ? await runE2E(win, load, say)
+      : e2eMode ? await runE2E(win, load, say, store)
       : await runSmoke(win, target, load);
     // **必须 app.exit(code)，不能 `process.exitCode = code` + app.quit()**：后者实测退出码恒为 0
     // （2026-09-07 打包版自检明明报红却 exit 0）。门禁 fail-open 比没有门禁更糟——
@@ -191,7 +234,7 @@ app.whenReady().then(async () => {
 // 原注释说它能防端口/fd 累积，那是不对的——真正回收靠的是进程退出，且 smoke/e2e/perf 走
 // `app.exit()` 压根不触发 will-quit）。D4 若加「关闭=最小化到托盘」而需要在不退进程的前提下
 // 重建服务，这里必须改成记下活连接并逐个 destroy。
-app.on("will-quit", () => { localServer?.close(); localServer = null; });
+app.on("will-quit", () => { localServer?.close(); localServer = null; store?.close(); store = null; });
 
 // 装了托盘之后，关窗只是 hide，窗口不会被销毁，所以 window-all-closed 正常情况下压根不触发。
 // 只有「托盘 → 退出」那条路才会走到这里（那时 quitting 已置上）。保留这个兜底是为了
