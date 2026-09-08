@@ -5,30 +5,40 @@
 
 ## 当前焦点
 
-> **`/code-review` 修完 6 条 ✅ 2026-09-08（D4-2 之后）**。其中一条是我这轮埋的最严重的：
+> **D4-3a ✅ 2026-09-09：`sdk/localStore*.ts` 抽成能力接口 + web 实现逐字平移 + 契约测试**
+> （方案 `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.6；桌面端 D4-3b 要把它换成主进程 SQLite）。
 >
-> ① **离线积压同步会一次弹几十条通知**。`onMessage` 不区分「实时」与「同步/开窗批量投递」——
-> `imSdk` 的 `processIncoming` 只有一个 `onMessage` 调用点，`SYNC_RESP`/`WINDOW_RESP` 同样逐条回调。
-> **讽刺的是我在 App 那句注释里写了「只对真正新追加的发，否则同步重推会把历史又通知一遍」**，
-> 以为 `ingestInbound` 的去重挡住了——去重挡的是「本地已有」，而离线积压对本地就是全新的，一条挡不住。
-> **这是「我以为我处理了」，比没处理更糟。** 修法：`onMessage` 加 `live` 位（`!collect`），
-> 只对 `live` 的发通知。`imSdk` 那行注释写明「**凡面向用户的提示必须先看这一位**」。
-> ② 群系统消息（入群/退群/设管理员）也会通知，正文落成「[消息]」——已排除 system 与 recalled，
-> 补 2 例测试并变异验红。
-> ③④⑤⑥ 四条都是**注释声称的事实与代码不符**（这几轮我反复在骂它，自己还是留了四处）：
-> `setBadge` 注释说同步阻塞而代码已异步；`getAutoStart` 的 sendSync 理由是「设置页点出来才调」，
-> 实际在 React 挂载时就调（已改 invoke）；`subscribeOpenConversation` 说换号会拆而 effect 是
-> `[]` 依赖（已改 `[selfUid]`，否则点旧通知会给新账号开一个他未必有的会话）；
-> `autoStart` prop 说「读系统真实值」而只在挂载读一次（已改：挂载 + **回前台**各读一次）。
+> 现在是三层，**加方法/改语义前先读 `localStore.types.ts` 的注释**：
 >
-> **顺带撞到两次体量闸门**：`App.tsx` 与 `imSdk.ts` 都恰好顶在棘轮上，加一行注释就红。
-> 没放宽阈值——把注释压进同一行解决。
+> | 文件 | 是什么 |
+> |---|---|
+> | `localStore.types.ts` | 契约：15 个异步方法 + 记录形状 + 键的形状（纯类型，无运行时依赖） |
+> | `localStore.web.db.ts` | web 地基：连接 / schema / 游标。**新增 object store 现在改这里**（CODING_STYLE §九 那条已跟着改） |
+> | `localStore.web{,.ranges,.search}.ts` | web 实现（原三个文件逐字平移）+ 末尾装配出 `webLocalStore` |
+> | `localStore{,.ranges,.search}.ts` | 门面：19 个同名导出转发给选中的实现；**选实现只在 `pickStore()` 一处** |
+> | `localStore.contract.ts` | 两侧共跑的 39 条断言，**不在 `*.test.ts` 里**——好让 `desktop/` 那个独立工程也能 import |
 >
-> 验证：build 零错误 + **1032 例全绿**；打包版四项自检 exit 0。
+> **调用点一处没动**（`imSdk.ts`/`App.tsx`/`useChatSearch.ts` 仍是原来的 import），原有 37 条
+> localStore 用例逐字未改仍绿——那就是「行为没变」的证据。地基之所以单拆一层：装配点要 import
+> 区间与搜索、它们又要 import 地基，写在一起就是一圈运行时循环依赖（同 `platform/types.ts` 那个理由）。
+>
+> **契约里两条是红线守门人**：「两个字的中文必须搜得到」钉住「不上 FTS5」的结论
+> （trigram 要 ≥3 字符，「开会」搜不到且**静默失效**）；「字段整轮往返」钉住 SQLite 逐列建表
+> 最容易漏的那类（少 `groupId` 相册散架、少 `thumb` 门控图退化、少 `mentionSpans` @ 不再高亮）。
+>
+> **按 §九「新增的测试必须先看它红一次」写了个变异验证器**，逐条改坏实现跑契约：8 个变异全被抓。
+> 第 2 个变异当场抓到**契约测试自己的一个洞**——「按 conv_seq 升序」原来用个位数序号，而记录键
+> 是字符串、字典序恰好等于数字序，把 `sort` 删掉照样绿；换成 1/2/10 才真的在守。
+>
+> 验证：`npm run build` 零错误；`npm test` **108 文件 1071 例全绿**；`check-file-size.sh` 通过。
 
 > 更早的已完成块已移入 [current_task.archive.md](current_task.archive.md)（只读归档）。
 
 ## 下一步
+0. **D4-3b：主进程 SQLite 实现 + 桥**（判据已备好：照 `sdk/localStore.types.ts` 实现一套
+   `LocalStore`，让 `localStore.contract.ts` 那 39 条对它也跑绿，再把 `pickStore()` 改成
+   `desktopLocalStore() ?? webLocalStore`）。三个雷都写在接口注释里：**整页写必须是一次 IPC**、
+   **字段逐列建全**、**`LIKE` 不许换成 FTS5 分词**。既有 IndexedDB 数据**不迁移**（DESKTOP_DESIGN §7.6.3）。
 1. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。
 2. 语音转文字**结果链路**未在本地验通（本轮实测停在「识别中…」，服务端识别多半没配）——排一次后端 `internal/transcribe` 配置再复测。
 3. 群内已读细化（随主线）。
