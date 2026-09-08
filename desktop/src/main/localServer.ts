@@ -52,6 +52,14 @@ export interface LocalServerHandle {
   close(): void;
 }
 
+/** 去掉尾部分隔符。`normalize()` 会保留它，而穿越守卫比的是 `root + sep`——
+ *  root 带尾斜杠时前缀就成了 `//`，于是**每一个静态文件都 403**。根目录 `/` 本身要留住。 */
+function stripTrailingSep(p: string): string {
+  let out = p;
+  while (out.length > 1 && out.endsWith(sep)) out = out.slice(0, -1);
+  return out;
+}
+
 function isProxied(pathname: string): boolean {
   return PROXY_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
@@ -111,7 +119,12 @@ function serveStatic(pathname: string, root: string, res: ServerResponse): void 
     file = join(root, "index.html");
   }
   res.writeHead(200, { "content-type": MIME[extname(file).toLowerCase()] ?? "application/octet-stream" });
-  createReadStream(file).pipe(res);
+  const stream = createReadStream(file);
+  // **必须挂 error**（/code-review 抓到）：statSync 与真正开文件之间有窗口（重新打包 / dist 被重写 /
+  // 权限问题），流上未处理的 error 事件在 Electron 主进程里会抛成 uncaughtException，直接带走整个应用。
+  // 响应头已经发出去了，补不了状态码，只能掐掉这条连接让页面自己重试。
+  stream.on("error", () => { res.destroy(); });
+  stream.pipe(res);
 }
 
 /**
@@ -128,7 +141,10 @@ export function startLocalServer(
   preferredPort = 0,
 ): Promise<LocalServerHandle> {
   const backend = new URL(backendOrigin);
-  const rootNorm = normalize(root);
+  // 去掉尾部分隔符再比：normalize() 会保留它，而穿越守卫用的是 `root + sep`——
+  // root 带尾斜杠时前缀会变成 `//`，于是**每一个静态文件都 403**（/code-review 指出的潜伏坑；
+  // 当前 distDir() 用 join() 不会带尾斜杠，但 dist 路径一旦改成可配置就会踩上）。
+  const rootNorm = stripTrailingSep(normalize(root));
 
   const server: Server = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;

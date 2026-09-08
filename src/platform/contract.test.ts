@@ -121,8 +121,8 @@ describe("desktop 侧特有", () => {
       ...bareBridge,
       saveFile: async (url, name) => { saved.push(`${url}|${name}`); },
       openExternal: (url) => { opened.push(url); },
-      notify: () => {},
-      setBadge: () => {},
+      notify: () => true,
+      setBadge: () => true,
       voiceRecording: () => ({ supported: true, mime: "audio/mp4", ext: ".m4a" }),
     });
     await p.saveFile({ url: "u", name: "n.zip" });
@@ -132,6 +132,12 @@ describe("desktop 侧特有", () => {
     expect(p.notify({ title: "t", body: "b" })).toBe(true);
     expect(p.setBadge(2)).toBe(true);
     expect(p.voiceRecording().supported).toBe(true);
+  });
+
+  it("桥说通知没发出去（权限被拒/勿扰）就如实回 false，不许谎报成功", () => {
+    const p = createDesktopPlatform({ ...bareBridge, notify: () => false, setBadge: () => false });
+    expect(p.notify({ title: "t", body: "b" })).toBe(false);   // 谎报 true 会让调用方跳过应用内兜底
+    expect(p.setBadge(3)).toBe(false);
   });
 
   it("桥有自己的唤醒源时**叠加**浏览器信号，拆除要两边都拆", () => {

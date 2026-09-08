@@ -55,9 +55,15 @@ export async function runPerf(win: BrowserWindow, load: Promise<void>, say: (s: 
     if (Date.now() > deadline) break;
     await wait(120);
   }
-  say(tUsable > 0
-    ? `[perf] 冷启动 · 会话列表可见        ${tUsable} ms`
-    : `[perf] 冷启动 · 会话列表可见        未出现（未登录？perf 模式不自动登录）`);
+  if (tUsable < 0) {
+    // **不能继续往下量**（/code-review 抓到）：会话列表没出来说明停在登录页，
+    // 这时采到的内存是一个登录页的内存——本次 D3 就先量错了三轮（323 MB 而非 486 MB），
+    // 而当时它照样 return 0，人和 CI 都会把它当有效数据。
+    say("[perf] ✗ 会话列表未出现——多半停在登录页，此时的内存不代表应用空载。");
+    say("[perf]   perf 模式不自动登录：先跑一次 `npm run e2e` 建立会话，再跑 perf。");
+    return 4;
+  }
+  say(`[perf] 冷启动 · 会话列表可见        ${tUsable} ms`);
 
   say(`[perf] 静置 ${IDLE_MS / 1000}s 后采样 ${SAMPLES} 次…`);
   await wait(IDLE_MS);

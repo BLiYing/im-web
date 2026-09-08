@@ -3,7 +3,7 @@
 // D2 的验收目标只有一条：**登录 → 会话列表 → 收发一条消息**。所以这里刻意只做窗口与身份，
 // 托盘 / 通知 / 自启 / 单实例锁 / 关闭最小化统统归 D4——那些每加一件都要在两个平台各验一次，
 // 混进 D2 会让「骨架到底通没通」失去判据。
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import { join } from "node:path";
 import { BRIDGE_CONTRACT, deviceName, rememberedLocalPort, rememberLocalPort, stableDeviceId } from "./identity";
 import { runSmoke } from "./smoke";
@@ -68,11 +68,29 @@ function createWindow(): BrowserWindow {
 
 let localServer: LocalServerHandle | null = null;
 
+/** 启动失败时把话说出来。**没有这个的后果是「窗口永不出现且零报错」**——
+ *  show:false + 只在 ready-to-show 才 show()，一旦 whenReady 链里抛了，用户看到的是
+ *  「点了图标什么也没发生」。最常见的触发是仓库根没跑 npm run dev（/code-review 抓到）。 */
+function fatal(stage: string, e: unknown): void {
+  const msg = e instanceof Error ? e.message : String(e);
+  process.stderr.write(`[im-desktop] 启动失败（${stage}）：${msg}\n`);
+  if (!app.isPackaged && msg.includes("ERR_CONNECTION_REFUSED")) {
+    process.stderr.write("[im-desktop]   dev 模式要先在仓库根跑 `npm run dev`（Vite :5173）\n");
+  }
+  dialog.showErrorBox("IM Desktop 启动失败", `${stage}：${msg}`);
+  app.exit(1);
+}
+
 app.whenReady().then(async () => {
   const win = createWindow();
   if (useLocalServer()) {
-    localServer = await startLocalServer(distDir(), backendOrigin(), rememberedLocalPort());
-    rememberLocalPort(localServer.port);   // 下次复用同一个端口 → origin 稳定 → localStorage 不丢
+    try {
+      localServer = await startLocalServer(distDir(), backendOrigin(), rememberedLocalPort());
+      rememberLocalPort(localServer.port);   // 下次复用同一个端口 → origin 稳定 → localStorage 不丢
+    } catch (e) {
+      fatal("起本地同源层", e);
+      return;
+    }
   }
   const target = localServer ? localServer.url : DEV_URL;
   const load = win.loadURL(target);
@@ -88,7 +106,12 @@ app.whenReady().then(async () => {
     app.exit(code);
     return;
   }
-  await load;
+  try {
+    await load;
+  } catch (e) {
+    fatal("加载页面", e);
+    return;
+  }
 
   app.on("activate", () => {
     // macOS：Dock 图标被点、且没有窗口时重开一个（系统惯例，不是可选项）。
@@ -97,7 +120,11 @@ app.whenReady().then(async () => {
   });
 });
 
-// 本地服务是常驻资源，进程退出必须关掉——否则测试里反复起停会攒住端口与 fd。
+// 本地服务是常驻资源，退出前停掉。
+// ⚠️ **`server.close()` 只停止接新连接，拆不掉已建立的 WS 长连接**（/code-review 指出：
+// 原注释说它能防端口/fd 累积，那是不对的——真正回收靠的是进程退出，且 smoke/e2e/perf 走
+// `app.exit()` 压根不触发 will-quit）。D4 若加「关闭=最小化到托盘」而需要在不退进程的前提下
+// 重建服务，这里必须改成记下活连接并逐个 destroy。
 app.on("will-quit", () => { localServer?.close(); localServer = null; });
 
 app.on("window-all-closed", () => {

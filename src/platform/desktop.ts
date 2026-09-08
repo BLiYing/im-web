@@ -19,8 +19,11 @@ export interface DesktopBridge {
   readonly deviceName: string;
   saveFile?(url: string, name: string): Promise<void>;
   openExternal?(url: string): void;
-  notify?(title: string, body: string, convId?: string): void;
-  setBadge?(count: number): void;
+  /** 返回**是否真的发出去了**（见 types.ts 的契约）。系统拒绝通知权限 / 开了勿扰时必须回 false，
+   *  否则调用方会以为已通知而跳过应用内兜底，用户什么都看不到。 */
+  notify?(title: string, body: string, convId?: string): boolean;
+  /** 同上：真的设上了才回 true。 */
+  setBadge?(count: number): boolean;
   subscribeWake?(onWake: (reason: string) => void): () => void;
   voiceRecording?(): VoiceRecordingSupport;
 }
@@ -63,14 +66,14 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
 
     notify(req: NotifyRequest): boolean {
       if (!bridge.notify) { fellBack("notify"); return webPlatform.notify(req); }
-      bridge.notify(req.title, req.body, req.convId);
-      return true;
+      // 如实透传桥的结果，**不要无条件 true**（/code-review 抓到）：系统拒了权限或开着勿扰时
+      // 谎报成功，调用方就会跳过应用内兜底，用户什么都看不到。
+      return bridge.notify(req.title, req.body, req.convId);
     },
 
     setBadge(count: number): boolean {
       if (!bridge.setBadge) { fellBack("setBadge"); return webPlatform.setBadge(count); }
-      bridge.setBadge(count);
-      return true;
+      return bridge.setBadge(count);
     },
 
     subscribeWake(onWake: (reason: string) => void): () => void {

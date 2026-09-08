@@ -102,14 +102,20 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
     await waitFor(win, `document.querySelector('.msgs').innerText.includes(${JSON.stringify(marker)})`, "消息上屏");
     say("[e2e] ✓ 发出并上屏");
 
-    // ⑤ 上屏 ≠ 服务端收下了：本地会先乐观渲染一条「发送中」。等发送态消失才算真的走完一圈。
+    // ⑤ 上屏 ≠ 服务端收下了：本地会先乐观渲染一条「发送中」。
+    //
+    // ⚠️ **只等「发送中」消失是不够的**（/code-review 抓到）：发送**失败**的消息同样不含
+    // 「发送中」——MessageList 里 `status==="sending"` 才渲染「发送中…」，失败态换成 `.fail-badge`
+    // 红❗。于是后端一挂，门禁会对一条根本没发出去的消息打 ✓ 并 exit 0。
+    // 所以三条一起断言：marker 在场、没有发送中、**且列表里没有失败徽标**。
     await waitFor(
       win,
       `document.querySelector('.msgs').innerText.includes(${JSON.stringify(marker)})
-       && !document.querySelector('.msgs').innerHTML.includes('发送中')`,
-      "服务端确认（发送态消失）",
+       && !document.querySelector('.msgs').innerHTML.includes('发送中')
+       && document.querySelectorAll('.msgs .fail-badge').length === 0`,
+      "服务端确认（发送态消失 + 无失败徽标）",
     );
-    say("[e2e] ✓ 服务端已确认（发送态消失）");
+    say("[e2e] ✓ 服务端已确认（发送态消失，且列表无失败徽标）");
 
     // ⑥ 媒体相对路径。**这是选方案 B 的核心理由，所以必须验，不能只写在文档里**：
     // 消息与头像里存的是 /uploads、/avatars 相对路径（服务端不知道端可达的 host 故不绝对化，
@@ -123,21 +129,32 @@ export async function runE2E(win: BrowserWindow, load: Promise<void>, say: Say):
         .map((e) => e.name)
         .filter((n) => /\\/(uploads|avatars)\\//.test(n));
       if (!hits.length) return { total: 0 };
-      const url = hits[0];
-      try {
-        const r = await fetch(url, { cache: 'no-store' });  // 绕开 HTTP 缓存：前几轮成功加载过的图会替坏掉的代理背书
-        return { total: hits.length, url, status: r.status, type: r.headers.get('content-type') || '' };
-      } catch (e) {
-        return { total: hits.length, url, status: 0, type: 'FETCH FAILED: ' + e.message };
+      // **不能只抽一个**（/code-review 抓到）：本工程有完整的「媒体失效」机制，服务端会清理
+      // uploads，失效媒体是**正常状态**不是 bug。只抽 hits[0] 碰上一个已清理的就误报 exit 5，
+      // 还把人往「代理前缀漏了一条」的错方向带。改成抽最多 5 个，**任一为 image/* 即算代理通**。
+      const tried = [];
+      for (const url of hits.slice(0, 5)) {
+        try {
+          const r = await fetch(url, { cache: 'no-store' });  // 绕开 HTTP 缓存：前几轮成功加载过的图会替坏掉的代理背书
+          const type = r.headers.get('content-type') || '';
+          tried.push({ url, status: r.status, type });
+          if (r.status === 200 && type.startsWith('image/')) {
+            return { total: hits.length, ok: true, url, status: r.status, type, tried: tried.length };
+          }
+        } catch (e) {
+          tried.push({ url, status: 0, type: 'FETCH FAILED: ' + e.message });
+        }
       }
-    })()`)) as { total: number; url?: string; status?: number; type?: string };
+      return { total: hits.length, ok: false, tried: tried.length, ...tried[tried.length - 1] };
+    })()`)) as { total: number; ok?: boolean; url?: string; status?: number; type?: string; tried?: number };
     if (media.total === 0) {
       say("[e2e] – 相对路径媒体：本轮一次都没请求过，跳过（不算失败，但也没验到）");
-    } else if (media.status === 200 && (media.type ?? "").startsWith("image/")) {
-      say(`[e2e] ✓ 相对路径媒体可达：${media.total} 个请求，抽验 ${media.url} → ${media.status} ${media.type}`);
+    } else if (media.ok) {
+      say(`[e2e] ✓ 相对路径媒体可达：${media.total} 个请求，抽验第 ${media.tried} 个命中 ${media.url} → ${media.status} ${media.type}`);
     } else {
-      say(`[e2e] ✗ 相对路径媒体拿到的不是图片：${media.url} → ${media.status} ${media.type}`);
-      say("[e2e]   同源层的代理前缀漏了一条——去和仓库根 vite.config.ts 的 proxy 逐条对");
+      say(`[e2e] ✗ 抽验的 ${media.tried} 个相对路径媒体没有一个是图片，最后一个：${media.url} → ${media.status} ${media.type}`);
+      say("[e2e]   若全是 404，先看同源层的代理前缀是否漏了一条（和仓库根 vite.config.ts 的 proxy 逐条对）；");
+      say("[e2e]   若只是个别 404，那多半是服务端已清理的失效媒体，属正常——本检查已抽到 5 个才判负。");
       return 5;
     }
   } catch (e) {
