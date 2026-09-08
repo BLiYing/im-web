@@ -1,542 +1,81 @@
-// 本地消息持久化（IndexedDB）。对齐 iOS 的 IMDatabase：消息按会话落库，刷新/重连后从本地秒载，
-// 后台仅从独立连续游标增量追平。按 owner（本人 uid）隔离，避免同一浏览器多账号串库。
-// 失败记录 IM.STORE warn，但持久化是增强，绝不阻断收发主流程。
+// 本地消息库的**门面 + 唯一选择点**（D4-3a，DESKTOP_DESIGN §7.6）。
+//
+// 全仓所有落库/读盘都从这里走。谁在底下（浏览器 = IndexedDB，桌面 = 主进程 SQLite）
+// 只在本文件的 `pickStore()` 里决定一次——**别在业务代码里问「我是不是桌面端」**
+// （与 `src/platform/index.ts` 同一条规矩，见 DESKTOP_DESIGN §7.3 ③）。
+//
+// 为什么保留这一层同名函数、而不是让调用方写 `activeLocalStore().loadConversation(...)`：
+// 20 多个调用点（`imSdk.ts` 的命名空间 import、App.tsx、useChatSearch）本来就是这个形状，
+// 换实现不该顺带改它们——**这一层的价值就是让 D4-3b 只改 `pickStore()` 一处**。
+//
+// 契约（每个方法的语义、不变量、踩过的坑）在 localStore.types.ts；
+// web 实现在 localStore.web*.ts；两套实现共跑的断言在 localStore.contract.test.ts。
 
-import type { ChatMessage, Conversation, SysSegment } from "./protocol";
-import { addRange, type SeqRange } from "./ranges";
-import type { MentionSpan } from "../mention";
-import { LOG_TAG, logger } from "../logging/logger";
+import type { ChatMessage, MsgOpPatch } from "./protocol";
+import type { DeleteTarget, LocalStore } from "./localStore.types";
+import { webLocalStore } from "./localStore.web";
 
-const DB_NAME = "im-web";
-// v4：修「曾中途升到 v3 但 deletions store 没建成」的坏库（HMR 半态/失败升级）——版本不变时 onupgradeneeded 不再触发，
-// 缺的 store 永远补不上；bump 一版强制走一次 onupgradeneeded（`if(!contains)` 幂等，只补缺的、不动已有数据）。
-// v5：新增 ranges store（离线积压的「本地有哪几段」目录，见 OFFLINE_BACKLOG_DESIGN §4.2）。
-const DB_VERSION = 5;
-export const STORE = "messages";
-const CURSOR_STORE = "sync_cursors";
-export const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
-export const RANGES_STORE = "conv_ranges";  // 「本地有哪几段」目录：一个会话一行，值是归一化后的区间数组
+export type { LocalStore, MsgRecord, DeleteTarget, RangesSnapshot, SearchOptions } from "./localStore.types";
+export { keyOf, cursorKeyOf, rejectedKeyOf } from "./localStore.types";
+// 会话列表缓存（localStorage，同步）刻意不在能力接口里，理由见 localStore.types.ts 顶部。
+export { saveConversations, loadConversations } from "./localStore.web";
+
+let cached: LocalStore | null = null;
 
 /**
- * IndexedDB object store 的**单一来源清单**。新增一个 store 只需在此加一项 + bump `DB_VERSION`：
- * `onupgradeneeded` 建表、`EXPECTED_STORES` 校验、陈旧连接自愈都从它派生——杜绝「加 store 要四处同改、
- * 漏一处 → 升级过的老库事务抛 `NotFoundError`、悄悄空列表」的历史坑（见 CODING_STYLE §九）。
- * 所有 store 主键均为 `id`（复合键字符串，见各 *Record 的 id 字段）。
+ * 选一次实现。**D4-3a 只有 web 一种**：desktop 的 SQLite 实现（D4-3b）就位后，这里变成
+ * `desktopLocalStore() ?? webLocalStore`——桥不可用 / 桥半残一律回落 IndexedDB（它在 Electron
+ * 里照样能跑，§7.6.4 的「逐能力回退」）。
  */
-interface StoreDef {
-  name: string;
-  keyPath: string;
-  indexes?: { name: string; keyPath: string; unique?: boolean }[];
-}
-const STORE_DEFS: StoreDef[] = [
-  { name: STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
-  { name: CURSOR_STORE, keyPath: "id" },
-  { name: DELETIONS_STORE, keyPath: "id", indexes: [{ name: "ownerConv", keyPath: "ownerConv" }] },
-  { name: RANGES_STORE, keyPath: "id" },
-];
-
-export interface MsgRecord {
-  id: string;        // 已确认：owner|convId|convSeq；被拒(convSeq=0)：owner|convId|c:clientMsgId —— 唯一键，幂等覆盖
-  ownerConv: string; // owner|convId —— 索引：按会话批量取
-  owner: string;
-  convId: string;
-  convSeq: number;
-  from: string;
-  // 发送者昵称/角色快照（服务端随群消息冗余下发）。**必须持久化**：
-  // 普通群里丢了还能从群成员表兜底，看不出来；超级群资料只下发"我自己"（语义降级⑤），
-  // 兜底失效——刷新后整个会话的发件人全部显示「未命名用户」（2026-09-01 大群联测实锤）。
-  fromNickname?: string;
-  fromRole?: string;
-  content: string;
-  contentType: string;
-  fileName?: string;
-  fileSize?: number;
-  caption?: string; // 图文/视频文/文件文随附文本（Telegram 图说模型）：仅 image/video/file 有
-  mentions?: string[]; // M4-8 被 @ 成员 uid：刷新后 caption/正文 @ 高亮可点 + 转发重发（强提醒）都靠它
-  mentionSpans?: MentionSpan[]; // @ token 的位置（UTF-16 偏移）：不落库的话刷新后大群里的 @ 又会退回不高亮
-  mentionAll?: boolean; // @所有人
-  // 系统消息分段：必须落库，否则刷新后系统消息退回"显真实昵称、名字不可点"，与刚收到时不一致。
-  sysSegments?: SysSegment[];
-  timestamp: number;
-  serverMsgId?: string; // 服务端真实消息 id（举报消息等需用真实 id，不能用复合键 id）
-  // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。
-  clientMsgId?: string;
-  status?: "failed";  // 仅落"被拒"失败态；已确认消息不写此字段（读回默认 received）
-  note?: string;      // 系统提示文案（如"消息已发出，但被对方拒收了"）
-  // M4 消息操作派生状态（撤回/编辑/置顶）：由 applyMsgOpLocal 就地更新，读回还原到 ChatMessage。
-  recalledAt?: number;
-  recalledBy?: string;
-  editedAt?: number;
-  pinnedAt?: number;
-  replyToConvSeq?: number;
-  replySnapshot?: string;
-  replyToFrom?: string;
-  forwardFrom?: string;
-  groupId?: string; // 相册分组（M4+）
-  posterUrl?: string; // 视频封面首帧 URL（M4+）
-  mediaW?: number;    // 媒体像素宽（M4+）：按原比例渲染气泡，免加载完跳版
-  mediaH?: number;    // 媒体像素高（M4+）
-  duration?: number;  // 视频时长毫秒（M4+）：封面左上角角标
-  thumb?: string;     // 极小模糊预览 data URI（M4-7）：未下载卡片的磨砂占位。**必须持久化**，否则刷新后门控图退化成中性斜纹底
-}
-
-interface DeletionRecord {
-  id: string;        // 被删消息的记录键（owner|convId|convSeq 或 owner|convId|c:clientMsgId），与 MsgRecord.id 同形
-  ownerConv: string; // owner|convId —— 索引：loadConversation 时批量取本会话墓碑
+function pickStore(): LocalStore {
+  return webLocalStore;
 }
 
 /**
- * 「本地有哪几段」的持久化行：一个 (owner, conv) 一行。
+ * 取当前宿主的本地库实现。
  *
- * 与 SyncCursorRecord 的关系：游标是这张目录的**派生量**（从下界起连续到哪），
- * 两者都留着是为了向后兼容——老库只有游标，升级后第一次读会由游标反推出首段区间。
+ * **缓存是有意的**（同 `platform()`）：桥在 preload 期就注入完毕，运行中不会凭空长出来；
+ * 每次调用重新探测只会让「同一次会话里前后拿到不同实现」变成可能——那种不一致比慢一点难查得多。
  */
-export interface RangesRecord {
-  id: string;     // owner|convId
-  owner: string;
-  convId: string;
-  ranges: SeqRange[];
-  head?: number;  // 服务端最新位点的最近一次快照（sync_resp 的 head_conv_seq），用于判"齐不齐"
+export function activeLocalStore(): LocalStore {
+  return (cached ??= pickStore());
 }
 
-interface SyncCursorRecord {
-  id: string;       // owner|convId
-  owner: string;
-  convId: string;
-  convSeq: number;  // 已经连续持久化完成的最大 conv_seq；不是本地消息最大值
-}
+// ---- 以下每个函数都只做一件事：转发给选中的实现。语义注释在 localStore.types.ts，不在这里重抄。 ----
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+export const saveMessage = (owner: string, m: ChatMessage): Promise<void> =>
+  activeLocalStore().saveMessage(owner, m);
 
-/** 本次连接期望具备的全部 object store（从 STORE_DEFS 派生）——校验拿到的连接是不是「缺 store 的陈旧连接」。 */
-const EXPECTED_STORES = STORE_DEFS.map((s) => s.name);
+export const saveIncomingMessage = (owner: string, m: ChatMessage, advanceCursor: boolean): Promise<void> =>
+  activeLocalStore().saveIncomingMessage(owner, m, advanceCursor);
 
-export function openDB(attempt = 0): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      // 从 STORE_DEFS 派生建表：`if(!contains)` 幂等，只补缺的、不动已有数据。新增 store 改 STORE_DEFS 即可。
-      for (const def of STORE_DEFS) {
-        if (db.objectStoreNames.contains(def.name)) continue;
-        const os = db.createObjectStore(def.name, { keyPath: def.keyPath });
-        for (const idx of def.indexes ?? []) os.createIndex(idx.name, idx.keyPath, { unique: idx.unique ?? false });
-      }
-    };
-    // 另一标签页/连接占着旧版本 → 本次升级被阻塞（多标签页测号常见）。留痕，靠对方收到 versionchange 关闭后放行。
-    req.onblocked = () => logger.warn(LOG_TAG.store, "indexeddb_open_blocked", { db: DB_NAME, version: DB_VERSION });
-    req.onsuccess = () => {
-      const db = req.result;
-      // 别的标签页要升级 schema 时，关闭本连接并清缓存 —— 否则本连接会阻塞对方升级，且升级后本连接仍是旧结构（缺新 store）。
-      db.onversionchange = () => { try { db.close(); } finally { dbPromise = null; } };
-      resolve(db);
-    };
-    req.onerror = () => reject(req.error);
-  }).then((db) => {
-    // 兜底自愈：若拿到的是「缺某个 store 的陈旧连接」（曾以旧版本打开、被 dbPromise 缓存复用），
-    // 关掉并清缓存重开一次触发升级（此时本连接已不占用，升级可放行）。最多重试 2 次，避免被别的标签页
-    // 长期阻塞时死循环——仍缺则返回该连接，由各读函数按 objectStoreNames 兜底降级（见 loadConversation）。
-    const missing = EXPECTED_STORES.some((s) => !db.objectStoreNames.contains(s));
-    if (missing && attempt < 2) {
-      db.close();
-      dbPromise = null;
-      return openDB(attempt + 1);
-    }
-    return db;
-  });
-  return dbPromise;
-}
+export const saveIncomingPage = (
+  owner: string, msgs: ChatMessage[], advanceTo: number, rangeFrom: number, rangeTo: number, head = 0,
+): Promise<boolean> =>
+  activeLocalStore().saveIncomingPage(owner, msgs, advanceTo, rangeFrom, rangeTo, head);
 
-export const keyOf = (owner: string, convId: string, convSeq: number) => `${owner}|${convId}|${convSeq}`;
-export const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId}`;
+export const saveRejected = (owner: string, m: ChatMessage): Promise<void> =>
+  activeLocalStore().saveRejected(owner, m);
 
-/** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。 */
-export async function saveMessage(owner: string, m: ChatMessage): Promise<void> {
-  if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
-  await put(owner, messageRecord(owner, m));
-}
+export const applyMsgOpLocal = (
+  owner: string, convId: string, convSeq: number, patch: MsgOpPatch, advanceCursorTo = 0,
+): Promise<void> =>
+  activeLocalStore().applyMsgOpLocal(owner, convId, convSeq, patch, advanceCursorTo);
 
-function messageRecord(owner: string, m: ChatMessage): MsgRecord {
-  return {
-    id: keyOf(owner, m.convId, m.convSeq),
-    ownerConv: `${owner}|${m.convId}`,
-    owner, convId: m.convId, convSeq: m.convSeq,
-    from: m.from, fromNickname: m.fromNickname, fromRole: m.fromRole, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionSpans: m.mentionSpans, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
-    serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
-    recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
-    replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
-    groupId: m.groupId, posterUrl: m.posterUrl,
-    mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration, thumb: m.thumb,
-  };
-}
+export const markMessageDeleted = (owner: string, convId: string, target: DeleteTarget): Promise<void> =>
+  activeLocalStore().markMessageDeleted(owner, convId, target);
 
-function mergedRecord(existing: MsgRecord | undefined, rec: MsgRecord): MsgRecord {
-  return {
-    ...existing,
-    ...rec,
-    fileName: rec.fileName || existing?.fileName,
-    fromNickname: rec.fromNickname || existing?.fromNickname,
-    fromRole: rec.fromRole || existing?.fromRole,
-    fileSize: rec.fileSize !== undefined && rec.fileSize > 0 ? rec.fileSize : existing?.fileSize ?? rec.fileSize,
-    serverMsgId: rec.serverMsgId || existing?.serverMsgId,
-  };
-}
+export const clearMessages = (owner: string, convId: string): Promise<void> =>
+  activeLocalStore().clearMessages(owner, convId);
 
-function advanceCursorInStore(store: IDBObjectStore, owner: string, convId: string, convSeq: number): void {
-  if (convSeq <= 0) return;
-  const id = cursorKeyOf(owner, convId);
-  const req = store.get(id);
-  req.onsuccess = () => {
-    const previous = Number((req.result as SyncCursorRecord | undefined)?.convSeq) || 0;
-    if (convSeq > previous) store.put({ id, owner, convId, convSeq } satisfies SyncCursorRecord);
-  };
-}
+export const advanceSyncCursor = (owner: string, convId: string, convSeq: number): Promise<void> =>
+  activeLocalStore().advanceSyncCursor(owner, convId, convSeq);
 
-/**
- * **整页**补拉消息的原子落库（OFFLINE_BACKLOG_DESIGN §4.8）：一页消息 + 游标推进 + 区间登记
- * 全部在**同一个事务**里提交。
- *
- * 为什么按页而不是按条：不变量仍是「消息未落库则游标/区间绝不越过」，只是把粒度从"每条"
- * 降到"每页"——页内任一条失败则整页回滚、整页重拉，约束一字不改，而事务数从 N 降到 N/200。
- * 补拉 10 万条时这是 10 万次事务与 500 次事务的差别。
- *
- * advanceTo：本页权威覆盖位点（服务端 covered_conv_seq）；0 表示不推进（调用方判定本页不可信）。
- * rangeFrom/rangeTo：本页齐全的区间，登记进"本地有哪几段"目录；rangeTo<rangeFrom 表示不登记。
- */
-export async function saveIncomingPage(
-  owner: string,
-  msgs: ChatMessage[],
-  advanceTo: number,
-  rangeFrom: number,
-  rangeTo: number,
-  head = 0,
-): Promise<boolean> {
-  if (!owner || msgs.length === 0) return true;
-  const convId = msgs[0].convId;
-  const recs = msgs.filter((m) => m.convId && m.convSeq > 0).map((m) => messageRecord(owner, m));
-  if (recs.length === 0) return true;
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, CURSOR_STORE, RANGES_STORE], "readwrite");
-      const messageStore = tx.objectStore(STORE);
-      for (const rec of recs) {
-        const getReq = messageStore.get(rec.id);
-        getReq.onsuccess = () => messageStore.put(mergedRecord(getReq.result as MsgRecord | undefined, rec));
-      }
-      if (advanceTo > 0) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, convId, advanceTo);
-      if (rangeTo >= rangeFrom && rangeTo > 0) {
-        const rangeStore = tx.objectStore(RANGES_STORE);
-        const id = cursorKeyOf(owner, convId);
-        const getReq = rangeStore.get(id);
-        getReq.onsuccess = () => {
-          const prev = getReq.result as RangesRecord | undefined;
-          rangeStore.put({
-            id, owner, convId,
-            ranges: addRange(prev?.ranges ?? [], rangeFrom, rangeTo),
-            head: Math.max(Number(prev?.head) || 0, head),
-          } satisfies RangesRecord);
-        };
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    return true;
-  } catch (error) {
-    // 整页失败 → 游标与区间都没动，下次从原位幂等重拉。宁可重拉，不可漏拉。
-    logger.warn(LOG_TAG.store, "incoming_page_write_failed", { conv_id: convId, count: recs.length, error });
-    return false;
-  }
-}
+export const loadConversation = (owner: string, convId: string): Promise<ChatMessage[]> =>
+  activeLocalStore().loadConversation(owner, convId);
 
-/**
- * 接收/补拉消息的原子落库：消息与连续游标在同一个 IndexedDB 事务提交。
- * 崩溃时要么两者都成功，要么游标仍停在旧位置并在下次幂等重拉，不会出现“游标已过、消息没落库”。
- */
-export async function saveIncomingMessage(owner: string, m: ChatMessage, advanceCursor: boolean): Promise<void> {
-  if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
-  const rec = messageRecord(owner, m);
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, CURSOR_STORE], "readwrite");
-      const messageStore = tx.objectStore(STORE);
-      const getReq = messageStore.get(rec.id);
-      getReq.onsuccess = () => messageStore.put(mergedRecord(getReq.result as MsgRecord | undefined, rec));
-      if (advanceCursor) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, m.convId, m.convSeq);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "incoming_message_write_failed", {
-      conv_id: m.convId, conv_seq: m.convSeq, content_type: m.contentType, error,
-    });
-  }
-}
+export const loadDeletedSeqs = (owner: string, convId: string): Promise<number[]> =>
+  activeLocalStore().loadDeletedSeqs(owner, convId);
 
-/** 把一次消息操作（撤回/编辑/置顶）就地应用到已落库消息（按 conv_seq 定位）。记录不存在则忽略。 */
-export async function applyMsgOpLocal(
-  owner: string, convId: string, convSeq: number,
-  patch: { recalledAt?: number; recalledBy?: string; editedAt?: number; pinnedAt?: number; content?: string },
-  advanceCursorTo = 0,
-): Promise<void> {
-  if (!owner || !convId || !convSeq) return;
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const stores = advanceCursorTo > 0 ? [STORE, CURSOR_STORE] : [STORE];
-      const tx = db.transaction(stores, "readwrite");
-      const os = tx.objectStore(STORE);
-      const getReq = os.get(keyOf(owner, convId, convSeq));
-      getReq.onsuccess = () => {
-        const rec = getReq.result as MsgRecord | undefined;
-        if (rec) {
-          if (patch.recalledAt !== undefined) rec.recalledAt = patch.recalledAt;
-          if (patch.recalledBy !== undefined) rec.recalledBy = patch.recalledBy;
-          if (patch.editedAt !== undefined) rec.editedAt = patch.editedAt;
-          if (patch.pinnedAt !== undefined) rec.pinnedAt = patch.pinnedAt;
-          if (patch.content !== undefined) {
-            rec.content = patch.content;
-            // @ 片段的偏移是相对**原文**的，正文一改就全错位 → 连同清空（服务端落库时也清了）。
-            // 不清的话刷新后旧片段会从 IndexedDB 回来配上新正文：多数时候被
-            // segmentMentionsBySpans 挡掉（那个位置不是 `@`），但只要新正文碰巧在同一偏移
-            // 有个 `@`，就会高亮出来并且**点进去是另一个人**的资料页。
-            rec.mentionSpans = undefined;
-          }
-          os.put(rec);
-        }
-      };
-      if (advanceCursorTo > 0) {
-        advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, convId, advanceCursorTo);
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "message_operation_write_failed", { conv_id: convId, conv_seq: convSeq, error });
-  }
-}
-
-/** 保存一条被拒收的失败消息（被拉黑：服务端永不接受、无 conv_seq）。按 clientMsgId 落库，重进/刷新仍在。 */
-export async function saveRejected(owner: string, m: ChatMessage): Promise<void> {
-  if (!owner || !m.convId || !m.clientMsgId) return;
-  // 复用 messageRecord 的**完整**字段集：被拒的媒体消息也要留住 groupId/poster/尺寸/文件名，
-  // 否则刷新后图片/视频退化成显示 URL 的文本气泡，相册也会因 groupId 丢失而散成独立消息。
-  await put(owner, {
-    ...messageRecord(owner, m),
-    id: `${owner}|${m.convId}|c:${m.clientMsgId}`, // 与已确认消息的 conv_seq 键不冲突；同 clientMsgId 幂等覆盖
-    convSeq: 0, // 被拒收永远拿不到 conv_seq，渲染按 timestamp 落位
-    clientMsgId: m.clientMsgId, status: "failed", note: m.note,
-  });
-}
-
-/** 写一条记录（put 幂等）。失败只记日志——持久化是增强，绝不阻断收发主流程。 */
-async function put(owner: string, rec: MsgRecord): Promise<void> {
-  if (!owner) return;
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      const store = tx.objectStore(STORE);
-      const getReq = store.get(rec.id);
-      getReq.onsuccess = () => {
-        const existing = getReq.result as MsgRecord | undefined;
-        // 同一服务端消息可能先由 ACK/实时帧落库、后由 sync_resp 再次到达。
-        // 后到的稀疏负载不能把已经确认的文件名/字节数覆盖为空或 0。
-        store.put(mergedRecord(existing, rec));
-      };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "message_write_failed", {
-      conv_id: rec.convId,
-      conv_seq: rec.convSeq,
-      content_type: rec.contentType,
-      error,
-    });
-  }
-}
-
-/** 读取按账号+会话隔离的连续同步游标。无记录表示从 0 开始，不从消息最大值推断。 */
-export async function loadSyncCursor(owner: string, convId: string): Promise<number> {
-  if (!owner || !convId) return 0;
-  try {
-    const db = await openDB();
-    return await new Promise<number>((resolve, reject) => {
-      const tx = db.transaction(CURSOR_STORE, "readonly");
-      const req = tx.objectStore(CURSOR_STORE).get(cursorKeyOf(owner, convId));
-      req.onsuccess = () => resolve(Math.max(0, Number((req.result as SyncCursorRecord | undefined)?.convSeq) || 0));
-      req.onerror = () => reject(req.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "sync_cursor_read_failed", { conv_id: convId, error });
-    return 0;
-  }
-}
-
-/**
- * 单调推进连续同步游标。调用方只可在对应消息/操作已处理后调用；游标本身按 owner 隔离持久化。
- * 写失败时下次从较低位置重拉，最多产生幂等重复，不会漏消息。
- */
-export async function advanceSyncCursor(owner: string, convId: string, convSeq: number): Promise<void> {
-  if (!owner || !convId || convSeq <= 0) return;
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(CURSOR_STORE, "readwrite");
-      const store = tx.objectStore(CURSOR_STORE);
-      advanceCursorInStore(store, owner, convId, convSeq);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "sync_cursor_write_failed", { conv_id: convId, conv_seq: convSeq, error });
-  }
-}
-
-export async function loadConversation(owner: string, convId: string): Promise<ChatMessage[]> {
-  if (!owner || !convId) return [];
-  try {
-    const db = await openDB();
-    // 消息与本会话的删除墓碑同事务读出：本人删过的消息即便被重同步重新落库，也在此过滤掉，不复现。
-    // 兜底：陈旧连接可能缺 `deletions` store（升级被别的标签页阻塞时）——此时**只读 messages**，宁可暂不过滤墓碑，
-    // 也不能让整个事务抛 NotFoundError 而返回空（曾导致资料卡片「媒体/文件」列表全空）。
-    const hasDeletions = db.objectStoreNames.contains(DELETIONS_STORE);
-    const stores = hasDeletions ? [STORE, DELETIONS_STORE] : [STORE];
-    const { recs, deleted } = await new Promise<{ recs: MsgRecord[]; deleted: Set<string> }>((resolve, reject) => {
-      const tx = db.transaction(stores, "readonly");
-      const ownerConv = `${owner}|${convId}`;
-      const msgReq = tx.objectStore(STORE).index("ownerConv").getAll(ownerConv);
-      const delReq = hasDeletions ? tx.objectStore(DELETIONS_STORE).index("ownerConv").getAllKeys(ownerConv) : null;
-      tx.oncomplete = () => resolve({
-        recs: (msgReq.result as MsgRecord[]) ?? [],
-        deleted: new Set(((delReq?.result as IDBValidKey[] | undefined) ?? []).map(String)),
-      });
-      tx.onerror = () => reject(tx.error);
-    });
-    recs.sort((a, b) => a.convSeq - b.convSeq);
-    return recs.filter((r) => !deleted.has(r.id)).map((r) =>
-      r.status === "failed"
-        ? {
-            // 被拒收的失败消息：还原失败态 + 系统提示（红❗+下方系统行）。convSeq=0，渲染按 timestamp 落位。
-            // 媒体字段一并还原（与下面已确认分支同一套）——少还原 groupId 会让相册散架、
-            // 少还原 posterUrl/尺寸会让视频封面与比例丢失。
-            clientMsgId: r.clientMsgId,
-            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionSpans: r.mentionSpans, mentionAll: r.mentionAll,
-            convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
-            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
-            groupId: r.groupId, posterUrl: r.posterUrl,
-            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb,
-          }
-        : {
-            serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
-            convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionSpans: r.mentionSpans, mentionAll: r.mentionAll,
-            sysSegments: r.sysSegments,
-            convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
-            recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
-            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
-            groupId: r.groupId, posterUrl: r.posterUrl,
-            mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb,
-          },
-    );
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "conversation_load_failed", { conv_id: convId, error });
-    return [];
-  }
-}
-
-export async function markMessageDeleted(
-  owner: string,
-  convId: string,
-  opts: { convSeq?: number; clientMsgId?: string },
-): Promise<void> {
-  if (!owner || !convId) return;
-  const id = opts.convSeq && opts.convSeq > 0
-    ? keyOf(owner, convId, opts.convSeq)
-    : opts.clientMsgId ? `${owner}|${convId}|c:${opts.clientMsgId}` : null;
-  if (!id) return;
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, DELETIONS_STORE], "readwrite");
-      tx.objectStore(DELETIONS_STORE).put({ id, ownerConv: `${owner}|${convId}` } satisfies DeletionRecord);
-      tx.objectStore(STORE).delete(id);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "message_delete_failed", { conv_id: convId, error });
-  }
-}
-
-/**
- * 读某会话被本地删除的 conv_seq 列表：登录/进会话时载入内存，供 onMessage 挡住服务端重同步的**复现**。
- * loadConversation 只在"读盘"时过滤墓碑，但服务端会通过实时同步(onMessage)把删掉的消息重新推来——那条路径绕过读盘过滤，
- * 故必须另有一份内存墓碑在收帧时拦截。只取 conv_seq 型墓碑（c:clientMsgId 型是被拒消息，服务端本就不会重推）。
- */
-export async function loadDeletedSeqs(owner: string, convId: string): Promise<number[]> {
-  if (!owner || !convId) return [];
-  try {
-    const db = await openDB();
-    const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
-      const tx = db.transaction(DELETIONS_STORE, "readonly");
-      const req = tx.objectStore(DELETIONS_STORE).index("ownerConv").getAllKeys(`${owner}|${convId}`);
-      req.onsuccess = () => resolve((req.result as IDBValidKey[]) ?? []);
-      req.onerror = () => reject(req.error);
-    });
-    const prefix = `${owner}|${convId}|`;
-    return keys.map(String)
-      .filter((id) => id.startsWith(prefix) && !id.startsWith(`${prefix}c:`))
-      .map((id) => Number(id.slice(prefix.length)))
-      .filter((n) => Number.isFinite(n) && n > 0);
-  } catch { return []; }
-}
-
-/** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。 */
-export async function clearMessages(owner: string, convId: string): Promise<void> {
-  if (!owner || !convId) return;
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      const store = tx.objectStore(STORE);
-      const req = store.index("ownerConv").getAllKeys(`${owner}|${convId}`);
-      req.onsuccess = () => {
-        for (const key of (req.result as IDBValidKey[]) ?? []) store.delete(key);
-      };
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "conversation_clear_failed", { conv_id: convId, error });
-  }
-}
-
-// ---- 会话列表缓存（localStorage 单 JSON blob，按 owner）：刷新/离线时先秒显旧列表 ----
-
-const convsKey = (owner: string) => `im-web:convs:${owner}`;
-
-/** 缓存会话列表（每次服务端拉到就覆盖写）。失败记日志但不阻断。 */
-export function saveConversations(owner: string, convs: Conversation[]): void {
-  if (!owner) return;
-  try {
-    localStorage.setItem(convsKey(owner), JSON.stringify(convs));
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "conversation_cache_write_failed", { count: convs.length, error });
-  }
-}
-
-/** 读缓存的会话列表（刷新后先秒显，再被服务端最新覆盖）。无则空数组。 */
-export function loadConversations(owner: string): Conversation[] {
-  if (!owner) return [];
-  try {
-    const s = localStorage.getItem(convsKey(owner));
-    const arr = s ? JSON.parse(s) : [];
-    return Array.isArray(arr) ? (arr as Conversation[]) : [];
-  } catch (error) {
-    logger.warn(LOG_TAG.store, "conversation_cache_read_failed", { error });
-    return [];
-  }
-}
+export const loadSyncCursor = (owner: string, convId: string): Promise<number> =>
+  activeLocalStore().loadSyncCursor(owner, convId);

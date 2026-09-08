@@ -127,7 +127,7 @@
 `npm run build` 绿只证明「TS 类型 + 打包过」，本端多数坑是**加载不报错、运行时悄悄错**的逻辑/状态类，jsdom 也测不到真滚动。声明完成前对照下表扫一遍——每条对应一次真实/复盘出的坑，命中即停下来核：
 
 - **[消息身份] List React key / 菜单高亮 / 详情定位一律用 `album.ts#msgKey`（convSeq 优先），永不用数组下标 `i` 或 `serverMsgId` 兜底。** 入站消息无 `clientMsgId`，用 `?? i` 会让向上翻页 prepend 时下标平移、React 错绑 DOM（播放中视频/展开长文/编辑框跳到别的行）。别再各处自造身份表达式（曾 4 套漂移，已收敛）。
-- **[IndexedDB] 新增 object store 必须四处齐**（`sdk/localStore.ts`）：① bump `DB_VERSION` ② `onupgradeneeded` 建表 ③ 加进 `EXPECTED_STORES` ④ 每个读函数加 `contains` 降级分支。漏一处 → 升级过的老用户浏览器事务抛 `NotFoundError`、悄悄空列表（最好把 store 清单收敛成单一数据结构派生）。
+- **[IndexedDB] 新增 object store 必须四处齐**（`sdk/localStore.web.db.ts`，D4-3a 起 schema 收在这里）：① bump `DB_VERSION` ② `onupgradeneeded` 建表 ③ 加进 `EXPECTED_STORES` ④ 每个读函数加 `contains` 降级分支。漏一处 → 升级过的老用户浏览器事务抛 `NotFoundError`、悄悄空列表（最好把 store 清单收敛成单一数据结构派生）。
 - **[滚动跳转] 照 `../IMServer/docs/CHAT_UX.md`**：`jumpToSeq` 用瞬时 `scrollTop` 赋值（非 `behavior:"smooth"`）、跳转前清 `wasNearBottomRef`，否则 `onMediaLoad` 把定位拽回底部。滚动/分页改动**编译过 ≠ 对，必须浏览器手测**（jsdom 测不到）。
 - **[错误码] 按业务码分支读 `Error.code`**（`qr.ts#errorCode`），**禁止 parse `error.message` 字符串**；`imSdk.ts#friendlyMessage` 手写码表与后端 errcode 各存一份，新增/改码时加对齐测试。
 - **[CSS 作用域] 别用「容器 + 裸标签」后代选择器**（`.login button` / `.modal input` 这类会误伤容器内全部子元素，日后加次要按钮无代码即被染成主按钮样式）。用类选择器（`.login-submit`）或 `> button` 限直接子级。
