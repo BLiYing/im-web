@@ -146,6 +146,12 @@ export function startLocalServer(
   // 当前 distDir() 用 join() 不会带尾斜杠，但 dist 路径一旦改成可配置就会踩上）。
   const rootNorm = stripTrailingSep(normalize(root));
 
+  // 活着的连接。**`server.close()` 只停止接新连接，拆不掉已建立的**，而 WS 隧道是长连接
+  // 永远不会自己结束——不记下来逐个 destroy，close() 的回调永远不回，端口也不释放。
+  // D2 时靠「进程紧接着就退出」掩盖了这个问题；D4 加了「关闭=收起到托盘」之后应用会活很久，
+  // 真要重建服务时就会踩上（/code-review 已指出，这里补齐）。
+  const live = new Set<import("node:net").Socket>();
+
   const server: Server = createServer((req, res) => {
     const pathname = new URL(req.url ?? "/", "http://127.0.0.1").pathname;
     if (isProxied(pathname)) proxy(req, res, backend);
@@ -175,11 +181,21 @@ export function startLocalServer(
     socket.on("close", () => up.destroy());
   });
 
+  server.on("connection", (socket) => {
+    live.add(socket);
+    socket.on("close", () => live.delete(socket));
+  });
+
   return new Promise((resolve, reject) => {
     const done = (): void => {
       const addr = server.address();
       if (!addr || typeof addr === "string") { reject(new Error("拿不到本地端口")); return; }
-      resolve({ port: addr.port, url: `http://127.0.0.1:${addr.port}/`, close: () => server.close() });
+      const close = (): void => {
+        server.close();
+        for (const s of live) s.destroy();   // 含 WS 隧道那条永不自尽的长连接
+        live.clear();
+      };
+      resolve({ port: addr.port, url: `http://127.0.0.1:${addr.port}/`, close });
     };
     const onFirstError = (e: NodeJS.ErrnoException): void => {
       // 记住的端口被别人占了 → 退回系统分配。其余错误照抛。

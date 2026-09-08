@@ -10,6 +10,9 @@ import { runSmoke } from "./smoke";
 import { runE2E } from "./e2e";
 import { startLocalServer, type LocalServerHandle } from "./localServer";
 import { runPerf } from "./perf";
+import { runShellCheck } from "./shellCheck";
+import { beginQuit, installTray, isQuitting } from "./tray";
+import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
 
 /** 开发时加载 Vite dev server（吃热更新），打包后加载随包的 dist/。
  *  `IM_DEV_URL` 允许压测/多实例时指向别的端口，与后端 dev.sh 的用法对齐。 */
@@ -42,13 +45,19 @@ const smokeMode = process.argv.includes("--smoke");
 const e2eMode = process.argv.includes("--e2e");
 /** `--perf`：D3 性能实测（见 perf.ts）。同样不显窗口——显窗口会把合成器开销算进来，那是另一码事。 */
 const perfMode = process.argv.includes("--perf");
+/** `--shell-check`：托盘/退出闸/窗口状态的生命周期自检（见 shellCheck.ts）。 */
+const shellMode = process.argv.includes("--shell-check");
 
 function createWindow(): BrowserWindow {
+  // 位置与大小从上次记的恢复；整块落在屏幕外时只留尺寸、位置交给系统（见 windowState.ts）。
+  const st = restoreWindowState();
   const win = new BrowserWindow({
-    width: 1180,
-    height: 800,
-    minWidth: 720,        // 再窄下去 im-web 的双栏（侧栏 + 聊天）会挤成一坨
-    minHeight: 560,
+    width: st.width,
+    height: st.height,
+    x: st.x,
+    y: st.y,
+    minWidth: MIN_SIZE.width,
+    minHeight: MIN_SIZE.height,
     show: false,          // 先隐藏，ready-to-show 再显——否则用户会看到一闪而过的白屏
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -62,7 +71,21 @@ function createWindow(): BrowserWindow {
       ],
     },
   });
-  win.once("ready-to-show", () => { if (!smokeMode && !e2eMode && !perfMode) win.show(); });
+  win.once("ready-to-show", () => {
+    if (smokeMode || e2eMode || perfMode || shellMode) return;
+    if (st.maximized) win.maximize();
+    win.show();
+  });
+  // 记窗口几何。`resize`/`move` 触发很密，节流着写，别把 device.json 写成热点。
+  let saveTimer: NodeJS.Timeout | null = null;
+  const scheduleSave = (): void => {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => saveWindowState(win), 400);
+  };
+  win.on("resize", scheduleSave);
+  win.on("move", scheduleSave);
+  // 关闭前立刻存一次：节流的那次可能还没落地。收进托盘也算一次「用户摆完了」。
+  win.on("close", () => { if (saveTimer) clearTimeout(saveTimer); saveWindowState(win); });
   return win;
 }
 
@@ -95,9 +118,10 @@ app.whenReady().then(async () => {
   const target = localServer ? localServer.url : DEV_URL;
   const load = win.loadURL(target);
 
-  if (smokeMode || e2eMode || perfMode) {
+  if (smokeMode || e2eMode || perfMode || shellMode) {
     const say = (s: string): void => { process.stdout.write(`${s}\n`); };
-    const code = perfMode ? await runPerf(win, load, say)
+    const code = shellMode ? await runShellCheck(win, say)
+      : perfMode ? await runPerf(win, load, say)
       : e2eMode ? await runE2E(win, load, say)
       : await runSmoke(win, target, load);
     // **必须 app.exit(code)，不能 `process.exitCode = code` + app.quit()**：后者实测退出码恒为 0
@@ -113,10 +137,15 @@ app.whenReady().then(async () => {
     return;
   }
 
+  // 托盘 + 「关闭 = 收起」。自检模式不装：它会在菜单栏留个图标，而自检紧接着就 exit。
+  installTray(win);
+
   app.on("activate", () => {
-    // macOS：Dock 图标被点、且没有窗口时重开一个（系统惯例，不是可选项）。
-    // **必须用同一个 target**——写死 DEV_URL 会让打包版重开的窗口打到不存在的 :5173。
-    if (BrowserWindow.getAllWindows().length === 0) createWindow().loadURL(target);
+    // macOS：Dock 图标被点时把窗口召回来。装了托盘之后窗口是被 hide 的（不是销毁），
+    // 所以先试 show；真没有窗口了才新建。
+    const [first] = BrowserWindow.getAllWindows();
+    if (first) { first.show(); first.focus(); return; }
+    createWindow().loadURL(target);   // **必须用同一个 target**，写死 DEV_URL 会让打包版打到不存在的 :5173
   });
 });
 
@@ -127,8 +156,13 @@ app.whenReady().then(async () => {
 // 重建服务，这里必须改成记下活连接并逐个 destroy。
 app.on("will-quit", () => { localServer?.close(); localServer = null; });
 
+// 装了托盘之后，关窗只是 hide，窗口不会被销毁，所以 window-all-closed 正常情况下压根不触发。
+// 只有「托盘 → 退出」那条路才会走到这里（那时 quitting 已置上）。保留这个兜底是为了
+// 万一窗口真被销毁（崩溃/系统强制）时，非 macOS 平台不要留一个只有托盘的僵尸进程。
 app.on("window-all-closed", () => {
-  // macOS 的惯例是关窗不退应用；Windows/Linux 关窗即退。
-  // D4 会把 macOS 这条改成「关闭 = 最小化到托盘」，那时两平台都要重验。
-  if (process.platform !== "darwin") app.quit();
+  if (isQuitting() || process.platform !== "darwin") app.quit();
 });
+
+// 菜单栏「退出」/ Cmd+Q / 系统关机：这些不走托盘菜单，也要把闸置上，否则 close 事件
+// 会被托盘那段 preventDefault 收进托盘，用户按 Cmd+Q 会发现退不掉。
+app.on("before-quit", () => beginQuit());

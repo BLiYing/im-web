@@ -15,11 +15,20 @@ files:
     to: dist
     filter:
       - "**/*"
-extraResources: []
+# 托盘图标要随包走：主进程用 process.resourcesPath 直接拼文件名（见 tray.ts）。
+# **必须写 from/to 压平**：只写路径的话 electron-builder 会保留目录层级，
+# 文件落到 Contents/Resources/**resources**/tray.png，而代码找的是 Contents/Resources/tray.png
+# ——2026-09-08 首次打包就踩了，是 `--shell-check` 在打包版上抓出来的（dev 模式走的是另一条路径，验不到）。
+extraResources:
+  - from: resources/tray.png
+    to: tray.png
+  - from: resources/tray@2x.png
+    to: tray@2x.png
 extraMetadata:
   main: out/main/index.js
 asar: true
 mac:
+  icon: resources/icon.png
   category: public.app-category.social-networking
   target:
     - dir            # D2 只出 .app 目录，不做 dmg——dmg 要图标/背景/布局，属 D6

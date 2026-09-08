@@ -19,17 +19,19 @@ function stateFile(): string {
   return join(app.getPath("userData"), "device.json");
 }
 
-function readState(): { deviceId?: unknown; localPort?: unknown } {
+/** 本机状态的全量读取。`windowState` 等新字段直接往里加，不必再开一个文件。 */
+export function readLocalState(): Record<string, unknown> {
   try {
-    return JSON.parse(readFileSync(stateFile(), "utf8")) as { deviceId?: unknown; localPort?: unknown };
+    return JSON.parse(readFileSync(stateFile(), "utf8")) as Record<string, unknown>;
   } catch {
     return {};   // 首次运行 / 文件损坏 / 无读权限
   }
 }
 
-function writeState(patch: Record<string, unknown>): void {
+/** 合并写入。落盘失败不抛——本机状态丢了最多是下次启动重来，不该阻断任何功能。 */
+export function writeLocalState(patch: Record<string, unknown>): void {
   try {
-    writeFileSync(stateFile(), JSON.stringify({ ...readState(), ...patch }), "utf8");
+    writeFileSync(stateFile(), JSON.stringify({ ...readLocalState(), ...patch }), "utf8");
   } catch {
     // 落盘失败：本次会话照常工作，只是下次启动要重来。不阻断，理由见 stableDeviceId。
   }
@@ -46,12 +48,12 @@ function writeState(patch: Record<string, unknown>): void {
  * 但总比起不来强，且下次会记住新端口。
  */
 export function rememberedLocalPort(): number {
-  const v = readState().localPort;
+  const v = readLocalState().localPort;
   return typeof v === "number" && v > 1024 && v < 65536 ? v : 0;
 }
 
 export function rememberLocalPort(port: number): void {
-  if (rememberedLocalPort() !== port) writeState({ localPort: port });
+  if (rememberedLocalPort() !== port) writeLocalState({ localPort: port });
 }
 
 /**
@@ -62,10 +64,10 @@ export function rememberLocalPort(port: number): void {
  * 已在 docs/SYMMETRY.md 登记。
  */
 export function stableDeviceId(): string {
-  const existing = readState().deviceId;
+  const existing = readLocalState().deviceId;
   if (typeof existing === "string" && existing) return existing;
   const id = randomUUID();
-  writeState({ deviceId: id });   // 落盘失败也返回可用 ID：降级为不去重但不阻断登录（同 web 侧）
+  writeLocalState({ deviceId: id });   // 落盘失败也返回可用 ID：降级为不去重但不阻断登录（同 web 侧）
   return id;
 }
 
