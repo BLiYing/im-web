@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { entryWindowAnchor, planEntryWindow, moreLocalAbove, moreLocalBelow } from "./windowPlan";
+import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow } from "./windowPlan";
 import type { SeqRange } from "./sdk/ranges";
 
 const base = { contextBefore: 10, historyPage: 200 };
 const plan = (o: Partial<Parameters<typeof planEntryWindow>[0]>) =>
-  planEntryWindow({ ...base, readSeq: 0, latestSeq: 0, unread: 0, ranges: [], head: 0, ...o });
+  planEntryWindow({ ...base, readSeq: 0, latestSeq: 0, unread: 0, ranges: [], head: 0, localNewest: 1e9, ...o });
 
 describe("entryWindowAnchor —— 进会话锚在哪", () => {
   it("有未读：锚到已读位点，上方留上下文、下方要一页", () => {
@@ -47,6 +47,17 @@ describe("planEntryWindow —— 这一窗问本地还是问服务端", () => {
     expect(plan({ head: 0, latestSeq: 0, ranges: [{ lo: 1, hi: 999999 }] }).source).toBe("server");
   });
 
+  // /code-review 2026-09-09 抓出的 P0：「清空聊天记录」当时只删消息、不删清单，
+  // 于是刷新后清单仍说齐全 → 判 local → 一个请求都不发 → 会话恒空且上滑/点↓ 都不自愈。
+  // 存储侧已改成同事务一起清，但**老库里已经孤立的清单追不回来**，这道闸得长期留着。
+  it("清单说齐全、但本地一条消息都没有（清空过）→ 仍旧问服务端", () => {
+    expect(plan({ head: 1000, ranges: [{ lo: 1, hi: 1000 }], localNewest: 0 }).source).toBe("server");
+  });
+
+  it("本地最新一条还落在要覆盖的那一页之下 → 也算没有，问服务端", () => {
+    expect(plan({ head: 1000, ranges: [{ lo: 1, hi: 1000 }], localNewest: 700 }).source).toBe("server");
+  });
+
   it("有未读 + 锚点上下都齐全 → 不打网络", () => {
     expect(plan({ readSeq: 500, latestSeq: 900, unread: 400, head: 900, ranges: [{ lo: 1, hi: 900 }] }))
       .toEqual({ source: "local" });
@@ -76,53 +87,56 @@ describe("planEntryWindow —— 这一窗问本地还是问服务端", () => {
 
 describe("moreLocalAbove —— 上滚时本地还有没有更早的", () => {
   it("当前最早一条在某段中间 → 本地展开，不打网络", () => {
-    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 300, { hasPrevSeq: false, hasAnyEarlier: true })).toBe(true);
+    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 300, 299)).toBe(true);
   });
 
   it("当前最早一条正是段首 → 上面是缺口或到顶，去问服务端", () => {
-    expect(moreLocalAbove([{ lo: 300, hi: 500 }], 300, { hasPrevSeq: true, hasAnyEarlier: true })).toBe(false);
+    expect(moreLocalAbove([{ lo: 300, hi: 500 }], 300, 299)).toBe(false);
   });
 
   // 这一条钉住 C3 的核心：seq 连号判据在这里是错的。
   // 300 与 301 之间隔着 msg_op 事件行/墓碑（占号不成消息），本地明明齐全，
   // 按 `有没有 seq-1 这条消息` 判会判成"到边界了" ⇒ 空跑一次请求 + 窗口提前切锚点模式。
   it("段内相邻两条之间隔着占号行 —— 清单说齐全就是齐全，不看 seq-1 在不在", () => {
-    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 301, { hasPrevSeq: false, hasAnyEarlier: true })).toBe(true);
+    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 301, 299)).toBe(true);
+  });
+
+  // /code-review 2026-09-09：第一版这道闸只问「本地任意位置还有没有更早的」，
+  // 于是缺口另一侧旧岛里的那一条会让它判真 —— 展开分支展不出东西、滑窗分支锚点原地不动。
+  it("更早的那一条在**缺口另一侧的旧岛**里（不在上沿这一段内）→ 判否，去问服务端", () => {
+    const ranges: SeqRange[] = [{ lo: 1, hi: 100 }, { lo: 300, hi: 500 }];
+    expect(moreLocalAbove(ranges, 300, /* 旧岛里的 */ 100)).toBe(false);
   });
 
   it("清单不可用（空/未预热）→ 退回 seq 连号判定", () => {
-    expect(moreLocalAbove([], 300, { hasPrevSeq: true, hasAnyEarlier: true })).toBe(true);
-    expect(moreLocalAbove([], 300, { hasPrevSeq: false, hasAnyEarlier: true })).toBe(false);
+    expect(moreLocalAbove([], 300, 299)).toBe(true);
+    expect(moreLocalAbove([], 300, 250)).toBe(false);
   });
 
   it("锚点不在任何已知段里（本地发出去还没登记）→ 同样退回连号判定", () => {
-    expect(moreLocalAbove([{ lo: 1, hi: 100 }], 300, { hasPrevSeq: true, hasAnyEarlier: true })).toBe(true);
+    expect(moreLocalAbove([{ lo: 1, hi: 100 }], 300, 299)).toBe(true);
   });
 
   it("清单说上面还有、但内存里一条更早的都没有 → 判否（不许无声卡住）", () => {
     // 清单可以合法地覆盖一段没有任何消息的号（整段都是 msg_op 事件行 / 墓碑）。
-    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 300, { hasPrevSeq: false, hasAnyEarlier: false })).toBe(false);
+    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 300, 0)).toBe(false);
   });
 
   it("已经是第一条 → 没有更早的", () => {
-    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 1, { hasPrevSeq: true, hasAnyEarlier: true })).toBe(false);
+    expect(moreLocalAbove([{ lo: 1, hi: 500 }], 1, 0)).toBe(false);
   });
 });
 
-describe("moreLocalBelow —— 下滚时本地还有没有更新的（与上滚对称）", () => {
-  it("在段中间 → 本地展开", () => {
-    expect(moreLocalBelow([{ lo: 1, hi: 500 }], 300, false)).toBe(true);
+describe("floorFromWindow —— has_before=false 时把可见下界记在哪一条", () => {
+  it("取本窗最小 seq（不是 anchor）", () => {
+    expect(floorFromWindow([49999, 50003, 50001], 50200)).toBe(49999);
   });
 
-  it("正是段尾 → 去问服务端", () => {
-    expect(moreLocalBelow([{ lo: 1, hi: 500 }], 500, true)).toBe(false);
+  it("整窗都是占号行（一条消息都没带回）→ 退回 anchor", () => {
+    expect(floorFromWindow([], 50200)).toBe(50200);
   });
 
-  it("段尾之下隔着占号行时同理：清单说到段尾了就是到段尾", () => {
-    expect(moreLocalBelow([{ lo: 1, hi: 500 }], 499, false)).toBe(true);
-  });
-
-  it("清单不可用 → 退回连号判定", () => {
-    expect(moreLocalBelow([], 300, true)).toBe(true);
+  it("anchor=0（取最新）且空窗 → 0，即「仍然未知」，不许当成到顶", () => {
+    expect(floorFromWindow([], 0)).toBe(0);
   });
 });

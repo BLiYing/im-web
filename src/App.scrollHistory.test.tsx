@@ -66,10 +66,10 @@ beforeEach(() => {
   installJsdomShims();
   // 已读到头、无未读：进会话贴底，首窗 = 最新一页。
   Fake.conversations = [makeConv({ latest_conv_seq: HEAD, read_seq: HEAD, unread: 0 })];
-  Fake.ranges = []; Fake.head = 0; Fake.atFloor = false; // 取数分流的三个输入，逐例自己摆
+  Fake.ranges = []; Fake.head = 0; Fake.floor = 0; // 取数分流的三个输入，逐例自己摆
 });
 afterEach(() => {
-  Fake.ranges = []; Fake.head = 0; Fake.atFloor = false;
+  Fake.ranges = []; Fake.head = 0; Fake.floor = 0;
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -323,14 +323,25 @@ describe("C3 上滑取数分流：先查区间清单再决定问不问服务端"
     await waitFor(() => expect(loadOlderCalls()).toEqual([HEAD - PAGE + 1]));
   });
 
-  it("服务端说过 has_before=false（到可见下界了）→ 不再空跑请求", async () => {
+  it("上沿正踩在服务端说过的可见下界上 → 不再空跑请求", async () => {
     // G2 把新成员的可见下界抬到入群位点，`上沿 > 1` 这个猜法对他们恒真：
     // 不认这条权威答案的话，每次上滑都要空跑一次注定回空页的请求。
     Fake.ranges = [{ lo: HEAD - PAGE + 1, hi: HEAD }];
-    Fake.atFloor = true;
+    Fake.floor = HEAD - PAGE + 1;                 // 下界就是当前上沿
     await enterWithLatestPage();
     scrollToTop();
     scrollToTop();
     expect(loadOlderCalls()).toEqual([]);
+  });
+
+  // /code-review 2026-09-09：第一版把下界记成布尔。从搜索结果跳进一个旧岛、上滑到岛顶时
+  // 服务端同样回 has_before=false（它是相对**本窗下沿**说的），记成布尔就等于宣布"整条会话
+  // 到顶了"——回到最新那一段再上滑会被永久静默屏蔽，中间那段缺口再也补不上。
+  it("下界是从旧岛记下的（远低于当前上沿）→ 当前这一段照旧要问服务端", async () => {
+    Fake.ranges = [{ lo: HEAD - PAGE + 1, hi: HEAD }];
+    Fake.floor = 1;                               // 旧岛顶部记下的下界
+    await enterWithLatestPage();
+    scrollToTop();
+    await waitFor(() => expect(loadOlderCalls()).toEqual([HEAD - PAGE + 1]));
   });
 });

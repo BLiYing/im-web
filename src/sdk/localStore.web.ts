@@ -317,12 +317,18 @@ async function clearMessages(owner: string, convId: string): Promise<void> {
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
+      // **区间清单必须同事务一起清**（OFFLINE_BACKLOG_DESIGN §4.2 的反方向不变量）：
+      // 清单宣称的是"这几段我已齐全"，消息删了它还留着，就是在宣称一段其实没有的内容。
+      // 后果不是报错而是**空白**——取数分流先查清单，判"本地已齐全"就一个请求都不发，
+      // 于是清空聊天记录 + 刷新后会话恒空，上滑/点↓ 都不自愈（/code-review 2026-09-09 抓出）。
+      const hasRanges = db.objectStoreNames.contains(RANGES_STORE); // 陈旧连接兜底，同 loadConversation
+      const tx = db.transaction(hasRanges ? [STORE, RANGES_STORE] : [STORE], "readwrite");
       const store = tx.objectStore(STORE);
       const req = store.index("ownerConv").getAllKeys(cursorKeyOf(owner, convId));
       req.onsuccess = () => {
         for (const key of (req.result as IDBValidKey[]) ?? []) store.delete(key);
       };
+      if (hasRanges) tx.objectStore(RANGES_STORE).delete(cursorKeyOf(owner, convId));
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });

@@ -7,7 +7,7 @@ import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
 import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
-import { planEntryWindow } from "../windowPlan";
+import { planEntryWindow, floorFromWindow } from "../windowPlan";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { type MentionSpan } from "../mention";
@@ -163,9 +163,9 @@ export class IMClient extends IMRestApi {
   private superConvs = new Set<string>();  // 超级群：max_gap=0，正文只在打开会话时按需取，永不自动补拉
   private headSeq = new Map<string, number>(); // convId -> 服务端最新位点（sync_resp.head_conv_seq / conv_bump.latest_seq）
   private gapped = new Set<string>();       // 收到过 too_long，即本地对该会话有缺口
-  // window_resp 说过 has_before=false，即"再往上没有对我可见的消息了"——**权威**答案。
-  // 此前只能靠 `上沿 > 1` 猜，而 G2 把新成员的可见下界抬到入群位点，对他们那个猜法恒真。
-  private atFloor = new Set<string>();
+  // 可见下界的**位点**（未知为 0），由 window_resp 的 has_before=false 记下；此前靠 `上沿 > 1`
+  // 猜，而 G2 把新成员的下界抬到入群位点，那个猜法对他们恒真。为什么是位点不是布尔：见 floorFromWindow。
+  private floorSeq = new Map<string, number>();
   // 区间清单的**内存镜像**（IndexedDB 里那份为准，这里只为让渲染层能同步读到）。
   // 渲染切段必须知道"两条消息之间那些 conv_seq 到底是没下载、还是下载过但本就不是一条消息"——
   // msg_op 事件行、已被「为所有人删除」的墓碑、对我不可见的行都会占掉 conv_seq 却永远不成为消息。
@@ -296,6 +296,7 @@ export class IMClient extends IMRestApi {
     this.headSeq.clear();
     this.convRanges.clear();
     this.gapped.clear();
+    this.floorSeq.clear();
     this.pagedPending.clear();
     this.pendingOps.clear();
     this.ws?.close(1000);
@@ -414,7 +415,7 @@ export class IMClient extends IMRestApi {
    *  天然落后于自己刚发的那一堆——压测灌完 1 万条后，user1001 自己进会话时 unread=0 而
    *  latest 比 read_seq 大一万，旧判据据此锚到一万条之前的位置：不贴底、↓N 显示一大串，
    *  用户以为消息没发出去。iOS 一直用的就是真实未读数（entryUnread），此处对齐。 */
-  openConversation(convId: string, readSeq: number, latestSeq: number, unread: number): void {
+  openConversation(convId: string, readSeq: number, latestSeq: number, unread: number, localNewest = 0): void {
     if (!convId) return;
     const newlyTracked = !this.tracked.has(convId);
     this.tracked.add(convId);
@@ -430,32 +431,28 @@ export class IMClient extends IMRestApi {
       }
       if (head > 0) this.headSeq.set(convId, Math.max(this.headSeq.get(convId) ?? 0, head));
     }).catch(() => { /* 目录读不出来 → 当作没有，下面照常问服务端 */ })
-      .finally(() => this.fetchEntryWindow(convId, readSeq, latestSeq, unread));
+      .finally(() => this.fetchEntryWindow(convId, readSeq, latestSeq, unread, localNewest));
   }
 
-  /** 首屏取数（§4.6）：先查目录再决定问谁。**刻意排在区间预热之后**——目录只有 IndexedDB
-   *  里那份记得，不等它就等于每次刷新后的第一次进会话都必然打一次网络（规则见 windowPlan.ts）。 */
-  private fetchEntryWindow(convId: string, readSeq: number, latestSeq: number, unread: number): void {
+  /** 首屏取数（§4.6，规则见 windowPlan.ts）：先查目录再决定问谁。**刻意排在区间预热之后**——
+   *  目录只有 IndexedDB 那份记得，不等它＝每次刷新后的第一次进会话都必然打一次网络。 */
+  private fetchEntryWindow(convId: string, readSeq: number, latestSeq: number, unread: number, localNewest: number): void {
     const plan = planEntryWindow({
-      ranges: this.rangesOf(convId),
-      head: this.headSeq.get(convId) ?? 0,
-      readSeq, latestSeq, unread,
-      contextBefore: this.contextBefore, historyPage: this.historyPage,
+      ranges: this.rangesOf(convId), head: this.headSeq.get(convId) ?? 0, localNewest,
+      readSeq, latestSeq, unread, contextBefore: this.contextBefore, historyPage: this.historyPage,
     });
     if (plan.source === "local") {
-      // 本地已齐全：一个请求都不发。仍要报一次「取数结束」，否则 UI 的分页忙标志复位不了
-      //（它只由响应帧解除，而这一路根本没有响应帧）。
+      // 本地已齐全：一个请求都不发。仍要报一次「取数结束」——忙标志只由响应帧解除，而这一路没有响应帧。
       this.handlers.onHistoryPage?.(convId, 0, 0);
       return;
     }
     this.requestWindow(convId, plan.anchor, plan.before, plan.after);
   }
 
-  /** 加载 oldestSeq 之前的一页（上滚到本地这一段的头部触发）。
-   *  调用方须先确认本地这一段之上没有已下载内容（windowPlan.moreLocalAbove）。 */
+  /** 加载 oldestSeq 之前的一页（上滚到本地这一段的头部触发；调用方先过 windowPlan.moreLocalAbove）。 */
   loadOlder(convId: string, oldestSeq: number): void {
     if (!convId || oldestSeq <= 1) return;
-    if (this.atFloor.has(convId)) { this.handlers.onHistoryPage?.(convId, 0, 0); return; } // 服务端说过没有更早的了
+    if (oldestSeq <= (this.floorSeq.get(convId) ?? 0)) { this.handlers.onHistoryPage?.(convId, 0, 0); return; } // 已在可见下界
     this.requestWindow(convId, oldestSeq, this.historyPage, 0);
   }
 
@@ -993,11 +990,13 @@ export class IMClient extends IMRestApi {
           }
         }
         {
-          // 上滚/下滚/进会话现在都走这一路（§4.6/§4.7），分页忙标志靠「响应到了」复位；
-          // 不报的话一次上滚之后 loadingOlderRef 永远为真，之后每次上滑都被当 busy 跳过。
+          // 上滚/下滚/进会话都走这一路（§4.6/§4.7），分页忙标志靠「响应到了」复位；不报的话一次上滚之后永久 busy。
           const cid2 = String(d.conv_id ?? "");
           this.handlers.onHistoryPage?.(cid2, Number(d.anchor) || 0, (d.messages || []).length);
-          if (d.has_before === false && Number(d.anchor) > 0) this.atFloor.add(cid2); // 只置位不复位：稳定事实
+          if (d.has_before === false) { // 本窗下沿即可见下界，只往小里收
+            const f = floorFromWindow((d.messages || []).map((m: { conv_seq?: number }) => Number(m.conv_seq) || 0), Number(d.anchor) || 0);
+            if (f > 0) this.floorSeq.set(cid2, Math.min(this.floorSeq.get(cid2) ?? f, f));
+          }
         }
         this.handlers.onWindow?.({
           convId: String(d.conv_id ?? ""),
@@ -1202,9 +1201,10 @@ export class IMClient extends IMRestApi {
     return this.convRanges.get(convId) ?? [];
   }
 
-  /** 服务端是否说过"再往上没有更早的了"（window_resp.has_before=false）。UI 据此不再空跑上滚请求。 */
-  atHistoryFloor(convId: string): boolean {
-    return this.atFloor.has(convId);
+  /** `oldestSeq` 是否已踩在服务端说过的可见下界上。UI 据此不再空跑注定回空页的上滚请求；未知下界恒 false。 */
+  atHistoryFloor(convId: string, oldestSeq: number): boolean {
+    const floor = this.floorSeq.get(convId) ?? 0;
+    return floor > 0 && oldestSeq <= floor;
   }
 
   /** 该会话本地是否有缺口（收到过 too_long）。上层据此决定"整会话问题"问本地还是问服务端。 */

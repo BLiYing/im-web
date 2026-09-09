@@ -324,9 +324,15 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
 
     async clearMessages(owner: string, convId: string): Promise<void> {
       if (!owner || !convId) return;
-      // **只删消息**：墓碑与游标一概不动（删掉墓碑会让重同步把删过的消息复活）。
+      // **只删消息与区间清单**：墓碑与游标一概不动（删掉墓碑会让重同步把删过的消息复活）。
+      // 清单必须跟着删——它宣称的是"这几段我已齐全"，消息没了还留着就是在宣称一段其实没有的
+      // 内容；取数分流据此判"本地已齐全"就一个请求都不发，表现是清空后会话恒空且不自愈。
       guard("conversation_clear_failed", { conv_id: convId }, undefined, () => {
-        db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ?").run(owner, convId);
+        const tx = db.transaction(() => {
+          db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ?").run(owner, convId);
+          db.prepare("DELETE FROM conv_ranges WHERE owner = ? AND conv_id = ?").run(owner, convId);
+        });
+        tx();
       });
     },
 

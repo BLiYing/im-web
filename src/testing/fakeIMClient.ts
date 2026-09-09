@@ -13,7 +13,7 @@ export class FakeIMClient {
   /** 区间清单（"本地有哪几段"）。取数分流与渲染切段都读它，故用例要能摆布它。 */
   static ranges: { lo: number; hi: number }[] = [];
   static head = 0;
-  static atFloor = false;
+  static floor = 0;   // 服务端说过的可见下界位点（0=未知）
   static pinned: PinnedMessage[] = []; // 置顶集合（G0 横幅数据源）：测试可就地改，模拟服务端剔除撤回/取消置顶
   handlers: Handlers;
   calls: Record<string, unknown[][]> = {}; // 方法名 → 各次调用实参（断言用）
@@ -65,8 +65,10 @@ export class FakeIMClient {
   // Proxy 兜底回 Promise，会被 visibleSlice 当成一个没有 length 的清单。
   rangesOf(): { lo: number; hi: number }[] { return FakeIMClient.ranges; }
   headOf(): number { return FakeIMClient.head; }
-  /** 服务端说过"再往上没有更早的了"（window_resp.has_before=false）。 */
-  atHistoryFloor(): boolean { return FakeIMClient.atFloor; }
+  /** 上沿是否已踩在服务端说过的可见下界上。**位点语义**：从旧岛记下的下界不该屏蔽新段的上滑。 */
+  atHistoryFloor(_convId: string, oldestSeq: number): boolean {
+    return FakeIMClient.floor > 0 && oldestSeq <= FakeIMClient.floor;
+  }
   loadOlder(...a: unknown[]) { this.rec("loadOlder", ...a); }
   loadNewer(...a: unknown[]) { this.rec("loadNewer", ...a); }
   async fetchUserPresence() { return { onlineUntil: 0, lastSeen: 0 }; }
@@ -90,7 +92,7 @@ export type Fake = {
   pinned: PinnedMessage[];
   ranges: { lo: number; hi: number }[];
   head: number;
-  atFloor: boolean;
+  floor: number;
 };
 
 /** hook 测试：把部分实现的假客户端包成 clientRef。 */

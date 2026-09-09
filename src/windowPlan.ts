@@ -58,7 +58,9 @@ export function entryWindowAnchor({ readSeq, unread, contextBefore, historyPage 
  * "取最新"这一窗的上界就是 head，不知道上界就无从判断本地齐不齐，
  * 此时若乐观地判成 local，用户进会话看到的就是一段停在旧位置的历史，而且不会有任何提示。
  */
-export function planEntryWindow(input: EntryWindowInput & { ranges: SeqRange[]; head: number }): WindowPlan {
+export function planEntryWindow(
+  input: EntryWindowInput & { ranges: SeqRange[]; head: number; localNewest: number },
+): WindowPlan {
   const { anchor, before, after } = entryWindowAnchor(input);
   const tip = input.head > 0 ? input.head : input.latestSeq;
   const server: WindowPlan = { source: "server", anchor, before, after };
@@ -66,6 +68,12 @@ export function planEntryWindow(input: EntryWindowInput & { ranges: SeqRange[]; 
   const lo = Math.max(1, (anchor > 0 ? anchor : tip) - before);
   const hi = anchor > 0 ? Math.min(tip, anchor + after) : tip;
   if (hi < lo) return server;
+  // **清单说齐全还不够，手里得真有东西**（/code-review 2026-09-09）。
+  // 清单与消息表是两处存储，任何一处让它们失配，判 local 的后果就是**空白且不自愈**：
+  // 一个请求都不发，上滑与点 ↓ 都走同一条判定。已知的失配来源是「清空聊天记录」只删了消息
+  // （web 与 SQLite 两侧都已改成同事务连清单一起清），但**老库里已经孤立的清单追不回来**，
+  // 所以这道闸得长期留着。代价只是偶尔多问一次服务端——往这个方向倒才是对的。
+  if (input.localNewest < lo) return server;
   return coversSpan(input.ranges, lo, hi) ? { source: "local" } : server;
 }
 
@@ -81,26 +89,30 @@ export function planEntryWindow(input: EntryWindowInput & { ranges: SeqRange[]; 
  * `hasPrevSeqLocally` 是**清单不可用时**的退路（老库、清单还没预热好）：退回 seq 连号判定。
  * 宁可多问服务端一次，也不能把缺口两侧静默拼在一起。
  */
-export function moreLocalAbove(
-  ranges: SeqRange[],
-  oldestRendered: number,
-  local: { hasPrevSeq: boolean; hasAnyEarlier: boolean },
-): boolean {
+export function moreLocalAbove(ranges: SeqRange[], oldestRendered: number, prevLocalSeq: number): boolean {
   if (oldestRendered <= 1) return false;
-  // 清单说"还没到头"但内存里**确实一条更早的都没有** → 仍旧问服务端。
-  // 少了这一条就有一条**无声的卡死路径**：展开分支什么也展不开（没内容）、滑窗分支把锚点
-  // 定在原地（上沿不动），于是上滑永远不发请求也永远不动。清单记的是"下载过哪些号"，
-  // 它可以合法地覆盖一段没有任何消息的号（整段都是 msg_op 事件行 / 墓碑）。
-  if (!local.hasAnyEarlier) return false;
+  // `prevLocalSeq` = 本地**实际存在的消息**里、比上沿更早的那个最大 conv_seq（没有则 0）。
+  // 判据必须是「同一段内确实还有一条消息」，两个条件缺一不可：
+  //   · 只看清单 → 清单可以合法地覆盖一段没有任何消息的号（整段都是 msg_op 事件行 / 墓碑），
+  //     展开分支展不出东西、滑窗分支把锚点定在原地，上滑**永远不动也永远不发请求**；
+  //   · 只看"本地任意位置还有更早的" → 那一条可能在**缺口另一侧的旧岛**里，同样展不出来
+  //     （/code-review 2026-09-09：第一版就是这么写的，闸放宽了一档）。
+  if (prevLocalSeq <= 0 || prevLocalSeq >= oldestRendered) return false;
   const seg = rangeContaining(ranges, oldestRendered);
-  if (!seg) return local.hasPrevSeq;
-  return seg.lo < oldestRendered; // 同一段内还有更早的 → 本地展开；段首 → 上面是缺口或到顶
+  if (!seg) return prevLocalSeq === oldestRendered - 1; // 清单不可用（老库/未预热）→ 退回 seq 连号
+  return prevLocalSeq >= seg.lo;                        // 就在这一段里 → 本地展开
 }
 
-/** 下滚：当前渲染的最新一条**之下**还有没有本地已下载的内容（与 moreLocalAbove 对称）。 */
-export function moreLocalBelow(ranges: SeqRange[], newestRendered: number, hasNextSeqLocally: boolean): boolean {
-  if (newestRendered <= 0) return false;
-  const seg = rangeContaining(ranges, newestRendered);
-  if (!seg) return hasNextSeqLocally;
-  return seg.hi > newestRendered;
+/**
+ * `has_before=false` 时该把可见下界记在哪一条上。
+ *
+ * **必须记位点、不能记布尔**（/code-review 2026-09-09）：服务端的 `has_before` 是相对**本窗下沿**
+ * 说的，不是相对整条会话（`internal/gateway/window.go` 的 `hasBefore = len(pre) > before`）。
+ * 从搜索结果跳进一个旧岛、上滑到岛顶时它同样为 false——记成布尔就等于宣布"整条会话到顶了"，
+ * 之后回到最新那一段再上滑会被永久静默屏蔽，中间那段缺口再也补不上。
+ * 整窗都是占号行（msg_op / 墓碑）时退回 anchor：那同样断言了"anchor 之下没有"。
+ */
+export function floorFromWindow(seqs: number[], anchor: number): number {
+  const valid = seqs.filter((n) => n > 0);
+  return valid.length > 0 ? Math.min(...valid) : Math.max(0, anchor);
 }

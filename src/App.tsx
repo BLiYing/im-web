@@ -650,7 +650,7 @@ export default function App() {
     setJumpCount(0);
     maxReadReportedRef.current = readSeq;
     pendingReadRef.current = readSeq;
-    clientRef.current?.openConversation(cid, readSeq, latestSeq, conv?.unread ?? 0);
+    clientRef.current?.openConversation(cid, readSeq, latestSeq, conv?.unread ?? 0, maxSeqOf(msgsByConvRef.current[cid] ?? []));
     void refreshGroupInfo(cid); // 群资料：标题成员数 / 气泡昵称回退 / 资料面板
     // 进会话即清手动"标未读"（IM 通行做法）；多端经 conv_update 同步。
     if (conv?.marked_unread) {
@@ -1009,7 +1009,7 @@ export default function App() {
     // 可见即读：已读起点=进入前位点；只有滚入视口超过它的消息才上报（见 markVisibleRead）。
     maxReadReportedRef.current = readSeq;
     pendingReadRef.current = readSeq;
-    clientRef.current?.openConversation(cid, readSeq, latestSeq, conv?.unread ?? 0); // 加载锚点窗口，余下双向分页
+    clientRef.current?.openConversation(cid, readSeq, latestSeq, conv?.unread ?? 0, maxSeqOf(msgsByConvRef.current[cid] ?? [])); // 加载锚点窗口，余下双向分页
     // 进会话即清手动"标未读"（IM 通行做法：打开视为已处理）；多端经 conv_update 同步。
     if (conv?.marked_unread) {
       void clientRef.current?.updateConvSettings(cid, { pinned_at: conv.pinned_at ?? 0, muted: !!conv.muted, marked_unread: false }).then(() => refreshConversations()).catch(() => {});
@@ -2257,9 +2257,9 @@ export default function App() {
       // 不能用本地全量最小 seq——后者在有缺口时指向缺口另一侧的旧岛（极端就是 seq=1），
       // 于是「oldest > 1」恒假、上滚什么都不发生（2026-09-03 实测）。
       const localAllForConv = msgsByConv[cid] ?? [];
-      const anySeq = (pred: (sq: number) => boolean) => localAllForConv.some((m) => m.convSeq > 0 && pred(m.convSeq));
-      const contiguousAbove = moreLocalAbove(clientRef.current?.rangesOf(cid) ?? [], oldestRendered,
-        { hasPrevSeq: anySeq((sq) => sq === oldestRendered - 1), hasAnyEarlier: anySeq((sq) => sq < oldestRendered) });
+      // 本地实际存在的消息里、比上沿更早的那个**最大** conv_seq（没有则 0）——判据只认它。
+      const prevLocalSeq = localAllForConv.reduce((mx, m) => (m.convSeq > 0 && m.convSeq < oldestRendered ? Math.max(mx, m.convSeq) : mx), 0);
+      const contiguousAbove = moreLocalAbove(clientRef.current?.rangesOf(cid) ?? [], oldestRendered, prevLocalSeq);
       const localCount = localAllForConv.length;
       const roomToGrow = Math.min(localCount, RENDER_WINDOW_MAX);
       if (contiguousAbove && renderView.size < roomToGrow) {
@@ -2270,7 +2270,7 @@ export default function App() {
         // 摆在窗口中间，于是上方多出半窗、下方等量丢掉，DOM 恒定在上限内。
         // 不这么做就只剩两条路：要么无限长（回到 W2 之前），要么什么都不做（往上滚不动）。
         setRenderView({ anchor: oldestRendered, size: RENDER_WINDOW_MAX });
-      } else if (oldestRendered > 1 && !clientRef.current?.atHistoryFloor(cid)) {
+      } else if (oldestRendered > 1 && !clientRef.current?.atHistoryFloor(cid, oldestRendered)) {
         // atHistoryFloor = 服务端的权威答案（has_before=false）；`>1` 只是猜，对有可见下界的新成员恒真。
         loadingOlderRef.current = true;
         // **切到锚点模式**：anchor=null 的窗口恒等于"本地最新 size 条"，于是补回来的更早消息
@@ -2301,7 +2301,7 @@ export default function App() {
       setEntryUnread(0);
       forceBottomRef.current = true;
       pendingScrollRef.current = true;
-      clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current, 0); // 点 ↓ = 我要最新的，无未读语义
+      clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current, 0, newest); // 点 ↓ = 我要最新的，无未读语义
     }
     wasNearBottomRef.current = true;
     setShowJump(false);

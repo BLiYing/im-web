@@ -300,6 +300,19 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.loadConversation(other, "c1")).toHaveLength(1);
     });
 
+    it("清空聊天记录必须**连区间清单一起清**（否则会话空白且不自愈）", async () => {
+      // 清单宣称的是"这几段我已齐全"。消息删了它还留着，就是在宣称一段其实没有的内容——
+      // 而取数分流（windowPlan.planEntryWindow）先查清单，判"本地已齐全"就一个请求都不发。
+      // 表现不是报错而是**空白**：清空聊天记录 + 刷新后会话恒空，上滑与点↓ 都不自愈
+      // （/code-review 2026-09-09 抓出，当时 web 与 SQLite 两侧都只删了消息）。
+      const o = newOwner("clear-ranges");
+      await store.saveMessage(o, msg("c1", 1));
+      await store.registerRange(o, "c1", 1, 500, 500);
+      expect((await store.loadRanges(o, "c1")).ranges).toEqual([{ lo: 1, hi: 500 }]);
+      await store.clearMessages(o, "c1");
+      expect((await store.loadRanges(o, "c1")).ranges).toEqual([]);
+    });
+
     it("清空聊天记录**不动墓碑、不动游标**", async () => {
       // 归档里那条「删了又冒出来」的另一种走法：先删第 1 条、再清空整个会话，
       // 若实现顺手把墓碑一起清了，下一次后台重同步第 1 条就复活了。
