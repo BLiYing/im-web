@@ -10,7 +10,7 @@
 //
 // **只往 `IM_E2E_CONV`（默认「冒烟测试」）匹配的会话发**，找不到就失败退出——
 // 绝不退化成「挑第一个会话发」，那会把测试消息发进真实会话甚至大群。
-import type { BrowserWindow } from "electron";
+import { app, type BrowserWindow } from "electron";
 import { getNotifyCount } from "./shellCaps";
 
 const TARGET_CONV = process.env.IM_E2E_CONV || "冒烟测试";
@@ -225,6 +225,48 @@ export async function runE2E(
       return 6;
     } else {
       say(`[e2e] ✓ D4-2 桥打通：setBadge/notify/subscribeOpenConversation/autoStart 齐备，setBadge(7)=${bridge.set}`);
+    }
+
+    // ⑧ D4-4 的三件：另存 / 外链 / 唤醒信号。
+    //    `saveFile` 会弹保存对话框、`openExternal` 会拉起系统浏览器——**都不能在无人值守里真调**，
+    //    所以这里只验「桥上有没有」。唯一能端到端验的是**唤醒信号**：它没有可见副作用，
+    //    而且正是那条「合盖一夜再打开，网页那两个信号一个都不来」的路，值得真跑一次。
+    if (!bridge.present) {
+      say("[e2e] – 桥不在（浏览器模式），跳过 D4-4 桥检查");
+    } else {
+      const caps = (await win.webContents.executeJavaScript(`(() => {
+        const b = window.imDesktop;
+        return { save: typeof b.saveFile === 'function', open: typeof b.openExternal === 'function',
+                 wake: typeof b.subscribeWake === 'function' };
+      })()`)) as { save: boolean; open: boolean; wake: boolean };
+      if (!caps.save || !caps.open || !caps.wake) {
+        say(`[e2e] ✗ D4-4 桥不完整：${JSON.stringify(caps)}`);
+        return 10;
+      }
+      // 唤醒信号走一遍真链路：页面订阅 → 主进程发 focus → 页面收到 → 拆除后不再收。
+      // **拆除那一半必须验**：不拆的话换号后旧回调仍挂在 ipcRenderer 上，
+      // 醒来会把已作废的会话拉回来（sdk/wake.ts 记着这个坑，2026-08-22 真出过）。
+      await win.webContents.executeJavaScript(`(() => {
+        window.__wake = [];
+        window.__wakeOff = window.imDesktop.subscribeWake((r) => window.__wake.push(r));
+      })()`);
+      win.emit("focus");                                   // 与 app 的 browser-window-focus 同源
+      app.emit("browser-window-focus", {}, win);
+      await new Promise((r) => setTimeout(r, 300));
+      const got = (await win.webContents.executeJavaScript(
+        `(() => { window.__wakeOff(); const n = window.__wake.length; window.__wake = []; return n; })()`)) as number;
+      app.emit("browser-window-focus", {}, win);           // 拆除之后再发一次
+      await new Promise((r) => setTimeout(r, 300));
+      const after = (await win.webContents.executeJavaScript(`window.__wake.length`)) as number;
+      if (got < 1) {
+        say("[e2e] ✗ 唤醒信号没到页面——主进程 installWakeSignals 没装，或频道名两侧不一致");
+        return 10;
+      }
+      if (after !== 0) {
+        say(`[e2e] ✗ 拆除后仍收到 ${after} 条唤醒信号——subscribeWake 返回的拆除函数没真拆`);
+        return 10;
+      }
+      say(`[e2e] ✓ D4-4 桥打通：saveFile/openExternal 齐备；唤醒信号收到 ${got} 条，拆除后归零`);
     }
   } catch (e) {
     say(`[e2e] ✗ ${String(e instanceof Error ? e.message : e)}`);

@@ -18,7 +18,8 @@ export interface DesktopBridge {
   readonly contract: number;
   readonly deviceId: string;
   readonly deviceName: string;
-  saveFile?(url: string, name: string): Promise<void>;
+  /** 另存。`bytes` 与 `url` 二选一——blob: 主进程够不到，由本层读好递过去（见下方实现）。 */
+  saveFile?(name: string, url?: string, bytes?: ArrayBuffer): Promise<boolean>;
   openExternal?(url: string): void;
   /** 返回**是否真的发出去了**（见 types.ts 的契约）。系统拒绝通知权限 / 开了勿扰时必须回 false，
    *  否则调用方会以为已通知而跳过应用内兜底，用户什么都看不到。 */
@@ -64,13 +65,37 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
 
     async saveFile(req: SaveFileRequest): Promise<void> {
       if (!bridge.saveFile) { fellBack("saveFile"); return webPlatform.saveFile(req); }
-      return bridge.saveFile(req.url, req.name);
+      try {
+        // blob:/data: **活在渲染进程的 origin 里**，主进程 fetch 不到——只能本层读成字节递过去。
+        // 这类 URL 是「用户已手动下载进应用内缓存」的文件（useMediaDownload 的 dlBlobs），
+        // 本来就整份在内存里，多一次拷贝可接受。
+        if (/^(blob|data):/i.test(req.url)) {
+          const bytes = await (await fetch(req.url)).arrayBuffer();
+          await bridge.saveFile(req.name, undefined, bytes);
+          return;
+        }
+        // 远端媒体：只给 URL，让主进程**流式**落盘。别在这里 fetch 成 ArrayBuffer——
+        // 视频最大可到 1.5 GB（MAX_AUTO_BYTES），那会把整份读进渲染进程内存，
+        // 而浏览器版的 `<a download>` 本来是流式的，不该在桌面上退化。
+        // 调用方传的可能是 `/uploads/xxx` 这种相对路径，主进程需要绝对 URL。
+        await bridge.saveFile(req.name, new URL(req.url, location.href).href, undefined);
+      } catch (error) {
+        logger.warn(LOG_TAG.app, "desktop_save_file_failed", { name: req.name, error });
+      }
     },
 
     openExternal(url: string): void {
       // 同步、fire-and-forget：理由同 web 侧（保用户手势）。桥这边即使是 IPC 也不许 await。
       if (!bridge.openExternal) { fellBack("openExternal"); webPlatform.openExternal(url); return; }
-      bridge.openExternal(url);
+      // blob:/data: **交不给系统浏览器**——那是渲染进程 origin 里的东西，系统里没有这个地址。
+      // 退回 window.open：主进程的 setWindowOpenHandler 会给它开一个**不带桥**的窗口。
+      // （调用点是 useMediaDownload 的预览分支，已下载过的文件传的就是 blob:。）
+      if (/^(blob|data):/i.test(url)) { webPlatform.openExternal(url); return; }
+      try {
+        bridge.openExternal(new URL(url, location.href).href);   // 相对路径要补成绝对
+      } catch {
+        webPlatform.openExternal(url);   // URL 解析不了就按老路走，别把预览整个吞掉
+      }
     },
 
     async notify(req: NotifyRequest): Promise<boolean> {

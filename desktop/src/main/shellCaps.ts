@@ -3,10 +3,12 @@
 // 这三件都**只能由外壳做**，也是 D1 立接口时就留好、至今在 web 侧恒返回 false 的那两个
 // （`notify` / `setBadge`）第一次真正有实现。判断逻辑不在这里——「该不该弹」「角标算几」
 // 是页面侧的纯函数（`src/desktopNotify.ts`），这里只负责「让它发生」。
-import { app, BrowserWindow, Notification } from "electron";
+import { app, BrowserWindow, Notification, powerMonitor } from "electron";
 
 /** 主进程 → 渲染进程的事件通道。preload 那侧同名订阅（见 preload/index.ts）。 */
 export const IPC_OPEN_CONVERSATION = "im:open-conversation";
+/** 「该醒过来看一眼连接」的信号。同上，preload 那侧是同名字面量。 */
+export const IPC_WAKE = "im:wake";
 
 /** 本进程内一共真的弹了几条通知。**只给自检用**——`--e2e` 靠它断言「批量投递不产生通知」，
  *  那是没有别的观测手段的：通知弹没弹，从页面里看不见。 */
@@ -81,4 +83,32 @@ export function setAutoStart(on: boolean): boolean {
     return getAutoStart();
   }
   return getAutoStart();
+}
+
+/**
+ * 桌面独有的「醒来」信号：系统睡眠唤醒 / 解锁 / 窗口重新聚焦。
+ *
+ * **为什么要有它**：渲染进程本身还是个网页，`online` / `visibilitychange` 照常会来
+ * （web 那侧仍在订阅，桌面这层是**叠加**不是替换，见 platform/desktop.ts）。
+ * 但合盖一夜再打开这种情形，网页那两个信号可能一个都不来——窗口一直"可见"、网络也没断过，
+ * 而 WebSocket 早被系统掐了。少了这一条，用户看到的是「打开电脑后聊天半天不动」。
+ *
+ * 返回拆除函数：`app.whenReady` 之后只装一次，进程退出时拆。
+ */
+export function installWakeSignals(getWin: () => BrowserWindow | null): () => void {
+  const send = (reason: string) => (): void => {
+    const win = getWin();
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_WAKE, reason);
+  };
+  const onResume = send("desktop-resume");
+  const onUnlock = send("desktop-unlock");
+  const onFocus = send("desktop-focus");
+  powerMonitor.on("resume", onResume);
+  powerMonitor.on("unlock-screen", onUnlock);
+  app.on("browser-window-focus", onFocus);
+  return () => {
+    powerMonitor.off("resume", onResume);
+    powerMonitor.off("unlock-screen", onUnlock);
+    app.off("browser-window-focus", onFocus);
+  };
 }

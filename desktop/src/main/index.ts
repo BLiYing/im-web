@@ -13,7 +13,8 @@ import { runPerf } from "./perf";
 import { runShellCheck } from "./shellCheck";
 import { checkDistFreshness, freshnessMessage } from "./distFreshness";
 import { beginQuit, installTray, isQuitting, setTrayTooltip } from "./tray";
-import { getAutoStart, notify, setAutoStart, setBadge } from "./shellCaps";
+import { getAutoStart, installWakeSignals, notify, setAutoStart, setBadge } from "./shellCaps";
+import { isExternallyOpenable, openExternal, saveFile } from "./fileCaps";
 import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
 import { createSqliteStore, type SqliteStore } from "./sqliteStore";
 import { IPC_STORE, isStoreMethod } from "../shared/storeIpc";
@@ -75,6 +76,22 @@ function createWindow(): BrowserWindow {
       ],
     },
   });
+
+  // `window.open` 的去向。**不设这个的后果**：Electron 默认允许开子窗口且**继承 webPreferences**
+  // ——包括那个 preload，于是任意 `window.open` 都会造出第二个挂着完整桥的窗口。
+  // 三条去向都是刻意的：
+  //   · http(s) → 交系统浏览器（与 openExternal 同一条路，别在应用里再开一个浏览器）
+  //   · blob:/data: → 允许开窗，但**不带 preload、不带 node**：它是本应用下载下来的媒体预览
+  //     （useMediaDownload 的预览分支对已下载文件传的就是 blob:），内容是我们自己的，但没有理由带桥
+  //   · 其余一律拒
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isExternallyOpenable(url)) { openExternal(url); return { action: "deny" }; }
+    if (url.startsWith("blob:") || url.startsWith("data:")) {
+      return { action: "allow", overrideBrowserWindowOptions: { webPreferences: { preload: undefined, nodeIntegration: false, contextIsolation: true, sandbox: true } } };
+    }
+    process.stderr.write(`[im-desktop] 拒绝 window.open：${url.slice(0, 80)}\n`);
+    return { action: "deny" };
+  });
   win.once("ready-to-show", () => {
     if (smokeMode || e2eMode || perfMode || shellMode) return;
     if (st.maximized) win.maximize();
@@ -96,6 +113,8 @@ function createWindow(): BrowserWindow {
 let localServer: LocalServerHandle | null = null;
 /** 本地消息库（D4-3b）。打不开时保持 null，渲染侧会整体回落 IndexedDB。 */
 let store: SqliteStore | null = null;
+/** 唤醒信号的拆除函数（D4-4）。 */
+let stopWakeSignals: (() => void) | null = null;
 
 /**
  * 桥的 IPC 处理端。
@@ -116,6 +135,23 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   });
   ipcMain.handle("im:get-auto-start", () => getAutoStart());
   ipcMain.handle("im:set-auto-start", (_e, on: unknown) => setAutoStart(on === true));
+
+  // 另存：异步（要弹保存对话框）。返回值只给日志/自检用，契约那侧是 Promise<void>。
+  ipcMain.handle("im:save-file", async (_e, p: unknown) => {
+    const q = (p ?? {}) as { name?: unknown; url?: unknown; bytes?: unknown };
+    return saveFile(getWin(), {
+      name: typeof q.name === "string" ? q.name : "download",
+      url: typeof q.url === "string" ? q.url : undefined,
+      bytes: q.bytes instanceof Uint8Array || q.bytes instanceof ArrayBuffer ? q.bytes : undefined,
+    });
+  });
+
+  // 打开外链：**`on` 不是 `handle`**。契约要求 `openExternal` 是同步 fire-and-forget
+  // （脱离用户手势的调用栈就会被弹窗拦截器吃掉，见 types.ts），所以桥那侧用 `send`，
+  // 这边就得用 `on` 接。用 `handle` 的话 preload 只能 `invoke`，那是个 Promise，语义就变了。
+  ipcMain.on("im:open-external", (_e, url: unknown) => {
+    openExternal(typeof url === "string" ? url : "");
+  });
 }
 
 /**
@@ -176,6 +212,9 @@ app.whenReady().then(async () => {
     store = null;
   }
   installStoreIpc(() => store);
+  // 桌面独有的唤醒源（睡眠唤醒 / 解锁 / 窗口聚焦）。web 那两个信号仍在页面里订阅着，
+  // 这层是**叠加**——见 platform/desktop.ts 的 subscribeWake。
+  stopWakeSignals = installWakeSignals(() => (win.isDestroyed() ? null : win));
   if (useLocalServer()) {
     try {
       localServer = await startLocalServer(distDir(), backendOrigin(), rememberedLocalPort());
@@ -234,7 +273,11 @@ app.whenReady().then(async () => {
 // 原注释说它能防端口/fd 累积，那是不对的——真正回收靠的是进程退出，且 smoke/e2e/perf 走
 // `app.exit()` 压根不触发 will-quit）。D4 若加「关闭=最小化到托盘」而需要在不退进程的前提下
 // 重建服务，这里必须改成记下活连接并逐个 destroy。
-app.on("will-quit", () => { localServer?.close(); localServer = null; store?.close(); store = null; });
+app.on("will-quit", () => {
+  localServer?.close(); localServer = null;
+  store?.close(); store = null;
+  stopWakeSignals?.(); stopWakeSignals = null;
+});
 
 // 装了托盘之后，关窗只是 hide，窗口不会被销毁，所以 window-all-closed 正常情况下压根不触发。
 // 只有「托盘 → 退出」那条路才会走到这里（那时 quitting 已置上）。保留这个兜底是为了

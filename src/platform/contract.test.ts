@@ -140,19 +140,55 @@ describe("desktop 侧特有", () => {
     const opened: string[] = [];
     const p = createDesktopPlatform({
       ...bareBridge,
-      saveFile: async (url, name) => { saved.push(`${url}|${name}`); },
+      saveFile: async (name, url) => { saved.push(`${url}|${name}`); return true; },
       openExternal: (url) => { opened.push(url); },
       notify: async () => true,
       setBadge: async () => true,
       voiceRecording: () => ({ supported: true, mime: "audio/mp4", ext: ".m4a" }),
     });
-    await p.saveFile({ url: "u", name: "n.zip" });
+    await p.saveFile({ url: "https://x/u", name: "n.zip" });
     p.openExternal("https://x/y");
-    expect(saved).toEqual(["u|n.zip"]);
+    expect(saved).toEqual(["https://x/u|n.zip"]);
     expect(opened).toEqual(["https://x/y"]);
     expect(await p.notify({ title: "t", body: "b" })).toBe(true);
     expect(await p.setBadge(2)).toBe(true);
     expect(p.voiceRecording().supported).toBe(true);
+  });
+
+  it("相对路径要补成绝对 URL 再过桥（主进程没有页面的 base）", async () => {
+    // 调用方传的是 `/uploads/xxx` 这种相对路径（m.content 就是这个形状）。
+    // 不补的话主进程拿到 `/uploads/xxx` 直接 fetch 失败——而失败长得像「另存没反应」。
+    const saved: (string | undefined)[] = [];
+    const opened: string[] = [];
+    const p = createDesktopPlatform({
+      ...bareBridge,
+      saveFile: async (_n, url) => { saved.push(url); return true; },
+      openExternal: (url) => { opened.push(url); },
+    });
+    await p.saveFile({ url: "/uploads/a.bin", name: "a.bin" });
+    p.openExternal("/uploads/b.pdf");
+    expect(saved[0]).toMatch(/^https?:\/\/.+\/uploads\/a\.bin$/);
+    expect(opened[0]).toMatch(/^https?:\/\/.+\/uploads\/b\.pdf$/);
+  });
+
+  it("blob: 不走桥的 URL 那条路——另存改递字节，预览退回 window.open", async () => {
+    // blob: 活在渲染进程的 origin 里，主进程既 fetch 不到、系统浏览器也打不开。
+    // 这两条路各自绕开，是桌面端与浏览器版**语义一致**的前提（都还能存/还能看）。
+    const calls: { name: string; url?: string; hasBytes: boolean }[] = [];
+    const openedByBridge: string[] = [];
+    const p = createDesktopPlatform({
+      ...bareBridge,
+      saveFile: async (name, url, bytes) => { calls.push({ name, url, hasBytes: !!bytes }); return true; },
+      openExternal: (url) => { openedByBridge.push(url); },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => ({ arrayBuffer: async () => new ArrayBuffer(8) })));
+    await p.saveFile({ url: "blob:http://localhost/abc", name: "v.mp4" });
+    expect(calls).toEqual([{ name: "v.mp4", url: undefined, hasBytes: true }]);
+
+    p.openExternal("blob:http://localhost/abc");
+    expect(openedByBridge).toEqual([]);              // 没交给系统浏览器
+    expect(window.open).toHaveBeenCalledWith("blob:http://localhost/abc", "_blank", "noopener,noreferrer");
+    vi.unstubAllGlobals();
   });
 
   it("桥来的 open-conversation 事件要能传到订阅者，拆除后不再传", () => {

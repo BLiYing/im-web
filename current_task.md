@@ -39,6 +39,11 @@
 > 更早的已完成块已移入 [current_task.archive.md](current_task.archive.md)（只读归档）。
 
 ## 下一步
+0-. **D4-4 桥补齐 ✅ 2026-09-09**：`saveFile`（blob 递字节 / 远端流式落盘）、`openExternal`
+   （协议白名单 + blob 退回 window.open + `setWindowOpenHandler` 不让子窗口继承桥）、
+   `subscribeWake`（睡眠唤醒/解锁/聚焦，**叠加**页面那两个信号）。
+   **`voiceRecording` 实测后决定不做**：Electron 原生支持 AAC 录制，页面那套探测本就给对答案
+   且自纠错。桥现在没有未实现的能力了（IMServer `docs/design/DESKTOP_DESIGN.md` §7.8）。
 0. **桌面版手测本地库**（D4-3b 已过 e2e，但有三件要眼睛看的）：① 发一条语音 → 重启应用 →
    波形还在不在（`waveform` 是这轮才补上落库的）；② 换号后不串库（SQLite 按 owner 隔离，
    但没在真机上验过两个账号来回切）；③ **首次升级会清空本地缓存**——既有 IndexedDB 数据

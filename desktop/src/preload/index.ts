@@ -8,6 +8,7 @@ import { contextBridge, ipcRenderer } from "electron";
 
 const IPC_OPEN_CONVERSATION = "im:open-conversation";   // 与 main/shellCaps.ts 同名，改一处要改两处
 const IPC_STORE = "im:store";                           // 与 main/../shared/storeIpc.ts 同名，同上
+const IPC_WAKE = "im:wake";                             // 与 main/shellCaps.ts 同名，同上
 //
 // ⚠️ **preload 里不许 import 相对路径的模块**。它跑在 sandbox 里（webPreferences 没显式关，
 // Electron 默认 sandbox:true），那份 `require` 只认 `electron` 与少数内置模块——
@@ -77,7 +78,30 @@ if (contract > 0 && deviceId && deviceName) {
         ipcRenderer.invoke(IPC_STORE, { method, args }) as Promise<unknown>,
     },
 
-    // 仍未实现（继续由 platform/desktop.ts 逐能力回退 web）：
-    // saveFile / openExternal / subscribeWake / voiceRecording。
+    /** 另存到磁盘（D4-4）。`bytes` 与 `url` 二选一——blob: 活在渲染进程的 origin 里，
+     *  主进程取不到，只能由页面读好递过来；远端 URL 则交给主进程流式落盘（别读进内存）。 */
+    saveFile: (name: string, url?: string, bytes?: ArrayBuffer): Promise<boolean> =>
+      ipcRenderer.invoke("im:save-file", { name, url, bytes }) as Promise<boolean>,
+
+    /** 用系统浏览器打开（D4-4）。**必须是 `send` 不是 `invoke`**：契约要求这个方法同步、
+     *  fire-and-forget（`invoke` 返回 Promise，语义就变了，见 im-web 的 platform/types.ts）。
+     *  协议白名单在主进程校验——`shell.openExternal` 会把 URL 交给系统按协议分发，
+     *  放行 `file://` 或自定义协议等于给页面一个任意程序启动器。 */
+    openExternal: (url: string): void => { ipcRenderer.send("im:open-external", url); },
+
+    /** 订阅桌面独有的唤醒信号（睡眠唤醒 / 解锁 / 窗口聚焦，D4-4）。返回拆除函数——
+     *  页面换号/卸载时必须调，否则旧回调攒在 ipcRenderer 上（同 sdk/wake.ts 那个坑）。
+     *  web 那两个信号（online / visibilitychange）**仍在页面侧订阅着**，这里是叠加不是替换。 */
+    subscribeWake: (cb: (reason: string) => void): (() => void) => {
+      const h = (_e: unknown, reason: string): void => cb(reason);
+      ipcRenderer.on(IPC_WAKE, h);
+      return () => { ipcRenderer.off(IPC_WAKE, h); };
+    },
+
+    // **voiceRecording 刻意不实现**：Electron 的 Chromium 原生支持 AAC 录制
+    // （2026-09-09 实测 `MediaRecorder.isTypeSupported('audio/mp4;codecs=mp4a.40.2')` 为 true），
+    // 页面侧 `voiceRecorder.ts` 那套三级探测在这里给出的就是正确答案（.m4a / iOS 可播）。
+    // 桥上再加一层只会有害：硬编码「桌面端支持」会在换成不带专有编解码的 ffmpeg 构建时
+    // 产出对端播不了的文件，而现在那套探测是**自纠错**的——不支持就自己把 mic 置灰。
   });
 }
