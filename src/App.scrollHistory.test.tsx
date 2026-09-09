@@ -66,6 +66,10 @@ beforeEach(() => {
   installJsdomShims();
   // 已读到头、无未读：进会话贴底，首窗 = 最新一页。
   Fake.conversations = [makeConv({ latest_conv_seq: HEAD, read_seq: HEAD, unread: 0 })];
+  Fake.ranges = []; Fake.head = 0; Fake.atFloor = false; // 取数分流的三个输入，逐例自己摆
+});
+afterEach(() => {
+  Fake.ranges = []; Fake.head = 0; Fake.atFloor = false;
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -112,8 +116,8 @@ describe("首次登录（read_seq=0）进大群：停在会话开头，一路往
     expect(readSeq).toBe(0);
     expect(unread).toBe(10000);
     expect(latestSeq).toBe(HEAD);
-    // 取哪一窗由 entryWindowSince 决定（见 entryWindow.test.ts）：unread>0 ⇒ since=readSeq-上下文=0，
-    // 即会话开头那一页，而不是 latest-一页。这里钉的是 App 把三个入参**原样**交出去。
+    // 取哪一窗由 planEntryWindow 决定（见 windowPlan.test.ts）：unread>0 ⇒ 锚到 readSeq=0，
+    // 即会话开头那一段，而不是最新一页。这里钉的是 App 把三个入参**原样**交出去。
   });
 
   it("往下翻页：窗口先长到上限再滑动，且每一页都还能继续翻（忙标志复位）", async () => {
@@ -261,5 +265,72 @@ describe("上滑翻历史：本地在上沿之上不连续 → 向服务端要�
     scrollToTop();
     scrollToTop();
     expect(loadOlderCalls()).toEqual([HEAD - PAGE + 1]);
+  });
+});
+
+// ==========================================================================================
+// C3 取数分流（OFFLINE_BACKLOG_DESIGN §4.6/§4.7）：上滑之前**先查区间清单**，
+// 本地这一段之上还有已下载的内容就直接展开，不打网络。
+//
+// 判据必须是清单、不是 seq 连不连号——判据的纯逻辑在 windowPlan.test.ts 钉过了，
+// 这里钉的是**接线**：App 真的把清单喂给了那个判据，且判据的答案真的决定了发不发请求。
+// 接线错了纯函数测试一条都不会红（2026-09-03 的教训：判据对、调用点没接上，等于没做）。
+// ==========================================================================================
+describe("C3 上滑取数分流：先查区间清单再决定问不问服务端", () => {
+  it("清单说上沿还在段中间 → 只展开本地，一个请求都不发", async () => {
+    // 本地其实有 [1..30001] 整段，只是渲染窗口停在最后 200 条。
+    Fake.ranges = [{ lo: 1, hi: HEAD }];
+    await enterChat();
+    deliver(HEAD - PAGE * 2 + 1, HEAD);           // 本地灌 400 条，窗口先渲染 200
+    await waitFor(() => expect(renderedSeqs().length).toBe(PAGE));
+    scrollToTop();
+    await waitFor(() => expect(renderedSeqs().length).toBeGreaterThan(PAGE)); // 窗口长大了
+    expect(loadOlderCalls()).toEqual([]);          // 本地够用 ⇒ 没问服务端
+  });
+
+  // C3 的核心：29802 与 29801 之间隔着 msg_op 事件行 / 墓碑（占了 conv_seq 却不成为消息）。
+  // 旧判据「本地有没有 seq-1 这条消息」在这里判"不连续"→ 空跑一次请求，还提前把窗口切进锚点模式。
+  it("上沿的前一号是占号行（本地没有那条消息）但清单说齐全 → 仍然不发请求", async () => {
+    Fake.ranges = [{ lo: 1, hi: HEAD }];
+    await enterChat();
+    // 故意在 29801 处留一个"洞"：那一号是事件行，不会有消息，但它在清单覆盖范围内。
+    act(() => {
+      for (let sq = HEAD - PAGE * 2 + 1; sq <= HEAD; sq++) {
+        if (sq === HEAD - PAGE) continue;          // 跳过 29801
+        Fake.last!.handlers.onMessage!(msg(sq));
+      }
+    });
+    await waitFor(() => expect(renderedSeqs().length).toBe(PAGE));
+    expect(renderedSeqs()[0]).toBe(HEAD - PAGE + 1); // 上沿仍是 29802
+    scrollToTop();
+    await waitFor(() => expect(renderedSeqs().length).toBeGreaterThan(PAGE));
+    expect(loadOlderCalls()).toEqual([]);
+  });
+
+  it("清单说上面还有、但内存里一条更早的都没有 → 仍旧问服务端（不许无声卡住）", async () => {
+    // 清单可以合法地覆盖一段没有任何消息的号（整段都是 msg_op 事件行 / 墓碑）。
+    // 只信清单的话：展开分支展不出东西、滑窗分支把锚点定在原地，上滑永远不动也永远不发请求。
+    Fake.ranges = [{ lo: 1, hi: HEAD }];
+    await enterWithLatestPage();          // 内存里只有 [29802..30001]，上沿之上一条都没有
+    scrollToTop();
+    await waitFor(() => expect(loadOlderCalls()).toEqual([HEAD - PAGE + 1]));
+  });
+
+  it("清单说上沿正是段首（上面是真缺口）→ 照旧向服务端要一页", async () => {
+    Fake.ranges = [{ lo: HEAD - PAGE + 1, hi: HEAD }];
+    await enterWithLatestPage();
+    scrollToTop();
+    await waitFor(() => expect(loadOlderCalls()).toEqual([HEAD - PAGE + 1]));
+  });
+
+  it("服务端说过 has_before=false（到可见下界了）→ 不再空跑请求", async () => {
+    // G2 把新成员的可见下界抬到入群位点，`上沿 > 1` 这个猜法对他们恒真：
+    // 不认这条权威答案的话，每次上滑都要空跑一次注定回空页的请求。
+    Fake.ranges = [{ lo: HEAD - PAGE + 1, hi: HEAD }];
+    Fake.atFloor = true;
+    await enterWithLatestPage();
+    scrollToTop();
+    scrollToTop();
+    expect(loadOlderCalls()).toEqual([]);
   });
 });

@@ -2,17 +2,12 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type FriendEntry, type MyProfile, type GroupInfo, type GroupSummary, type MsgOpPatch, type Favorite, type PinnedMessage, type GroupBan, type QRCard, type QRResolved, type JoinRequest, type DeviceView, } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type MyProfile, type MsgOpPatch, type PinnedMessage, } from "./protocol";
 import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
-import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
+import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
-import { entryWindowSince } from "../entryWindow";
-import * as groupApi from "./groupApi";
-import * as contactApi from "./contactApi";
-import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
-import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrApi";
-import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
+import { planEntryWindow } from "../windowPlan";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { type MentionSpan } from "../mention";
@@ -124,10 +119,9 @@ export interface IMClientHandlers {
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
 }
 
-/** 收藏列表每页条数。滚到底自动加载下一页（见 useFavorites）。 */
-export const FAVORITES_PAGE_SIZE = 60;
+export { FAVORITES_PAGE_SIZE };  // 实处在 imSdk.rest.ts；调用点仍从 imSdk 引入，位置变化不外溢
 
-export class IMClient {
+export class IMClient extends IMRestApi {
   private ws: WebSocket | null = null;
   private seq = 0;
   /** 登录凭据（公开句柄）。重连要用它重新 /login——登录接口不认内部 ID。 */
@@ -135,7 +129,6 @@ export class IMClient {
   private uid = "";
   private password = ""; // 登录密码（为空=开发期免密直签）；仅用于（重）连时换 token
   private sessionToken = ""; // 扫码登录标记（置位=本会话无密码可回退）：重连探活失效时无法 /login 自愈，一律回登录
-  private token = ""; // 登录后保存，供 HTTP API（会话列表等）带 Bearer
   /** 长效续期凭据（180 天绝对寿命）：免密换新 access token，替代"把明文密码存本地反复重放"。
    *  两类会话都有（密码登录由 /login 下发，扫码登录由 qr/login/poll 一次性下发）。 */
   private refreshToken = "";
@@ -170,6 +163,9 @@ export class IMClient {
   private superConvs = new Set<string>();  // 超级群：max_gap=0，正文只在打开会话时按需取，永不自动补拉
   private headSeq = new Map<string, number>(); // convId -> 服务端最新位点（sync_resp.head_conv_seq / conv_bump.latest_seq）
   private gapped = new Set<string>();       // 收到过 too_long，即本地对该会话有缺口
+  // window_resp 说过 has_before=false，即"再往上没有对我可见的消息了"——**权威**答案。
+  // 此前只能靠 `上沿 > 1` 猜，而 G2 把新成员的可见下界抬到入群位点，对他们那个猜法恒真。
+  private atFloor = new Set<string>();
   // 区间清单的**内存镜像**（IndexedDB 里那份为准，这里只为让渲染层能同步读到）。
   // 渲染切段必须知道"两条消息之间那些 conv_seq 到底是没下载、还是下载过但本就不是一条消息"——
   // msg_op 事件行、已被「为所有人删除」的墓碑、对我不可见的行都会占掉 conv_seq 却永远不成为消息。
@@ -196,6 +192,7 @@ export class IMClient {
   private handlers: IMClientHandlers;
 
   constructor(handlers: IMClientHandlers = {}) {
+    super();
     this.handlers = handlers;
   }
 
@@ -329,19 +326,10 @@ export class IMClient {
     });
   }
 
-  /** 账号级自动下载策略（M4-7）：读 / 整体替换。实现在 sdk/downloadSettingsApi.ts（无状态 HTTP）。 */
-  downloadSettings(): Promise<DownloadSettingsResult> { return fetchDownloadSettings(this.token); }
-  saveDownloadSettings(s: unknown): Promise<DownloadSettingsResult> { return putDownloadSettings(this.token, s); }
-
   /** 恢复出厂默认（草图 §05-3「重置自动下载设置」）。 */
   async resetDownloadSettings(): Promise<{ version: number; settings: unknown }> {
     return (await this.api("/api/v1/download-settings/reset", { method: "POST" })) as { version: number; settings: unknown };
   }
-
-  // ---- 已登录设备 / 多设备管理（P2）：无状态 HTTP，实现在 sdk/devicesApi.ts ----
-  listDevices(): Promise<DeviceView[]> { return listDevices(this.token); }
-  revokeDevice(sid: string): Promise<void> { return revokeDevice(this.token, sid); }
-  revokeOtherDevices(): Promise<void> { return revokeOtherDevices(this.token); }
 
   /** 修改密码：POST /api/v1/users/me/password {old_password,new_password}。
    *  成功后服务端会**自动下线本账号其它全部设备**（只保留当前，安全默认），无需前端再调 revoke-others。
@@ -360,53 +348,6 @@ export class IMClient {
   async linkPreview(url: string): Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }> {
     return await this.api(`/api/v1/link-preview?url=${encodeURIComponent(url)}`);
   }
-
-  // ---- 找人 / 好友 / 会话设置：无状态 HTTP，实现在 sdk/contactApi.ts ----
-  searchUsers(q: string, limit = 20): Promise<UserCard[]> { return contactApi.searchUsers(this.token, q, limit); }
-  listFriends(status = ""): Promise<FriendEntry[]> { return contactApi.listFriends(this.token, status); }
-  friendAction(action: "accept" | "reject" | "block" | "unblock", userId: string): Promise<void> { return contactApi.friendAction(this.token, action, userId); }
-  requestFriend(userId: string, hello = ""): Promise<boolean> { return contactApi.requestFriend(this.token, userId, hello); }
-  removeFriend(userId: string): Promise<void> { return contactApi.removeFriend(this.token, userId); }
-  setRemark(userId: string, remark: string): Promise<void> { return contactApi.setRemark(this.token, userId, remark); }
-  updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> { return contactApi.updateConvSettings(this.token, convId, s); }
-  setConvRemark(convId: string, remark: string): Promise<void> { return contactApi.setConvRemark(this.token, convId, remark); }
-  deleteConversation(convId: string): Promise<void> { return contactApi.deleteConversation(this.token, convId); }
-  // ---- 群聊 / 入群（M3~G3）：无状态 HTTP，实现在 sdk/groupApi.ts ----
-  createGroup(name: string, memberIds: string[], avatarUrl = ""): Promise<GroupInfo> { return groupApi.createGroup(this.token, name, memberIds, avatarUrl); }
-  listGroups(): Promise<GroupSummary[]> { return groupApi.listGroups(this.token); }
-  fetchGroup(convId: string): Promise<GroupInfo> { return groupApi.fetchGroup(this.token, convId); }
-  fetchReadReceipts(convId: string, convSeq: number): Promise<{ read: string[]; unread: string[]; enabled: boolean }> { return groupApi.fetchReadReceipts(this.token, convId, convSeq); }
-  updateGroup(convId: string, name: string, avatarUrl: string, intro = ""): Promise<void> { return groupApi.updateGroup(this.token, convId, name, avatarUrl, intro); }
-  setGroupAnnouncement(convId: string, text: string): Promise<void> { return groupApi.setGroupAnnouncement(this.token, convId, text); }
-  setGroupMute(convId: string, until: number): Promise<void> { return groupApi.setGroupMute(this.token, convId, until); }
-  setGroupMyNickname(convId: string, nickname: string): Promise<void> { return groupApi.setGroupMyNickname(this.token, convId, nickname); }
-  setGroupSettings(convId: string, s: {   join_approval: boolean; perm_invite: boolean; perm_edit_info: boolean; perm_pin: boolean; history_visible: boolean; }): Promise<void> { return groupApi.setGroupSettings(this.token, convId, s); }
-  muteGroupMember(convId: string, userId: string, until: number): Promise<void> { return groupApi.muteGroupMember(this.token, convId, userId, until); }
-  removeGroupMemberWithBan(convId: string, userId: string, ban: "none" | "cooldown" | "forever"): Promise<void> { return groupApi.removeGroupMemberWithBan(this.token, convId, userId, ban); }
-  fetchGroupBans(convId: string): Promise<GroupBan[]> { return groupApi.fetchGroupBans(this.token, convId); }
-  unbanGroupMember(convId: string, userId: string): Promise<void> { return groupApi.unbanGroupMember(this.token, convId, userId); }
-  inviteToGroup(convId: string, memberIds: string[]): Promise<string[]> { return groupApi.inviteToGroup(this.token, convId, memberIds); }
-  leaveGroup(convId: string): Promise<void> { return groupApi.leaveGroup(this.token, convId); }
-  dissolveGroup(convId: string): Promise<void> { return groupApi.dissolveGroup(this.token, convId); }
-  removeGroupMember(convId: string, userId: string): Promise<void> { return groupApi.removeGroupMember(this.token, convId, userId); }
-  setGroupRole(convId: string, userId: string, role: "admin" | "member"): Promise<void> { return groupApi.setGroupRole(this.token, convId, userId, role); }
-  transferGroup(convId: string, userId: string): Promise<void> { return groupApi.transferGroup(this.token, convId, userId); }
-  joinGroupByCode(token: string, hello = ""): Promise<GroupInfo> { return groupApi.joinGroupByCode(this.token, token, hello); }
-  fetchJoinRequests(convId: string, status = "pending"): Promise<JoinRequest[]> { return groupApi.fetchJoinRequests(this.token, convId, status); }
-  decideJoinRequest(convId: string, userId: string, accept: boolean): Promise<void> { return groupApi.decideJoinRequest(this.token, convId, userId, accept); }
-  // ---- 二维码体系（QRCODE P0）：无状态 HTTP，实现在 sdk/qrApi.ts ----
-  qrMyCard(): Promise<QRCard> { return qrMyCard(this.token); }
-  qrResetMyCard(): Promise<QRCard> { return qrResetMyCard(this.token); }
-  groupQR(convId: string): Promise<QRCard> { return groupQR(this.token, convId); }
-  groupQRReset(convId: string): Promise<QRCard> { return groupQRReset(this.token, convId); }
-  qrResolve(raw: string): Promise<QRResolved> { return qrResolve(this.token, raw); }
-
-  // ---- 收藏（M4-4）：无状态 HTTP，实现在 sdk/favoritesApi.ts ----
-  addFavorite(f: FavoriteDraft): Promise<void> { return addFavorite(this.token, f); }
-  listFavorites(offset = 0, limit = FAVORITES_PAGE_SIZE): Promise<{ items: Favorite[]; total: number }> {
-    return listFavorites(this.token, offset, limit);
-  }
-  deleteFavorite(id: number): Promise<void> { return deleteFavorite(this.token, id); }
 
   /** 翻译文本（M4-5）：POST /api/v1/translate → 译文（服务端代理 + 缓存）。 */
   async translate(text: string, targetLang = "zh"): Promise<string> {
@@ -488,23 +429,40 @@ export class IMClient {
         this.handlers.onRanges?.(convId);
       }
       if (head > 0) this.headSeq.set(convId, Math.max(this.headSeq.get(convId) ?? 0, head));
-    });
-    const since = entryWindowSince({
-      readSeq, latestSeq, unread, contextBefore: this.contextBefore, historyPage: this.historyPage,
-    });
-    this.requestPage(convId, since);
+    }).catch(() => { /* 目录读不出来 → 当作没有，下面照常问服务端 */ })
+      .finally(() => this.fetchEntryWindow(convId, readSeq, latestSeq, unread));
   }
 
-  /** 加载 oldestSeq 之前的一页（上滚到顶触发）。 */
+  /** 首屏取数（§4.6）：先查目录再决定问谁。**刻意排在区间预热之后**——目录只有 IndexedDB
+   *  里那份记得，不等它就等于每次刷新后的第一次进会话都必然打一次网络（规则见 windowPlan.ts）。 */
+  private fetchEntryWindow(convId: string, readSeq: number, latestSeq: number, unread: number): void {
+    const plan = planEntryWindow({
+      ranges: this.rangesOf(convId),
+      head: this.headSeq.get(convId) ?? 0,
+      readSeq, latestSeq, unread,
+      contextBefore: this.contextBefore, historyPage: this.historyPage,
+    });
+    if (plan.source === "local") {
+      // 本地已齐全：一个请求都不发。仍要报一次「取数结束」，否则 UI 的分页忙标志复位不了
+      //（它只由响应帧解除，而这一路根本没有响应帧）。
+      this.handlers.onHistoryPage?.(convId, 0, 0);
+      return;
+    }
+    this.requestWindow(convId, plan.anchor, plan.before, plan.after);
+  }
+
+  /** 加载 oldestSeq 之前的一页（上滚到本地这一段的头部触发）。
+   *  调用方须先确认本地这一段之上没有已下载内容（windowPlan.moreLocalAbove）。 */
   loadOlder(convId: string, oldestSeq: number): void {
     if (!convId || oldestSeq <= 1) return;
-    this.requestPage(convId, Math.max(0, oldestSeq - 1 - this.historyPage)); // [oldestSeq-页 .. oldestSeq-1]
+    if (this.atFloor.has(convId)) { this.handlers.onHistoryPage?.(convId, 0, 0); return; } // 服务端说过没有更早的了
+    this.requestWindow(convId, oldestSeq, this.historyPage, 0);
   }
 
   /** 加载 newestSeq 之后的一页（下滚到底、且还没到 latest 时触发）。 */
   loadNewer(convId: string, newestSeq: number): void {
     if (!convId) return;
-    this.requestPage(convId, newestSeq); // [newestSeq+1 .. newestSeq+页]
+    this.requestWindow(convId, newestSeq, 0, this.historyPage);
   }
 
   /**
@@ -1034,6 +992,13 @@ export class IMClient {
             else void registerRange(this.uid, convId, lo, hi, head); // 整窗都是 msg_op/墓碑：只落区间
           }
         }
+        {
+          // 上滚/下滚/进会话现在都走这一路（§4.6/§4.7），分页忙标志靠「响应到了」复位；
+          // 不报的话一次上滚之后 loadingOlderRef 永远为真，之后每次上滑都被当 busy 跳过。
+          const cid2 = String(d.conv_id ?? "");
+          this.handlers.onHistoryPage?.(cid2, Number(d.anchor) || 0, (d.messages || []).length);
+          if (d.has_before === false && Number(d.anchor) > 0) this.atFloor.add(cid2); // 只置位不复位：稳定事实
+        }
         this.handlers.onWindow?.({
           convId: String(d.conv_id ?? ""),
           anchor: Number(d.anchor) || 0,
@@ -1235,6 +1200,11 @@ export class IMClient {
   /** 本地已齐全的区间（内存镜像）。渲染切段用它判断"中间那几个 seq 是没下载、还是本就不是消息"。 */
   rangesOf(convId: string): SeqRange[] {
     return this.convRanges.get(convId) ?? [];
+  }
+
+  /** 服务端是否说过"再往上没有更早的了"（window_resp.has_before=false）。UI 据此不再空跑上滚请求。 */
+  atHistoryFloor(convId: string): boolean {
+    return this.atFloor.has(convId);
   }
 
   /** 该会话本地是否有缺口（收到过 too_long）。上层据此决定"整会话问题"问本地还是问服务端。 */

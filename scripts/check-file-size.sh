@@ -27,7 +27,8 @@ grandfather_limit() {
   case "$1" in
     src/App.tsx)      echo 3697 ;;  # 2026-09-08 3770→3697：文本渲染一族（@提及/URL/搜索高亮/长文本三档）抽到 components/messageText.tsx  # 2026-09-05 棘轮 4000→3800→3790→3770（语音转文字那一族抽到 useVoiceTranscript.ts 后 3756）。
                                     # 4000 那次是「触顶挡了 bug fix→用户拍板放宽」，不是设计值；现在有余量了就收回来。
-    src/sdk/imSdk.ts) echo 1416 ;;  # 2026-09-07 1445→1416：webDeviceId/webDeviceName 移入 src/platform/web.ts（D1 适配层，棘轮只降不升）
+    src/sdk/imSdk.ts) echo 1386 ;;  # 2026-09-09 1416→1386：REST 转发面（下载策略/设备/好友/群/二维码/收藏）拆到 sdk/imSdk.rest.ts 的 IMRestApi 基类
+                                    # 2026-09-07 1445→1416：webDeviceId/webDeviceName 移入 src/platform/web.ts（D1 适配层，棘轮只降不升）
                                     # 2026-09-05 1465→1445：帧→ChatMessage 的解析抽到 sdk/parseMessage.ts
                                     # 已抽到 sdk/wake.ts，类里只剩 reconnectNow 这个接线口（连接活性本就是
                                     # 本类的职责，再往外拆就是为凑数字硬拆，见 CLAUDE.md 体量红线那条）。

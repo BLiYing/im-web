@@ -110,6 +110,7 @@ import { pauseVoicePlayback } from "./components/VoiceBubble";
 import { unreadBelowCount } from "./unreadBelow";
 import { coversSpan } from "./sdk/ranges";
 import { visibleSlice } from "./renderWindow";
+import { moreLocalAbove } from "./windowPlan";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
@@ -2249,18 +2250,16 @@ export default function App() {
         top: topRow ? topRow.getBoundingClientRect().top - box.getBoundingClientRect().top : null,
         h: box.scrollHeight, t: box.scrollTop,
       };
-      // **展开渲染窗口前先确认本地这一段是连着的**（OFFLINE_BACKLOG_DESIGN §4.7）。
-      // 有缺口时 msgsByConv 里存着缺口**两侧**的消息：直接把窗口扩大，缺口另一侧的旧岛
-      // 就会被展开并紧贴着接上来——两段不相邻的历史静默拼在一起，界面照常、时间戳也递增，
-      // 只是中间少了几万条且没有任何提示。此时必须改走服务端翻页，让缺口从边缘逐页收窄。
-      // **判据必须用「当前渲染出来的最早一条」，不能用本地全量的最小 seq**：
-      // 有缺口时本地同时存着缺口两侧的消息，全量最小值是缺口**另一侧**那个旧岛的
-      // （极端情况就是 seq=1），于是「oldest > 1」恒假 → 既不展开窗口也不去服务端拉，
-      // 往上滚什么都不发生（2026-09-03 实测）。渲染窗口的上沿才是"用户正看到的历史边界"。
+      // **展开渲染窗口前先确认本地这一段是连着的**（OFFLINE_BACKLOG_DESIGN §4.7）：有缺口时
+      // msgsByConv 里存着缺口**两侧**的消息，直接扩窗会把另一侧的旧岛静默接上来——界面照常、
+      // 时间戳也递增，只是中间少了几万条且没有任何提示。判据在 windowPlan.ts（与 renderWindow.ts
+      // 的切段判据同源），**是区间清单不是 seq 连号**。锚点必须用「当前渲染出来的最早一条」，
+      // 不能用本地全量最小 seq——后者在有缺口时指向缺口另一侧的旧岛（极端就是 seq=1），
+      // 于是「oldest > 1」恒假、上滚什么都不发生（2026-09-03 实测）。
       const localAllForConv = msgsByConv[cid] ?? [];
-      const contiguousAbove = localAllForConv.some(
-        (m) => m.convSeq > 0 && m.convSeq === oldestRendered - 1,
-      );
+      const anySeq = (pred: (sq: number) => boolean) => localAllForConv.some((m) => m.convSeq > 0 && pred(m.convSeq));
+      const contiguousAbove = moreLocalAbove(clientRef.current?.rangesOf(cid) ?? [], oldestRendered,
+        { hasPrevSeq: anySeq((sq) => sq === oldestRendered - 1), hasAnyEarlier: anySeq((sq) => sq < oldestRendered) });
       const localCount = localAllForConv.length;
       const roomToGrow = Math.min(localCount, RENDER_WINDOW_MAX);
       if (contiguousAbove && renderView.size < roomToGrow) {
@@ -2271,7 +2270,8 @@ export default function App() {
         // 摆在窗口中间，于是上方多出半窗、下方等量丢掉，DOM 恒定在上限内。
         // 不这么做就只剩两条路：要么无限长（回到 W2 之前），要么什么都不做（往上滚不动）。
         setRenderView({ anchor: oldestRendered, size: RENDER_WINDOW_MAX });
-      } else if (oldestRendered > 1) {
+      } else if (oldestRendered > 1 && !clientRef.current?.atHistoryFloor(cid)) {
+        // atHistoryFloor = 服务端的权威答案（has_before=false）；`>1` 只是猜，对有可见下界的新成员恒真。
         loadingOlderRef.current = true;
         // **切到锚点模式**：anchor=null 的窗口恒等于"本地最新 size 条"，于是补回来的更早消息
         // 永远进不了这一窗——屏幕纹丝不动，而 loadingOlderRef 靠"渲染集最小 seq 下降"复位，
