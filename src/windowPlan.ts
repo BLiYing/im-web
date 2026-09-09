@@ -40,14 +40,21 @@ export interface EntryWindowInput {
  * 大一万，旧判据据此锚到一万条之前：不贴底、↓N 显示一大串，用户以为消息没发出去。
  *
  * `readSeq<=0` 是「一条都没读过」（首次登录、刚入群），**不是"没有可锚的位点"**——
- * 位点就是 0，首条未读即会话里对我可见的第一条。早先这里多判了一个 `readSeq > 0`，
+ * 位点就是会话对我可见的第一条。早先这里多判了一个 `readSeq > 0`，
  * 于是首次进 2 万人大群的新成员被当成"无未读"直接贴最新，紧接着「可见即读」把 read_seq
  * 一路推到头——**十万条未读进一次会话清零**（2026-09-03 user13028 实测）。
+ *
+ * ⚠️ **有未读时锚点最小是 1，不能是 0**：`window_req` 里 `anchor<=0` 是「取最新」这个哨兵
+ * （`internal/gateway/window.go` 的 `if data.Anchor <= 0`），与 `sync_req` 的 `since=0`＝
+ * 「从头开始」语义相反。照搬 `since` 那套写成 0，`readSeq=0` 的新成员拿回来的就是**最新
+ * `contextBefore` 条**，「可见即读」跟着把 read_seq 推到头——正是上面那条事故的原样复现。
+ * `anchor=1` 时服务端 `LoadBefore(1,…)` 为空 ⇒ `has_before=false`，`LoadSince(0,…)` 从可见
+ * 下界给第一页，正好是"首条未读即对我可见的第一条"。
  */
 export function entryWindowAnchor({ readSeq, unread, contextBefore, historyPage }: EntryWindowInput): {
   anchor: number; before: number; after: number;
 } {
-  if (unread > 0) return { anchor: Math.max(0, readSeq), before: contextBefore, after: historyPage };
+  if (unread > 0) return { anchor: Math.max(1, readSeq), before: contextBefore, after: historyPage };
   return { anchor: 0, before: historyPage, after: 0 }; // anchor=0 ⇒ 取最新
 }
 

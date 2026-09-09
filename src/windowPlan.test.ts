@@ -25,9 +25,11 @@ describe("entryWindowAnchor —— 进会话锚在哪", () => {
 
   // 2026-09-03 user13028 实测：多判一个 readSeq>0 会把首次进群的新成员当成"无未读"直接贴最新，
   // 紧接着「可见即读」把 read_seq 一路推到头 —— 十万条未读进一次会话清零。
-  it("一条都没读过（readSeq=0）但有未读 —— 是有未读，锚点就是 0 而不是取最新", () => {
+  // anchor=0 在 window_req 里是「取最新」的哨兵（与 sync_req 的 since=0＝「从头」相反），
+  // 所以这一档必须落在 1 上：否则新成员拿回最新 10 条，可见即读把 read_seq 推到头。
+  it("一条都没读过（readSeq=0）但有未读 —— 是有未读，锚点收到 1，绝不能是「取最新」的 0", () => {
     const a = entryWindowAnchor({ ...base, readSeq: 0, latestSeq: 110019, unread: 10000 });
-    expect(a).toEqual({ anchor: 0, before: 10, after: 200 });
+    expect(a).toEqual({ anchor: 1, before: 10, after: 200 });
   });
 });
 
