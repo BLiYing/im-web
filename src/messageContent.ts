@@ -222,8 +222,25 @@ export function mediaBoxProps(m: ChatMessage): { className: string; style?: CSSP
   return { className: "msg-media", style: { width: `${box.width}px`, height: `${box.height}px` } };
 }
 
-/** 就绪文件点击时能否在浏览器内直接预览（对齐 iOS QuickLook 的 Web 诚实映射）。其余类型 → 另存。 */
-const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac|txt|md|log|json|csv|xml)$/i;
+/**
+ * 就绪文件点击时能否在浏览器内直接预览（对齐 iOS QuickLook 的 Web 诚实映射）。其余类型 → 另存。
+ *
+ * ⚠️ **这份清单必须是服务端 `inlineMIME` 的子集**（IMServer `cmd/imserver/handlers_upload.go`）。
+ * 判据不在我们这边：`/uploads/` 只对 `inlineMIME` 白名单内的类型内联下发，**白名单外一律
+ * `octet-stream` + `Content-Disposition: attachment`**（2026-09-03 加的存储型 XSS 闸）。
+ * 所以这里多列一个类型，效果不是"能预览了"，而是**那个类型绕过了另存这条路**——
+ * 点它 → openExternal → 浏览器拿到 attachment → 直接下载。
+ *
+ * 2026-09-09 就为此收敛过一次：原先多列了 `svg txt md log json csv xml` 七个。
+ * 后果是桌面端点 `.log` 落进 `~/Downloads`（经系统浏览器），而点 `.apk` 弹原生保存框——
+ * 同样是不可预览的文件，行为却不一致，且没有正当理由。（`.svg` 更是死条目：
+ * 它连 `allowedUploadExt` 都不在，根本收不到。）两边的清单已登记进 docs/SYMMETRY.md。
+ *
+ * **反过来不必对齐**：服务端能内联、这里没列的（heic/heif/tif/tiff/ico/caf/opus/flac）
+ * 是刻意的——"服务端肯内联"不等于"浏览器渲染得了"（Chrome 打不开 heic/tif），
+ * 让它们走另存反而是对的。
+ */
+const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac)$/i;
 export function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test(name); }
 
 /** 视频回退 <video> 的 src：非 blob 时追加 #t=0.1，促使浏览器画出首帧（无 poster 封面时的兜底）。 */
