@@ -9,9 +9,14 @@
 // 这两份清单跨仓、同源不了（Go 与 TS），所以两边各有一条把对方钉住的测试
 // （另一侧是 IMServer 的 `TestInlineMIMECoversClientPreviewable`），并登记进 docs/SYMMETRY.md。
 import { describe, expect, it } from "vitest";
-import { isPreviewableFile } from "./messageContent";
+import { isPreviewableFile, PREVIEWABLE_FILE_EXT } from "./messageContent";
 
-/** 与服务端 `inlineMIME` 的交集。**改这里必须同时改 IMServer 那侧的对照测试。** */
+/**
+ * 与服务端 `inlineMIME` 的交集，**在本文件里写死一份**（不是 import 来的那份）。
+ * 两份逐字比对是本护栏的核心：`messageContent.ts` 那边加一个类型 → 下面那条集合相等断言当场红，
+ * 于是改的人必须回头确认 IMServer `inlineMIME` 也有它。
+ * **改这里必须同时改 IMServer 那侧的 `clientPreviewableExt`。**
+ */
 const PREVIEWABLE = [
   "pdf",
   "png", "jpg", "jpeg", "gif", "webp", "bmp",
@@ -49,7 +54,14 @@ describe("就绪文件的预览判据", () => {
   });
 
   it("清单本身：可预览的这几个，一个不多一个不少", () => {
-    // 逐个断言之外再钉一次总量——防止有人只加正则不加用例。
+    // 逐个断言之外再钉一次总量——防止有人只加实现不加用例。
     expect(PREVIEWABLE).toHaveLength(16);
+  });
+
+  // 这条是「加一个新类型」那条路的闸：上面的黑名单只能挡它列过的（svg/txt/…），
+  // 挡不住 avif/heif/mkv 这种没人想到要写进黑名单的新扩展名。
+  // 实现侧的清单与本文件这份必须**集合相等**，多一个少一个都红。
+  it("实现侧的清单与本文件这份逐字一致（加新类型时逼你回头看服务端 inlineMIME）", () => {
+    expect([...PREVIEWABLE_FILE_EXT].sort()).toEqual([...PREVIEWABLE].sort());
   });
 });

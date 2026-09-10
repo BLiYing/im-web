@@ -239,8 +239,21 @@ export function mediaBoxProps(m: ChatMessage): { className: string; style?: CSSP
  * **反过来不必对齐**：服务端能内联、这里没列的（heic/heif/tif/tiff/ico/caf/opus/flac）
  * 是刻意的——"服务端肯内联"不等于"浏览器渲染得了"（Chrome 打不开 heic/tif），
  * 让它们走另存反而是对的。
+ *
+ * **这个数组是唯一来源，正则由它拼出来**——别再写一条平行的正则字面量。
+ * 早先是「数组给测试看、正则给运行时用」的双份，于是只改正则、不改数组时两边测试都还绿，
+ * 而服务端 `inlineMIME` 并没有那个新类型 → 那条老 bug（绕过另存）原样复发且无声。
+ * 现在往这里加一个扩展名，`previewableFile.test.ts` 的「一个不多一个不少」当场红，
+ * 逼你回头确认 IMServer 的 `inlineMIME` 也有它（见 IMServer docs/SYMMETRY.md 那条登记）。
  */
-const PREVIEWABLE_FILE = /\.(pdf|png|jpe?g|gif|webp|bmp|mp4|mov|webm|m4v|mp3|wav|m4a|ogg|aac)$/i;
+export const PREVIEWABLE_FILE_EXT = [
+  "pdf",
+  "png", "jpg", "jpeg", "gif", "webp", "bmp",
+  "mp4", "mov", "webm", "m4v",
+  "mp3", "wav", "m4a", "ogg", "aac",
+] as const;
+
+const PREVIEWABLE_FILE = new RegExp(`\\.(${PREVIEWABLE_FILE_EXT.join("|")})$`, "i");
 export function isPreviewableFile(name: string): boolean { return PREVIEWABLE_FILE.test(name); }
 
 /** 视频回退 <video> 的 src：非 blob 时追加 #t=0.1，促使浏览器画出首帧（无 poster 封面时的兜底）。 */
