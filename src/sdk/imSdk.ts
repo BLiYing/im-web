@@ -7,7 +7,7 @@ import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
 import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
-import { planEntryWindow, floorFromWindow } from "../windowPlan";
+import { planEntryWindow, nextHistoryFloor } from "../windowPlan";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { type MentionSpan } from "../mention";
@@ -788,6 +788,7 @@ export class IMClient extends IMRestApi {
         tracked_conversations: this.tracked.size,
       });
       this.reconnectAttempts = 0;
+      this.floorSeq.clear();   // 下界会**变小**（群主关掉「仅可见入群后历史」），陈旧＝该会话再也翻不上去；head/gapped 自纠错，不清
       this.setState("connected");
       this.startPing();
       this.sendSyncReq([...this.tracked]); // 重连补偿
@@ -993,10 +994,9 @@ export class IMClient extends IMRestApi {
           // 上滚/下滚/进会话都走这一路（§4.6/§4.7），分页忙标志靠「响应到了」复位；不报的话一次上滚之后永久 busy。
           const cid2 = String(d.conv_id ?? "");
           this.handlers.onHistoryPage?.(cid2, Number(d.anchor) || 0, (d.messages || []).length);
-          if (d.has_before === false) { // 本窗下沿即可见下界，只往小里收
-            const f = floorFromWindow((d.messages || []).map((m: { conv_seq?: number }) => Number(m.conv_seq) || 0), Number(d.anchor) || 0);
-            if (f > 0) this.floorSeq.set(cid2, Math.min(this.floorSeq.get(cid2) ?? f, f));
-          }
+          // has_before=false ⇒ 本窗下沿即可见下界。**喂 pageMsgs 不是 d.messages**（见 nextHistoryFloor）
+          const nf = d.has_before === false ? nextHistoryFloor(this.floorSeq.get(cid2), pageMsgs.map((m) => m.convSeq || 0), Number(d.anchor) || 0) : 0;
+          if (nf > 0) this.floorSeq.set(cid2, nf);
         }
         this.handlers.onWindow?.({
           convId: String(d.conv_id ?? ""),

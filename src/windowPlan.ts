@@ -117,9 +117,32 @@ export function moreLocalAbove(ranges: SeqRange[], oldestRendered: number, prevL
  * 说的，不是相对整条会话（`internal/gateway/window.go` 的 `hasBefore = len(pre) > before`）。
  * 从搜索结果跳进一个旧岛、上滑到岛顶时它同样为 false——记成布尔就等于宣布"整条会话到顶了"，
  * 之后回到最新那一段再上滑会被永久静默屏蔽，中间那段缺口再也补不上。
- * 整窗都是占号行（msg_op / 墓碑）时退回 anchor：那同样断言了"anchor 之下没有"。
+ * 整窗都是占号行（msg_op / 墓碑）时退回 anchor：那同样断言了"anchor 之下没有"，
+ * 且 anchor 正是请求方当时的上沿，比得上、能收敛。
+ *
+ * ⚠️ **`seqs` 必须是「客户端真正会留下的行」的 conv_seq，不能是整窗 `d.messages` 的**
+ * （2026-09-10 /code-review，两端同一个洞）。窗里混着 msg_op 事件行与「为所有人删除」的墓碑，
+ * 它们**占号但被 `processIncoming` 当场丢掉**（iOS 侧同理）。拿整窗最小 seq 当下界，
+ * 下界就落在一条**页面永远渲染不出来的号**上，而拿去比的 `oldestRendered` 只数真实消息 →
+ * `atHistoryFloor` 恒假 → 每次滑到顶都再空问一次，**永不收敛**。
+ * 具体：会话最早一条 seq=1 被「为所有人删除」、最早的真实消息是 seq=2 → 下界记成 1、
+ * 上沿恒为 2，`2<=1` 永假。
  */
-export function floorFromWindow(seqs: number[], anchor: number): number {
-  const valid = seqs.filter((n) => n > 0);
+/**
+ * 收到一次 `has_before=false` 之后，该会话的可见下界应当变成多少。
+ *
+ * **只往小里收**（对端是 iOS 的 `IMChatMergeHistoryFloor`）：往大里收会把已经证实存在的更早内容
+ * 挡在外面，那是"少给用户看东西"的方向。`current` 未知（undefined/0）时取新值；新值算不出来（0）
+ * 时保持原样。抽出来是因为这条合并规则两端都要有，而 Web 侧此前是内联的 `Math.min`——
+ * 内联的东西不会被登记、也不会被单测钉住。
+ */
+export function nextHistoryFloor(current: number | undefined, keptSeqs: number[], anchor: number): number {
+  const incoming = floorFromWindow(keptSeqs, anchor);
+  if (incoming <= 0) return current && current > 0 ? current : 0;
+  return current && current > 0 ? Math.min(current, incoming) : incoming;
+}
+
+export function floorFromWindow(keptSeqs: number[], anchor: number): number {
+  const valid = keptSeqs.filter((n) => n > 0);
   return valid.length > 0 ? Math.min(...valid) : Math.max(0, anchor);
 }

@@ -36,6 +36,31 @@ const windowResp = (messages: unknown[], anchor: number) => ({
 // 等一拍：落盘是 fire-and-forget 的 void promise，断言前让微任务队列跑完。
 const settle = () => new Promise((r) => setTimeout(r, 20));
 
+describe("has_before=false 时的可见下界", () => {
+  // 2026-09-10 /code-review：下界必须落在**渲染得出来**的号上。窗里的墓碑（deleted_at>0）与
+  // msg_op 事件行占号却被 processIncoming 丢掉；拿整窗最小 seq 当下界，闸就钉在一条永远不会
+  // 出现在 oldestRendered 里的号上 → atHistoryFloor 恒假 → 每次滑到顶都再空问一次，永不收敛。
+  // 这一条钉的是**调用点**（喂 pageMsgs 还是 d.messages），纯函数单测覆盖不到。
+  it("最早那条是墓碑时，下界记成第一条真消息而不是墓碑", async () => {
+    const { client, feed } = clientFor("o-floor-1");
+    feed({
+      type: "window_resp",
+      data: {
+        conv_id: CID, anchor: 0, anchor_found: true, has_before: false, has_after: true,
+        messages: [row(1, { deleted_at: 1_700_000_000_000 }), row(2), row(3)],
+      },
+    });
+    await settle();
+    expect(client.atHistoryFloor(CID, 2)).toBe(true);   // 上沿=第一条真消息 → 该停
+    expect(client.atHistoryFloor(CID, 3)).toBe(false);  // 下界之上照常放行
+  });
+
+  // ⚠️ **「重连后清下界」这一行没有测试覆盖**：onopen 里那句 `this.floorSeq.clear()` 要驱动它
+  // 就得造一条真 WebSocket，本测试台是白盒喂帧、没有 socket。写成"手动 clear 再断言 false"
+  // 是没有牙的——把 onopen 那行删掉它照样绿。iOS 侧同理，只在 IMBacklogTracker 层面钉了
+  // `clearHistoryFloors` 不连累 head/缺口（那一条有牙）。这条空缺如实记在这里，别当它测过了。
+});
+
 describe("window_resp 落盘", () => {
   it("消息与「这一段我已齐全」一起进库，刷新后仍在", async () => {
     const { feed } = clientFor("o-win-1");

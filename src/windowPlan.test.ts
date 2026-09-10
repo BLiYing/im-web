@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow } from "./windowPlan";
+import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow, nextHistoryFloor } from "./windowPlan";
 import type { SeqRange } from "./sdk/ranges";
 
 const base = { contextBefore: 10, historyPage: 200 };
@@ -129,9 +129,36 @@ describe("moreLocalAbove —— 上滚时本地还有没有更早的", () => {
   });
 });
 
+describe("nextHistoryFloor —— 下界怎么合并（对端 iOS IMChatMergeHistoryFloor）", () => {
+  it("只往小里收：后来报上来的更大值不理它", () => {
+    expect(nextHistoryFloor(500, [200, 300], 0)).toBe(200);
+    expect(nextHistoryFloor(200, [500, 600], 0)).toBe(200);
+  });
+
+  it("原先未知 → 取新值；新值算不出来 → 保持原样", () => {
+    expect(nextHistoryFloor(undefined, [500], 0)).toBe(500);
+    expect(nextHistoryFloor(0, [500], 0)).toBe(500);
+    expect(nextHistoryFloor(500, [], 0)).toBe(500);   // 空窗且 anchor=0：算不出，别把已知的下界丢了
+    expect(nextHistoryFloor(undefined, [], 0)).toBe(0);
+  });
+
+  it("整窗都是占号行 → 退回 anchor（那同样断言了 anchor 之下没有）", () => {
+    expect(nextHistoryFloor(undefined, [], 620)).toBe(620);
+  });
+});
+
 describe("floorFromWindow —— has_before=false 时把可见下界记在哪一条", () => {
   it("取本窗最小 seq（不是 anchor）", () => {
     expect(floorFromWindow([49999, 50003, 50001], 50200)).toBe(49999);
+  });
+
+  // 2026-09-10 /code-review（两端同一个洞）：喂进来的必须是**客户端留下来的那批行**，
+  // 不是整窗 d.messages。窗里的 msg_op 事件行与「为所有人删除」的墓碑占号却被 processIncoming
+  // 丢掉；拿它们当下界，闸就钉在一条永远渲染不出来的号上，而 oldestRendered 只数真实消息
+  // → atHistoryFloor 恒假 → 每次滑到顶都再空问一次，永不收敛。
+  it("下界必须落在渲染得出来的号上：墓碑 seq=1 被丢掉时，下界是 2 而不是 1", () => {
+    const kept = [2, 3, 4];              // seq=1 是墓碑，processIncoming 不产出
+    expect(floorFromWindow(kept, 0)).toBe(2);
   });
 
   it("整窗都是占号行（一条消息都没带回）→ 退回 anchor", () => {
