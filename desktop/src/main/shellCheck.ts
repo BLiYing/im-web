@@ -10,6 +10,7 @@ import { beginQuit, installTray } from "./tray";
 import { readLocalState } from "./identity";
 import { getAutoStart, notify, setBadge } from "./shellCaps";
 import { setTrayTooltip } from "./tray";
+import { checkChildWindowBridge } from "./bridgeIsolation";
 
 /** 轮询到条件成立为止，或超时。**「该发生的事」用它**——成功时立刻返回，不为等待付固定成本。 */
 async function waitUntil(pred: () => boolean, timeoutMs: number): Promise<boolean> {
@@ -28,7 +29,12 @@ async function waitUntil(pred: () => boolean, timeoutMs: number): Promise<boolea
  * 时间只是上限——`closed` 一旦触发立刻判负，没触发才等满。 */
 const NOT_HAPPEN_MS = 1500;
 
-export async function runShellCheck(win: BrowserWindow, say: (s: string) => void): Promise<number> {
+export async function runShellCheck(
+  win: BrowserWindow,
+  /** 页面加载的 promise。⓪ 要在渲染进程里 `window.open`，没文档就调不动。 */
+  load: Promise<void>,
+  say: (s: string) => void,
+): Promise<number> {
   const fail: string[] = [];
 
   try {
@@ -38,6 +44,18 @@ export async function runShellCheck(win: BrowserWindow, say: (s: string) => void
     say(`[shell] ✗ 装托盘失败：${String(e)}`);
     say("[shell]   多半是图标路径不对——打包版走 process.resourcesPath，要 electron-builder 的 extraResources 带上");
     return 2;
+  }
+
+  // ⓪ blob: 子窗不许挂桥。**必须排在 ①② 前面**——那两步会把窗口关掉/销毁，
+  //    之后就没有渲染进程可以 `window.open` 了。
+  try {
+    await load;
+    for (const r of await checkChildWindowBridge(win)) {
+      if (r.ok) say(`[shell] ✓ blob: 子窗没有桥（${r.name}）：${r.detail}`);
+      else fail.push(`blob: 子窗（${r.name}）${r.detail}——它能直接调 localStore 读写本地消息库；见 index.ts 的 setWindowOpenHandler`);
+    }
+  } catch (e) {
+    fail.push(`blob: 子窗桥隔离没验成：${String(e)}`);
   }
 
   // ① 未置退出闸时关窗：必须**收起而不是销毁**。销毁了下次「显示主窗口」就没窗口可显。

@@ -12,7 +12,8 @@
     "e2e": "npm run compile && electron . --e2e",
     "perf": "npm run compile && electron . --perf",
     "test": "tsc -p tsconfig.test.json --noEmit && vitest run",
-    "shell-check": "npm run compile && electron . --shell-check"
+    "shell-check": "npm run compile && electron . --shell-check",
+    "c3-check": "npm run compile && electron . --c3-check"
   },
   "license": "UNLICENSED",
   "devDependencies": {

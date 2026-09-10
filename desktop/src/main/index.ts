@@ -11,6 +11,7 @@ import { runE2E } from "./e2e";
 import { startLocalServer, type LocalServerHandle } from "./localServer";
 import { runPerf } from "./perf";
 import { runShellCheck } from "./shellCheck";
+import { runC3Check } from "./c3Check";
 import { checkDistFreshness, freshnessMessage } from "./distFreshness";
 import { beginQuit, installTray, isQuitting, setTrayTooltip } from "./tray";
 import { getAutoStart, installWakeSignals, notify, setAutoStart, setBadge } from "./shellCaps";
@@ -52,6 +53,8 @@ const e2eMode = process.argv.includes("--e2e");
 const perfMode = process.argv.includes("--perf");
 /** `--shell-check`：托盘/退出闸/窗口状态的生命周期自检（见 shellCheck.ts）。 */
 const shellMode = process.argv.includes("--shell-check");
+/** `--c3-check`：C3 取数分流的行为级验收——数 window_req 帧（见 c3Check.ts）。同样不显窗口。 */
+const c3Mode = process.argv.includes("--c3-check");
 
 function createWindow(): BrowserWindow {
   // 位置与大小从上次记的恢复；整块落在屏幕外时只留尺寸、位置交给系统（见 windowState.ts）。
@@ -84,6 +87,11 @@ function createWindow(): BrowserWindow {
   //   · blob:/data: → 允许开窗，但**不带 preload、不带 node**：它是本应用下载下来的媒体预览
   //     （useMediaDownload 的预览分支对已下载文件传的就是 blob:），内容是我们自己的，但没有理由带桥
   //   · 其余一律拒
+  //
+  // ⚠️ 下面那个 `preload: undefined` **在 Electron 44 上是 no-op**（2026-09-10 实测：
+  // `window.open` 造出的子窗本来就不继承 preload，删掉整段覆盖子窗照样没有桥）。留着是表明意图，
+  // 别把它当护栏——真正守住这条的是 `--shell-check` 里的 `checkChildWindowBridge`，
+  // 它做过双向变异验证。改这一段前先读 `bridgeIsolation.ts` 顶部那段结论。
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isExternallyOpenable(url)) { openExternal(url); return { action: "deny" }; }
     if (url.startsWith("blob:") || url.startsWith("data:")) {
@@ -93,7 +101,7 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
   win.once("ready-to-show", () => {
-    if (smokeMode || e2eMode || perfMode || shellMode) return;
+    if (smokeMode || e2eMode || perfMode || shellMode || c3Mode) return;
     if (st.maximized) win.maximize();
     win.show();
   });
@@ -227,7 +235,7 @@ app.whenReady().then(async () => {
   const target = localServer ? localServer.url : DEV_URL;
   const load = win.loadURL(target);
 
-  if (smokeMode || e2eMode || perfMode || shellMode) {
+  if (smokeMode || e2eMode || perfMode || shellMode || c3Mode) {
     const say = (s: string): void => { process.stdout.write(`${s}\n`); };
     // **对着旧产物跑出来的绿是假的**。只在「未打包 + 走本地同源层」时判——
     // dev 模式加载 :5173 是实时源码，打包版的 dist 就是包里那份，都不适用。
@@ -239,7 +247,8 @@ app.whenReady().then(async () => {
         return;
       }
     }
-    const code = shellMode ? await runShellCheck(win, say)
+    const code = c3Mode ? await runC3Check(win, load, say)
+      : shellMode ? await runShellCheck(win, load, say)
       : perfMode ? await runPerf(win, load, say)
       : e2eMode ? await runE2E(win, load, say, store)
       : await runSmoke(win, target, load);
