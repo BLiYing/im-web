@@ -61,7 +61,10 @@ export function ChatSearchBar(p: {
         {(p.searchNeedle || p.searchFrom) && !p.searchFromPickerOpen && (
           <span className="chat-search-nav">
             <span className="chat-search-count">{p.searchHitCount ? `${p.searchHitIdx + 1} / ${p.searchHitCount}${p.searchHitsTruncated ? "+" : ""}` : "无匹配"}</span>
-            <button className="icon-btn chat-search-arrow" title="上一条（更旧）" disabled={p.searchHitCount === 0 || p.searchHitIdx <= 0}
+            {/* 在已取回的最旧命中上、但服务端还有更早的页（计数带 +）时 ▲ 仍可点：点了去取下一页。 */}
+            <button className="icon-btn chat-search-arrow"
+              title={p.searchHitIdx <= 0 && p.searchHitsTruncated ? "加载更早的命中" : "上一条（更旧）"}
+              disabled={p.searchHitCount === 0 || (p.searchHitIdx <= 0 && !p.searchHitsTruncated)}
               onClick={() => p.gotoSearchHit(p.searchHitIdx - 1)}><ChevronUp size={16} /></button>
             <button className="icon-btn chat-search-arrow" title="下一条（更新）" disabled={p.searchHitCount === 0 || p.searchHitIdx >= p.searchHitCount - 1}
               onClick={() => p.gotoSearchHit(p.searchHitIdx + 1)}><ChevronDown size={16} /></button>

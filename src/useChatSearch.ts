@@ -14,6 +14,7 @@ import { messageMatchesNeedle, activeDayKeys } from "./searchPredicate";
 import { isSameDay } from "./time";
 import { pickQuerySource, DEGRADED_SEARCH_NOTICE, DEGRADED_CALENDAR_NOTICE } from "./convQuerySource";
 import { searchConvMessages, fetchConvCalendar, localUtcOffsetMs, type CalendarDay } from "./sdk/convQueriesApi";
+import { prependOlderHits, MAX_EMPTY_PAGES, type SearchHit } from "./searchPaging";
 
 import type { FromRow } from "./components/ChatSearchBar";
 
@@ -91,12 +92,22 @@ export function useChatSearch(d: ChatSearchDeps) {
 
   // 有缺口且在线 → 命中集改由服务端给（§4.9 第 1 项）。本地齐全时这段不发请求，
   // 行为与改造前**逐字一致**——绝大多数会话走的都是那条路。
-  const [serverHits, setServerHits] = useState<{ convSeq: number; timestamp: number }[]>([]);
-  // 服务端检索只取一页（上限 50）。命中更多时如实告知（计数写「/ 50+」），
-  // 而不是悄悄截断成 50 条还写「/ 50」——那会让人以为大群里就只有这些命中。
+  const [serverHits, setServerHits] = useState<SearchHit[]>([]);
+  // 服务端检索按页取（每页上限 50）。还有更早的页时计数写「/ 50+」，▲ 翻过最旧那条就去取下一页
+  // （loadOlderHits）——而不是悄悄截断成 50 条还写「/ 50」，那会让人以为大群里就只有这些命中。
   const [hitsTruncated, setHitsTruncated] = useState(false);
   const [searchDegraded, setSearchDegraded] = useState(false);
+  // 翻页用的三个 ref：下一页游标、是否有一次「取更早」在途、以及**查询代次**——
+  // 词 / 发件人 / 会话一变代次就 +1，在途的旧页回来时对不上代次就丢，否则旧词的第二页会混进新词的命中集。
+  const serverCursorRef = useRef(0);
+  const loadingOlderRef = useRef(false);
+  const searchGenRef = useRef(0);
+  const serverHitsRef = useRef(serverHits);
+  serverHitsRef.current = serverHits;
   useEffect(() => {
+    searchGenRef.current += 1;
+    loadingOlderRef.current = false;
+    serverCursorRef.current = 0;
     // 早退分支的清空必须**幂等**（已空就不换新数组），否则每次清空都是一次多余渲染。
     if (!searchOpen || (!searchNeedle && !searchFrom) || querySource === "local") {
       setServerHits((h) => (h.length ? [] : h)); setSearchDegraded(false); setHitsTruncated(false);
@@ -117,7 +128,8 @@ export function useChatSearch(d: ChatSearchDeps) {
           if (cancelled) return;
           // 服务端按 conv_seq 倒序返回；本 Hook 通篇按**升序**（0=最早）使用命中集，这里翻过来。
           setServerHits(page.items.map((i) => ({ convSeq: i.conv_seq, timestamp: i.timestamp })).reverse());
-          setHitsTruncated(!!page.has_more);
+          serverCursorRef.current = page.next_cursor;
+          setHitsTruncated(!!page.has_more && page.next_cursor > 0);
         })
         .catch(() => { if (!cancelled) { setServerHits([]); setHitsTruncated(false); } });
     }, 250); // 防抖：输入过程中不要每敲一个字打一次服务端
@@ -126,14 +138,18 @@ export function useChatSearch(d: ChatSearchDeps) {
 
   // 命中集：服务端结果优先（有缺口时它才是完整的），否则本地。
   // 形状统一成 {convSeq, timestamp}——上层只用这两个字段做跳转与计数。
+  const hitsFromServer = querySource === "server" && serverHits.length > 0;
   const searchHits = useMemo(
-    () => (querySource === "server" && serverHits.length > 0 ? serverHits : localHits),
-    [querySource, serverHits, localHits],
+    () => (hitsFromServer ? serverHits : localHits),
+    [hitsFromServer, serverHits, localHits],
   );
   // 词/发件人/会话变化 → 默认跳「最新一条命中」；签名去重避免每次渲染重跳。命中集为空时不锁签名（切会话消息异步载入中）。
   useEffect(() => {
     if (!searchOpen) { searchSigRef.current = ""; return; }
-    const sig = `${convId}|${searchNeedle}|${searchFrom}`;
+    // 签名要带**命中来自哪一份**：有缺口的会话里本地命中立刻算出来先锁签名，250ms 后服务端命中换掉命中集——
+    // 不带来源的话签名没变、不重跳，下标还停在本地那份的最后一条，超出服务端命中集的长度
+    // （2026-09-11 浏览器实测：计数「193 / 50+」、▲▼ 点了没反应）。翻更早的页时来源仍是 server，不会误跳。
+    const sig = `${convId}|${searchNeedle}|${searchFrom}|${hitsFromServer ? "server" : "local"}`;
     if (sig === searchSigRef.current) return;
     if (searchHits.length === 0) { setSearchHitIdx(0); return; }
     searchSigRef.current = sig;
@@ -144,7 +160,44 @@ export function useChatSearch(d: ChatSearchDeps) {
     // 而 jumpToSeq 只会滚 DOM——跨不了窗，只会弹「原消息较早，请上拉加载后重试」。
     requestAnimationFrame(() => locateInChat(convId, seq));
   }, [searchOpen, convId, searchNeedle, searchFrom, searchHits, locateInChat]);
+  // 还能不能往更早翻：只有走服务端、且服务端说还有下一页时。本地命中不分页，永远是 false。
+  const canLoadOlderHits = querySource === "server" && hitsTruncated;
+
+  /** 取服务端下一页（更早的命中），拼到命中集前面，并落到紧挨着原最旧命中的那一条。 */
+  const loadOlderHits = async (): Promise<void> => {
+    if (loadingOlderRef.current || !canLoadOlderHits) return;
+    const token = getTokenRef.current();
+    if (!token) return;
+    loadingOlderRef.current = true;
+    const gen = searchGenRef.current;
+    const q = searchQuery.trim();
+    try {
+      // 服务端可能回空页却仍 has_more（逐人隐藏过滤掉了一整页），此时接着往前翻，但有上限。
+      for (let attempt = 0; attempt <= MAX_EMPTY_PAGES; attempt++) {
+        const page = await searchConvMessages(token, convId, q, { from: searchFrom || undefined, cursor: serverCursorRef.current, limit: 50 });
+        if (gen !== searchGenRef.current) return;   // 词 / 发件人 / 会话在途中变了：这页属于上一次搜索
+        serverCursorRef.current = page.next_cursor;
+        const more = !!page.has_more && page.next_cursor > 0;
+        const { hits, added } = prependOlderHits(serverHitsRef.current, page.items.map((i) => ({ convSeq: i.conv_seq, timestamp: i.timestamp })));
+        if (added === 0 && more) continue;
+        setHitsTruncated(more);
+        if (added === 0) return;
+        serverHitsRef.current = hits;
+        setServerHits(hits);
+        setSearchHitIdx(added - 1);
+        locateInChat(convId, hits[added - 1].convSeq);
+        return;
+      }
+    } catch {
+      if (gen === searchGenRef.current) setToast("加载更早的搜索结果失败，请重试");
+    } finally {
+      if (gen === searchGenRef.current) loadingOlderRef.current = false;
+    }
+  };
+
   const gotoSearchHit = (idx: number) => {
+    // 翻过已取回的最旧命中：服务端还有更早的页就去取（取回后自动落到紧挨着的那一条）。
+    if (idx < 0 && canLoadOlderHits) { void loadOlderHits(); return; }
     if (idx < 0 || idx >= searchHits.length) return;
     setSearchHitIdx(idx);
     locateInChat(convId, searchHits[idx].convSeq); // ▲▼ 逐条跳同理：命中可能在窗口外
