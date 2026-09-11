@@ -3,7 +3,7 @@
 //
 // D1 阶段外壳还不存在，本文件的实际作用是：把契约钉死，并保证「桥缺什么就退回 web 那份」。
 // 这个逐能力回退不是过渡期的将就，是长期形状——外壳与页面各自发版，桥落后于页面是常态。
-import type { NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
+import type { GlobalShortcutState, NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
 import { webPlatform } from "./web";
 import { createDesktopLocalStore } from "../sdk/localStore.desktop";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -30,6 +30,10 @@ export interface DesktopBridge {
   getAutoStart?(): Promise<boolean>;
   /** 返回**设完之后读回来的实际值**，不是回显入参。 */
   setAutoStart?(on: boolean): Promise<boolean>;
+  globalShortcutSupported?(): boolean;
+  getGlobalShortcut?(): Promise<GlobalShortcutState>;
+  /** 返回**设完之后的真实状态**（被占用时 enabled=false、taken=true），不是回显入参。 */
+  setGlobalShortcut?(on: boolean): Promise<GlobalShortcutState>;
   subscribeOpenConversation?(cb: (convId: string) => void): () => void;
   /** 深链。回调拿到扫码原文 `q/g/<token>`；宿主只放行邀请码两种（见 types.ts）。 */
   subscribeDeepLink?(cb: (raw: string) => void): () => void;
@@ -125,6 +129,22 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
     async setAutoStart(on: boolean): Promise<boolean> {
       if (!bridge.setAutoStart) { fellBack("setAutoStart"); return webPlatform.setAutoStart(on); }
       return bridge.setAutoStart(on);
+    },
+
+    globalShortcutSupported(): boolean {
+      if (!bridge.globalShortcutSupported) { fellBack("globalShortcutSupported"); return webPlatform.globalShortcutSupported(); }
+      return bridge.globalShortcutSupported();
+    },
+
+    async getGlobalShortcut(): Promise<GlobalShortcutState> {
+      if (!bridge.getGlobalShortcut) { fellBack("getGlobalShortcut"); return webPlatform.getGlobalShortcut(); }
+      return bridge.getGlobalShortcut();
+    },
+
+    async setGlobalShortcut(on: boolean): Promise<GlobalShortcutState> {
+      if (!bridge.setGlobalShortcut) { fellBack("setGlobalShortcut"); return webPlatform.setGlobalShortcut(on); }
+      // 如实透传：被占用时桥回的是关着的状态，谎报成开会让设置页开关停在「开」、用户按了却没反应。
+      return bridge.setGlobalShortcut(on);
     },
 
     subscribeOpenConversation(cb: (convId: string) => void): () => void {

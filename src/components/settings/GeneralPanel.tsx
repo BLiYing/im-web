@@ -3,7 +3,7 @@ import { SubPanel } from "./SubPanel";
 
 /** 通用设置子面板：设置 ▸ 通用设置进入，叠在设置之上。主题已接通真功能，其余先 UI。
  *  纯展示：全部偏好状态与 setter 由 App 注入。 */
-export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, autoStart, autoStartSupported, onFontSize, onTheme, onTimeFormat, onSendKey, onAutoStart, onOpenWallpaper, onBack }: {
+export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, autoStart, autoStartSupported, globalShortcut, globalShortcutSupported, onFontSize, onTheme, onTimeFormat, onSendKey, onAutoStart, onGlobalShortcut, onOpenWallpaper, onBack }: {
   fontSize: number;
   theme: "light" | "dark" | "system";
   timeFormat: "12" | "24";
@@ -13,11 +13,16 @@ export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, autoStart, 
   /** 宿主支不支持这个概念。浏览器恒 false —— 那时整段不渲染，
    *  显示一个永远点不动的开关比不显示更糟（platform/types.ts 的说明）。 */
   autoStartSupported: boolean;
+  /** 全局快捷键的**真实状态**（真注册上了才是开）；label 未读到时为空串。 */
+  globalShortcut: { enabled: boolean; label: string; taken?: boolean };
+  /** 浏览器恒 false，整段不渲染（理由同 autoStartSupported）。 */
+  globalShortcutSupported: boolean;
   onFontSize: (v: number) => void;
   onTheme: (v: "light" | "dark" | "system") => void;
   onTimeFormat: (v: "12" | "24") => void;
   onSendKey: (v: "enter" | "cmd") => void;
   onAutoStart: (v: boolean) => void;
+  onGlobalShortcut: (v: boolean) => void;
   onOpenWallpaper: () => void;
   onBack: () => void;
 }) {
@@ -72,6 +77,25 @@ export function GeneralPanel({ fontSize, theme, timeFormat, sendKey, autoStart, 
                 <span className="radio-text">
                   <span className="row-label">开机时自动启动</span>
                   <span className="row-sub">登录系统后在后台启动，收到消息才提示</span>
+                </span>
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* 全局快捷键：**默认关**——它在系统范围抢一个组合键，会静默盖掉别的应用的同名快捷键。
+            只在宿主支持、且已读到组合键写法时出现。被占用时开关是关着的，副标题说明原因。 */}
+        {globalShortcutSupported && globalShortcut.label && (
+          <>
+            <div className="section-label">全局快捷键</div>
+            <div className="settings-group">
+              <button type="button" className="radio-row" onClick={() => onGlobalShortcut(!globalShortcut.enabled)}>
+                <span className={`radio-dot${globalShortcut.enabled ? " on" : ""}`} />
+                <span className="radio-text">
+                  <span className="row-label">按 {globalShortcut.label} 显示 / 隐藏窗口</span>
+                  <span className="row-sub">{globalShortcut.taken
+                    ? `${globalShortcut.label} 已被其他应用占用，没能开启`
+                    : "在任何应用里都能按；默认关闭，以免盖掉其他应用的同名快捷键"}</span>
                 </span>
               </button>
             </div>

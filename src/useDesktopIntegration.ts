@@ -4,7 +4,7 @@
 // 拿到 false 或空实现，于是行为不变（D1 的验收就是这句话）。判断逻辑在纯函数
 // `src/desktopNotify.ts` 里，本文件只负责「什么时候调」以及订阅的生命周期。
 import { useEffect, useRef, useState } from "react";
-import { platform } from "./platform";
+import { platform, type GlobalShortcutState } from "./platform";
 import { badgeCountOf, notifyBodyOf, shouldNotify } from "./desktopNotify";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { DesktopCallbacks } from "./desktopWiring";
@@ -25,6 +25,10 @@ export interface DesktopIntegration {
   autoStart: boolean;
   autoStartSupported: boolean;
   setAutoStart: (on: boolean) => void;
+  /** 全局快捷键（默认关）。`enabled` 是真的注册上了，`taken` 表示想开但被别的应用占着。 */
+  globalShortcut: GlobalShortcutState;
+  globalShortcutSupported: boolean;
+  setGlobalShortcut: (on: boolean) => void;
 }
 
 export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopIntegration {
@@ -85,6 +89,16 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
     return () => { alive = false; window.removeEventListener("focus", load); };
   }, []);
 
+  // 全局快捷键。**只在挂载时读一次**：它只会被本应用自己改（设置页那个开关），不像开机自启
+  // 会被用户跑去系统设置里改。label 在读到之前是空串，设置页据此先不渲染那一项。
+  const [globalShortcut, setGlobalShortcutState] = useState<GlobalShortcutState>({ enabled: false, label: "" });
+  useEffect(() => {
+    if (!platform().globalShortcutSupported()) return;
+    let alive = true;
+    void platform().getGlobalShortcut().then((s) => { if (alive) setGlobalShortcutState(s); });
+    return () => { alive = false; };
+  }, []);
+
   return {
     notifyInbound,
     bindCallbacks: (cb) => { cbRef.current = cb; },
@@ -92,5 +106,9 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
     autoStartSupported: platform().autoStartSupported(),
     // 回填的是**设完读回来的实际值**：设失败（系统不允许）时开关会弹回去，而不是假装设上了。
     setAutoStart: (on) => { void platform().setAutoStart(on).then(setAutoStartState); },
+    globalShortcut,
+    globalShortcutSupported: platform().globalShortcutSupported(),
+    // 同上：回填读回来的真实状态。被占用时开关弹回去，并带着 taken 让设置页说明原因。
+    setGlobalShortcut: (on) => { void platform().setGlobalShortcut(on).then(setGlobalShortcutState); },
   };
 }

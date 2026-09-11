@@ -54,6 +54,15 @@ if (contract > 0 && deviceId && deviceName) {
     getAutoStart: (): Promise<boolean> => ipcRenderer.invoke("im:get-auto-start") as Promise<boolean>,
     setAutoStart: (on: boolean): Promise<boolean> => ipcRenderer.invoke("im:set-auto-start", on) as Promise<boolean>,
 
+    // 全局快捷键（默认关，设置页开）。与开机自启同一个口径：返回**设完之后的真实状态**——
+    // 被别的应用占用时 enabled=false、taken=true，设置页据此把开关弹回并说明原因。
+    // Linux（尤其 Wayland）上 Electron 的全局快捷键不可靠，不开放。
+    globalShortcutSupported: (): boolean => process.platform === "darwin" || process.platform === "win32",
+    getGlobalShortcut: (): Promise<{ enabled: boolean; label: string; taken?: boolean }> =>
+      ipcRenderer.invoke("im:get-global-shortcut") as Promise<{ enabled: boolean; label: string; taken?: boolean }>,
+    setGlobalShortcut: (on: boolean): Promise<{ enabled: boolean; label: string; taken?: boolean }> =>
+      ipcRenderer.invoke("im:set-global-shortcut", on) as Promise<{ enabled: boolean; label: string; taken?: boolean }>,
+
     /** 点系统通知后主进程把 convId 递过来。返回拆除函数——页面换号/卸载时必须调，
      *  否则旧回调会攒在 ipcRenderer 上（同 sdk/wake.ts 那个「不拆就跟着醒」的坑）。 */
     subscribeOpenConversation: (cb: (convId: string) => void): (() => void) => {

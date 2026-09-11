@@ -28,6 +28,14 @@ export interface SaveFileRequest {
   name: string;
 }
 
+/** 全局快捷键的状态。`enabled` 是**真的注册上了**，不是偏好；`taken` 只在「想开但被别的应用占着」时为 true。 */
+export interface GlobalShortcutState {
+  enabled: boolean;
+  /** 给人看的组合键写法（⌃⌘W / Ctrl+Alt+W）。不支持的宿主为空串。 */
+  label: string;
+  taken?: boolean;
+}
+
 /** 一条系统通知。`convId` 供宿主实现「点通知定位到会话」，web 侧目前不消费。 */
 export interface NotifyRequest {
   title: string;
@@ -118,6 +126,18 @@ export interface Platform {
 
   /** 设开机自启，返回**设完之后读回来的实际值**。设失败时读回来仍是旧值，调用方据此就知道没设上。 */
   setAutoStart(on: boolean): Promise<boolean>;
+
+  /**
+   * 宿主支不支持全局快捷键（一个固定组合键显示 / 隐藏主窗口，**默认关**，设置里开）。
+   * 浏览器恒 false——网页拿不到系统级按键，不是没做。设置页据此决定显不显示那一项。
+   */
+  globalShortcutSupported(): boolean;
+
+  /** 当前状态。**异步**：挂载时就会调，理由同 `getAutoStart`。 */
+  getGlobalShortcut(): Promise<GlobalShortcutState>;
+
+  /** 开 / 关，返回**设完之后的真实状态**；组合键被别的应用占着时 `enabled=false`、`taken=true`。 */
+  setGlobalShortcut(on: boolean): Promise<GlobalShortcutState>;
 
   /**
    * 订阅「用户点了系统通知，要打开这个会话」。返回拆除函数。

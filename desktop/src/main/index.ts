@@ -3,9 +3,10 @@
 // D2 的验收目标只有一条：**登录 → 会话列表 → 收发一条消息**。所以这里刻意只做窗口与身份，
 // 托盘 / 通知 / 自启 / 单实例锁 / 关闭最小化统统归 D4——那些每加一件都要在两个平台各验一次，
 // 混进 D2 会让「骨架到底通没通」失去判据。
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain } from "electron";
 import { join } from "node:path";
-import { BRIDGE_CONTRACT, deviceName, rememberedLocalPort, rememberLocalPort, stableDeviceId } from "./identity";
+import { BRIDGE_CONTRACT, deviceName, readLocalState, rememberedLocalPort, rememberLocalPort, stableDeviceId, writeLocalState } from "./identity";
+import { createGlobalShortcut, toggleActionFor } from "./globalShortcutCap";
 import { runSmoke } from "./smoke";
 import { runE2E } from "./e2e";
 import { startLocalServer, type LocalServerHandle } from "./localServer";
@@ -97,6 +98,21 @@ if (lockExit === null) {
   }
 }
 
+// 全局快捷键（**默认关**，设置里开；见 globalShortcutCap.ts）。要等 ready 才能注册，这里只建。
+// 偏好落 device.json（跟窗口状态同一份），这样登录前、页面还没起来时就能按偏好注册上。
+const shortcut = createGlobalShortcut({
+  registry: globalShortcut,
+  platform: process.platform,
+  load: () => readLocalState().globalShortcut === true,
+  save: (on) => { writeLocalState({ globalShortcut: on }); },
+  onPress: () => {
+    const w = liveMainWin();
+    if (!w) return;
+    if (toggleActionFor(w.isVisible(), w.isFocused()) === "hide") w.hide();
+    else showWindow(w);
+  },
+});
+
 function createWindow(): BrowserWindow {
   // 位置与大小从上次记的恢复；整块落在屏幕外时只留尺寸、位置交给系统（见 windowState.ts）。
   const st = restoreWindowState();
@@ -184,6 +200,9 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   });
   // 深链：页面订阅时先取一次、之后每收到「有新链接」再取。取走即清（deepLink.ts）。
   ipcMain.handle(IPC_DEEP_LINK_DRAIN, () => deepLinks.drain());
+  // 全局快捷键：与开机自启同口径，set 返回**设完之后的真实状态**（被占用时 enabled=false、taken=true）。
+  ipcMain.handle("im:get-global-shortcut", () => shortcut.state());
+  ipcMain.handle("im:set-global-shortcut", (_e, on: unknown) => shortcut.set(on === true));
   ipcMain.handle("im:get-auto-start", () => getAutoStart());
   ipcMain.handle("im:set-auto-start", (_e, on: unknown) => setAutoStart(on === true));
 
@@ -320,6 +339,8 @@ app.whenReady().then(async () => {
 
   // 托盘 + 「关闭 = 收起」。自检模式不装：它会在菜单栏留个图标，而自检紧接着就 exit。
   installTray(win);
+  // 按偏好注册全局快捷键。只在正常启动走到这里——自检模式在上面已经 return，不许替用户抢键。
+  shortcut.restore();
 
   app.on("activate", () => {
     // macOS：Dock 图标被点时把窗口召回来。装了托盘之后窗口是被 hide 的（不是销毁），
@@ -340,6 +361,7 @@ app.on("will-quit", () => {
   localServer?.close(); localServer = null;
   store?.close(); store = null;
   stopWakeSignals?.(); stopWakeSignals = null;
+  shortcut.dispose();
 });
 
 // 装了托盘之后，关窗只是 hide，窗口不会被销毁，所以 window-all-closed 正常情况下压根不触发。

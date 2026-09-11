@@ -7,7 +7,7 @@
 //   openExternal           ← src/useMediaDownload.ts（openReadyFile 的预览分支）
 //   subscribeWake          ← src/sdk/wake.ts（installWakeListeners，**留在原处**，本层只转发）
 //   voiceRecording         ← src/voiceRecorder.ts（voiceRecordingSupported，**留在原处**，本层只转发）
-import type { NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
+import type { GlobalShortcutState, NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
 import { installWakeListeners } from "../sdk/wake";
 import { voiceRecordingSupported } from "../voiceRecorder";
 
@@ -81,6 +81,11 @@ export const webPlatform: Platform = {
   autoStartSupported(): boolean { return false; },
   async getAutoStart(): Promise<boolean> { return false; },
   async setAutoStart(_on: boolean): Promise<boolean> { return false; },
+
+  // 网页拿不到系统级按键——不适用。label 给空串：设置页根本不渲染这一项。
+  globalShortcutSupported(): boolean { return false; },
+  async getGlobalShortcut(): Promise<GlobalShortcutState> { return { enabled: false, label: "" }; },
+  async setGlobalShortcut(_on: boolean): Promise<GlobalShortcutState> { return { enabled: false, label: "" }; },
 
   // web 的 notify 恒 false，没有通知可点，所以这个回调永远不会触发。
   // 仍返回一个可调用的拆除函数，让调用方不必分平台写 cleanup。

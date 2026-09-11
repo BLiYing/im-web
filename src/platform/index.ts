@@ -6,7 +6,7 @@ import type { Platform } from "./types";
 import { webPlatform } from "./web";
 import { createDesktopPlatform, isBridgeUsable } from "./desktop";
 
-export type { Platform, NotifyRequest, SaveFileRequest, VoiceRecordingSupport } from "./types";
+export type { Platform, GlobalShortcutState, NotifyRequest, SaveFileRequest, VoiceRecordingSupport } from "./types";
 export type { DesktopBridge } from "./desktop";
 
 let cached: Platform | null = null;

@@ -3017,7 +3017,7 @@ export default function App() {
         {generalOpen && (
           <GeneralPanel
             fontSize={fontSize} theme={theme} timeFormat={timeFormat} sendKey={sendKey}
-            autoStart={desktop.autoStart} autoStartSupported={desktop.autoStartSupported} onAutoStart={desktop.setAutoStart}
+            autoStart={desktop.autoStart} autoStartSupported={desktop.autoStartSupported} onAutoStart={desktop.setAutoStart} globalShortcut={desktop.globalShortcut} globalShortcutSupported={desktop.globalShortcutSupported} onGlobalShortcut={desktop.setGlobalShortcut}
             onFontSize={setFontSize} onTheme={setTheme} onTimeFormat={setTimeFormat} onSendKey={setSendKey}
             onOpenWallpaper={() => setWallpaperOpen(true)}
             onBack={() => setGeneralOpen(false)}

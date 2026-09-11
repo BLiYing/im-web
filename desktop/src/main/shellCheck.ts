@@ -5,9 +5,10 @@
 // （少一个 isQuitting 闸，app.quit() 会再次触发 close、又被 preventDefault 收回去，
 // 用户按 Cmd+Q 会发现退不掉）。这两条互相拉扯，正是那种「手点一次好像没问题、
 // 换个入口就锁死」的逻辑，所以在主进程里程序化验一遍，不靠人盯屏幕。
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, globalShortcut } from "electron";
 import { beginQuit, installTray } from "./tray";
 import { probeSecondInstance } from "./singleInstance";
+import { createGlobalShortcut } from "./globalShortcutCap";
 import { readLocalState } from "./identity";
 import { getAutoStart, notify, setBadge } from "./shellCaps";
 import { setTrayTooltip } from "./tray";
@@ -111,6 +112,26 @@ export async function runShellCheck(
   else say("[shell] ✓ 系统通知已交给系统（会真的弹一条，可忽略；能否显示还取决于系统权限）");
 
   say(`[shell] · 开机自启当前状态 = ${getAutoStart()}（自检不改它）`);
+
+  // ③b 全局快捷键：用**真注册器**验「开 → 系统里真注册上；关 → 真释放」。
+  //    单测里的注册器是假的，证明不了 Electron 的 globalShortcut 真吃这个接线。
+  //    换一个不会与任何人冲突的组合键，load/save 走空实现——**自检不许改用户的偏好、不许抢用户的键**。
+  const probeAcc = "Control+Alt+Shift+F13";
+  const gs = createGlobalShortcut({
+    registry: globalShortcut, platform: process.platform, accelerator: probeAcc,
+    load: () => false, save: () => {}, onPress: () => {},
+  });
+  const turnedOn = gs.set(true);
+  const heldAfterOn = globalShortcut.isRegistered(probeAcc);
+  gs.set(false);
+  const heldAfterOff = globalShortcut.isRegistered(probeAcc);
+  if (!turnedOn.enabled || !heldAfterOn) {
+    fail.push(`全局快捷键开不起来：set(true)=${JSON.stringify(turnedOn)}，系统里注册=${heldAfterOn}（探针键 ${probeAcc} 若被别的应用占着，换一个重跑）`);
+  } else if (heldAfterOff) {
+    fail.push("全局快捷键关不掉：set(false) 之后系统里仍注册着——用户在设置里关了，组合键却还被我们占着");
+  } else {
+    say(`[shell] ✓ 全局快捷键：真注册器上开 → 注册、关 → 释放（探针键 ${probeAcc}）`);
+  }
 
   // ④ 窗口几何应当已被记下（close 时会强制存一次）。
   const st = readLocalState().windowState as { bounds?: { width?: number } } | undefined;

@@ -299,6 +299,23 @@ export async function runE2E(
       }
       say("[e2e] ✓ 深链：运行中 open-url 与 second-instance argv 都弹出卡片，登录码 q/l 未弹");
     }
+
+    // ⑩ 全局快捷键的桥：页面 → preload → ipcMain → globalShortcutCap 通不通、回的形状对不对。
+    //    **只读不设**：set 会改用户偏好、抢用户的键。真注册器上的开 / 关归 --shell-check（它换了探针键）。
+    if (bridge.present) {
+      const gs = (await win.webContents.executeJavaScript(`(async () => {
+        const b = window.imDesktop;
+        if (typeof b.getGlobalShortcut !== 'function' || typeof b.setGlobalShortcut !== 'function'
+            || typeof b.globalShortcutSupported !== 'function') return null;
+        return { supported: b.globalShortcutSupported(), state: await b.getGlobalShortcut() };
+      })()`)) as { supported: boolean; state?: { enabled?: unknown; label?: unknown } } | null;
+      const st = gs?.state;
+      if (!gs || typeof st?.enabled !== "boolean" || typeof st?.label !== "string" || (gs.supported && !st.label)) {
+        say(`[e2e] ✗ 全局快捷键的桥不完整：${JSON.stringify(gs)}——get 拿不到 {enabled,label} 通常是 ipcMain 处理端没装`);
+        return 14;
+      }
+      say(`[e2e] ✓ 全局快捷键桥打通：supported=${gs.supported} state=${JSON.stringify(st)}`);
+    }
   } catch (e) {
     say(`[e2e] ✗ ${String(e instanceof Error ? e.message : e)}`);
     if (rendererErrors.length) {

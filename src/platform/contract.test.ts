@@ -82,6 +82,13 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     expect(typeof await p.setAutoStart(true)).toBe("boolean");
   });
 
+  it("全局快捷键三件：supported 为 false 时 get 必须是关着的；set 返回完整形状", async () => {
+    const p = make();
+    if (!p.globalShortcutSupported()) expect((await p.getGlobalShortcut()).enabled).toBe(false);
+    const s = await p.setGlobalShortcut(true);
+    expect(s).toEqual(expect.objectContaining({ enabled: expect.any(Boolean), label: expect.any(String) }));
+  });
+
   it("subscribeOpenConversation 返回可调用的拆除函数（调用方不必分平台写 cleanup）", () => {
     const p = make();
     const stop = p.subscribeOpenConversation(() => {});
@@ -234,6 +241,15 @@ describe("desktop 侧特有", () => {
     // 桥模拟「设不上」：无论传什么，读回来都是 false。
     const p = createDesktopPlatform({ ...bareBridge, setAutoStart: async () => false, getAutoStart: async () => false });
     expect(await p.setAutoStart(true)).toBe(false);
+  });
+
+  it("setGlobalShortcut 如实透传桥的真实状态：组合键被占用时是关着的、带 taken", async () => {
+    const p = createDesktopPlatform({
+      ...bareBridge, globalShortcutSupported: () => true,
+      setGlobalShortcut: async () => ({ enabled: false, label: "⌃⌘W", taken: true }),
+    });
+    // 谎报 enabled=true 的话，设置页开关停在「开」、用户按了却没反应，还不知道为什么
+    expect(await p.setGlobalShortcut(true)).toEqual({ enabled: false, label: "⌃⌘W", taken: true });
   });
 
   it("桥说通知没发出去（权限被拒/勿扰）就如实回 false，不许谎报成功", async () => {
