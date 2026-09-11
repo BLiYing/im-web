@@ -5,8 +5,9 @@
 // （少一个 isQuitting 闸，app.quit() 会再次触发 close、又被 preventDefault 收回去，
 // 用户按 Cmd+Q 会发现退不掉）。这两条互相拉扯，正是那种「手点一次好像没问题、
 // 换个入口就锁死」的逻辑，所以在主进程里程序化验一遍，不靠人盯屏幕。
-import { BrowserWindow } from "electron";
+import { app, BrowserWindow } from "electron";
 import { beginQuit, installTray } from "./tray";
+import { probeSecondInstance } from "./singleInstance";
 import { readLocalState } from "./identity";
 import { getAutoStart, notify, setBadge } from "./shellCaps";
 import { setTrayTooltip } from "./tray";
@@ -56,6 +57,19 @@ export async function runShellCheck(
     }
   } catch (e) {
     fail.push(`blob: 子窗桥隔离没验成：${String(e)}`);
+  }
+
+  // ⓪b 单实例锁。两半分开验，因为各自能单独坏：
+  //    · 真起一个探针进程：它必须被拒，且主实例要收到它（锁 + 事件投递）；
+  //    · 合成一次「用户又点了图标」：主窗口必须被叫出来（index.ts 里那段接线）。
+  //    **必须排在 ①② 前面**：② 会销毁窗口，之后就没有窗口可叫了。
+  const probe = await probeSecondInstance();
+  if (probe.ok) say(`[shell] ✓ 单实例锁：${probe.detail}`);
+  else fail.push(`单实例锁：${probe.detail}`);
+  if (!win.isDestroyed()) {
+    app.emit("second-instance", {}, [], "", { kind: "launch" });
+    if (await waitUntil(() => win.isVisible(), 3000)) say("[shell] ✓ 再次启动 → 主窗口被叫到前台");
+    else fail.push("合成了一次 second-instance(launch)，主窗口没出来——index.ts 的 second-instance 处理没装或没叫 showWindow");
   }
 
   // ① 未置退出闸时关窗：必须**收起而不是销毁**。销毁了下次「显示主窗口」就没窗口可显。

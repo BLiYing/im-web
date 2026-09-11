@@ -27,7 +27,8 @@ function trayIconPath(): string {
     : join(__dirname, "../..", "resources/tray.png");
 }
 
-function showWindow(win: BrowserWindow): void {
+/** 把窗口叫到前台（最小化的先还原）。托盘菜单与单实例锁的 second-instance 共用。 */
+export function showWindow(win: BrowserWindow): void {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();

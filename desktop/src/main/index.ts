@@ -13,7 +13,8 @@ import { runPerf } from "./perf";
 import { runShellCheck } from "./shellCheck";
 import { runC3Check } from "./c3Check";
 import { checkDistFreshness, freshnessMessage } from "./distFreshness";
-import { beginQuit, installTray, isQuitting, setTrayTooltip } from "./tray";
+import { beginQuit, installTray, isQuitting, setTrayTooltip, showWindow } from "./tray";
+import { exitCodeAfterLock, lockDataFor, shouldFocusOnSecondInstance } from "./singleInstance";
 import { getAutoStart, installWakeSignals, notify, setAutoStart, setBadge } from "./shellCaps";
 import { isExternallyOpenable, openExternal, saveFile } from "./fileCaps";
 import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
@@ -55,6 +56,20 @@ const perfMode = process.argv.includes("--perf");
 const shellMode = process.argv.includes("--shell-check");
 /** `--c3-check`：C3 取数分流的行为级验收——数 window_req 帧（见 c3Check.ts）。同样不显窗口。 */
 const c3Mode = process.argv.includes("--c3-check");
+/** 任一自检模式。**加新模式只改这一处**——下面三个地方（不显窗口 / 跑自检 / 抢锁时报身份）都读它。 */
+const anySelfCheck = smokeMode || e2eMode || perfMode || shellMode || c3Mode;
+
+// 单实例锁（见 singleInstance.ts 顶部：两个进程同写一份 messages.db）。
+// **必须在 whenReady 之前抢**：拿不到锁的进程什么都不该建——托盘、SQLite、本地同源层一个都不许碰。
+// 用 `app.exit` 而不是 `app.quit`：quit 会先走完 ready 再退，那段时间里下面的 whenReady 回调照样会跑。
+const lockData = lockDataFor(process.argv, anySelfCheck);
+const lockExit = exitCodeAfterLock(lockData, app.requestSingleInstanceLock(lockData));
+if (lockExit !== null) {
+  if (lockData.kind === "self-check") {
+    process.stderr.write("[im-desktop] 已有一个 IM Desktop 在运行（同一个 userData）——先退出它再跑自检\n");
+  }
+  app.exit(lockExit);
+}
 
 function createWindow(): BrowserWindow {
   // 位置与大小从上次记的恢复；整块落在屏幕外时只留尺寸、位置交给系统（见 windowState.ts）。
@@ -101,7 +116,7 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
   win.once("ready-to-show", () => {
-    if (smokeMode || e2eMode || perfMode || shellMode || c3Mode) return;
+    if (anySelfCheck) return;
     if (st.maximized) win.maximize();
     win.show();
   });
@@ -204,7 +219,13 @@ function fatal(stage: string, e: unknown): void {
 }
 
 app.whenReady().then(async () => {
+  if (lockExit !== null) return;   // 没拿到锁：app.exit 已发出，别在退出途中建任何东西
   const win = createWindow();
+  // 用户又点了一次图标 / 从命令行又起了一个：那个进程已被锁拒掉，这边把窗口叫出来。
+  // 窗口通常是被托盘收起（hide）而不是销毁，所以 show 就够。
+  app.on("second-instance", (_e, _argv, _cwd, data) => {
+    if (!win.isDestroyed() && shouldFocusOnSecondInstance(data)) showWindow(win);
+  });
   // **必须无条件装，且早于页面加载**：页面一渲染就会调 platform().setBadge()，
   // 而它走的是 ipcRenderer.sendSync——处理端不在，轻则拿到 undefined、重则卡住渲染进程。
   // 原先只在正常模式装，等于所有自检模式下页面都在对着空通道喊（自检本身反而验不到这条）。
@@ -235,7 +256,7 @@ app.whenReady().then(async () => {
   const target = localServer ? localServer.url : DEV_URL;
   const load = win.loadURL(target);
 
-  if (smokeMode || e2eMode || perfMode || shellMode || c3Mode) {
+  if (anySelfCheck) {
     const say = (s: string): void => { process.stdout.write(`${s}\n`); };
     // **对着旧产物跑出来的绿是假的**。只在「未打包 + 走本地同源层」时判——
     // dev 模式加载 :5173 是实时源码，打包版的 dist 就是包里那份，都不适用。
