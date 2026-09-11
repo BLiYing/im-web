@@ -3,6 +3,7 @@ import { IMClient, registerAccount, type ConnState } from "./sdk/imSdk";
 import { AppServicesProvider, type AppServices } from "./AppServicesContext";
 import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
+import { useLocalPreload } from "./useLocalPreload";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
@@ -513,28 +514,8 @@ export default function App() {
     return [];
   }, []);
 
-  // 登录后从本地库（IndexedDB）预载各会话历史 → 打开会话即秒显，刷新不丢已下载的历史；
-  // 同时读取独立的连续同步游标；本地消息最大值与服务端 latest 都不能证明中间没有空洞。
-  const preloadLocal = useCallback(async (convs: Conversation[]) => {
-    const client = clientRef.current;
-    if (!client) return;
-    const loaded: Record<string, ChatMessage[]> = {};
-    for (const c of convs) {
-      const local = await client.loadLocal(c.conv_id);
-      const continuousCursor = await client.loadSyncCursor(c.conv_id);
-      // is_super 决定 max_gap=0：超级群正文只在打开会话时按需拉，连上时永不自动补
-      // （SUPERGROUP_DESIGN §5 早有此规定，OFFLINE_BACKLOG_DESIGN §4.5 把它落到 sync 帧上）。
-      client.trackConversation(c.conv_id, continuousCursor, c.is_super === true);
-      // 载入删除墓碑（须早于 syncTracked）：被删的 conv_seq 进内存墓碑，onMessage 收到服务端重推时直接丢弃。
-      const del = await client.loadDeletedSeqs(c.conv_id);
-      if (del.length) deletedByConv.current[c.conv_id] = new Set(del);
-      if (local.length === 0) continue;
-      loaded[c.conv_id] = local;
-      const seen = (seenByConv.current[c.conv_id] ??= new Set());
-      local.forEach((m) => m.convSeq > 0 && seen.add(m.convSeq)); // 防服务端同步重复回显
-    }
-    if (Object.keys(loaded).length) preloadMsgs(loaded);
-  }, []);
+  // 本地库预载（登录 / 重连走全量 preloadLocal；会话刷新走 preloadNew，只登记新冒出来的会话）：见 useLocalPreload。
+  const { preloadLocal, preloadNew } = useLocalPreload({ clientRef, seenByConv, deletedByConv, preloadMsgs });
 
   const scheduleConversationRefresh = useCallback(() => {
     if (conversationRefreshTimerRef.current !== null) {
@@ -544,11 +525,12 @@ export default function App() {
       conversationRefreshTimerRef.current = null;
       void refreshConversations().then(async (latest) => {
         if (latest.length === 0) return;
-        await preloadLocal(latest); // 新会话也立即登记，避免等刷新页面后才补洞
-        clientRef.current?.syncTracked();
+        // 新会话立即登记并只同步它们。开窗/翻页/conv_bump 也走到这里：已登记的会话不重读本地库、不再全量 sync。
+        const fresh = await preloadNew(latest);
+        if (fresh.length) clientRef.current?.syncTracked(fresh);
       });
     }, 150);
-  }, [refreshConversations, preloadLocal]);
+  }, [refreshConversations, preloadNew]);
 
   // 会话列表节流刷新：把一阵 ack/receipt/conv_update 风暴合并成 400ms 一发，并串行化拉取。
   // 与 scheduleConversationRefresh 的区别：那条负责 sync 批量新消息（还要 preloadLocal + syncTracked），

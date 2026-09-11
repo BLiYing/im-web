@@ -1200,9 +1200,9 @@ export class IMClient extends IMRestApi {
     return this.headSeq.get(convId) ?? 0;
   }
 
-  /** 对所有已登记会话发一次增量同步（从各自基线补新消息）。 */
-  syncTracked(): void {
-    this.sendSyncReq([...this.tracked]);
+  /** 对已登记会话发一次增量同步（从各自基线补新消息）；给了 convIds 就只同步这几个（会话刷新里新冒出来的）。 */
+  syncTracked(convIds?: string[]): void {
+    this.sendSyncReq(convIds ?? [...this.tracked]);
   }
 
   /** 缓存 / 读取会话列表（localStorage，按本人 uid 隔离）。 */

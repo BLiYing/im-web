@@ -44,13 +44,14 @@ export class FakeIMClient {
   disconnect() { this.rec("disconnect"); }
   cachedConversations(): Conversation[] { return []; }
   cacheConversations() {}
-  async fetchConversations(): Promise<Conversation[]> { return FakeIMClient.conversations; }
-  syncTracked() {}
+  // 这三条记录调用：会话刷新的接线测试要数「刷新了几次 / 重读了哪些会话 / 同步了哪些会话」。
+  async fetchConversations(): Promise<Conversation[]> { this.rec("fetchConversations"); return FakeIMClient.conversations; }
+  syncTracked(...a: unknown[]) { this.rec("syncTracked", ...a); }
   async listFriends() { return []; }
   async fetchMyProfile() { return { nickname: "我自己", phone: "", avatar_url: "" }; }
   async downloadSettings() { return { version: 1, settings: {} }; }
   // —— 会话/消息链路 ——
-  async loadLocal(): Promise<ChatMessage[]> { return []; }
+  async loadLocal(...a: unknown[]): Promise<ChatMessage[]> { this.rec("loadLocal", ...a); return []; }
   async loadDeletedSeqs(): Promise<number[]> { return []; }
   async loadSyncCursor(): Promise<number> { return 0; }
   openConversation(...a: unknown[]) { this.rec("openConversation", ...a); }
