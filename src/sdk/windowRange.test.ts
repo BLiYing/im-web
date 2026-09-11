@@ -23,6 +23,19 @@ function clientFor(owner: string): { client: IMClient; feed: (frame: unknown) =>
   return { client, feed: (f) => (client as unknown as { onFrame(raw: string): void }).onFrame(JSON.stringify(f)) };
 }
 
+/** 同上，但挂一个假 socket，好数出站帧——「到了下界就不再问」这条断言必须看真的发没发。 */
+function clientWithSocket(owner: string): {
+  client: IMClient; sent: { type?: string }[]; feed: (frame: unknown) => void;
+} {
+  const sent: { type?: string }[] = [];
+  const { client, feed } = clientFor(owner);
+  (client as unknown as { ws: unknown }).ws = {
+    readyState: WebSocket.OPEN,
+    send: (s: string) => { sent.push(JSON.parse(s) as { type?: string }); },
+  };
+  return { client, sent, feed };
+}
+
 const row = (seq: number, over: Record<string, unknown> = {}) => ({
   server_msg_id: `s${seq}`, conv_id: CID, from: "peer", content: `#${seq}`,
   content_type: "text", conv_seq: seq, timestamp: 1_700_000_000_000 + seq, ...over,
@@ -53,6 +66,42 @@ describe("has_before=false 时的可见下界", () => {
     await settle();
     expect(client.atHistoryFloor(CID, 2)).toBe(true);   // 上沿=第一条真消息 → 该停
     expect(client.atHistoryFloor(CID, 3)).toBe(false);  // 下界之上照常放行
+  });
+
+  // 「入群后才有消息的新成员」这条路——**C3 手测一直没验到的那一条**
+  // （IMServer docs/ops/DESKTOP_MANUAL_TEST.md §5 第 2 条记的欠账）。
+  //
+  // 为什么以前验不到：手测拿的是压测群，成员建群时就在，可见下界就是 conv_seq 1，
+  // 于是上滚分支里那个 `oldestRendered > 1` 自己就会停住，`atHistoryFloor` 压根没被考验到，
+  // 试过变异也红不起来。**history_visible=1 的群 + 入群后才有消息的新成员**才是真正的现场：
+  // 上沿恒 > 1，`>1` 那个猜测帮不上任何忙，唯一能让上滑停下来的就是服务端的 `has_before=false`。
+  // 判错的后果不是报错，是**每次滑到顶都再空问一次、永不收敛**。
+  //
+  // 服务端那一半由 IMServer 的 TestWindowRespectsHistoryFloor 钉（含上滚到下界那一问）。
+  it("新成员的下界远大于 1 时，上滚到下界一个 window_req 都不发", async () => {
+    const { client, sent, feed } = clientWithSocket("o-floor-newcomer");
+    // join_conv_seq=20 的新成员进会话：服务端只给 21..30，并回 has_before=false。
+    feed({
+      type: "window_resp",
+      data: {
+        conv_id: CID, anchor: 0, anchor_found: true, has_before: false, has_after: false,
+        messages: [21, 22, 23, 24, 25, 26, 27, 28, 29, 30].map((s) => row(s)),
+      },
+    });
+    await settle();
+
+    // 下界落在第一条**对我可见**的消息上，不是 1。
+    expect(client.atHistoryFloor(CID, 21)).toBe(true);
+    expect(client.atHistoryFloor(CID, 22)).toBe(false);
+
+    // 上沿=21（已在下界）：一个请求都不该发。`21 > 1` 恒真，挡住它的只能是下界。
+    sent.length = 0;
+    client.loadOlder(CID, 21);
+    expect(sent.filter((f) => f.type === "window_req")).toEqual([]);
+
+    // 反面：下界之上照常问，证明上面那条绿不是"loadOlder 根本不发请求"蒙来的。
+    client.loadOlder(CID, 25);
+    expect(sent.filter((f) => f.type === "window_req")).toHaveLength(1);
   });
 
   // ⚠️ **「重连后清下界」这一行没有测试覆盖**：onopen 里那句 `this.floorSeq.clear()` 要驱动它
