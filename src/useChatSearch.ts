@@ -93,6 +93,11 @@ export function useChatSearch(d: ChatSearchDeps) {
   // 有缺口且在线 → 命中集改由服务端给（§4.9 第 1 项）。本地齐全时这段不发请求，
   // 行为与改造前**逐字一致**——绝大多数会话走的都是那条路。
   const [serverHits, setServerHits] = useState<SearchHit[]>([]);
+  // 这份服务端命中属于哪一次查询（会话|词|发件人）。改词后新词结果要防抖 250ms 才回来，这段时间旧词的命中集
+  // 还挂在 serverHits 上——不按它认，就会被当成新词的服务端结果：「默认跳最新」按旧集锁了签名、下标落在旧集末尾，
+  // 新词结果回来签名没变、下标不再重置（2026-09-11 用户实测：搜「98」翻过一页后改「981」，计数「100 / 50+」、▲ 没反应）。
+  const [serverKey, setServerKey] = useState("");
+  const queryKey = `${convId}|${searchNeedle}|${searchFrom}`;
   // 服务端检索按页取（每页上限 50）。还有更早的页时计数写「/ 50+」，▲ 翻过最旧那条就去取下一页
   // （loadOlderHits）——而不是悄悄截断成 50 条还写「/ 50」，那会让人以为大群里就只有这些命中。
   const [hitsTruncated, setHitsTruncated] = useState(false);
@@ -121,6 +126,7 @@ export function useChatSearch(d: ChatSearchDeps) {
     setSearchDegraded(false);
     const token = getTokenRef.current();
     if (!token) return;
+    const key = `${convId}|${searchNeedle}|${searchFrom}`;
     let cancelled = false;
     const timer = setTimeout(() => {
       void searchConvMessages(token, convId, searchQuery.trim(), { from: searchFrom || undefined, limit: 50 })
@@ -128,6 +134,7 @@ export function useChatSearch(d: ChatSearchDeps) {
           if (cancelled) return;
           // 服务端按 conv_seq 倒序返回；本 Hook 通篇按**升序**（0=最早）使用命中集，这里翻过来。
           setServerHits(page.items.map((i) => ({ convSeq: i.conv_seq, timestamp: i.timestamp })).reverse());
+          setServerKey(key);
           serverCursorRef.current = page.next_cursor;
           setHitsTruncated(!!page.has_more && page.next_cursor > 0);
         })
@@ -138,7 +145,8 @@ export function useChatSearch(d: ChatSearchDeps) {
 
   // 命中集：服务端结果优先（有缺口时它才是完整的），否则本地。
   // 形状统一成 {convSeq, timestamp}——上层只用这两个字段做跳转与计数。
-  const hitsFromServer = querySource === "server" && serverHits.length > 0;
+  const serverFresh = serverKey === queryKey;   // 旧查询的命中不认（见 serverKey 注释）
+  const hitsFromServer = querySource === "server" && serverFresh && serverHits.length > 0;
   const searchHits = useMemo(
     () => (hitsFromServer ? serverHits : localHits),
     [hitsFromServer, serverHits, localHits],
@@ -161,7 +169,8 @@ export function useChatSearch(d: ChatSearchDeps) {
     requestAnimationFrame(() => locateInChat(convId, seq));
   }, [searchOpen, convId, searchNeedle, searchFrom, searchHits, locateInChat]);
   // 还能不能往更早翻：只有走服务端、且服务端说还有下一页时。本地命中不分页，永远是 false。
-  const canLoadOlderHits = querySource === "server" && hitsTruncated;
+  // 同样只认当前查询：新词结果回来前按 ▲，游标已按新词归零，拿它去翻旧词的命中集会把两个词的结果拼在一起。
+  const canLoadOlderHits = querySource === "server" && serverFresh && hitsTruncated;
 
   /** 取服务端下一页（更早的命中），拼到命中集前面，并落到紧挨着原最旧命中的那一条。 */
   const loadOlderHits = async (): Promise<void> => {
@@ -376,7 +385,7 @@ export function useChatSearch(d: ChatSearchDeps) {
   }, [homeMsgHits, conversations]);
 
   return {
-    searchNeedle, searchHits, searchHitIdx, hitsTruncated, gotoSearchHit, openInChatSearch, armInChatSearch, closeInChatSearch, searchInputRef,
+    searchNeedle, searchHits, searchHitIdx, hitsTruncated: serverFresh && hitsTruncated, gotoSearchHit, openInChatSearch, armInChatSearch, closeInChatSearch, searchInputRef,
     searchFrom, searchFromName, searchFromPickerOpen, setSearchFromPickerOpen, searchFromRows, openFromPicker, pickSearchFrom, clearSearchFrom,
     calendarOpen, setCalendarOpen, calendarMonth, setCalendarMonth, activeDays, jumpToDay, jumpToToday, jumpToEarliest, monthLabel,
     // 降级提示（§4.9）：离线 + 本地有缺口时，UI 必须把"只搜了已下载的部分"说出来。

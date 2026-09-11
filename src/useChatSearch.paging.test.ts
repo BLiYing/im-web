@@ -114,4 +114,52 @@ describe("会话内搜索 · 服务端翻页", () => {
     expect(result.current.searchHitIdx).toBe(0);
     expect(deps.locateInChat).toHaveBeenLastCalledWith(CONV, 120);
   });
+
+  // 2026-09-11 用户实测：大群里搜「98」翻过一页（50 / 100+），改成「981」后计数成了「100 / 50+」、▲ 点了没反应。
+  // 新词的服务端结果要防抖 250ms 才回来，这段时间旧词的命中集还挂着、被当成新词的服务端结果——
+  // 「默认跳最新」按它锁了签名、下标落在第 100 条；新词那 50 条回来时签名没变，下标不再重置，越界。
+  it("翻过页后改词 → 下标按新词的命中集重置，▲ 照常能往更旧跳", async () => {
+    vi.spyOn(api, "searchConvMessages")
+      .mockResolvedValueOnce(page([300, 250, 200], true, 200))
+      .mockResolvedValueOnce(page([150, 100], true, 100))
+      .mockResolvedValueOnce(page([280, 180], true, 180));
+    const { result, rerender, deps } = mount({ searchQuery: "98" });
+    await waitFor(() => expect(hitSeqs(result)).toEqual([200, 250, 300]));
+    await settleDefaultJump();
+    act(() => result.current.gotoSearchHit(0));
+    act(() => result.current.gotoSearchHit(-1));
+    await waitFor(() => expect(hitSeqs(result)).toEqual([100, 150, 200, 250, 300]));
+
+    rerender({ ...deps, searchQuery: "981" });
+    await waitFor(() => expect(hitSeqs(result)).toEqual([180, 280]));
+    await settleDefaultJump();
+    expect(result.current.searchHitIdx).toBe(1);                        // 新词最新那条，不是沿用旧词的第 5 条
+    expect(deps.locateInChat).toHaveBeenLastCalledWith(CONV, 280);
+
+    act(() => result.current.gotoSearchHit(result.current.searchHitIdx - 1));
+    expect(result.current.searchHitIdx).toBe(0);
+    expect(deps.locateInChat).toHaveBeenLastCalledWith(CONV, 180);
+  });
+
+  it("改词后、新词结果回来之前按 ▲ → 不拿新词的游标去翻旧词的命中集", async () => {
+    let releaseNew: (p: api.ConvSearchPage) => void = () => {};
+    const spy = vi.spyOn(api, "searchConvMessages")
+      .mockResolvedValueOnce(page([300, 200], true, 200))
+      .mockResolvedValueOnce(page([150, 100], true, 100))
+      .mockImplementation(() => new Promise((res) => { releaseNew = res; }));
+    const { result, rerender, deps } = mount({ searchQuery: "98" });
+    await waitFor(() => expect(hitSeqs(result)).toEqual([200, 300]));
+    await settleDefaultJump();
+    act(() => result.current.gotoSearchHit(0));
+    act(() => result.current.gotoSearchHit(-1));
+    await waitFor(() => expect(hitSeqs(result)).toEqual([100, 150, 200, 300]));
+
+    rerender({ ...deps, searchQuery: "981" });
+    act(() => result.current.gotoSearchHit(-1));                        // 旧词的命中集还挂着时按 ▲
+    await waitFor(() => expect(spy.mock.calls.some((c) => c[2] === "981")).toBe(true));
+    expect(spy.mock.calls.filter((c) => c[2] === "981").map((c) => c[3]?.cursor)).toEqual([undefined]);
+
+    await act(async () => { releaseNew(page([180], false, 0)); await Promise.resolve(); });
+    await waitFor(() => expect(hitSeqs(result)).toEqual([180]));
+  });
 });
