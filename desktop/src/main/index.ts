@@ -15,6 +15,7 @@ import { runC3Check } from "./c3Check";
 import { checkDistFreshness, freshnessMessage } from "./distFreshness";
 import { beginQuit, installTray, isQuitting, setTrayTooltip, showWindow } from "./tray";
 import { exitCodeAfterLock, lockDataFor, shouldFocusOnSecondInstance } from "./singleInstance";
+import { createDeepLinkRouter, DEEP_LINK_SCHEME, IPC_DEEP_LINK_AVAILABLE, IPC_DEEP_LINK_DRAIN } from "./deepLink";
 import { getAutoStart, installWakeSignals, notify, setAutoStart, setBadge } from "./shellCaps";
 import { isExternallyOpenable, openExternal, saveFile } from "./fileCaps";
 import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
@@ -69,6 +70,31 @@ if (lockExit !== null) {
     process.stderr.write("[im-desktop] 已有一个 IM Desktop 在运行（同一个 userData）——先退出它再跑自检\n");
   }
   app.exit(lockExit);
+}
+
+/** 主窗口。深链与 second-instance 都要够到它，而那两条路的事件可能早于 whenReady 里的局部变量存在。 */
+let mainWin: BrowserWindow | null = null;
+const liveMainWin = (): BrowserWindow | null => (mainWin && !mainWin.isDestroyed() ? mainWin : null);
+
+// 深链（见 deepLink.ts 顶部：只收邀请码、排队等页面来取）。
+const deepLinks = createDeepLinkRouter(
+  () => { liveMainWin()?.webContents.send(IPC_DEEP_LINK_AVAILABLE); },
+  (why) => { process.stderr.write(`[im-desktop] 丢弃深链：${why}\n`); },
+);
+if (lockExit === null) {
+  // **必须在模块顶层装**：macOS 冷启动时 open-url 早于 ready 到，装在 whenReady 里就漏掉了那一条。
+  app.on("open-url", (e, url) => {
+    e.preventDefault();
+    if (!deepLinks.acceptUrl(url) || anySelfCheck) return;   // 自检不把隐藏窗口弹出来
+    const w = liveMainWin();
+    if (w) showWindow(w);
+  });
+  deepLinks.acceptArgv(process.argv);   // Windows / Linux 冷启动：链接在启动参数里
+  // 只在打包版登记：dev 下登记的是 Electron 本体，等于把整台机器的 imdesktop:// 交给了一个开发二进制。
+  // macOS 另要 Info.plist 声明（electron-builder.yml 的 protocols），这一行在 mac 上是补登记。
+  if (app.isPackaged && !app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME)) {
+    process.stderr.write(`[im-desktop] 登记 ${DEEP_LINK_SCHEME}:// 失败，深链点不进来\n`);
+  }
 }
 
 function createWindow(): BrowserWindow {
@@ -156,6 +182,8 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
     const q = (p ?? {}) as { title?: string; body?: string; convId?: string };
     return notify(getWin(), String(q.title ?? ""), String(q.body ?? ""), q.convId);
   });
+  // 深链：页面订阅时先取一次、之后每收到「有新链接」再取。取走即清（deepLink.ts）。
+  ipcMain.handle(IPC_DEEP_LINK_DRAIN, () => deepLinks.drain());
   ipcMain.handle("im:get-auto-start", () => getAutoStart());
   ipcMain.handle("im:set-auto-start", (_e, on: unknown) => setAutoStart(on === true));
 
@@ -221,10 +249,14 @@ function fatal(stage: string, e: unknown): void {
 app.whenReady().then(async () => {
   if (lockExit !== null) return;   // 没拿到锁：app.exit 已发出，别在退出途中建任何东西
   const win = createWindow();
-  // 用户又点了一次图标 / 从命令行又起了一个：那个进程已被锁拒掉，这边把窗口叫出来。
-  // 窗口通常是被托盘收起（hide）而不是销毁，所以 show 就够。
-  app.on("second-instance", (_e, _argv, _cwd, data) => {
-    if (!win.isDestroyed() && shouldFocusOnSecondInstance(data)) showWindow(win);
+  mainWin = win;
+  // 用户又点了一次图标 / 从命令行又起了一个 / Windows 上点了一条深链：那个进程已被锁拒掉，
+  // 它的参数（可能带着深链）转到这边。窗口通常是被托盘收起（hide）而不是销毁，所以 show 就够。
+  // **深链先收、再判要不要叫窗口**：自检递来的深链也要走完整条路（e2e 靠这个验 argv 那条），只是不弹窗。
+  app.on("second-instance", (_e, argv, _cwd, data) => {
+    deepLinks.acceptArgv(argv);
+    const w = liveMainWin();
+    if (w && shouldFocusOnSecondInstance(data)) showWindow(w);
   });
   // **必须无条件装，且早于页面加载**：页面一渲染就会调 platform().setBadge()，
   // 而它走的是 ipcRenderer.sendSync——处理端不在，轻则拿到 undefined、重则卡住渲染进程。
@@ -294,7 +326,8 @@ app.whenReady().then(async () => {
     // 所以先试 show；真没有窗口了才新建。
     const [first] = BrowserWindow.getAllWindows();
     if (first) { first.show(); first.focus(); return; }
-    createWindow().loadURL(target);   // **必须用同一个 target**，写死 DEV_URL 会让打包版打到不存在的 :5173
+    mainWin = createWindow();          // 深链与 second-instance 要够到的是这个新窗口
+    mainWin.loadURL(target);           // **必须用同一个 target**，写死 DEV_URL 会让打包版打到不存在的 :5173
   });
 });
 

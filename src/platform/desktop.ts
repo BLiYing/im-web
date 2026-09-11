@@ -31,6 +31,8 @@ export interface DesktopBridge {
   /** 返回**设完之后读回来的实际值**，不是回显入参。 */
   setAutoStart?(on: boolean): Promise<boolean>;
   subscribeOpenConversation?(cb: (convId: string) => void): () => void;
+  /** 深链。回调拿到扫码原文 `q/g/<token>`；宿主只放行邀请码两种（见 types.ts）。 */
+  subscribeDeepLink?(cb: (raw: string) => void): () => void;
   subscribeWake?(onWake: (reason: string) => void): () => void;
   /** 本地消息库（D4-3b）。类型故意是 unknown：形状校验在 `createDesktopLocalStore` 里做，
    *  那边少一个方法就整体返回 null。 */
@@ -130,6 +132,12 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
       // 叠加反而会让「拆除函数返回了什么」变得不好判断。
       if (!bridge.subscribeOpenConversation) { fellBack("subscribeOpenConversation"); return () => {}; }
       return bridge.subscribeOpenConversation(cb);
+    },
+
+    subscribeDeepLink(cb: (raw: string) => void): () => void {
+      // 不叠加 web 实现，理由同 subscribeOpenConversation：web 那份是空的。
+      if (!bridge.subscribeDeepLink) { fellBack("subscribeDeepLink"); return () => {}; }
+      return bridge.subscribeDeepLink(cb);
     },
 
     subscribeWake(onWake: (reason: string) => void): () => void {

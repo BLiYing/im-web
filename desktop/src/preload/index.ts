@@ -9,6 +9,8 @@ import { contextBridge, ipcRenderer } from "electron";
 const IPC_OPEN_CONVERSATION = "im:open-conversation";   // 与 main/shellCaps.ts 同名，改一处要改两处
 const IPC_STORE = "im:store";                           // 与 main/../shared/storeIpc.ts 同名，同上
 const IPC_WAKE = "im:wake";                             // 与 main/shellCaps.ts 同名，同上
+const IPC_DEEP_LINK_AVAILABLE = "im:deep-link-available"; // 与 main/deepLink.ts 同名，同上
+const IPC_DEEP_LINK_DRAIN = "im:deep-link-drain";         // 与 main/deepLink.ts 同名，同上
 //
 // ⚠️ **preload 里不许 import 相对路径的模块**。它跑在 sandbox 里（webPreferences 没显式关，
 // Electron 默认 sandbox:true），那份 `require` 只认 `electron` 与少数内置模块——
@@ -96,6 +98,23 @@ if (contract > 0 && deviceId && deviceName) {
       const h = (_e: unknown, reason: string): void => cb(reason);
       ipcRenderer.on(IPC_WAKE, h);
       return () => { ipcRenderer.off(IPC_WAKE, h); };
+    },
+
+    /** 深链（`imdesktop://q/u|g/<token>`）。回调拿到的是扫码原文 `q/g/<token>`。
+     *  **订阅时先取一次**：冷启动时链接比页面先到，早在主进程排着队了；之后每来一个信号再取。
+     *  取是主进程里的原子操作，不会丢也不会重复。拆除后在途那一次取回来的会被丢掉——
+     *  那只发生在「正好在退出登录那一刻点了深链」，此时交给页面反而会拿已作废的会话去 resolve。 */
+    subscribeDeepLink: (cb: (raw: string) => void): (() => void) => {
+      let alive = true;
+      const take = (): void => {
+        void (ipcRenderer.invoke(IPC_DEEP_LINK_DRAIN) as Promise<unknown>).then((links) => {
+          if (!alive || !Array.isArray(links)) return;
+          for (const l of links) if (typeof l === "string") cb(l);
+        });
+      };
+      ipcRenderer.on(IPC_DEEP_LINK_AVAILABLE, take);
+      take();
+      return () => { alive = false; ipcRenderer.off(IPC_DEEP_LINK_AVAILABLE, take); };
     },
 
     // **voiceRecording 刻意不实现**：Electron 的 Chromium 原生支持 AAC 录制

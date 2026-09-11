@@ -88,6 +88,11 @@ export const webPlatform: Platform = {
     return () => {};
   },
 
+  // 浏览器没有深链入口：邀请链接在浏览器里打开的是落地页，走 `?qr=` 回放（useQR 的 bootQr）。
+  subscribeDeepLink(_cb: (raw: string) => void): () => void {
+    return () => {};
+  },
+
   subscribeWake(onWake: (reason: string) => void): () => void {
     return installWakeListeners(onWake);
   },

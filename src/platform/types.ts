@@ -131,6 +131,19 @@ export interface Platform {
   subscribeOpenConversation(cb: (convId: string) => void): () => void;
 
   /**
+   * 订阅「外部点了一条本应用的深链」（`imdesktop://q/u|g/<token>`）。回调拿到的是能直接交给
+   * `useQR#handleScanRaw` 的扫码原文（`q/g/<token>`）。返回拆除函数。
+   *
+   * **只有邀请码两种**：登录码在宿主那侧就被丢了（深链任何网页都能触发，放行 q/l 就是
+   * QRLjacking 入口，见 desktop/src/main/deepLink.ts）。
+   * 浏览器没有深链这个入口——它的等价物是落地页 `?qr=` 回放（`useQR` 的 bootQr），所以 web 侧永不回调。
+   *
+   * **只在登录后订阅、换号重订**：宿主会把登录前到的链接攒着，订阅那一刻一并交出；
+   * 不跟着账号重订的话，旧订阅会拿已作废的会话去 resolve（与 subscribeOpenConversation 同一个坑）。
+   */
+  subscribeDeepLink(cb: (raw: string) => void): () => void;
+
+  /**
    * 取本地消息库的宿主实现；**没有就返回 `null`**，由 `sdk/localStore.ts` 回落 IndexedDB。
    *
    * 为什么这一项在平台层而不是让 sdk 自己去摸桥：`window.imDesktop` 的唯一调用方必须是

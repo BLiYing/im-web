@@ -27,6 +27,12 @@ extraResources:
 extraMetadata:
   main: out/main/index.js
 asar: true
+# 深链 imdesktop://（只收邀请码，见 src/main/deepLink.ts）。macOS 靠这里写进 Info.plist 的
+# CFBundleURLTypes——运行时的 setAsDefaultProtocolClient 在 mac 上也要 Info.plist 先声明过才生效。
+protocols:
+  - name: IM Desktop
+    schemes:
+      - imdesktop
 mac:
   icon: resources/icon.png
   category: public.app-category.social-networking

@@ -90,6 +90,14 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     expect(() => stop()).not.toThrow();   // 重复拆除也不许炸
   });
 
+  it("subscribeDeepLink 返回可调用的拆除函数（useQR 不分平台写 cleanup）", () => {
+    const p = make();
+    const stop = p.subscribeDeepLink(() => {});
+    expect(typeof stop).toBe("function");
+    expect(() => stop()).not.toThrow();
+    expect(() => stop()).not.toThrow();
+  });
+
   it("subscribeWake：收得到浏览器 online 信号，拆除后不再回调", () => {
     const p = make();
     const seen: string[] = [];
@@ -205,6 +213,21 @@ describe("desktop 侧特有", () => {
     expect(got).toEqual(["c-42"]);
     stop();
     expect(stopped).toBe(true);   // 不拆的话换号后点通知会打开已作废的会话
+  });
+
+  it("桥来的深链要能传到订阅者，拆除后不再传", () => {
+    const box: { emit: ((raw: string) => void) | null } = { emit: null };
+    let stopped = false;
+    const p = createDesktopPlatform({
+      ...bareBridge,
+      subscribeDeepLink: (cb) => { box.emit = cb; return () => { stopped = true; box.emit = null; }; },
+    });
+    const got: string[] = [];
+    const stop = p.subscribeDeepLink((raw) => got.push(raw));
+    box.emit?.("q/g/Ab3dEf5hIj7lMn9pQr1tUv");
+    expect(got).toEqual(["q/g/Ab3dEf5hIj7lMn9pQr1tUv"]);
+    stop();
+    expect(stopped).toBe(true);   // 不拆的话换号后点深链会拿已作废的会话去 resolve
   });
 
   it("setAutoStart 如实透传桥读回来的实际值，不回显入参", async () => {

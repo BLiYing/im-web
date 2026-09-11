@@ -7,7 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
 import type { GroupInfo, QRCard, QRResolved, UserCard } from "./sdk/protocol";
-import { errorCode } from "./qr";
+import { describeRaw, errorCode } from "./qr";
+import { platform } from "./platform";
+import { LOG_TAG, logger } from "./logging/logger";
 
 export interface QRDeps {
   phase: "login" | "app";
@@ -46,6 +48,19 @@ export function useQR(d: QRDeps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
+  // 深链（桌面端 imdesktop://q/u|g/<token>）：与上面的落地页回放同一条路——交给 handleScanRaw，
+  // 走服务端 resolve → 结果卡片，要用户再点一次才生效。**登录后才订阅、换号重订**：宿主把登录前
+  // 到的链接攒着，订阅那一刻一并交出；换号不重订的话，旧订阅会拿已作废的会话去 resolve。
+  // 经 ref 调：handleScanRaw 每次渲染都是新函数，放进依赖会让订阅随每次渲染重装一遍。
+  const handleScanRawRef = useRef<(raw: string) => Promise<void>>(async () => {});
+  useEffect(() => {
+    if (phase !== "app") return;
+    return platform().subscribeDeepLink((raw) => {
+      logger.info(LOG_TAG.app, "deep_link_received", { kind: describeRaw(raw).kind });   // 不记 token
+      void handleScanRawRef.current(raw);
+    });
+  }, [phase, uid]);
+
   // 扫到原文 → 服务端 resolve → 按 kind 展示分支；码失效（200110）走「已失效」分支。
   const handleScanRaw = async (raw: string) => {
     setQrScan(false);
@@ -57,6 +72,7 @@ export function useQR(d: QRDeps) {
       else setToast((e as Error).message);
     }
   };
+  handleScanRawRef.current = handleScanRaw;
 
   const openMyCard = async () => {
     try {

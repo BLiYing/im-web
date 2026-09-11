@@ -12,6 +12,7 @@
 // 绝不退化成「挑第一个会话发」，那会把测试消息发进真实会话甚至大群。
 import { app, type BrowserWindow } from "electron";
 import { getNotifyCount } from "./shellCaps";
+import { checkWarmDeepLinks, expectColdDeepLinkCard, seedColdDeepLink } from "./deepLinkCheck";
 
 const TARGET_CONV = process.env.IM_E2E_CONV || "冒烟测试";
 const STEP_TIMEOUT_MS = 15_000;
@@ -73,6 +74,8 @@ export async function runE2E(
   win.webContents.on("console-message", (_e, level, message) => {
     if (level >= 2) rendererErrors.push(message);   // 2=warning, 3=error
   });
+  // 深链冷启动那条：**必须在页面订阅之前投**，才验得到「排队 + 订阅时先取一次」（见 deepLinkCheck.ts）。
+  seedColdDeepLink();
   try {
     await load;
   } catch (e) {
@@ -110,6 +113,15 @@ export async function runE2E(
     await waitFor(win, `document.querySelectorAll('.convitem').length > 0`, "会话列表");
     const n = (await win.webContents.executeJavaScript(`document.querySelectorAll('.convitem').length`)) as number;
     say(`[e2e] ✓ 会话列表 ${n} 行`);
+
+    // ②b 冷启动深链：加载前投的那条，登录后卡片要出来。**必须在 ③ 之前关掉**，否则遮罩挡住会话点击。
+    const cold = await expectColdDeepLinkCard(win);
+    if (cold) {
+      say(`[e2e] ✗ ${cold}`);
+      say("[e2e]   链路：deepLink.ts 排队 → preload subscribeDeepLink 先取一次 → useQR 订阅 → handleScanRaw");
+      return 12;
+    }
+    say("[e2e] ✓ 冷启动深链：页面订阅前到的链接，登录后弹出了扫码结果卡片");
 
     // ③ 打开目标会话。找不到就失败——绝不退化成「挑第一个」。
     const opened = (await win.webContents.executeJavaScript(OPEN_CONV_JS)) as boolean;
@@ -267,6 +279,16 @@ export async function runE2E(
         return 10;
       }
       say(`[e2e] ✓ D4-4 桥打通：saveFile/openExternal 齐备；唤醒信号收到 ${got} 条，拆除后归零`);
+    }
+
+    // ⑨ 运行中的两条深链入口（open-url / second-instance argv）+ 登录码必须不出卡片。
+    if (bridge.present) {
+      const warm = await checkWarmDeepLinks(win);
+      if (warm) {
+        say(`[e2e] ✗ ${warm}`);
+        return 12;
+      }
+      say("[e2e] ✓ 深链：运行中 open-url 与 second-instance argv 都弹出卡片，登录码 q/l 未弹");
     }
   } catch (e) {
     say(`[e2e] ✗ ${String(e instanceof Error ? e.message : e)}`);
