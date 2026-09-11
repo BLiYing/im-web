@@ -27,7 +27,8 @@
 0--. **会话内搜索服务端命中翻页 ✅ 2026-09-11**（`b30bed6`）：▲ 翻过最旧命中带 `next_cursor` 取下一页，
    判据在 `src/searchPaging.ts`（与 iOS `IMChatSearchPaging` 同口径，SYMMETRY 已登记）；顺带修了有缺口会话里
    「本地命中先到、服务端命中后到」时下标越界（计数「193 / 50+」、▲▼ 失灵）。浏览器实测过（:8099 副本库 + :5199）。
-   **接下来是 C4**（↓ 跳到底 / 实时跳号 / conv_bump，OFFLINE_BACKLOG_DESIGN §4.8）。
+   **C4 ✅ 2026-09-11**（↓ 问区间清单 / 实时消息登记 [seq, seq] / bump 贴底才补 + 取最新下沿 off-by-one），
+   浏览器数出站帧实测三场景；自检写法见 `src/sdk/c4Realtime.test.ts`。
 0-. **D4-4 桥补齐 ✅ 2026-09-09**：`saveFile`（blob 递字节 / 远端流式落盘）、`openExternal`
    （协议白名单 + blob 退回 window.open + `setWindowOpenHandler` 不让子窗口继承桥）、
    `subscribeWake`（睡眠唤醒/解锁/聚焦，**叠加**页面那两个信号）。
