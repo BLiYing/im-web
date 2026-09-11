@@ -54,6 +54,8 @@ export class FakeIMClient {
   async loadDeletedSeqs(): Promise<number[]> { return []; }
   async loadSyncCursor(): Promise<number> { return 0; }
   openConversation(...a: unknown[]) { this.rec("openConversation", ...a); }
+  jumpToLatest(...a: unknown[]): boolean { this.rec("jumpToLatest", ...a); return true; }
+  catchUpOnBump(...a: unknown[]): boolean { this.rec("catchUpOnBump", ...a); return false; }
   trackConversation() {}
   watchUsers(...a: unknown[]) { this.rec("watchUsers", ...a); }
   markRead(...a: unknown[]) { this.rec("markRead", ...a); }

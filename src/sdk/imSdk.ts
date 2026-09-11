@@ -7,7 +7,8 @@ import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
 import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
-import { planEntryWindow, nextHistoryFloor } from "../windowPlan";
+import { planEntryWindow, planJumpToLatest, planBumpCatchUp, nextHistoryFloor, type WindowPlan } from "../windowPlan";
+import { shouldHealGap, nextSyncCursor } from "./syncCursor";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
 import { presenceFromFrame, type Presence } from "./presence";
 import { type MentionSpan } from "../mention";
@@ -177,9 +178,6 @@ export class IMClient extends IMRestApi {
   private pendingReceipts = new Map<string, number>(); // convId -> 待上报的最大 conv_seq
   private receiptTimer: ReturnType<typeof setTimeout> | null = null;
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
-  // 聊天历史单页请求 seq → {会话, 请求时的 since}。记下 since 是为了在收到该页后
-  // **把这一段登记进区间清单**：用户往上翻一页，本地缺口就收窄一页（§4.7）。
-  private pagedPending = new Map<number, { convId: string; since: number }>();
   private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; mentionSpans?: MentionSpan[]; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string; waveform?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
@@ -216,7 +214,6 @@ export class IMClient extends IMRestApi {
       this.tracked.clear();
       this.syncingConvs.clear();
       this.syncPending.clear();
-      this.pagedPending.clear();
       this.pendingOps.clear();
       this.sendTimers.forEach((timer) => clearTimeout(timer));
       this.sendTimers.clear();
@@ -244,7 +241,6 @@ export class IMClient extends IMRestApi {
       this.tracked.clear();
       this.syncingConvs.clear();
       this.syncPending.clear();
-      this.pagedPending.clear();
       this.pendingOps.clear();
       this.sendTimers.forEach((timer) => clearTimeout(timer));
       this.sendTimers.clear();
@@ -297,7 +293,6 @@ export class IMClient extends IMRestApi {
     this.convRanges.clear();
     this.gapped.clear();
     this.floorSeq.clear();
-    this.pagedPending.clear();
     this.pendingOps.clear();
     this.ws?.close(1000);
     this.ws = null;
@@ -473,23 +468,28 @@ export class IMClient extends IMRestApi {
     this.send({ type: T.WINDOW_REQ, seq: ++this.seq, data: { conv_id: convId, anchor, before, after } });
   }
 
-  /** 补拉某会话在本地游标之后的新消息（超级群收到 conv_bump 后用；信号无正文，见 sdk/convBump.ts）。 */
-  syncConversation(convId: string, sinceConvSeq: number): void {
-    if (convId) this.requestPage(convId, Math.max(0, sinceConvSeq));
+  /**
+   * ↓ 跳到底（C4，OFFLINE_BACKLOG_DESIGN §4.8）：最后一页本地不齐才 `window_req(anchor=0)`，判据见 windowPlan.planJumpToLatest。
+   * **返回是否真的发了请求**——没发就不会有响应帧，调用方别挂着等「数据到了再滚」。
+   */
+  jumpToLatest(convId: string, latestSeq: number, localNewest: number): boolean {
+    return this.runWindowPlan(convId, planJumpToLatest({
+      ranges: this.rangesOf(convId), head: this.headOf(convId), latestSeq, localNewest, historyPage: this.historyPage,
+    }));
   }
 
-  /** 发一页分页请求：指定游标、单页、不自动向前翻页（由 SYNC_RESP 的 pagedPending 抑制）。 */
-  /**
-   * 发一页历史请求。**刻意不带 `max_gap`**（OFFLINE_BACKLOG_DESIGN §4.4）：
-   * 积压闸门只该闸「连上时的自动补拉」，绝不能闸「用户主动往上翻页」——
-   * 用户滚到顶就是明确要求看这一段，此时回一个 too_long 等于翻不动历史。
-   * 自动补拉走 sendSyncReq（带 max_gap），两条路径就此分开。
-   */
-  private requestPage(convId: string, since: number): void {
-    if (!this.isSocketOpen()) return;
-    const requestSeq = ++this.seq;
-    this.pagedPending.set(requestSeq, { convId, since });
-    this.send({ type: T.SYNC_REQ, seq: requestSeq, data: { cursors: [{ conv_id: convId, since_conv_seq: since }] } });
+  /** 超级群 conv_bump 到了、会话正开着（C4）：只在贴底跟随时补，补哪一窗见 windowPlan.planBumpCatchUp。
+   *  C4 之前这里是「从本地最大 seq 往后拉一页」（已删的 syncConversation）——用户停在旧岛上时拉回来的是缺口开头那一页。 */
+  catchUpOnBump(convId: string, latestSeq: number, localNewest: number, following: boolean): boolean {
+    return this.runWindowPlan(convId, planBumpCatchUp({
+      ranges: this.rangesOf(convId), head: this.headOf(convId), latestSeq, localNewest, historyPage: this.historyPage, following,
+    }));
+  }
+
+  private runWindowPlan(convId: string, plan: WindowPlan): boolean {
+    if (!convId || plan.source === "local" || !this.isSocketOpen()) return false;
+    this.requestWindow(convId, plan.anchor, plan.before, plan.after);
+    return true;
   }
 
   /** 发送文本，返回 client_msg_id。opts.replyTo=引用回复（M4-2）；opts.forwardFrom=转发溯源（M4-3）。 */
@@ -815,7 +815,6 @@ export class IMClient extends IMRestApi {
       this.stopPing();
       this.syncingConvs.clear(); // 此连接上未返回的 sync_resp 已失效，重连后重新补偿
       this.syncPending.clear();
-      this.pagedPending.clear();
       this.setState("disconnected");
       if (!this.manualClose) this.scheduleReconnect();
     };
@@ -885,29 +884,12 @@ export class IMClient extends IMRestApi {
         break;
       case T.SYNC_RESP: {
         const responseSeq = typeof env.seq === "number" ? env.seq : 0;
-        const paged = this.pagedPending.get(responseSeq);
-        const isPaged = paged !== undefined;
-        if (isPaged) this.pagedPending.delete(responseSeq);
         const requestedConvs = this.syncPending.get(responseSeq) ?? [];
         this.syncPending.delete(responseSeq);
         requestedConvs.forEach((convId) => this.syncingConvs.delete(convId));
         for (const conv of d.conversations || []) {
           const pageMsgs: ChatMessage[] = [];
           for (const m of conv.messages || []) this.processIncoming(m, false, (msg) => pageMsgs.push(msg));
-          if (isPaged) {
-            // 聊天历史单页请求：**不推游标**（它不参与自动追平），但**要登记区间**——
-            // 服务端的 covered_conv_seq 同样断言了 (since, covered] 已全部下发或对我不可见，
-            // 那正是"这段我齐全"的定义。用户往上翻一页，本地缺口就实实在在收窄一页。
-            const covered = Number(conv.covered_conv_seq) || 0;
-            const since = paged!.since;
-            void localStore.saveIncomingPage(
-              this.uid, pageMsgs, 0, since + 1, covered > since ? covered : 0,
-            );
-            if (covered > since) this.noteRange(paged!.convId, since + 1, covered);
-            this.handlers.onHistoryPage?.(paged!.convId, since, pageMsgs.length);
-            // 聊天历史分页只返回一页，不参与自动追平。
-            continue;
-          }
           const convId = typeof conv.conv_id === "string" ? conv.conv_id : "";
           if (!convId) continue;
           // head 快照：服务端会话真实最新位点（仅在带了 max_gap 时下发）。↓N 计数与"还差多少"都用它。
@@ -1046,10 +1028,6 @@ export class IMClient extends IMRestApi {
         const syncConvs = this.syncPending.get(responseSeq) ?? [];
         this.syncPending.delete(responseSeq);
         syncConvs.forEach((convId) => this.syncingConvs.delete(convId));
-        const rejectedPage = this.pagedPending.get(responseSeq);
-        this.pagedPending.delete(responseSeq);
-        // 分页请求被拒：也要告诉 UI 这次结束了，否则忙标志卡死、历史再也翻不动。
-        if (rejectedPage) this.handlers.onHistoryPage?.(rejectedPage.convId, rejectedPage.since, 0);
         const cmid = d.client_msg_id;
         // 消息操作被拒（如撤回超时 300008）：回滚提示，不动消息本身。
         const op = cmid ? this.pendingOps.get(cmid) : undefined;
@@ -1154,8 +1132,13 @@ export class IMClient extends IMRestApi {
     if (collect) {
       collect(msg); // 整页落库由调用方在本页全部处理完后一次事务提交
     } else {
-      // 连续消息与游标同事务提交；非连续消息只落消息，游标仍停在空洞前。
-      void localStore.saveIncomingMessage(this.uid, msg, isNextContiguous);
+      // 连续消息推游标；**每条**实时消息都登记 [seq, seq]（C4 §4.8：跳号不补、登记成岛，紧接尾段则并进尾段）。
+      // 走整页写：消息 + 游标 + 区间同一个事务，与 sync / window 两路同款。C4 之前实时消息从不进清单，
+      // 于是 ↓ / 进会话 / ↓N 的「覆盖」判据对刚收到的那几条恒判不齐，要么白问服务端、要么尾部孤岛被当成最新。
+      if (msg.convSeq > 0) {
+        this.noteRange(msg.convId, msg.convSeq, msg.convSeq);
+        void localStore.saveIncomingPage(this.uid, [msg], isNextContiguous ? msg.convSeq : 0, msg.convSeq, msg.convSeq, this.headSeq.get(msg.convId) ?? 0);
+      }
     }
     this.handlers.onMessage?.(msg, !collect);   // 无 collect = new_msg 实时帧；有 collect = 同步/开窗批量
   }
@@ -1350,19 +1333,6 @@ export class IMClient extends IMRestApi {
     this.state = s;
     this.handlers.onState?.(s);
   }
-}
-
-/** 离线空洞自愈判定（纯函数，导出供单测）：实时消息跳过“已连续位置+1”即补拉。
- *  初始位置为 0 但首条直接是较大序号同样是空洞，不能当作已同步。 */
-export function shouldHealGap(prevSynced: number, incomingConvSeq: number, tracked: boolean): boolean {
-  return tracked && prevSynced >= 0 && incomingConvSeq > prevSynced + 1;
-}
-
-/** sync 游标推进规则（纯函数，导出供单测）：服务端 covered_conv_seq 权威覆盖 (since, covered]——
- *  区间内每个序号要么已下发、要么对本人不可见（history_visible 抬入群下界 / 「仅为我删除」隐藏项）。
- *  据此把游标推过永远拿不到的可见性空洞，破解死循环；covered 未超过当前游标则不动（空页/已追平）。 */
-export function nextSyncCursor(before: number, covered: number): number {
-  return covered > before ? covered : before;
 }
 
 /** 注册账号：POST /api/v1/register {username, password, nickname}。成功 resolve，失败抛带服务端文案的 Error。

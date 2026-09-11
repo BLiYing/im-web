@@ -72,7 +72,11 @@ export function planEntryWindow(
   const tip = input.head > 0 ? input.head : input.latestSeq;
   const server: WindowPlan = { source: "server", anchor, before, after };
   if (tip <= 0) return server;                       // 连"最新到哪"都不知道 → 问服务端
-  const lo = Math.max(1, (anchor > 0 ? anchor : tip) - before);
+  // 取最新（anchor=0）拿回的是**以 tip 结尾的 before 条**：`[tip-before+1, tip]`（IMServer `internal/gateway/window.go`
+  // 的 `got[len(got)-before:]`）。按 `tip-before` 算会多要一条——刚取回最新一页后，这一窗永远判不齐，
+  // 于是每次点 ↓、每次进无未读的会话都白问服务端一次（2026-09-11 C4 的出站帧测试抓到）。
+  // 锚点开窗（anchor>0）是「前 before 条 + 锚点本身 + 后 after 条」，下沿就是 anchor-before。
+  const lo = Math.max(1, anchor > 0 ? anchor - before : tip - before + 1);
   const hi = anchor > 0 ? Math.min(tip, anchor + after) : tip;
   if (hi < lo) return server;
   // **清单说齐全还不够，手里得真有东西**（/code-review 2026-09-09）。
@@ -145,4 +149,56 @@ export function nextHistoryFloor(current: number | undefined, keptSeqs: number[]
 export function floorFromWindow(keptSeqs: number[], anchor: number): number {
   const valid = keptSeqs.filter((n) => n > 0);
   return valid.length > 0 ? Math.min(...valid) : Math.max(0, anchor);
+}
+
+// ===== C4：↓ 跳到底 / 超级群 conv_bump 补不补（OFFLINE_BACKLOG_DESIGN §4.8）=====
+
+export interface LatestWindowInput {
+  ranges: SeqRange[];
+  /** 服务端最新位点快照（0=未知）。 */
+  head: number;
+  /** 会话列表给的最新位点（head 未知时的退路）。 */
+  latestSeq: number;
+  /** 本地已下载的最大 conv_seq。 */
+  localNewest: number;
+  historyPage: number;
+}
+
+/**
+ * ↓ 跳到底：**最后一页**本地齐不齐。齐 → 本地贴底、一个请求都不发；不齐 → `window_req(anchor=0)`。
+ *
+ * **不能只比「本地最大 seq < 最新」**（C4 之前 App 的判据）：离线积压超过 max_gap 后实时收到一条，
+ * 那一条被登记成孤岛 `[seq, seq]`，本地最大 seq 已经等于最新——旧判据判「已是最新」，
+ * 点 ↓ 只看到孤零零一条，它上面那一页永远不来。与进会话「无未读 → 取最新」是同一个问题，故直接复用那条判据。
+ */
+export function planJumpToLatest(input: LatestWindowInput): WindowPlan {
+  return planEntryWindow({ ...input, readSeq: input.latestSeq, unread: 0, contextBefore: 0 });
+}
+
+export interface BumpCatchUpInput extends LatestWindowInput {
+  /** 用户此刻是否贴底跟随（窗口含本地最新、且贴着底部）。 */
+  following: boolean;
+}
+
+/**
+ * 超级群 `conv_bump` 到了、会话正开着：该不该补、补哪一窗。
+ *
+ * 服务端对超级群在线只推信号不推全文，补不补全由客户端定：
+ *   · **没贴底（在翻历史）→ 不补**。head 已由 SDK 更新，↓N 照常计数，点 ↓ 再取。
+ *     C4 之前这里是「从本地最大 seq 往后拉一页」——用户停在旧岛上时拉回来的是缺口开头那一页，
+ *     不是新消息，白跑一趟还把一段不相干的历史塞进本地；
+ *   · 贴底跟随、差距 ≤ 一页 → 从尾段上沿接着取新的那几条（`anchor=尾段上沿, after=差距`），与尾段合并；
+ *   · 贴底跟随、差距 > 一页 → 直接取最新一页（`anchor=0`），尾段与新页之间留成缺口——
+ *     跟随的人要看的是最新，不是把几百条补齐（与连上时 max_gap 留缺口同一个取舍）。
+ */
+export function planBumpCatchUp(input: BumpCatchUpInput): WindowPlan {
+  const tip = Math.max(input.head, input.latestSeq);
+  if (!input.following || tip <= 0) return { source: "local" };
+  if (coversSpan(input.ranges, tip, tip)) return { source: "local" };   // 最新那条本地已有
+  const seg = rangeContaining(input.ranges, input.localNewest);
+  const tailHi = seg ? seg.hi : input.localNewest;
+  const gap = tip - tailHi;
+  if (gap <= 0) return { source: "local" };
+  if (tailHi > 0 && gap <= input.historyPage) return { source: "server", anchor: tailHi, before: 0, after: gap };
+  return { source: "server", anchor: 0, before: input.historyPage, after: 0 };
 }

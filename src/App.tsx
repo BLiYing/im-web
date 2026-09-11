@@ -738,8 +738,8 @@ export default function App() {
       },
       // 超级群轻量信号（2 万人量级）：服务端不推全文，只说「某会话最新到 seq 了」。
       //   · 会话列表：走既有的节流刷新，从服务端拿到权威的预览/未读（比自己拼更不容易错）。
-      //   · **正开着的那个会话**：主动补拉落后的那段，否则界面会停在旧消息上，
-      //     直到用户切走再切回——那是最容易被当成"消息丢了"的体验。
+      //   · **正开着的那个会话**：贴底跟随时补上新的那段（不补就停在旧消息上，最像"消息丢了"）；
+      //     在翻历史时不补，↓N 计数、点 ↓ 再取（C4，判据见 windowPlan.planBumpCatchUp）。
       // 没开着的会话不拉，那正是信号化省下的开销。
       onConvBump: (items) => {
         scheduleConversationRefresh();
@@ -747,9 +747,9 @@ export default function App() {
         if (!openConv) return;
         const hit = items.find((it) => it.conv_id === openConv);
         if (!hit) return;
-        // 本地已加载到的最大 conv_seq 作为游标；空会话从 0 开始拉。
-        const localNewest = messagesRef.current.reduce((mx, m) => Math.max(mx, m.convSeq ?? 0), 0);
-        if (hit.latest_seq > localNewest) clientRef.current?.syncConversation(openConv, localNewest);
+        // 本地最新取**本地全量**（不是渲染窗口）：锚点模式的窗口不含尾部。跟随与否看 wasNearBottomRef。
+        const localNewest = maxSeqOf(msgsByConvRef.current[openConv] ?? []);
+        clientRef.current?.catchUpOnBump(openConv, hit.latest_seq, localNewest, wasNearBottomRef.current);
       },
       // 锚点窗口到达：消息已落库，这里只决定"滚过去"还是"告诉用户没了"。
       // **anchor_found=false 才是真的没有**——旧实现靠"翻满 40 页没见到"来猜，会误报删除。
@@ -2297,11 +2297,11 @@ export default function App() {
     const newest = maxSeqOf(msgsByConv[cid] ?? []);
     // 无条件先滚一次消除假死（500人大群必现）：openConversation 拉回一页若全命中 seen → mergeMetaBySeq 不改 messages.length → layout effect 不重跑 → pendingScrollRef 卡住。真新消息到达时 layout effect 会再精修。
     box.scrollTop = box.scrollHeight;
-    if (newest < latestSeqRef.current) {
+    // C4（OFFLINE_BACKLOG §4.8）：最后一页本地不齐才 window_req(anchor=0)；只比最大 seq 会漏掉「尾部是跳号登记的孤岛」。
+    if (clientRef.current?.jumpToLatest(cid, latestSeqRef.current, newest)) {   // 真发了请求才等响应来滚
       setEntryUnread(0);
       forceBottomRef.current = true;
       pendingScrollRef.current = true;
-      clientRef.current?.openConversation(cid, latestSeqRef.current, latestSeqRef.current, 0, newest); // 点 ↓ = 我要最新的，无未读语义
     }
     wasNearBottomRef.current = true;
     setShowJump(false);

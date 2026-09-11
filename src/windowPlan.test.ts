@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow, nextHistoryFloor } from "./windowPlan";
+import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow, nextHistoryFloor, planJumpToLatest, planBumpCatchUp } from "./windowPlan";
 import type { SeqRange } from "./sdk/ranges";
 
 const base = { contextBefore: 10, historyPage: 200 };
@@ -36,6 +36,13 @@ describe("entryWindowAnchor —— 进会话锚在哪", () => {
 describe("planEntryWindow —— 这一窗问本地还是问服务端", () => {
   it("无未读 + 尾部一页本地齐全 → 不打网络", () => {
     expect(plan({ head: 1000, ranges: [{ lo: 1, hi: 1000 }] })).toEqual({ source: "local" });
+  });
+
+  // 取最新拿回的正是 `[tip-199, tip]` 这 200 条。下沿多算一条的话，刚取回最新一页后这一窗永远判不齐，
+  // 每次点 ↓ / 每次进无未读的会话都白问一次（2026-09-11 C4 出站帧测试抓到的 off-by-one）。
+  it("无未读 + 本地恰好只有取最新拿回的那一页 [801,1000] → 不打网络", () => {
+    expect(plan({ head: 1000, ranges: [{ lo: 801, hi: 1000 }] })).toEqual({ source: "local" });
+    expect(plan({ head: 1000, ranges: [{ lo: 802, hi: 1000 }] }).source).toBe("server");   // 少一条就不算
   });
 
   it("无未读 + 尾部一页缺一条 → 问服务端", () => {
@@ -167,5 +174,70 @@ describe("floorFromWindow —— has_before=false 时把可见下界记在哪一
 
   it("anchor=0（取最新）且空窗 → 0，即「仍然未知」，不许当成到顶", () => {
     expect(floorFromWindow([], 0)).toBe(0);
+  });
+});
+
+// ===== C4（OFFLINE_BACKLOG_DESIGN §4.8）=====
+
+describe("planJumpToLatest —— 点 ↓ 问不问服务端", () => {
+  const page = 200;
+  const jump = (o: Partial<Parameters<typeof planJumpToLatest>[0]>) =>
+    planJumpToLatest({ ranges: [], head: 0, latestSeq: 0, localNewest: 0, historyPage: page, ...o });
+
+  // C4 之前的判据是「本地最大 seq < 最新」。离线积压超过 max_gap 后实时来一条，它被登记成孤岛，
+  // 本地最大 seq 已等于最新 → 旧判据一个请求都不发，点 ↓ 只看到孤零零一条。
+  it("尾部是跳号登记的孤岛（本地最大 seq 已等于最新）→ 仍要取最新一页", () => {
+    expect(jump({ ranges: [{ lo: 1, hi: 200 }, { lo: 100000, hi: 100000 }], head: 100000, latestSeq: 100000, localNewest: 100000 }))
+      .toEqual({ source: "server", anchor: 0, before: page, after: 0 });
+  });
+
+  it("最后一页本地齐全 → 一个请求都不发", () => {
+    expect(jump({ ranges: [{ lo: 1, hi: 100000 }], head: 100000, latestSeq: 100000, localNewest: 100000 }))
+      .toEqual({ source: "local" });
+  });
+
+  it("本地最新落后于 head → 取最新一页", () => {
+    expect(jump({ ranges: [{ lo: 1, hi: 900 }], head: 1000, latestSeq: 1000, localNewest: 900 }).source).toBe("server");
+  });
+
+  it("head 未知时退到会话列表的 latestSeq", () => {
+    expect(jump({ ranges: [{ lo: 1, hi: 500 }], head: 0, latestSeq: 500, localNewest: 500 }).source).toBe("local");
+    expect(jump({ ranges: [{ lo: 1, hi: 500 }], head: 0, latestSeq: 0, localNewest: 500 }).source).toBe("server");
+  });
+});
+
+describe("planBumpCatchUp —— 超级群 conv_bump 到了补不补", () => {
+  const page = 200;
+  const bump = (o: Partial<Parameters<typeof planBumpCatchUp>[0]>) =>
+    planBumpCatchUp({ ranges: [], head: 0, latestSeq: 0, localNewest: 0, historyPage: page, following: true, ...o });
+
+  // C4 之前：一律「从本地最大 seq 往后拉一页」。用户停在旧岛上翻历史时，拉回来的是缺口开头那一页。
+  it("没贴底（在翻历史）→ 不补，交给 ↓N 计数", () => {
+    expect(bump({ following: false, ranges: [{ lo: 1, hi: 100 }], head: 130, latestSeq: 130, localNewest: 100 }))
+      .toEqual({ source: "local" });
+  });
+
+  it("贴底跟随、差距 ≤ 一页 → 从尾段上沿接着取那几条", () => {
+    expect(bump({ ranges: [{ lo: 1, hi: 100 }], head: 130, latestSeq: 130, localNewest: 100 }))
+      .toEqual({ source: "server", anchor: 100, before: 0, after: 30 });
+  });
+
+  it("尾段上沿以区间为准：最后一条真消息之后若是占号行（msg_op / 墓碑），接着取也从区间上沿开始", () => {
+    expect(bump({ ranges: [{ lo: 1, hi: 105 }], head: 130, latestSeq: 130, localNewest: 100 }))
+      .toEqual({ source: "server", anchor: 105, before: 0, after: 25 });
+  });
+
+  it("贴底跟随、差距 > 一页 → 直接取最新一页，不把几百条补齐", () => {
+    expect(bump({ ranges: [{ lo: 1, hi: 100 }], head: 900, latestSeq: 900, localNewest: 100 }))
+      .toEqual({ source: "server", anchor: 0, before: page, after: 0 });
+  });
+
+  it("最新那条本地已有（信号晚到）→ 不补", () => {
+    expect(bump({ ranges: [{ lo: 1, hi: 130 }], head: 130, latestSeq: 130, localNewest: 130 })).toEqual({ source: "local" });
+  });
+
+  it("本地一条都没有 → 取最新一页（没有尾段可接）", () => {
+    expect(bump({ ranges: [], head: 50, latestSeq: 50, localNewest: 0 }))
+      .toEqual({ source: "server", anchor: 0, before: page, after: 0 });
   });
 });

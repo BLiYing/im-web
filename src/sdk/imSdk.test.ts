@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { shouldHealGap, nextSyncCursor } from "./imSdk";
+import { shouldHealGap, nextSyncCursor } from "./syncCursor";
 import { createProbeWatchdog, PROBE_TIMEOUT_MS, wakeActionFor } from "./wake";
 import { friendlyMessage, FRIENDLY_MESSAGES } from "./errcode";
 
