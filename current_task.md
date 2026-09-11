@@ -29,6 +29,12 @@
    「本地命中先到、服务端命中后到」时下标越界（计数「193 / 50+」、▲▼ 失灵）。浏览器实测过（:8099 副本库 + :5199）。
    **C4 ✅ 2026-09-11**（↓ 问区间清单 / 实时消息登记 [seq, seq] / bump 贴底才补 + 取最新下沿 off-by-one），
    浏览器数出站帧实测三场景；自检写法见 `src/sdk/c4Realtime.test.ts`。
+0-a. **⚠️ 查明未修：开窗 / 翻页 / conv_bump 之后都会顺带跑一整轮「会话刷新」**（2026-09-11 C4 浏览器实测时看到的那个多出来的 `sync_req`）。
+   链路：开窗那批消息走 `onMessage(m, live=false)` → `ingestInbound` 判为新追加 → `scheduleConversationRefresh()`（150ms 合并）→
+   ① `GET /conversations`；② `preloadLocal` 对**每个**会话 `getAll` 整份本地消息 + 游标 + 墓碑（结果被 `preload` 的「内存优先」丢掉）；
+   ③ `syncTracked()` 对**所有**已登记会话发一帧 `sync_req`（超级群 `max_gap=0` 只回 too_long；普通群按游标可能真补一段）。
+   `onConvBump` 也无条件走这条。这条链本是给「实时来消息、可能是新会话」用的；`live=false` 的批量投递与 bump 只需要
+   `scheduleListRefresh`（只重拉列表）。**改之前先想清楚离线 sync 批量那条路是否依赖它登记新会话**，再补测试。iOS 未核对是否有同类。
 0-. **D4-4 桥补齐 ✅ 2026-09-09**：`saveFile`（blob 递字节 / 远端流式落盘）、`openExternal`
    （协议白名单 + blob 退回 window.open + `setWindowOpenHandler` 不让子窗口继承桥）、
    `subscribeWake`（睡眠唤醒/解锁/聚焦，**叠加**页面那两个信号）。
