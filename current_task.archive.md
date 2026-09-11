@@ -695,3 +695,36 @@
 >
 > 验证：`npm run build` 零错误；`npm test` **108 文件 1074+ 例全绿**；`check-file-size.sh` 通过。
 > **未做浏览器实测**——纯结构平移 + 一个字段的落库，但按仓规这不等于验过。
+
+## 2026-09-09 D4-3 本地消息库（2026-09-11 自 current_task.md「当前焦点」移入）
+
+> **D4-3 收工 ✅ 2026-09-09：本地消息库 = 能力接口 + 双实现**（web=IndexedDB / 桌面=主进程 SQLite）。
+> 方案 `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.6，那里记着落地形态与三条实测结论。
+>
+> | 层 | 文件 |
+> |---|---|
+> | 契约（15 方法 + 记录形状 + 键形状 + 方法清单） | `sdk/localStore.types.ts` |
+> | web 实现 | `sdk/localStore.web{,.db,.ranges,.search}.ts` |
+> | 桌面代理（转发到桥） | `sdk/localStore.desktop.ts` |
+> | 门面 + **唯一选择点** `pickStore()` | `sdk/localStore{,.ranges,.search}.ts` |
+> | 契约断言（两侧共跑，44 条） | `sdk/localStore.contract.ts` |
+> | 主进程 SQLite | `desktop/src/main/sqlite{Store,Rows}.ts` |
+>
+> **同一组断言现在跑三遍**：web(IndexedDB) / 桌面 SQLite（在 `desktop/` 的 vitest 里）/
+> 经回环桥的代理（`structuredClone` 模拟 IPC 序列化，专抓"跨进程那一跳丢了东西"）。
+>
+> **三条动手后才知道的事**（细节见 §7.6.4）：
+> ① **主进程引不了 im-web 的运行时代码**（TS6059 + 依赖图会把 protocol/mention/listSearch 拖进来）
+>    → 合并白名单 / 搜索字段规则 / 区间代数在 SQLite 侧各有一份平行实现，已登记进 SYMMETRY，
+>    护栏是共跑的契约 + 桥两侧白名单对齐测试 + `LOCAL_STORE_METHODS` 的编译期穷尽性检查。
+> ② **preload 跑在 sandbox 里，不许 import 相对路径的模块**——头一版引了共享模块，
+>    `npm run e2e` 当场白屏（module not found → 桥没挂上）。现在 preload 一个方法名都不写。
+> ③ **搜索不能用 SQL 的 `lower()`**（只折叠 ASCII，「ÄPFEL」搜不到「äpfel」且不报错，
+>    与 FTS5 同一种静默失效）→ 落库时用 JS 的 `toLowerCase()` 算好三个检索列。`LIKE` 的 `%`/`_` 也必须转义。
+>
+> **验证**：`npm run build` 零错误；`npm test` 108 文件 1100+ 例全绿；`desktop && npm test` 58 例全绿；
+> **`npm run e2e` 全绿**，并新增一步查「本轮那条 marker 真的落进了 SQLite 文件」——
+> 头一版写成「数总行数>0」，被变异验证抓到（库是持久的，上一轮遗留的数据让它恒真，
+> 把桥打断也照样绿）。变异跑批：web 17 个 + SQLite 15 个，全部被抓。
+>
+> **未做浏览器/真机手测**：语音波形刷新后还在不在、桌面版换号后旧库会不会串，都要眼睛看。

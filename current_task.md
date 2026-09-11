@@ -5,36 +5,21 @@
 
 ## 当前焦点
 
-> **D4-3 收工 ✅ 2026-09-09：本地消息库 = 能力接口 + 双实现**（web=IndexedDB / 桌面=主进程 SQLite）。
-> 方案 `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.6，那里记着落地形态与三条实测结论。
+> **D4 收尾 ✅ 2026-09-11：单实例锁 / 深链 / 拖文件进聊天列 / 全局快捷键**（设计与取舍记在
+> `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.9；上一块 D4-3 本地消息库已移入 archive）。
 >
-> | 层 | 文件 |
-> |---|---|
-> | 契约（15 方法 + 记录形状 + 键形状 + 方法清单） | `sdk/localStore.types.ts` |
-> | web 实现 | `sdk/localStore.web{,.db,.ranges,.search}.ts` |
-> | 桌面代理（转发到桥） | `sdk/localStore.desktop.ts` |
-> | 门面 + **唯一选择点** `pickStore()` | `sdk/localStore{,.ranges,.search}.ts` |
-> | 契约断言（两侧共跑，44 条） | `sdk/localStore.contract.ts` |
-> | 主进程 SQLite | `desktop/src/main/sqlite{Store,Rows}.ts` |
+> | 件 | 入口 | 自检 |
+> |---|---|---|
+> | 单实例锁 | `desktop/src/main/singleInstance.ts` | `--shell-check` ⓪b 真起探针进程 |
+> | 深链 `imdesktop://q/u\|g/<token>`（只收邀请码） | `desktop/src/main/deepLink.ts` → preload `subscribeDeepLink` → `useQR` | `--e2e` ②b / ⑨ |
+> | 拖文件进聊天列（浏览器版同得） | `src/useFileDrop.ts` → `useMediaSend#addPastedFiles` | `--e2e` ③c |
+> | 全局快捷键（**默认关**） | `desktop/src/main/globalShortcutCap.ts` → 设置 ▸ 通用 | `--shell-check` ③b / `--e2e` ⑩ |
 >
-> **同一组断言现在跑三遍**：web(IndexedDB) / 桌面 SQLite（在 `desktop/` 的 vitest 里）/
-> 经回环桥的代理（`structuredClone` 模拟 IPC 序列化，专抓"跨进程那一跳丢了东西"）。
+> 每件都做过双向变异（单测 / 契约 / 接线各自转红）。**自动化验不到的三件要手点**：① 真拖一个文件到侧栏，
+> 窗口不导航走（脚本派发的 drop 是 untrusted 事件，浏览器本来就不导航）；② 桌面端粘贴截图；
+> ③ 设置里开全局快捷键、按 ⌃⌘W 收起 / 叫出。系统真正分发深链要装签名包，归 D6。
 >
-> **三条动手后才知道的事**（细节见 §7.6.4）：
-> ① **主进程引不了 im-web 的运行时代码**（TS6059 + 依赖图会把 protocol/mention/listSearch 拖进来）
->    → 合并白名单 / 搜索字段规则 / 区间代数在 SQLite 侧各有一份平行实现，已登记进 SYMMETRY，
->    护栏是共跑的契约 + 桥两侧白名单对齐测试 + `LOCAL_STORE_METHODS` 的编译期穷尽性检查。
-> ② **preload 跑在 sandbox 里，不许 import 相对路径的模块**——头一版引了共享模块，
->    `npm run e2e` 当场白屏（module not found → 桥没挂上）。现在 preload 一个方法名都不写。
-> ③ **搜索不能用 SQL 的 `lower()`**（只折叠 ASCII，「ÄPFEL」搜不到「äpfel」且不报错，
->    与 FTS5 同一种静默失效）→ 落库时用 JS 的 `toLowerCase()` 算好三个检索列。`LIKE` 的 `%`/`_` 也必须转义。
->
-> **验证**：`npm run build` 零错误；`npm test` 108 文件 1100+ 例全绿；`desktop && npm test` 58 例全绿；
-> **`npm run e2e` 全绿**，并新增一步查「本轮那条 marker 真的落进了 SQLite 文件」——
-> 头一版写成「数总行数>0」，被变异验证抓到（库是持久的，上一轮遗留的数据让它恒真，
-> 把桥打断也照样绿）。变异跑批：web 17 个 + SQLite 15 个，全部被抓。
->
-> **未做浏览器/真机手测**：语音波形刷新后还在不在、桌面版换号后旧库会不会串，都要眼睛看。
+> ⚠️ **自检不能与正在运行的 IM Desktop 同时跑**：单实例锁会拒掉后起的那个并 exit 11（这是故意的——两个进程同写一份 messages.db）。
 
 > 更早的已完成块已移入 [current_task.archive.md](current_task.archive.md)（只读归档）。
 
