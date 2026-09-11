@@ -87,7 +87,8 @@ export function useMediaSend(d: MediaSendDeps) {
   // 粘贴限单件的替换判定用镜像 ref（addPastedFiles 是空 deps 回调，直接读 state 会拿到陈旧闭包）。
   const pastedImagesRef = useRef(pastedImages);
   pastedImagesRef.current = pastedImages;
-  const addPastedFiles = useCallback((files: File[]) => {
+  // source：文件是粘贴进来的还是拖进来的（useFileDrop 走同一条路），只影响提示文案。
+  const addPastedFiles = useCallback((files: File[], source: "paste" | "drop" = "paste") => {
     // 走与文件选择器同一个类型闸：可发送的图片/视频进"媒体批量"通道（image/video），
     // 其余（含 svg——MIME 是 image/svg+xml，旧代码会误判成 image 送进批量→服务端拒传坏气泡）走文件通道。
     // 网页端解不了码的媒体（HEIC 等）直接丢弃：发出去自己看不了。（非媒体文件仍按文件发，行为不变。）
@@ -109,7 +110,7 @@ export function useMediaSend(d: MediaSendDeps) {
     // 被替换项延迟 revoke：预览条 <img>/<video> 可能仍挂着旧 blob URL，同步回收会闪断图 + 控制台报错
     //（与 send() 的 60s 延迟回收同策略）。
     replaced.forEach((p) => window.setTimeout(() => URL.revokeObjectURL(p.url), 60_000));
-    if (replaced.length) setToast("一次只能粘贴一个文件，已保留最新的");
+    if (replaced.length) setToast(`一次只能${source === "drop" ? "拖入" : "粘贴"}一个文件，已保留最新的`);
     setPastedImages([kept]);
   }, []);
   const removePastedImage = useCallback((idx: number) => {

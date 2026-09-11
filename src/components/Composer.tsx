@@ -17,6 +17,7 @@ import { FileTypeIcon } from "../FileTypeIcon";
 import { Avatar } from "./Avatar";
 import { QuoteThumb } from "./QuoteThumb";
 import { useChatActions } from "../ChatActionsContext";
+import { useFileDrop } from "../useFileDrop";
 import { unreadBadgeText } from "../unreadBadge";
 
 export type MentionRow = { label: string; userId: string | null; role?: string; avatarUrl?: string; note?: string };
@@ -66,11 +67,20 @@ export function Composer(p: ComposerProps) {
   const {
     setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, reportSelected, deleteSelected,
     removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, openContactPicker, onFilePicked,
-    setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, send,
+    setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, addPastedFiles, send,
     sendVoice, setToast,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   } = useChatActions();
   const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」）
+  // 输入栏此刻能不能用（有会话、没被禁言）。输入框 / 发送钮 / 麦克风 / 拖文件**共用这一处**——
+  // 各写各的话，将来加第三个禁用条件时漏改一处，就会出现「输入框灰着、文件却拖得进去」。
+  const composerUsable = !!convId && composerMuteReason === null;
+  // 从系统拖文件进聊天列 → 与粘贴同一条路进预览条（见 useFileDrop 顶部）。
+  // 多选态下输入栏整个换成了工具栏，也不收。
+  useFileDrop({
+    enabled: composerUsable && !selectMode,
+    onFiles: (files) => { addPastedFiles(files, "drop"); composerRef.current?.focus(); },
+  });
   // Web P1 语音：AAC 兼容探测 → 麦克风入口置灰/激活；点击开录 → 输入栏 morph 成录制条。
   // ChatActions.sendVoice 上传+发送；Space/Esc/Enter 快捷键在录制条 focus 时接管。
   const voiceProbe = useMemo(() => platform().voiceRecording(), []);
@@ -354,7 +364,7 @@ export function Composer(p: ComposerProps) {
                 )) : <div className="mention-empty">无匹配成员</div>}
               </div>
             )}
-            <textarea ref={composerRef} value={input} rows={1} disabled={!convId || composerMuteReason !== null}
+            <textarea ref={composerRef} value={input} rows={1} disabled={!composerUsable}
               placeholder={composerMuteReason || (convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…")}
               onChange={(e) => onInputChange(e.target.value)}
               onPaste={onComposerPaste}
@@ -370,13 +380,13 @@ export function Composer(p: ComposerProps) {
               // 空框：显麦克风（P1）。platform().voiceRecording() 探测为 false 的宿主 → 置灰 + tooltip。
               // （2026-09-07 实测：Chrome 已支持点名 AAC 的 audio/mp4，第一级探测即命中；置灰分支留给探测失败的浏览器。）
               <button className="mic-btn"
-                      disabled={!convId || composerMuteReason !== null || !voiceProbe.supported}
+                      disabled={!composerUsable || !voiceProbe.supported}
                       title={voiceProbe.supported ? "点击开始录音" : "当前浏览器不支持录制语音，可在 App 内发送"}
                       onClick={startVoiceRecord}>
                 <Mic size={18} aria-hidden="true" />
               </button>
             ) : (
-              <button onClick={send} disabled={!convId || composerMuteReason !== null}>发送</button>
+              <button onClick={send} disabled={!composerUsable}>发送</button>
             )}
           </footer>
           {/* 录音条只挂在**录音所属的那个会话**上：切走时录音已暂停留底，回来才重新露出。 */}

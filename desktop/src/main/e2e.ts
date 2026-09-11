@@ -13,6 +13,7 @@
 import { app, type BrowserWindow } from "electron";
 import { getNotifyCount } from "./shellCaps";
 import { checkWarmDeepLinks, expectColdDeepLinkCard, seedColdDeepLink } from "./deepLinkCheck";
+import { checkFileDrop } from "./dropCheck";
 
 const TARGET_CONV = process.env.IM_E2E_CONV || "冒烟测试";
 const STEP_TIMEOUT_MS = 15_000;
@@ -144,6 +145,14 @@ export async function runE2E(
       return 8;
     }
     say("[e2e] ✓ 批量投递（一页历史）未产生系统通知");
+
+    // ③c 拖文件进聊天列（真 DataTransfer）。**必须在 ④ 发消息之前**，且检查自己会把文件移除干净。
+    const dropFail = await checkFileDrop(win);
+    if (dropFail) {
+      say(`[e2e] ✗ ${dropFail}`);
+      return 13;
+    }
+    say("[e2e] ✓ 拖文件：侧栏上松手被拦且不收；聊天列里松手进预览条，已移除");
 
     // ④ 发一条。marker 带时间戳，重跑不会和上一次的混淆。
     await win.webContents.executeJavaScript(TYPE_JS(marker));

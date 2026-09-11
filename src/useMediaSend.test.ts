@@ -45,6 +45,12 @@ describe("useMediaSend", () => {
     expect(result.current.pastedImages).toHaveLength(0);
     expect(URL.revokeObjectURL).toHaveBeenCalled();
   });
+  it("拖入与粘贴同一条路（同样只留最新一个），只是提示文案说「拖入」", () => {
+    const { result, deps } = mount();
+    act(() => result.current.addPastedFiles([file("a.txt"), file("b.txt")], "drop"));
+    expect(result.current.pastedImages.map((p) => p.file.name)).toEqual(["b.txt"]);
+    expect(deps.setToast).toHaveBeenCalledWith("一次只能拖入一个文件，已保留最新的");
+  });
   it("uploadAndSend(file)：先 appendMsg 占位(sending) → 上传 → sendMedia → patchMsg 换 URL；进度清空、留存 File 移除", async () => {
     const { result, deps, client } = mount();
     await act(async () => { await result.current.uploadAndSend(file("doc.pdf"), "file"); });

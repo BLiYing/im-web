@@ -1070,7 +1070,7 @@ export default function App() {
   // 须在 clientRef/useMessageStore/uid/peer/groupConvId/setToast 之后、send()（deps 捕获 sendMediaBatch/uploadAndSend/pastedImages）之前。
   const {
     attachPanel, setAttachPanel, pendingFilesRef, uploadProgress, teardownOutboxUpload, hasActiveSend, toggleUploadPause,
-    cancelSendMessage, pastedImages, setPastedImages, removePastedImage, onComposerPaste, sendMediaBatch, uploadAndSend,
+    cancelSendMessage, pastedImages, setPastedImages, removePastedImage, onComposerPaste, addPastedFiles, sendMediaBatch, uploadAndSend,
     retryUpload, resendMessage, onMediaBubbleTap, fileInputRef, attachAnchorRef, cancelAttachClose, scheduleAttachClose, attachItems, pickFile, onFilePicked,
   } = useMediaSend({ uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
 
@@ -2383,7 +2383,7 @@ export default function App() {
     reportSelected: reportSelectedEv, removePastedImage: removePastedImageEv,
     cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
     openFavoritesPick: openFavoritesPickEv, openContactPicker: openContactPickerEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
-    setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, send: sendEv,
+    setMentionActive, onInputChange: onInputChangeEv, onComposerPaste: onComposerPasteEv, addPastedFiles, send: sendEv,
     sendVoice: sendVoiceEv,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   // 全部成员身份恒定 → 依赖为空，Context 值只建一次。

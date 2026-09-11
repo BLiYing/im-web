@@ -16,7 +16,7 @@ function actions(over: Partial<ChatActions> = {}): ChatActions {
     setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), favoriteSelected: vi.fn(), reportSelected: vi.fn(), deleteSelected: vi.fn(),
     removePastedImage: vi.fn(), cancelAttachClose: vi.fn(), scheduleAttachClose: vi.fn(), setAttachPanel: vi.fn(),
     pickFile: vi.fn(), openFavoritesPick: vi.fn(), onFilePicked: vi.fn(), setMentionFilter: vi.fn(), pickMention: vi.fn(),
-    setMentionActive: vi.fn(), onInputChange: vi.fn(), onComposerPaste: vi.fn(), send: vi.fn(),
+    setMentionActive: vi.fn(), onInputChange: vi.fn(), onComposerPaste: vi.fn(), addPastedFiles: vi.fn(), send: vi.fn(),
     sendVoice: vi.fn(() => Promise.resolve()),
     attachAnchorRef: createRef<HTMLDivElement>(), fileInputRef: createRef<HTMLInputElement>(),
     mentionPanelRef: createRef<HTMLDivElement>(), mentionActiveRef: createRef<HTMLButtonElement>(), composerRef: createRef<HTMLTextAreaElement>(),
@@ -39,6 +39,40 @@ function base(over: Partial<ComposerProps> = {}): ComposerProps {
   };
 }
 const mount = (p: ComposerProps, a: ChatActions) => render(<ChatActionsProvider value={a}><Composer {...p} /></ChatActionsProvider>);
+
+describe("Composer · 拖文件进聊天列（useFileDrop 接线）", () => {
+  const png = new File(["x"], "a.png", { type: "image/png" });
+  // 接收区是 `.chat`（在 App 里），这里包一层同名容器模拟真实结构。
+  const mountInChat = (p: ComposerProps, a: ChatActions) =>
+    render(<div className="chat"><ChatActionsProvider value={a}><Composer {...p} /></ChatActionsProvider></div>);
+  /** jsdom 没有 DataTransfer 构造器：造一个带 dataTransfer 的可取消 drop 事件。 */
+  const drop = (target: Element) => {
+    const e = new Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(e, "dataTransfer", { value: { types: ["Files"], files: [png], dropEffect: "" } });
+    target.dispatchEvent(e);
+    return e;
+  };
+
+  it("有会话、可发言 → 文件以 drop 来源进预览条（与粘贴同一条路，不直接发）", () => {
+    const a = actions();
+    const { container } = mountInChat(base(), a);
+    drop(container.querySelector(".chat")!);
+    expect(a.addPastedFiles).toHaveBeenCalledWith([png], "drop");
+    expect(a.send).not.toHaveBeenCalled();
+  });
+
+  it("被禁言 / 多选态 / 没打开会话 → 不收，但仍拦住默认行为（否则浏览器会打开这个文件）", () => {
+    const cases: Partial<ComposerProps>[] = [{ composerMuteReason: "你已被禁言" }, { selectMode: true }, { convId: "" }];
+    for (const over of cases) {
+      const a = actions();
+      const { container, unmount } = mountInChat(base(over), a);
+      const e = drop(container.querySelector(".chat")!);
+      expect(e.defaultPrevented).toBe(true);
+      expect(a.addPastedFiles).not.toHaveBeenCalled();
+      unmount();
+    }
+  });
+});
 
 describe("Composer", () => {
   it("默认：输入框可用、发送钮在（有输入时）；Enter → send()，Shift+Enter 不发", () => {
