@@ -5,6 +5,15 @@
 
 ## 当前焦点
 
+> **第二批用户报告 ✅ 2026-09-15（未提交；tsc + vitest 1303 条全绿、变异验红、浏览器实测）**，逐条见 IMServer `docs/CLIENT_PARITY.md` 顶部：
+> ① 角标统一蓝：`.row-badge`（新的朋友）/ `.conv-pending-badge` / `.detail-badge` 由 `--danger` 改 `--unread-badge`；
+> ② 文本 / 引用消息时间贴气泡右下角：`.bmeta` 统一 `margin-left:auto`（原先只有 caption / 链接卡 / 超长文本三条 `:has` 规则）；
+> ③ **改昵称后老消息仍显旧名、刷新也没用**：`chatNaming.ts` 的 senderLabel 原为快照优先（还有一条单测把它钉成
+>    「历史消息不随成员表变」，已翻转），改「成员表 > 本窗最新快照 > 本条快照 > 资料缓存」；`useForward.ts` nameOf 同序；
+>    「末条昵称对不上成员表 → 5s 节流重拉群资料」放在 `src/useGroupInfoRefresh.ts`（连同 refreshGroupInfo 逐字平移出 App.tsx——
+>    App 已触体量基线 3679，写在 App 里被 pre-commit 拦下），`useGroupInfoRefresh.test.ts` 4 例、变异验红。
+> 实测（:5173，user1001）：通讯录页签与「新的朋友」角标蓝；「1002群」里改名后的 user3005 旧消息显示新名；链接 / 引用消息时间在右下角。
+
 > **D4 收尾 ✅ 2026-09-11：单实例锁 / 深链 / 拖文件进聊天列 / 全局快捷键**（设计与取舍记在
 > `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.9；上一块 D4-3 本地消息库已移入 archive）。
 >

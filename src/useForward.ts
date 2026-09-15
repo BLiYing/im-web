@@ -75,7 +75,9 @@ export function useForward(d: ForwardDeps) {
     // 与备注同一条纪律：只在本机渲染时成立的名字，绝不能进入会发出去的内容（docs/UI.md 隐私红线）。
     // 改为自己的公开显示名（昵称 → @username → 未命名用户），与其他条目同一口径。
     const myRecordName = displayNameNoRemark(myPublicName, myUsername);
-    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? myRecordName : (m.fromNickname || gm?.group_nickname || gm?.nickname || "未命名用户"); };
+    // 群成员表（现名）压过消息上的 from_nickname 快照（发消息那一刻的名字）：与气泡 senderLabel、
+    // iOS senderPublicNameForMessage 同序（2026-09-15，改名后老消息显示旧名那条修复），否则转发条目里仍是旧名。
+    const nameOf = (m: ChatMessage) => { const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from); return m.from === uid ? myRecordName : (gm?.group_nickname || gm?.nickname || m.fromNickname || "未命名用户"); };
     const pushOptimistic = (clientMsgId: string, content: string, contentType: string, forwardFrom?: string, fileName?: string, fileSize?: number, posterUrl?: string, thumb?: string, caption?: string, mentions?: string[], mentionAll?: boolean, groupId?: string, extra?: Partial<ChatMessage>) =>
       appendMsg(target.conv_id, { clientMsgId, convId: target.conv_id, from: uid, content, contentType, fileName, fileSize, posterUrl, thumb, caption, mentions, mentionAll, groupId, convSeq: 0, timestamp: Date.now(), status: "sending", ...(forwardFrom ? { forwardFrom } : {}), ...(extra ?? {}) });
 

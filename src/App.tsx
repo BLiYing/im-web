@@ -14,6 +14,7 @@ import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionS
 import { remarkMap, displayNameOf } from "./remarks";
 import { resolveDetailFollow } from "./detailFollow";
 import { makeNameResolvers } from "./chatNaming";
+import { useGroupInfoRefresh } from "./useGroupInfoRefresh";
 import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
@@ -592,20 +593,8 @@ export default function App() {
     }
   }, []);
 
-  // 拉群资料进缓存（best-effort）：失败（被移出/群没了）则清缓存。返回最新资料或 null。
-  const refreshGroupInfo = useCallback(async (cid: string): Promise<GroupInfo | null> => {
-    try {
-      const info = await clientRef.current?.fetchGroup(cid);
-      if (info) setGroupInfos((prev) => ({ ...prev, [cid]: info }));
-      return info ?? null;
-    } catch {
-      setGroupInfos((prev) => {
-        const { [cid]: _drop, ...rest } = prev;
-        return rest;
-      });
-      return null;
-    }
-  }, []);
+  // 拉群资料进缓存 + 群成员表过期检测（会话开着时有人改名再发消息 → 节流重拉），见 useGroupInfoRefresh.ts。
+  const refreshGroupInfo = useGroupInfoRefresh(clientRef, setGroupInfos, groupConvId, msgsByConv, groupInfos);
 
   // 打开群会话：与 openChat 同一套进会话定位逻辑，只是标识从 peer 换成 conv_id。
   const openGroupChat = useCallback((cid: string) => {
@@ -2525,6 +2514,7 @@ export default function App() {
     memberNick, localNameOf, senderLabel, groupMemberLabel, senderRole, senderAvatar,
   } = makeNameResolvers({
     remarks, friends, conversations, groupInfos, peerCards, searchResults, profileCards: userProfiles.cards,
+    windowMessages: messages,
   });
 
   // 当前聊天对端的会话项与显示名（聊天页标题/备注预填用）。

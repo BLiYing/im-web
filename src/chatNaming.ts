@@ -34,6 +34,33 @@ export interface NamingSources {
   /** useUserProfiles 的批量解析缓存：优先级最低，但**超级群里它是唯一还有东西的那一层**
    *  ——成员表只含群主+管理员，普通成员在别处一律查不到。 */
   profileCards: Record<string, UserCard>;
+  /** 当前渲染窗口的消息（App 的 `messages`，显示序旧→新）：senderLabel 取「该发送者最新一条」的昵称快照。
+   *  可缺省（单测 / 不在聊天页）——缺省时那一级跳过。 */
+  windowMessages?: readonly ChatMessage[];
+}
+
+/** 成员表里这个人在本群的名字：群昵称 > 全局昵称；查不到 / 都空回空串。**不含**全局解析缓存那一级。 */
+export function memberTableNickname(info: GroupInfo | undefined, uid: string): string {
+  const m = info?.members.find((x) => x.user_id === uid);
+  return (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
+}
+
+const senderKey = (convId: string, from: string) => `${convId}\n${from}`;
+
+/** 按显示序（旧→新）扫一遍，记下每个 (会话, 发送者) **最新一条**带昵称快照的那份昵称。 */
+export function latestSenderNicknames(msgs: readonly ChatMessage[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of msgs) {
+    if (m.from && m.fromNickname) out.set(senderKey(m.convId, m.from), m.fromNickname);
+  }
+  return out;
+}
+
+/** 新到的群消息带的昵称与成员表对不上 ⇒ 对方在会话开着期间改了名，成员表该重拉。
+ *  成员表查不到（超级群普通成员 / 还没拉到）或消息没带昵称时不算：重拉也拿不到更多。
+ *  对端 iOS `IMGroupMemberNicknameStale`（IMProgram/Common/IMGroupSenderName.h）。 */
+export function memberNicknameStale(memberNickname: string, inboundNickname: string | undefined): boolean {
+  return !!memberNickname && !!inboundNickname && memberNickname !== inboundNickname;
 }
 
 export interface NameResolvers {
@@ -55,7 +82,7 @@ export interface NameResolvers {
 }
 
 export function makeNameResolvers(s: NamingSources): NameResolvers {
-  const { remarks, friends, conversations, groupInfos, peerCards, searchResults, profileCards } = s;
+  const { remarks, friends, conversations, groupInfos, peerCards, searchResults, profileCards, windowMessages } = s;
 
   const labelOf = (id: string, nick: string, username?: string) => displayNameOf(id, remarks, nick, username);
   // 好友显示名优先级：备注名 > 昵称 > @句柄 > 占位。
@@ -85,8 +112,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
 
   // 群成员昵称（气泡回退用）：群昵称 > 全局昵称 > 全局解析缓存 > 空串（调用方走自己的兜底）。
   const memberNick = (cid: string, id: string): string => {
-    const m = groupInfos[cid]?.members.find((x) => x.user_id === id);
-    const local = (m?.group_nickname && m.group_nickname.trim()) || (m?.nickname && m.nickname.trim()) || "";
+    const local = memberTableNickname(groupInfos[cid], id);
     if (local) return local;
     // 成员表给不出：超级群不下发成员集、或发送者已退群。问全局解析器（缺的由 App 的
     // unresolvedViewUids effect 批量补上）；仍拿不到回空串。
@@ -98,8 +124,18 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   const localNameOf = (id: string, cid: string, fallback?: string): string =>
     displayNameOf(id, remarks, memberNick(cid, id) || fallback);
 
+  // 气泡发送者：备注 > 成员表（群昵称/昵称）> 本窗该发送者最新快照 > 本条快照 > 全局解析缓存 > 占位。
+  // **成员表压过快照**（2026-09-15 改，此前快照优先）：from_nickname 是发消息那一刻的名字、落进 IndexedDB 后
+  // 不再更新，快照优先 = 改名后老消息永远显示旧名，刷新也没用（刷新读的正是那份老快照）；新设备没这毛病，
+  // 只因它的消息是现从服务端拉的。最新快照那一级给超级群用（成员表只含群主+管理员）。
+  // 对端：iOS IMProgram/Common/IMGroupSenderName.h、Android data/SenderNames.kt（SYMMETRY 已登记）。
+  const latestNicks = latestSenderNicknames(windowMessages ?? []);
   const senderLabel = (m: ChatMessage): string =>
-    displayNameOf(m.from, remarks, m.fromNickname || memberNick(m.convId, m.from));
+    displayNameOf(m.from, remarks,
+      memberTableNickname(groupInfos[m.convId], m.from)
+      || latestNicks.get(senderKey(m.convId, m.from))
+      || m.fromNickname
+      || memberNick(m.convId, m.from));
 
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 全局昵称 > 占位。
    *  成员列表/已读回执/成员菜单确认文案都用它；会发出去的内容（@token 等）仍用公开名。 */

@@ -306,7 +306,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 /* 可点的 @昵称（有 uid，非 @所有人）：点开该成员资料页。 */
 .mention-tap { cursor: pointer; }
 .mention-tap:hover { text-decoration: underline; }
-.bmeta { font-size: 11px; color: var(--meta-time); margin-left: var(--space-2); align-self: flex-end; white-space: nowrap; }
+/* 时间一律贴气泡右下角：margin-left:auto 把它推到所在行的最右（与正文同行时贴右、被挤到下一行时也贴右）。
+   此前只有 caption/链接卡/超长文本三种气泡加了 auto，**多行文本与引用消息**的时间换行后就停在左下角、
+   或跟在短正文后面悬在气泡中间（2026-09-15 用户报）。同行时的最小间距改由 padding-left 给（auto 的最小值是 0）。 */
+.bmeta { font-size: 11px; color: var(--meta-time); margin-left: auto; padding-left: var(--space-2); align-self: flex-end; white-space: nowrap; }
 .bmeta .ck { color: var(--meta-time); }
 .bmeta .ck.read { color: var(--check-read); }
 .bmeta .failed { color: var(--danger); }
@@ -660,13 +663,9 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
    文字按媒体宽换行）→ 媒体+caption 成一张紧凑整体卡片（对齐 iOS 整体化）。 */
 .msg-caption { width: 0; min-width: 100%; box-sizing: border-box; padding: 5px 10px 4px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4; font-size: var(--msg-font); }
 .msg-caption.file { padding: 6px 0 0; margin-top: 6px; border-top: 0.5px solid var(--separator); }
-/* 文件文：caption 撑满整行后，时间行（bmeta）落到第三行——推到右侧贴角（对齐草图「时间在 caption 右下」）。 */
-/* 同理：定宽/块级卡片（链接富预览 .link-card 260px、合并转发 .record-card 见 --card-bubble-w、超长文本 .longtext-card block）
-   会把 bmeta 挤到下一行——不加 auto 就停在左下角，与其余气泡的右下角时间不一致。统一推到右下角。 */
-.bubble:has(.msg-caption) > .bmeta,
-.bubble:has(> .link-card) > .bmeta,
-.bubble:has(> .longtext-card) > .bmeta { margin-left: auto; }
-/* 名片与合并转发不在此列：它们的时间已嵌进卡片脚注行，外层根本不渲染 .bmeta（见 .bubble.card）。 */
+/* 文件文 caption、链接富预览 .link-card、超长文本 .longtext-card 会把 bmeta 挤到下一行——
+   它靠 .bmeta 自身的 margin-left:auto 贴到右下角（原先是这里三条 :has 单独加，漏了多行文本与引用消息）。
+   名片与合并转发不渲染外层 .bmeta：它们的时间嵌在卡片脚注行里（见 .bubble.card）。 */
 /* 悬浮角标：底恒为半透明黑，浅色图上也读得清（不靠文字阴影）。 */
 .media-badge { position: absolute; padding: 1px 6px; border-radius: 9px; background: var(--overlay);
   color: var(--on-media); font-size: 11px; line-height: 16px; white-space: nowrap; pointer-events: none;
@@ -748,7 +747,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* 脚注行 = 左「聊天记录」+ 右「时间/勾」（弹窗里的套娃卡只有左半，flex 单子项照常）。 */
 .record-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px;
   margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--separator); font-size: 11px; color: var(--text-secondary); }
-.record-foot .bmeta { margin: 0; flex-shrink: 0; }
+.record-foot .bmeta { margin: 0; padding-left: 0; flex-shrink: 0; }
 .record-modal { width: min(520px, 92vw); max-height: 80vh; overflow-y: auto; }
 
 /* 个人名片（contact）——与 .record-card（同宽，共用 --card-bubble-w）/ .link-card(260px) 同族的定宽块级卡片。
@@ -771,7 +770,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
   margin-top: 8px; padding-top: 6px;
   border-top: 1px solid var(--separator); font-size: 11px; color: var(--text-secondary); }
 .contact-card-foot-label { display: inline-flex; align-items: center; gap: 4px; }
-.contact-card-foot .bmeta { margin: 0; flex-shrink: 0; }
+.contact-card-foot .bmeta { margin: 0; padding-left: 0; flex-shrink: 0; }
 
 /* 卡片型气泡（名片 / 合并转发）：**卡片本身就是气泡**（与 iOS 一致——那边卡片直接带底色圆角、
    没有外层气泡）。外层 .bubble 去掉底色/内边距/阴影，只当定位容器；时间已嵌进卡片脚注行。 */
@@ -860,9 +859,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .conv-mute { color: var(--text-secondary); vertical-align: -1px; margin-left: 4px; }
 /* 群「有人@我」红字前缀（M4-8）：只染前缀，正文保持次要色（对齐 iOS 会话行）。 */
 .conv-mention { color: var(--danger); font-weight: 600; margin-right: 4px; }
-/* 待审入群角标（G3，仅群主/管理员）：小号红色药丸，跟 .detail-badge 同色系但更贴合列表行 */
-.conv-pending-badge { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 8px; background: var(--danger);
-  color: #fff; font-size: 11px; font-weight: 600; line-height: 16px; vertical-align: middle; font-variant-numeric: tabular-nums; }
+/* 待审入群角标（G3，仅群主/管理员）：小号药丸，跟 .detail-badge 同色系但更贴合列表行。
+   角标三端统一蓝（2026-09-15 用户要求），不再用 --danger。 */
+.conv-pending-badge { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 8px; background: var(--unread-badge);
+  color: var(--on-accent); font-size: 11px; font-weight: 600; line-height: 16px; vertical-align: middle; font-variant-numeric: tabular-nums; }
 /* 「大群」标记：中性底色的小 pill，跟在群名后。
    刻意**不用强调色**——它是一条说明而不是提醒，抢不过未读徽标才对。
    flex-shrink:0 是要点：长群名截断发生在名字上，标记恒完整；做反了的话，
@@ -923,12 +923,11 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .row-label { flex: 1; }
 .row-value { color: var(--text-secondary); font-size: 14px; }
 .row-chevron { color: var(--text-secondary); flex-shrink: 0; }
-/* 入口行待办徽标（「新的朋友」待确认数）：红底白字圆角胶囊，与 iOS
-   IMContactsViewController 的入口红点同规格（systemRed / 18 高 / 圆角 9 / 12 号 semibold）。
-   走 --danger 而不是 --unread-badge（蓝）：蓝色胶囊在本站是"未读消息数"，
-   两种含义共用一个颜色，扫一眼分不出是"有人加我"还是"有新消息"。 */
+/* 入口行待办徽标（「新的朋友」待确认数）：蓝底白字圆角胶囊，与 iOS
+   IMContactsViewController 的入口角标同规格（18 高 / 圆角 9 / 12 号 semibold）。
+   原先刻意走 --danger 以区别于未读消息数；2026-09-15 用户要求角标三端统一蓝，改用 --unread-badge。 */
 .row-badge { flex-shrink: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
-  background: var(--danger); color: var(--on-accent); font-size: 12px; font-weight: 600; line-height: 18px;
+  background: var(--unread-badge); color: var(--on-accent); font-size: 12px; font-weight: 600; line-height: 18px;
   text-align: center; font-variant-numeric: tabular-nums; }
 .row-icon { color: var(--text-secondary); flex-shrink: 0; }
 /* iOS 设置图标：圆角色块 + 白字形（对齐 IMSettingsViewController 30×30 / 圆角7 / 白 glyph）。 */
@@ -1769,9 +1768,9 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
   background: var(--page-bg); color: var(--text); font-size: 15px; font-family: inherit; min-height: 120px; resize: vertical; line-height: 1.5; }
 .modal-counter { text-align: right; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; margin-top: -4px; }
 
-/* 详情页「群管理」行的待审角标（红点计数，G3） */
-.detail-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger);
-  color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+/* 详情页「群管理」行的待审角标（计数胶囊，G3；2026-09-15 起三端角标统一蓝） */
+.detail-badge { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--unread-badge);
+  color: var(--on-accent); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* ── 群管理面板分组标题 + 禁言时长选择（G2） ── */
 /* 左内边距对齐卡片左缘（.detail-card margin:16px），不再比卡片左突出 12px。 */
