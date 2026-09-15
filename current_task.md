@@ -5,6 +5,12 @@
 
 ## 当前焦点
 
+> **第三批用户报告（Web 部分）✅ 2026-09-15（用户复测通过，已提交；tsc + vitest 1312 条全绿、变异验红）**：
+> 左栏页签「会话」→「消息」（三端统一）；「消息」页签补未读蓝点——此前只有 Android 有。页签从 App.tsx 抽到
+> `src/components/SidebarTabs.tsx`（+5 例单测），判据复用 `desktopNotify.ts` 的 `badgeCountOf`（与 Dock 角标同一份，
+> 与 iOS `IMTabUnreadCount` / Android `TabUnread` 同口径，SYMMETRY 已登记）。**刻意不计「标为未读」**（三端一致）：
+> 会话行会画那颗点，但页签不亮——要改就三端一起改 badgeCountOf 那一处。Web 冷启动本就没有「先闪空态」（列表拉完才进主界面）。
+
 > **第二批用户报告 ✅ 2026-09-15（未提交；tsc + vitest 1303 条全绿、变异验红、浏览器实测）**，逐条见 IMServer `docs/CLIENT_PARITY.md` 顶部：
 > ① 角标统一蓝：`.row-badge`（新的朋友）/ `.conv-pending-badge` / `.detail-badge` 由 `--danger` 改 `--unread-badge`；
 > ② 文本 / 引用消息时间贴气泡右下角：`.bmeta` 统一 `margin-left:auto`（原先只有 caption / 链接卡 / 超长文本三条 `:has` 规则）；

@@ -246,6 +246,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .tabs { display: flex; border-bottom: 1px solid var(--separator); }
 .tab { flex: 1; padding: var(--space-3) 0; border: 0; background: none; color: var(--text-secondary); font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* 「消息」页签的未读蓝点（components/SidebarTabs.tsx）：只表「有」，数字在会话行上 */
+.tab-dot { display: inline-block; width: 8px; height: 8px; margin-left: 5px; border-radius: 50%; background: var(--unread-badge); vertical-align: middle; }
 .tab-badge { display: inline-block; min-width: 16px; height: 16px; margin-left: 5px; padding: 0 4px; border-radius: 8px; background: var(--unread-badge); color: var(--on-accent); font-size: 10px; line-height: 16px; text-align: center; vertical-align: middle; }
 
 /* 通讯录 */

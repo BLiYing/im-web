@@ -28,6 +28,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import type { DetailTab } from "./components/DetailTabs";
 import { Composer } from "./components/Composer";
 import { ContactsTab } from "./components/ContactsTab";
+import { SidebarTabs } from "./components/SidebarTabs";
 import { ChatHeader } from "./components/ChatHeader";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
 import { useEvent } from "./useEvent";
@@ -123,7 +124,7 @@ import {
   QrCode, IdCard, UserPlus } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
-type Tab = "chats" | "contacts"; // 左栏顶部：会话列表 / 通讯录
+type Tab = "chats" | "contacts"; // 左栏顶部页签：消息 / 通讯录（components/SidebarTabs.tsx）
 
 // 群成员上限**不再硬编码**：它是部署级配置（后端 `-max-group-members`，默认 2000），
 // 登录后经 GET /api/v1/server-config 拉一次。
@@ -228,7 +229,7 @@ export default function App() {
   // selected 的「最新值」镜像：勾选上限闸要在一轮同步的多次 toggle 里累计计数（见 toggleSelected）。
   const selectedRef = useRef<Set<number>>(selected);
   selectedRef.current = selected; // 每次渲染同步：enter/exitSelectMode 等外部 setSelected 也随之生效
-  const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：会话 / 通讯录
+  const [tab, setTab] = useState<Tab>("chats"); // 左栏当前 Tab：消息 / 通讯录
   const contactsScrollRef = useRef<HTMLDivElement>(null); // 通讯录滚动容器（好友列表虚拟化的滚动父，见 VirtualList）
   const [contactFilter, setContactFilter] = useState(""); // 通讯录本地过滤（按备注/昵称/uid 即时筛已有好友；桌面端替代 iOS 的 A–Z 索引尺）
   const [friends, setFriends] = useState<FriendEntry[]>([]); // 全量好友/申请关系（含 pending/requested/accepted）
@@ -2803,13 +2804,9 @@ export default function App() {
           {/* 显示公开句柄而非 uid（10 位随机内部 ID）。没有 username 时只留连接状态。 */}
           <span className="account-meta">{myInfo?.username ? `@${myInfo.username} · ` : ""}{stateText}</span>
         </header>
-        <div className="tabs">
-          <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={() => setTab("chats")}>会话</button>
-          <button className={`tab ${tab === "contacts" ? "active" : ""}`}
-            onClick={() => { setTab("contacts"); void refreshFriends(); }}>
-            通讯录{incomingCount > 0 && <span className="tab-badge">{unreadBadgeText(incomingCount)}</span>}
-          </button>
-        </div>
+        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incomingCount}
+          onChats={() => setTab("chats")}
+          onContacts={() => { setTab("contacts"); void refreshFriends(); }} />
         {tab === "chats" ? (
         <div className="convlist">
           {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
