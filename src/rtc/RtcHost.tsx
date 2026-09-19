@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CallEngine } from "im-rtc-call-engine";
 import { CallOverlay, CallProvider, ProfileProvider, useCall } from "im-rtc-call-uikit-react";
-import type { ProfileResolver } from "im-rtc-call-uikit-react";
+import type { InviteMemberProvider, ProfileResolver } from "im-rtc-call-uikit-react";
 import { logger, LOG_TAG } from "../logging/logger";
 import { startRtcEngine } from "./rtcEngine";
 import { registerCallActions } from "./rtcCall";
+import { buildInviteCandidates, type InviteMemberLike } from "./rtcProfiles";
 
 /** 宿主身份链的三个口子，全部来自 App 现成的解析器。 */
 export interface RtcProfiles {
@@ -15,6 +16,11 @@ export interface RtcProfiles {
   avatarOf: (uid: string) => string | undefined;
   /** 声明「这些 uid 现在要显示」，缺的由 useUserProfiles 批量拉。 */
   request: (uids: string[]) => void;
+  /**
+   * 群成员一页（通话里「添加成员」的候选来源）：走宿主现成的服务端分页 + 搜索接口，普通群、超级群同一条路。
+   * 拉不到要 reject（Kit 显示「加载失败」+ 重试），不要永不 resolve。
+   */
+  groupMembers?: (convId: string, opts: { q: string; cursor?: string }) => Promise<{ members: readonly InviteMemberLike[]; nextCursor: string }>;
 }
 
 /** 把 uikit 里拿到的 actions 注册到模块级出口。 */
@@ -84,10 +90,21 @@ export function RtcHost({ uid, profiles, profileKey }: {
     listeners.current.forEach((cb) => cb(uids));
   }, [profileKey[0], profileKey[1], profileKey[2], profileKey[3]]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 「添加成员」候选人：按 ctx.chatGroupId 取群成员。没有群号返回空页（不能悬着，Kit 10 秒判超时）。
+  const inviteProvider = useMemo<InviteMemberProvider>(() => async (ctx, query, cursor) => {
+    const p = profilesRef.current;
+    if (!ctx.chatGroupId || !p.groupMembers) return { items: [] };
+    const page = await p.groupMembers(ctx.chatGroupId, { q: query.trim(), cursor: cursor || undefined });
+    // 搜索已在服务端做过，这里不再本地过滤（备注名命中不了服务端的 username / 昵称，本地再滤会误杀）。
+    const items = buildInviteCandidates(page.members, uid, ctx.participantUids, "", p.nameOf, p.avatarOf);
+    logger.debug(LOG_TAG.rtc, "rtc_invite_candidates", { group: ctx.chatGroupId, q: query, members: page.members.length, items: items.length, more: !!page.nextCursor });
+    return page.nextCursor ? { items, nextCursor: page.nextCursor } : { items };
+  }, [uid]);
+
   if (!engine) return null;
   return (
     <ProfileProvider resolver={resolver}>
-      <CallProvider engine={engine} bannerFirst ringtoneMuted={false}>
+      <CallProvider engine={engine} inviteMemberProvider={inviteProvider} bannerFirst ringtoneMuted={false}>
         <ActionsBridge />
         <CallOverlay />
       </CallProvider>

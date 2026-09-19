@@ -3643,7 +3643,14 @@ export default function App() {
 
       {/* im-rtc 通话：登录态下挂载 = 起引擎，退出登录卸载 = 销毁；名字头像走本页的解析链。 */}
       <RtcHost uid={uid} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
-        profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles }} />
+        profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles,
+          // 服务端分页 + 搜索：普通群、超级群同一条路（超级群本地成员表只有我自己）。
+          groupMembers: async (cid, opts) => {
+            const tok = clientRef.current?.authToken ?? "";
+            if (!tok) throw new Error("未登录");
+            const page = await fetchGroupMembersPage(tok, cid, { cursor: opts.cursor, q: opts.q, limit: 50 });
+            return { members: page.members, nextCursor: page.has_more && page.members.length > 0 ? page.next_cursor : "" };
+          } }} />
 
       {toast && <div className="toast">{toast}</div>}
     </div>
