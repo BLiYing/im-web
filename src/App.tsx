@@ -89,6 +89,8 @@ import { publicNameOf } from "./groupName";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
 import { adminCandidates, transferCandidates } from "./groupAdmin";
 import { useUserProfiles } from "./useUserProfiles";
+import { RtcHost } from "./rtc/RtcHost";
+import { rtcNameOf } from "./rtc/rtcProfiles";
 import { useMemberSearch } from "./useMemberSearch";
 import { AdminPickerModal } from "./components/modals/AdminPickerModal";
 import { TransferOwnerModal } from "./components/modals/TransferOwnerModal";
@@ -3638,6 +3640,10 @@ export default function App() {
       {/* 应用内确认/输入弹窗：见 components/Dialogs（状态在 useDialogs）。 */}
       {confirmDlg && <ConfirmDialog dlg={confirmDlg} set={setConfirmDlg} />}
       {promptDlg && <PromptDialog dlg={promptDlg} set={setPromptDlg} />}
+
+      {/* im-rtc 通话：登录态下挂载 = 起引擎，退出登录卸载 = 销毁；名字头像走本页的解析链。 */}
+      <RtcHost uid={uid} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
+        profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles }} />
 
       {toast && <div className="toast">{toast}</div>}
     </div>

@@ -4,12 +4,12 @@
 // - 稳定服务走 Context：AppServicesContext（clientRef/setToast/comingSoon）+ ChatActionsContext（setViewer/onGateTap/onPassiveMediaError/openReadyFile）；
 // - 其余动作多定义在 App 的 login 早退之后（plain fn，不能进 memo 化 context）→ 按组走 props（此前登记的「~35 props」路线，用户拍板整块抽）。
 // 护栏：DetailPanel.test.tsx + DetailPanelParts.test.tsx（子件）。
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
-  IdCard, UsersRound, Flag,
+  IdCard, UsersRound, Flag, Users,
 } from "lucide-react";
 import type { GroupTextKind } from "./modals/GroupTextModal";
 import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, GroupMember } from "../sdk/protocol";
@@ -24,6 +24,8 @@ import { AdminListPanel } from "./AdminListPanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
 import { useMemberSearch } from "../useMemberSearch";
 import { SYSTEM_UID } from "../sdk/protocol";
+import { placeGroupCall, placeSingleCall } from "../rtc/rtcCall";
+import { RtcGroupCallPicker } from "../rtc/RtcGroupCallPicker";
 
 export type DetailTarget = { convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean };
 
@@ -134,7 +136,12 @@ export function DetailPanel(p: DetailPanelProps) {
     setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail, serverConfig,
   } = p;
-  const { clientRef, setToast, comingSoon, askFriendRequest } = useAppServices();
+  const { clientRef, setToast, askFriendRequest } = useAppServices();
+  // 群通话选人弹窗（通话服务不就绪时点按钮只提示，不开弹窗）。
+  const [groupCallPick, setGroupCallPick] = useState(false);
+  const startCall = (peer: string, video: boolean) => {
+    if (!placeSingleCall(peer, video)) setToast("通话服务未就绪");
+  };
   const { setViewer, onGateTap, onPassiveMediaError, openReadyFile, fetchLinkPreview } = useChatActions();
   // 成员搜索：只对群会话有意义（单聊没有成员表）。恒走服务端 ?q=，理由见 useMemberSearch 头注释。
   // token 每次渲染现取，**不在组件里存副本**——登录路径三条，副本必然漂移。
@@ -275,8 +282,9 @@ export function DetailPanel(p: DetailPanelProps) {
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
                   <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
                 )}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("语音通话")}><Phone size={20} /><span>呼叫</span></button>}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => comingSoon("视频通话")}><Video size={20} /><span>视频</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, false)}><Phone size={20} /><span>呼叫</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, true)}><Video size={20} /><span>视频</span></button>}
+                {d.isGroup && showDetailBody && <button className="detail-pill" onClick={() => setGroupCallPick(true)}><Users size={20} /><span>群通话</span></button>}
                 {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>搜索</span></button>}
                 {/* 「更多」：单聊**非好友**不显示——菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友），
                     此时页面只应给一个主入口「加好友」（与 iOS actionPillSpecs 同口径）。系统通知会话例外：它只有这一个入口。 */}
@@ -467,6 +475,14 @@ export function DetailPanel(p: DetailPanelProps) {
             </>
           )}
         </aside>
+        {groupCallPick && d.isGroup && (
+          <RtcGroupCallPicker members={p.superMembers ?? gp?.members ?? []} selfUid={uid} memberLabel={memberLabel}
+            onCancel={() => setGroupCallPick(false)}
+            onConfirm={(uids) => {
+              setGroupCallPick(false);
+              if (placeGroupCall(d.convId, uids)) onClose(); else setToast("通话服务未就绪");
+            }} />
+        )}
       </div>
     );
 }

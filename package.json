@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.9",
+    "im-rtc-call-engine": "file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/im-rtc-call-engine-1.0.0.tgz",
+    "im-rtc-call-uikit-react": "file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/im-rtc-call-uikit-react-1.0.0.tgz",
     "jsqr": "^1.4.0",
     "lucide-react": "^1.20.0",
     "qrcode": "^1.5.4",

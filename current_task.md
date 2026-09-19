@@ -5,6 +5,13 @@
 
 ## 当前焦点
 
+> **im-rtc 通话接入（调试密钥联调）✅ 代码完成、待真机联调（2026-09-19，未提交）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
+> `rtcEngine` 换票只走 `signToken`、`rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，
+> 群详情页新增「群通话」（成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。
+> SDK 暂用本地包：`package.json` 里两个 `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`（先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`）；
+> **2.0.0 发布后改回版本号**。配置在 `.env.local`（gitignored：`VITE_RTC_WS_URL/APP_ID/KEY_ID/DEBUG_SECRET`，缺项则通话入口不可用）。
+> 单测 `src/rtc/rtc.test.ts`（变异验红）；全量 vitest 1324 + `npm run build` 绿。未做：附件面板「音视频」不接（将移除）、设置页「接口/调试」开关（等换票接口一期）。
+
 > **第三批用户报告（Web 部分）✅ 2026-09-15（用户复测通过，已提交；tsc + vitest 1312 条全绿、变异验红）**：
 > 左栏页签「会话」→「消息」（三端统一）；「消息」页签补未读蓝点——此前只有 Android 有。页签从 App.tsx 抽到
 > `src/components/SidebarTabs.tsx`（+5 例单测），判据复用 `desktopNotify.ts` 的 `badgeCountOf`（与 Dock 角标同一份，
