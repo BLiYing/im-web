@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import type { ChatMessage, Favorite } from "./sdk/protocol";
 import { mediaDisplaySize } from "./media";
+import { CALL_CONTENT_TYPE } from "./callRecord";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
@@ -60,6 +61,7 @@ export const localizeSnippet = (s: string) =>
   s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]"
   : s === "[file]" ? "[文件]" : s.startsWith("[file] ") ? "[文件] " + s.slice(7) // 文件带原名（M4-x）
   : s === "[chat_record]" ? "[聊天记录]" // 旧服务端 token（无标题）兜底
+  : s === "[call]" ? "[音视频通话]"        // 服务端裸 call token 兜底（引用快照预本地化为 [音视频通话]）
   : s === "[contact]" ? "[个人名片]"      // 同上：老服务端下发的裸 contact token
   // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
   : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
@@ -72,11 +74,12 @@ export const replyPreviewOf = (m: ChatMessage): string =>
   : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
   : m.contentType === "chat_record" ? chatRecordSnippet(m.content)
   : m.contentType === CONTACT_CONTENT_TYPE ? contactCardPreview(m.content)
+  : m.contentType === CALL_CONTENT_TYPE ? "[音视频通话]"    // 通话记录不可被引用；防御：万一有，快照也别露 JSON
   : (m.content || "").slice(0, 60);
 
 /** 「可搜索/可选/可定位」的消息：已确认（convSeq>0）、非撤回、非系统提示。搜索命中集、日历活跃日、多选勾选共用此一处谓词。 */
 export const isSearchableMessage = (m: Pick<ChatMessage, "convSeq"> & { recalledAt?: number; contentType?: string }): boolean =>
-  m.convSeq > 0 && !m.recalledAt && m.contentType !== "system";
+  m.convSeq > 0 && !m.recalledAt && m.contentType !== "system" && m.contentType !== CALL_CONTENT_TYPE;
 /** 多选态该消息是否可勾选：系统提示/撤回墓碑/发送中·失败的本地件（无服务端内容，转出去是空的）不可选。
  *  与 iOS isSelectableMessage: 同语义。 */
 export const selectableInMultiSelect = (m: ChatMessage): boolean => isSearchableMessage(m);
@@ -175,6 +178,7 @@ export const recordItemPreview = (it: RecordItem): string => {
   if (it.ct === "video") return "[视频]";
   if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();
   if (it.ct === CONTACT_CONTENT_TYPE) return contactCardPreview(it.c);
+  if (it.ct === CALL_CONTENT_TYPE) return "[音视频通话]";
   // 语音条目：预览显 [语音] m:ss（有 d 才带时长），别把 URL 铺进套娃卡片的两行预览里。
   if (it.ct === "voice" || it.ct === "audio") {
     const sec = Math.max(0, Math.floor((it.d ?? 0) / 1000));

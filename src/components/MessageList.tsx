@@ -21,6 +21,9 @@ import {
 } from "../messageContent";
 import { IdCard } from "lucide-react";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
+import { CALL_CONTENT_TYPE, CALL_FALLBACK_TEXT, renderCallRecord } from "../callRecord";
+import { placeSingleCall } from "../rtc/rtcCall";
+import { CallRecordBody, CallSysItem } from "./CallRecordBubble";
 import { Avatar } from "./Avatar";
 import { AlbumGrid } from "./AlbumGrid";
 import { QuoteThumb, QuoteSnapshotIcon } from "./QuoteThumb";
@@ -170,6 +173,16 @@ export function MessageList(p: MessageListProps) {
             </div>
           );
         }
+        // 通话记录（content_type=call）：单聊 = 普通气泡里的图标+文字（下方走通用气泡分支），点整个气泡按原类型回拨；
+        // 群聊 = 居中系统条（不可点）；解析失败 = 灰色一行兜底，绝不显示 JSON。
+        const callView = m.contentType === CALL_CONTENT_TYPE
+          ? renderCallRecord(m.content, { viewerIsSender: mine, isGroup: isGroupChat,
+              senderName: mine ? undefined : localNameOf(m.from, m.convId, m.fromNickname) })
+          : null;
+        if (m.contentType === CALL_CONTENT_TYPE && (!callView || !callView.tappable)) {
+          return <CallSysItem key={msgKey(m)} seq={m.convSeq} text={callView?.text ?? CALL_FALLBACK_TEXT}
+                              dateLabel={showDate ? dayHeader(m.timestamp) : ""} unread={i === firstUnreadIdx} dividerRef={dividerRef} />;
+        }
         // 相册宫格（M4+）：同 group_id 聚簇——主行渲染整个宫格，从行跳过。多选态**同样聚簇**：整组作为一个
         // 勾选单位（不再拆成独立行），勾选左侧检查框即选中整组（见 toggleSelectedGroup / albumSelected）。
         if (isAlbumMember(m)) {
@@ -298,7 +311,8 @@ export function MessageList(p: MessageListProps) {
                         title={m.note || (canResend ? "发送失败，点击重发" : "发送失败")}
                         onClick={() => resendMessage(m)}>!</button>
               )}
-              <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${menuActive ? " ctx-active" : ""}`}
+              <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${callView ? " call-bubble" : ""}${menuActive ? " ctx-active" : ""}`}
+                onClick={callView && !selectMode ? () => { if (!placeSingleCall(peer, callView.icon === "video")) setToast("通话服务未就绪"); } : undefined}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                 {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
                 {m.replyToConvSeq ? (
@@ -408,6 +422,8 @@ export function MessageList(p: MessageListProps) {
                       </div>
                     );
                   })()
+                ) : callView ? (
+                  <CallRecordBody view={callView} />
                 ) : m.contentType === "voice" ? (
                   // 语音气泡（P0，Web 只播不录，见 IMServer docs/VOICE_MESSAGE_DESIGN §10）：
                   // ▶ + 波形 + m:ss + 未播红点；单例 audio 同页面一次只播一条。

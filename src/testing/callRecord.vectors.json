@@ -1,0 +1,836 @@
+{
+ "_doc": "通话记录消息渲染向量（三端 + 服务端共用）。改文案先改这里。tone: normal|missed；preview 为会话列表预览（按看的人视角）。",
+ "cases": [
+  {
+   "name": "1v1 hangup d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "hangup",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 hangup d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "hangup",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 cancel d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "cancel",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "已取消",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 已取消"
+   }
+  },
+  {
+   "name": "1v1 cancel d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "cancel",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "未接来电",
+    "tone": "missed",
+    "tappable": true,
+    "preview": "[语音通话] 未接来电"
+   }
+  },
+  {
+   "name": "1v1 reject d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "reject",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "对方已拒绝",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 对方已拒绝"
+   }
+  },
+  {
+   "name": "1v1 reject d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "reject",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "已拒绝",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 已拒绝"
+   }
+  },
+  {
+   "name": "1v1 no_answer d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "no_answer",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "对方无应答",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 对方无应答"
+   }
+  },
+  {
+   "name": "1v1 no_answer d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "no_answer",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "未接来电",
+    "tone": "missed",
+    "tappable": true,
+    "preview": "[语音通话] 未接来电"
+   }
+  },
+  {
+   "name": "1v1 busy d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "busy",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "对方忙线",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 对方忙线"
+   }
+  },
+  {
+   "name": "1v1 busy d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "busy",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "未接来电",
+    "tone": "missed",
+    "tappable": true,
+    "preview": "[视频通话] 未接来电"
+   }
+  },
+  {
+   "name": "1v1 offline d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "offline",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "对方不在线",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 对方不在线"
+   }
+  },
+  {
+   "name": "1v1 offline d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "offline",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "未接来电",
+    "tone": "missed",
+    "tappable": true,
+    "preview": "[语音通话] 未接来电"
+   }
+  },
+  {
+   "name": "1v1 network d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "network",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 network d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "network",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 room_closed d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "room_closed",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 room_closed d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "room_closed",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 kicked d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "kicked",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 kicked d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "kicked",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 error d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "error",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 error d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "error",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 weird_new_reason d=0 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "weird_new_reason",
+    "d": 0
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 weird_new_reason d=0 callee",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "weird_new_reason",
+    "d": 0
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话未接通",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话未接通"
+   }
+  },
+  {
+   "name": "1v1 hangup d=1 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 00:01",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 00:01"
+   }
+  },
+  {
+   "name": "1v1 hangup d=7 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 7
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 00:07",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 00:07"
+   }
+  },
+  {
+   "name": "1v1 hangup d=201 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 201
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 03:21",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 03:21"
+   }
+  },
+  {
+   "name": "1v1 hangup d=3599 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 3599
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 59:59",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 59:59"
+   }
+  },
+  {
+   "name": "1v1 hangup d=3600 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 3600
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 1:00:00",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 1:00:00"
+   }
+  },
+  {
+   "name": "1v1 hangup d=3801 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 3801
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 1:03:21",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 1:03:21"
+   }
+  },
+  {
+   "name": "1v1 hangup d=86400 caller",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 86400
+   },
+   "viewerIsSender": true,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 24:00:00",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[视频通话] 通话时长 24:00:00"
+   }
+  },
+  {
+   "name": "1v1 network d>0 callee 不红",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "network",
+    "d": 65
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 01:05",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话时长 01:05"
+   }
+  },
+  {
+   "name": "1v1 cancel d>0 以时长为准",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "cancel",
+    "d": 5
+   },
+   "viewerIsSender": false,
+   "isGroup": false,
+   "expect": {
+    "text": "通话时长 00:05",
+    "tone": "normal",
+    "tappable": true,
+    "preview": "[语音通话] 通话时长 00:05"
+   }
+  },
+  {
+   "name": "group hangup d=723 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 723,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "你发起的群视频通话，时长 12:03",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 时长 12:03"
+   }
+  },
+  {
+   "name": "group hangup d=723 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 723,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "张三发起的群视频通话，时长 12:03",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 时长 12:03"
+   }
+  },
+  {
+   "name": "group hangup d=3801 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 3801,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "你发起的群视频通话，时长 1:03:21",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 时长 1:03:21"
+   }
+  },
+  {
+   "name": "group hangup d=3801 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "hangup",
+    "d": 3801,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "张三发起的群视频通话，时长 1:03:21",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 时长 1:03:21"
+   }
+  },
+  {
+   "name": "group no_answer d=0 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "no_answer",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "你发起的群视频通话，无人接听",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 无人接听"
+   }
+  },
+  {
+   "name": "group no_answer d=0 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "no_answer",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "张三发起的群视频通话，无人接听",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 无人接听"
+   }
+  },
+  {
+   "name": "group cancel d=0 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "cancel",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "你取消了群视频通话",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已取消"
+   }
+  },
+  {
+   "name": "group cancel d=0 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "cancel",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "张三取消了群视频通话",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已取消"
+   }
+  },
+  {
+   "name": "group reject d=0 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "reject",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "群通话已结束",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已结束"
+   }
+  },
+  {
+   "name": "group reject d=0 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "reject",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "群通话已结束",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已结束"
+   }
+  },
+  {
+   "name": "group error d=0 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "error",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "群通话已结束",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已结束"
+   }
+  },
+  {
+   "name": "group error d=0 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "error",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "群通话已结束",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已结束"
+   }
+  },
+  {
+   "name": "group weird d=0 me",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "weird",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": true,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "群通话已结束",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已结束"
+   }
+  },
+  {
+   "name": "group weird d=0 other",
+   "content": {
+    "cid": "call-1",
+    "m": "video",
+    "r": "weird",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "群通话已结束",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群视频通话] 已结束"
+   }
+  },
+  {
+   "name": "group audio hangup",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "hangup",
+    "d": 201,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "张三",
+   "expect": {
+    "text": "张三发起的群语音通话，时长 03:21",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群语音通话] 时长 03:21"
+   }
+  },
+  {
+   "name": "group audio cancel other",
+   "content": {
+    "cid": "call-1",
+    "m": "audio",
+    "r": "cancel",
+    "d": 0,
+    "g": 1
+   },
+   "viewerIsSender": false,
+   "isGroup": true,
+   "senderName": "李四",
+   "expect": {
+    "text": "李四取消了群语音通话",
+    "tone": "normal",
+    "tappable": false,
+    "preview": "[群语音通话] 已取消"
+   }
+  }
+ ]
+}

@@ -234,3 +234,16 @@ describe("buildFavoriteActions", () => {
     expect(favHandlers.delete).toHaveBeenCalledWith(f0);
   });
 });
+
+describe("通话记录消息菜单：只留删除", () => {
+  it("call 消息（我发的、已发出）长按只剩 delete", () => {
+    const acts = buildMessageActions(msgHandlers);
+    const m = msg({ from: "1001", contentType: "call", content: '{"cid":"c","m":"audio","r":"hangup","d":5}', timestamp: Date.now() });
+    expect(visibleIds(acts, { m, uid: "1001", canPin: true } as MessageCtx)).toEqual(["delete"]);
+  });
+  it("对方发的 call 同样只剩 delete（无举报 / 引用 / 转发 / 收藏 / 多选）", () => {
+    const acts = buildMessageActions(msgHandlers);
+    const m = msg({ contentType: "call", content: '{"cid":"c","m":"video","r":"cancel","d":0}' });
+    expect(visibleIds(acts, { m, uid: "1001" } as MessageCtx)).toEqual(["delete"]);
+  });
+});

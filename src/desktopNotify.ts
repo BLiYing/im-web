@@ -6,6 +6,7 @@
 // 所以这里没有 if (isDesktop) —— 分流在 platform 层，不在业务里。
 import type { Conversation } from "./sdk/protocol";
 import type { ChatMessage } from "./sdk/protocol";
+import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 
 /**
  * Dock / 任务栏角标数。
@@ -51,6 +52,9 @@ export function shouldNotify(msg: ChatMessage, ctx: NotifyContext): boolean {
   if (msg.contentType === "system") return false;
   if (msg.recalledAt) return false;   // 已撤回的（同步时可能带着撤回标记过来）
   if (msg.from === ctx.selfUid) return false;                       // 自己发的（含多端抄送）
+  // 通话记录只推被叫「未接来电」（其余被叫本来就响过铃；群系统条不推）。入站的 call 消息发送者必是主叫，我就是被叫。
+  if (msg.contentType === CALL_CONTENT_TYPE
+      && !isMissedCall(msg.content, { viewerIsSender: false, isGroup: callRecordIsGroup(msg.content) })) return false;
   if (ctx.windowFocused && msg.convId === ctx.currentConvId) return false; // 正看着这个会话
   if (ctx.windowFocused) return false;                              // 前台：交给应用内的红点/声音
   if (ctx.muted) return ctx.mentionsMe;                             // 免打扰：只有 @我 才穿透
@@ -68,6 +72,7 @@ export function notifyBodyOf(msg: ChatMessage): string {
     case "voice": return "[语音]";
     case "file": return msg.fileName ? `[文件] ${msg.fileName}` : "[文件]";
     case "contact": return "[名片]";
+    case CALL_CONTENT_TYPE: return "[未接来电]";   // shouldNotify 已放行的只有被叫未接
     case "chat_record": return "[聊天记录]";
     default: return "[消息]";
   }

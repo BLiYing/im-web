@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { callRecordAcked, takeFailedCallRecord } from "./useCallRecordSend";
 import type { ChatMessage } from "./sdk/protocol";
 import {
   type MsgMap, appendTo, patchByClientMsgId, mapMatchingClientMsgId,
@@ -41,7 +42,18 @@ export function useMessageStore() {
   }, []);
 
   /** 发送回执（onAck）：跨所有会话按 clientMsgId 换 status/conv_seq/服务器时间戳；成功者把 conv_seq 记进去重集。 */
+  /** 是在途的通话记录且失败了 → 抹掉本地行并返回 true（调用方不再走通用失败路径）。 */
+  const dropFailedCallRecord = useCallback((clientMsgId: string, why: string): boolean => {
+    const cid = takeFailedCallRecord(clientMsgId, why);
+    if (cid === undefined) return false;
+    setMsgsByConv((prev) => removeByClientMsgId(prev, cid, clientMsgId));
+    return true;
+  }, []);
+
   const applyAck = useCallback((clientMsgId: string, ok: boolean, convSeq: number, serverTs?: number) => {
+    // 通话记录失败：吞掉（只写日志、抹掉本地行，不显红❗）——附带事实，不是用户「说的话」。
+    if (ok) callRecordAcked(clientMsgId);
+    else if (dropFailedCallRecord(clientMsgId, "ack_failed")) return;
     setMsgsByConv((prev) => mapMatchingClientMsgId(prev, clientMsgId, (m, cid) => {
       if (ok && convSeq > 0) (seenByConv.current[cid] ??= new Set()).add(convSeq);
       return { ...m, status: ok ? "sent" : "failed", convSeq, timestamp: ok && serverTs ? serverTs : m.timestamp };
@@ -50,6 +62,7 @@ export function useMessageStore() {
 
   /** 消息被拒收（onMsgRejected，被拉黑）：跨所有会话按 clientMsgId 标失败 + 挂原因/码。 */
   const markRejected = useCallback((clientMsgId: string, note: string, code: number) => {
+    if (dropFailedCallRecord(clientMsgId, `rejected_${code}`)) return; // 被拉黑（200102）等：同上，吞掉
     setMsgsByConv((prev) => mapMatchingClientMsgId(prev, clientMsgId, (m) => ({ ...m, status: "failed", note, noteCode: code })));
   }, []);
 

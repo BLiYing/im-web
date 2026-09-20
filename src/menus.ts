@@ -3,6 +3,7 @@
 // iOS 端可对照本文件保持菜单项与顺序一致（parity）。
 import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
+import { CALL_CONTENT_TYPE } from "./callRecord";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
   Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle, Download, Eye,
@@ -76,7 +77,7 @@ export interface ConversationHandlers {
  * 危险项「删除」放最后（destructive-last，防误触，两端一致）。未接后端的项调用 h.comingSoon(label) 弹"开发中"提示。
  */
 export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[] {
-  return [
+  const all: MenuAction<MessageCtx>[] = [
     // 已读详情（M4-8）：**只对自己发的群消息**显示——只有发送者能看谁读了自己（隐私，服务端另有 403 校验）。
     // 放首位，对齐 iOS 长按菜单顶部的读者行。人数在弹出的名单里显示（菜单构建是同步的，不做异步取数）。
     // **大群不显示**：超级群整套已读语义是关掉的（SUPERGROUP_DESIGN §4），2 万人"全员已读"永不成立，
@@ -129,6 +130,8 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "delete", label: "删除", icon: Trash2, danger: true,
       visible: (c) => !(c.m.status === "sending" && c.m.convSeq === 0), run: (c) => h.delete(c.m) },
   ];
+  // 通话记录是系统事实、不是「说过的话」：长按只留「删除」（仅为我删除）——不可复制 / 引用 / 转发 / 收藏 / 撤回 / 置顶 / 多选 / 举报。
+  return all.map((a) => (a.id === "delete" ? a : { ...a, visible: (c: MessageCtx) => c.m.contentType !== CALL_CONTENT_TYPE && a.visible(c) }));
 }
 
 /**

@@ -315,6 +315,17 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .bmeta .ck { color: var(--meta-time); }
 .bmeta .ck.read { color: var(--check-read); }
 .bmeta .failed { color: var(--danger); }
+/* 通话记录气泡（CALL_RECORD_UX_SKETCH §03）：普通气泡壳，竖内边距 10（文本气泡 6，多 4 撑出 ≥40 的触控高）；
+   图标边长 = 正文字号 + 5，实心，与文字垂直居中，间距 8；文字单行不换行；未接来电（被叫侧）图标+文字用 --danger（不随聊天主题）。
+   整个气泡可点、hover 手型、按下 opacity .7（0.08s，不做涟漪/缩放）。颜色只用既有令牌。 */
+.bubble.call-bubble { padding-top: 10px; padding-bottom: 10px; cursor: pointer; transition: opacity 0.08s; align-items: center; }
+.bubble.call-bubble:active { opacity: 0.7; }
+.call-rec { display: inline-flex; align-items: center; gap: 8px; font-size: var(--msg-font); white-space: nowrap; }
+.call-rec-icon { width: calc(var(--msg-font) + 5px); height: calc(var(--msg-font) + 5px); flex: none; stroke-width: 1.5; }
+.call-rec.missed { color: var(--danger); }
+.bubble.call-bubble .bmeta { align-self: flex-end; }
+/* 会话列表：被叫「未接来电」整行预览变红。 */
+.convlast.missed-call { color: var(--danger); }
 /* 长文本三档显示（阈值见 longtext.ts，与 iOS 统一）：long 折叠+就地展开、huge 摘要卡 → 全屏阅读器。 */
 .btext .lt-body { display: block; white-space: pre-wrap; word-break: break-word; }
 .btext .lt-body.collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 8; overflow: hidden; }

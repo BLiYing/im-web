@@ -1,6 +1,7 @@
 // 置顶消息横幅的纯逻辑（G0）：预览文案 + 多条置顶的轮转索引。
 // 与 iOS `IMPinnedBanner` 的对应实现保持一致（parity），逻辑集中在此以便单测。
 import type { PinnedMessage } from "./sdk/protocol";
+import { CALL_CONTENT_TYPE } from "./callRecord";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 import { chatRecordSnippet } from "./messageContent";
 
@@ -27,6 +28,8 @@ export function pinnedPreview(p: Pick<PinnedMessage, "contentType" | "content" |
       return "[文件]";
     case CONTACT_CONTENT_TYPE:
       return contactCardPreview(p.content);
+    case CALL_CONTENT_TYPE:
+      return "[音视频通话]";
     // 合并转发卡片：content 是整段 JSON，直接显会把 {"t":…,"items":[…]} 铺满横幅 → 收成「[聊天记录] 标题」。
     case "chat_record":
       return chatRecordSnippet(p.content);

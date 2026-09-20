@@ -8,6 +8,7 @@ import { logger, LOG_TAG } from "../logging/logger";
 import { startRtcEngine } from "./rtcEngine";
 import { registerCallActions } from "./rtcCall";
 import { buildInviteCandidates, type InviteMemberLike } from "./rtcProfiles";
+import { useCallRecordSend, type CallRecordSendDeps } from "../useCallRecordSend";
 
 /** 宿主身份链的三个口子，全部来自 App 现成的解析器。 */
 export interface RtcProfiles {
@@ -33,8 +34,10 @@ function ActionsBridge(): null {
   return null;
 }
 
-export function RtcHost({ uid, profiles, profileKey }: {
+export function RtcHost({ uid, profiles, profileKey, record }: {
   uid: string;
+  /** 通话记录发消息所需的 IM 出口：每通电话终局后 SDK 给一次 callSummary，由主叫发一条 content_type=call（见 useCallRecordSend）。 */
+  record: Omit<CallRecordSendDeps, "uid">;
   profiles: RtcProfiles;
   /** 解析数据源（名片 / 好友 / 会话 / 群资料）：任一项换了引用就通知 Kit 重画。固定 4 项。 */
   profileKey: readonly unknown[];
@@ -58,6 +61,18 @@ export function RtcHost({ uid, profiles, profileKey }: {
       setEngine(null);
     };
   }, [uid]);
+
+  // 通话记录：订阅 SDK 的 callSummary。宿主不自己记通话上下文，事实由 SDK 一次给齐；发不发（role==caller）由 planCallRecord 判。
+  const { sendCallRecord } = useCallRecordSend({ ...record, uid });
+  const onSummaryRef = useRef(sendCallRecord);
+  onSummaryRef.current = sendCallRecord;
+  useEffect(() => {
+    if (!engine) return undefined;
+    return engine.on("callSummary", (s) => {
+      logger.debug(LOG_TAG.rtc, "rtc_call_summary", { call_id: s.callId, role: s.role, reason: s.reason, duration_sec: s.durationSec, group: s.isGroup });
+      onSummaryRef.current(s);
+    });
+  }, [engine]);
 
   const profilesRef = useRef(profiles);
   profilesRef.current = profiles;

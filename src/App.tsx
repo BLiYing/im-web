@@ -54,7 +54,7 @@ import { useFavorites } from "./useFavorites";
 import { useGroupOps } from "./useGroupOps";
 import { useContactShare, CONTACT_MAX_SELECTION } from "./useContactShare";
 import { useReport } from "./useReport";
-import { convPreview as buildConvPreview } from "./convPreview";
+import { convPreview as buildConvPreview, isMissedCallPreview } from "./convPreview";
 import { useMentions } from "./useMentions";
 import { useQR } from "./useQR";
 import { useAppearanceSettings } from "./useAppearanceSettings";
@@ -2858,7 +2858,7 @@ export default function App() {
                     {c.last_message ? conversationTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>
                 </div>
-                <div className="convlast">
+                <div className={`convlast${isMissedCallPreview(c, uid) ? " missed-call" : ""}`}>
                   {/* 群「@我」红字前缀（M4-8）：未读区间内被 @（含 @所有人）。不另加右侧红 @ 角标——左侧红字已够醒目。 */}
                   {c.is_group && c.mention_unread ? <span className="conv-mention">[有人@我]</span> : null}
                   {/* 待审入群角标（G3）：仅群主/管理员会收到 pending_count>0，一眼看到有人等待审批。 */}
@@ -3642,7 +3642,7 @@ export default function App() {
       {promptDlg && <PromptDialog dlg={promptDlg} set={setPromptDlg} />}
 
       {/* im-rtc 通话：登录态下挂载 = 起引擎，退出登录卸载 = 销毁；名字头像走本页的解析链。 */}
-      <RtcHost uid={uid} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
+      <RtcHost uid={uid} record={{ clientRef, appendMsg }} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
         profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles,
           // 服务端分页 + 搜索：普通群、超级群同一条路（超级群本地成员表只有我自己）。
           groupMembers: async (cid, opts) => {

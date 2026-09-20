@@ -10,18 +10,21 @@
 //    历史消息没有分段 → 回退整句（别渲染成空）。
 import type { Conversation } from "./sdk/protocol";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
+import { CALL_CONTENT_TYPE, callRecordPreview, isMissedCall } from "./callRecord";
 import { sysSegmentName } from "./sysSegments";
 
 /** 会话列表预览的类型占位。
  *
  *  `extra` 不是可选的点缀：**voice 与 contact 需要 content_type 之外的东西**
  *  （时长 / 名片快照里的昵称），不给就分别退化成没有时长的 `[语音]` 和一整串 JSON。 */
-export function mediaPreview(ct: string, extra?: { duration?: number; content?: string }): string | null {
+export function mediaPreview(ct: string, extra?: { duration?: number; content?: string; viewerIsSender?: boolean; isGroup?: boolean }): string | null {
   if (ct === "image") return "[图片]";
   if (ct === "video") return "[视频]";
   if (ct === "file") return "[文件]";
   if (ct === "chat_record") return "[聊天记录]";
   if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(extra?.content);
+  // 通话记录：文案按「看的人」的视角（主叫 / 被叫两套），所以必须带上 viewerIsSender。
+  if (ct === CALL_CONTENT_TYPE) return callRecordPreview(extra?.content, { viewerIsSender: !!extra?.viewerIsSender, isGroup: !!extra?.isGroup });
   if (ct === "voice") {
     const ms = extra?.duration ?? 0;
     const s = Math.max(0, Math.floor(ms / 1000));
@@ -47,7 +50,7 @@ export function convPreview(c: Conversation, d: ConvPreviewDeps): string {
     const who = m.from === d.uid ? "你" : (c.is_group ? lastName(m.from_nickname) : "对方");
     return `${who}撤回了一条消息`;
   }
-  const media = mediaPreview(m.content_type, { duration: m.duration, content: m.content });
+  const media = mediaPreview(m.content_type, { duration: m.duration, content: m.content, viewerIsSender: m.from === d.uid, isGroup: c.is_group });
   // 系统消息：按分段拼，名字换成本机显示名；无分段（历史消息）回退整句。无发送者前缀。
   if (m.content_type === "system") {
     return m.sys_segments?.length
@@ -62,4 +65,11 @@ export function convPreview(c: Conversation, d: ConvPreviewDeps): string {
   if (!c.is_group) return text;
   const who = m.from === d.uid ? "我" : lastName(m.from_nickname);
   return `${who}: ${text}`;
+}
+
+/** 会话列表这一行是否整行红：最后一条是「我」作为被叫错过的来电（UX 稿 §06）。 */
+export function isMissedCallPreview(c: Conversation, uid: string): boolean {
+  const m = c.last_message;
+  if (!m || m.content_type !== CALL_CONTENT_TYPE || m.recalled_at) return false;
+  return isMissedCall(m.content, { viewerIsSender: m.from === uid, isGroup: !!c.is_group });
 }

@@ -18,7 +18,10 @@ import type { Conversation, ChatMessage } from "./sdk/protocol";
 
 vi.mock("./sdk/imSdk", async () => ({ IMClient: (await import("./testing/fakeIMClient")).FakeIMClient, registerAccount: vi.fn(async () => {}) }));
 
+vi.mock("./rtc/rtcCall", async (orig) => ({ ...(await orig<typeof import("./rtc/rtcCall")>()), placeSingleCall: vi.fn(() => true) }));
+
 import { IMClient } from "./sdk/imSdk";
+import { placeSingleCall } from "./rtc/rtcCall";
 
 import type { Fake } from "./testing/fakeIMClient";
 import {
@@ -249,5 +252,45 @@ describe("消息列表：合并转发卡片", () => {
     });
     expect(card.closest(".row")).toHaveClass("me");
     expect(card.querySelector(".record-foot .bmeta")).toBeInTheDocument();
+  });
+});
+
+describe("消息列表：通话记录（content_type=call）", () => {
+  const call = (r: string, d: number, m = "video") => JSON.stringify({ cid: "call-1", m, r, d });
+
+  it("单聊：普通气泡里图标+文字+时间；被叫未接来电走红色；不露 JSON", async () => {
+    await enterChat();
+    await push(recv({ contentType: "call", content: call("no_answer", 0) }));
+    const text = await screen.findByText("未接来电");
+    const bubble = text.closest(".bubble")!;
+    expect(bubble).toHaveClass("call-bubble");
+    expect(bubble.querySelector(".call-rec.missed")).toBeInTheDocument();
+    expect(bubble.querySelector(".bmeta")).toBeInTheDocument();
+    expect(msgs().textContent).not.toContain("cid");
+  });
+
+  it("我发的：对方已拒绝 / 通话时长，不红", async () => {
+    await enterChat();
+    await push(recv({ from: UID, contentType: "call", content: call("reject", 0) }));
+    await push(recv({ from: UID, contentType: "call", content: call("hangup", 201, "audio") }));
+    expect(await screen.findByText("对方已拒绝")).not.toHaveClass("missed");
+    await screen.findByText("通话时长 03:21");
+    expect(msgs().querySelector(".call-rec.missed")).toBeNull();
+  });
+
+  it("点整个气泡按原类型回拨（视频→video=true）；宿主不判忙", async () => {
+    await enterChat();
+    await push(recv({ contentType: "call", content: call("hangup", 5, "video") }));
+    const text = await screen.findByText("通话时长 00:05");
+    fireEvent.click(text.closest(".bubble")!);
+    expect(placeSingleCall).toHaveBeenCalledWith(PEER, true);
+  });
+
+  it("解析失败：灰色兜底行，不可点，不露 JSON", async () => {
+    await enterChat();
+    await push(recv({ contentType: "call", content: "{bad" }));
+    const line = await screen.findByText("[音视频通话] 请升级新版查看");
+    expect(line.closest(".sys-line")).toBeInTheDocument();
+    expect(msgs().textContent).not.toContain("{bad");
   });
 });
