@@ -8,8 +8,10 @@
 > **im-rtc 通话接入（调试密钥联调）✅ 代码完成、待真机联调（2026-09-19，未提交）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
 > `rtcEngine` 换票只走 `signToken`、`rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，
 > 群详情页新增「群通话」（成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。
-> SDK 暂用本地包：`package.json` 里两个 `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`（先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`）；
-> **2.0.0 发布后改回版本号**。配置在 `.env.local`（gitignored：`VITE_RTC_WS_URL/APP_ID/KEY_ID/DEBUG_SECRET`，缺项则通话入口不可用）。
+> SDK 默认用 npm 正式版 `im-rtc-call-engine` / `im-rtc-call-uikit-react` **2.0.0**（2026-09-20 已从本地 tgz 切过来）。
+> **本地包集成保留、默认关闭**：验未发布的 SDK 改动时 `./scripts/sdk-source.sh local`（等价于 package.json 里两个
+> `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`，先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`），验完 `./scripts/sdk-source.sh npm` 切回；
+> 本地档期间别提交 package.json / package-lock.json，装完 `npx vite --force`。配置在 `.env.local`（gitignored：`VITE_RTC_WS_URL/APP_ID/KEY_ID/DEBUG_SECRET`，缺项则通话入口不可用）。
 > 单测 `src/rtc/rtc.test.ts`（变异验红）；全量 vitest 1324 + `npm run build` 绿。未做：附件面板「音视频」不接（将移除）、设置页「接口/调试」开关（等换票接口一期）。
 
 > **第三批用户报告（Web 部分）✅ 2026-09-15（用户复测通过，已提交；tsc + vitest 1312 条全绿、变异验红）**：
