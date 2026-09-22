@@ -12,6 +12,8 @@ import type { Conversation } from "./sdk/protocol";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 import { CALL_CONTENT_TYPE, callRecordPreview, isMissedCall } from "./callRecord";
 import { sysSegmentName } from "./sysSegments";
+import { t, getLang } from "./i18n"; // 非组件文件：模块级 t()，调用时刻取语言，不在模块顶层求值
+import { buildGroupSysSegments } from "./sysEventRender";
 
 /** 会话列表预览的类型占位。
  *
@@ -51,13 +53,16 @@ export function convPreview(c: Conversation, d: ConvPreviewDeps): string {
     return `${who}撤回了一条消息`;
   }
   const media = mediaPreview(m.content_type, { duration: m.duration, content: m.content, viewerIsSender: m.from === d.uid, isGroup: c.is_group });
-  // 系统消息：按分段拼，名字换成本机显示名；无分段（历史消息）回退整句。无发送者前缀。
+  // 系统消息：P3 起 sys_event 认识就先按 App 语言重建分段（不挂点击，纯文本），不认识/为空回退
+  // 原始 sys_segments；再按分段拼，名字换成本机显示名，无分段（更老的历史消息）回退整句。无发送者前缀。
   if (m.content_type === "system") {
-    return m.sys_segments?.length
-      ? m.sys_segments
-          // 我自己 → 「我」，与聊天页系统行同口径（sysSegmentName）。
-          .map((seg) => (seg.uid ? sysSegmentName(seg.uid, d.uid, (id) => d.localNameOf(id, c.conv_id, seg.text)) : seg.text))
-          .join("")
+    const segs = buildGroupSysSegments(
+      { sysEvent: m.sys_event, sysArgs: m.sys_args, sysSegments: m.sys_segments, convId: c.conv_id },
+      t, d.uid, d.localNameOf, getLang(),
+    ) ?? m.sys_segments;
+    return segs?.length
+      // 我自己 → 「我」，与聊天页系统行同口径（sysSegmentName）。
+      ? segs.map((seg) => (seg.uid ? sysSegmentName(seg.uid, d.uid, (id) => d.localNameOf(id, c.conv_id, seg.text)) : seg.text)).join("")
       : m.content;
   }
   // 图说 caption「有字显字」（Telegram 模型）：带 caption 时直接显 caption，否则回退 [图片]/[视频]/[文件]。

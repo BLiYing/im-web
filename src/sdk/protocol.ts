@@ -86,6 +86,14 @@ export interface ChatMessage {
   pinnedAt?: number;    // >0=聊天内置顶（M4）
   replyToConvSeq?: number; // 引用回复的目标 conv_seq（点击跳转，M4-2）
   replySnapshot?: string;  // 引用目标的降级快照（气泡顶部引用条）
+  /**
+   * P3：引用快照的结构化种类（recalled/chat_record/file/voice/contact/call/other）。
+   * 本机据此把 `replySnapshotArgs` 代入本地语言的文案键渲染引用条（见 sysEventRender.ts）；
+   * 空 = 老消息/未识别 → 回退 `replySnapshot` 整句（该整句本身也要按 App 语言本地化，不能再硬编码中文）。
+   */
+  replySnapshotKind?: string;
+  /** replySnapshotKind 对应的参数（如 {title}/{name}/{duration_ms}），字面全部来自服务端，key 名对齐 IMServer store 常量注释。 */
+  replySnapshotArgs?: Record<string, string>;
   replyToFrom?: string;    // 被引用消息发送者 uid（M4-x）：群聊引用条显示发送者，本地解析显示名；单聊不显示
   forwardFrom?: string;    // 转发溯源"转发自 X"（M4-3）
   groupId?: string;        // 相册分组 ID（M4+）：同批多图/视频聚簇渲染宫格；空=普通消息
@@ -112,6 +120,14 @@ export interface ChatMessage {
    * 空 = 历史系统消息（服务端当时没存）或非系统消息 → 回退按 content 整句渲染。
    */
   sysSegments?: SysSegment[];
+  /**
+   * P3：系统消息/系统通知单聊的结构化事件名（对齐后端 store.SysEvent 与 SysEventNotice 前缀常量，
+   * 如 `member_remove`/`new_device_login`）。本机据此把 `sysArgs` 代入本地语言的文案键渲染（见
+   * sysEventRender.ts）；空 = 老消息/未识别事件 → 回退 `sysSegments`/`content`（不改变现有回退路径）。
+   */
+  sysEvent?: string;
+  /** sysEvent 对应的参数（如 {name}/{at}/{ip}），字面全部来自服务端，key 名对齐 IMServer store 常量注释。 */
+  sysArgs?: Record<string, string>;
 }
 
 /** 系统消息的一个可渲染片段（对齐后端 protocol.SysSegment）。 */
@@ -185,6 +201,10 @@ export interface ConvLastMessage {
   recalled_at?: number; // >0=最后一条是撤回消息（预览显示"撤回了一条消息"，原文已脱敏）
   /** 仅系统消息：与消息流同一份分段，列表预览据此把名字换成本机显示名（不挂点击）。空=历史消息，回退 content。 */
   sys_segments?: SysSegment[];
+  /** P3：与消息流同一个 sys_event/sys_args（服务端 conversation.MessageView 冗余下发），列表预览按
+   *  §1 同一套算法本地化整句（不挂点击，见 sysEventRender.ts）；空=历史消息，回退 sys_segments/content。 */
+  sys_event?: string;
+  sys_args?: Record<string, string>;
 }
 
 /** window_resp 的边界信息（消息本身走 processIncoming 常规落库，不在此重复）。 */

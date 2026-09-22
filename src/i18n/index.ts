@@ -70,13 +70,35 @@ export function useLang(): Lang {
   return useSyncExternalStore(subscribe, getLang, getLang);
 }
 
+/** `format()`/系统消息占位符分流共用的分词结果：一段固定文案，或一个待替换的占位符名。 */
+export type FormatToken = { type: "text"; value: string } | { type: "ph"; name: string };
+
+/**
+ * 按 `{name}` 占位符把模板串切成 `[固定文案 | 占位符]` 数组（`{{`/`}}` 转义为字面量花括号的文本段）。
+ * 供 `format()` 内部使用，也供 `sysEventRender.ts` 按「这个占位符要不要保留 uid」分流替换——
+ * 那种场景不能直接调 `format(tpl, args)`：那样会把所有占位符一次性吃成字符串，定位不到哪段该挂点击。
+ */
+export function tokenizeTemplate(tpl: string): FormatToken[] {
+  const out: FormatToken[] = [];
+  const re = /\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+  let last = 0;
+  for (let m = re.exec(tpl); m; m = re.exec(tpl)) {
+    if (m.index > last) out.push({ type: "text", value: tpl.slice(last, m.index) });
+    if (m[0] === "{{") out.push({ type: "text", value: "{" });
+    else if (m[0] === "}}") out.push({ type: "text", value: "}" });
+    else out.push({ type: "ph", name: m[1] });
+    last = m.index + m[0].length;
+  }
+  if (last < tpl.length) out.push({ type: "text", value: tpl.slice(last) });
+  return out;
+}
+
 /** `{name}` 具名占位符替换；`{{` `}}` 还原为字面量花括号；缺参保留 `{name}` 原样。 */
 export function format(tpl: string, args?: Args): string {
-  return tpl.replace(/\{\{|\}\}|\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, name?: string) => {
-    if (m === "{{") return "{";
-    if (m === "}}") return "}";
-    return args && name !== undefined && name in args ? String(args[name]) : m;
-  });
+  return tokenizeTemplate(tpl).map((tok) => {
+    if (tok.type === "text") return tok.value;
+    return args && tok.name in args ? String(args[tok.name]) : `{${tok.name}}`;
+  }).join("");
 }
 
 /** 取文案。复数键（值为 {one,other} 对象）按 args.count 选形式；缺键回落中文源，再缺返回键本身。 */

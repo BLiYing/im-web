@@ -5,8 +5,9 @@
 // - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
 import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
-import { useT } from "../i18n";
+import { useT, useLang, type Args, type Lang } from "../i18n";
 import type { ChatMessage } from "../sdk/protocol";
+import { buildGroupSysSegments, buildSysNoticeText, localizeReplySnapshot } from "../sysEventRender";
 import { pickNextVoiceRelay, voiceRelayMid } from "../voiceRelay";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
 import { albumMembers, isAlbumLeader, isAlbumMember, msgKey } from "../album";
@@ -17,7 +18,7 @@ import { sysSegmentName } from "../sysSegments";
 import { formatMediaDuration, formatUploadProgress } from "../media";
 import { downloadGlyph, downloadText, type DownloadState, type MediaKind } from "../download";
 import {
-  isUrlText, localizeSnippet, selectableInMultiSelect, parseChatRecord, recordItemPreview,
+  isUrlText, selectableInMultiSelect, parseChatRecord, recordItemPreview,
   fileNameFromContent, mediaBoxProps, isPreviewableFile, videoFrameSrc, firstURLInText,
 } from "../messageContent";
 import { IdCard } from "lucide-react";
@@ -70,6 +71,7 @@ export interface MessageListProps {
 
 export function MessageList(p: MessageListProps) {
   const tr = useT();
+  const lang = useLang(); // P3：多人名拼接/常用地拼接按语言选分隔符
   const {
     messages, peer, isGroupChat, isSuperGroup, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
     timeFormat, translations, transcripts, uploadProgress, dividerRef,
@@ -153,7 +155,7 @@ export function MessageList(p: MessageListProps) {
               {i === firstUnreadIdx && (
                 <div className="unread-divider" ref={dividerRef}><span>{tr("chat.unread_divider")}</span></div>
               )}
-              <div className="sys-line"><span>{renderSysLine(m, uid, localNameOf, openPeerDetail)}</span></div>
+              <div className="sys-line"><span>{renderSysLine(m, uid, localNameOf, openPeerDetail, tr, lang)}</span></div>
             </div>
           );
         }
@@ -328,7 +330,7 @@ export function MessageList(p: MessageListProps) {
                       {isGroupChat && m.replyToFrom && (
                         <span className="quote-who">{m.replyToFrom === uid ? tr("common.you") : localNameOf(m.replyToFrom, m.convId, m.replyToFrom)}</span>
                       )}
-                      <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || tr("chat.quote.original_fallback")}</span>
+                      <span className="quote-text">{localizeReplySnapshot(m, tr) || tr("chat.quote.original_fallback")}</span>
                     </span>
                   </div>
                 ) : null}
@@ -486,6 +488,8 @@ export function MessageList(p: MessageListProps) {
                   // 纯 URL 消息：可点击 URL 文本 + 下方 OG 富预览卡片（引用/普通消息一致）。
                   <LinkCard url={m.content} fetchPreview={fetchLinkPreview} onMediaLoad={onMediaLoad}
                             onOpenInvite={(u) => void handleScanRaw(u)} />
+                ) : m.sysEvent && buildSysNoticeText(m, tr, lang) !== undefined ? (
+                  <span className="btext">{buildSysNoticeText(m, tr, lang)}</span> // 系统通知单聊（P3）：无 sysSegments，本地拼多行文本，仍走普通文本气泡
                 ) : (
                   // 文本气泡：正文（含 URL 高亮 <a>）+ 若首个 URL 存在则挂 preview 卡（cardOnly=不再重复 URL 文本行）。
                   // 抓不到 og 时 LinkCard 内部返回 null 静默隐藏（负缓存），只留正文里的高亮 —— 与 iOS 一致。
@@ -575,16 +579,16 @@ export function MessageList(p: MessageListProps) {
   );
 }
 
-/** 系统消息一行：有分段就逐段渲染（名字换本地显示名、染色可点），没有就回退整句。
- *  历史系统消息（服务端当时没存分段）走回退分支：名字仍是当时的昵称、不可点。 */
+/** 系统消息一行：有分段就逐段渲染（名字换本地显示名、染色可点），没有就回退整句。P3 起 sysEvent
+ *  认识时先用 buildGroupSysSegments 按 App 语言重建分段（喂给同一套渲染），不认识/为空回退 m.sysSegments。 */
 function renderSysLine(
-  m: ChatMessage,
-  uid: string,
+  m: ChatMessage, uid: string,
   localNameOf: (uid: string, convId: string, fallback?: string) => string,
-  openPeerDetail: (uid: string) => void,
+  openPeerDetail: (uid: string) => void, t: (key: string, args?: Args) => string, lang: Lang,
 ): ReactNode {
-  if (!m.sysSegments?.length) return m.content;
-  return m.sysSegments.map((seg, i) =>
+  const segs = buildGroupSysSegments(m, t, uid, localNameOf, lang) ?? m.sysSegments;
+  if (!segs?.length) return m.content;
+  return segs.map((seg, i) =>
     seg.uid ? (
       <button key={i} type="button" className="sys-name" onClick={() => openPeerDetail(seg.uid!)}>
         {sysSegmentName(seg.uid, uid, (id) => localNameOf(id, m.convId, seg.text))}

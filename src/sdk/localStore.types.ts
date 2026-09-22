@@ -54,6 +54,12 @@ export interface MsgRecord {
   mentionAll?: boolean; // @所有人
   // 系统消息分段：必须落库，否则刷新后系统消息退回"显真实昵称、名字不可点"，与刚收到时不一致。
   sysSegments?: SysSegment[];
+  // P3：系统消息/通知的结构化事件+参数、引用快照的结构化种类+参数。必须落库，否则刷新后本地化
+  // 渲染退回老的整句 content/replySnapshot（不是崩，但语言会锁死成服务端当时生成的那版）。
+  sysEvent?: string;
+  sysArgs?: Record<string, string>;
+  replySnapshotKind?: string;
+  replySnapshotArgs?: Record<string, string>;
   timestamp: number;
   serverMsgId?: string; // 服务端真实消息 id（举报消息等需用真实 id，不能用复合键 id）
   // 被拉黑拒收等失败消息：服务端永不接受（无 conv_seq），故按本地态落库，重进/刷新仍在。

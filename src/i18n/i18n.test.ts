@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { format, getLang, getPref, resolveLanguage, setPref, subscribe, t, translate } from "./index";
+import { format, getLang, getPref, resolveLanguage, setPref, subscribe, t, tokenizeTemplate, translate } from "./index";
 
 afterEach(() => setPref("zh-Hans"));
 
@@ -24,6 +24,32 @@ describe("format", () => {
     expect(format("Hi {name}! {{x}}", { name: "Bob" })).toBe("Hi Bob! {x}");
     expect(format("Hi {name}")).toBe("Hi {name}");
     expect(format("{n}%", { n: 5 })).toBe("5%");
+  });
+});
+
+// P3：tokenizeTemplate 是 format() 与 sysEventRender.ts 系统消息占位符分流共用的分词器——
+// 后者不能直接调 format(tpl, args)，需要逐 token 判断「这个占位符是不是人名槽位」。
+describe("tokenizeTemplate", () => {
+  it("按 {name} 切出 text/ph 交替序列", () => {
+    expect(tokenizeTemplate("{actor} 将 {target} 移出群聊")).toEqual([
+      { type: "ph", name: "actor" }, { type: "text", value: " 将 " },
+      { type: "ph", name: "target" }, { type: "text", value: " 移出群聊" },
+    ]);
+  });
+  it("{{ }} 转义为字面量花括号文本段", () => {
+    expect(tokenizeTemplate("{{x}} {n}")).toEqual([
+      { type: "text", value: "{" }, { type: "text", value: "x" }, { type: "text", value: "}" }, { type: "text", value: " " },
+      { type: "ph", name: "n" },
+    ]);
+  });
+  it("无占位符的纯文本 → 单个 text token", () => {
+    expect(tokenizeTemplate("管理员开启了全员禁言")).toEqual([{ type: "text", value: "管理员开启了全员禁言" }]);
+  });
+  it("与 format() 用同一份分词结果拼回去等价（回归护栏：改分词不能悄悄改 format 输出）", () => {
+    const tpl = "{actor} invited {names} to the group";
+    const joined = tokenizeTemplate(tpl).map((tok) => (tok.type === "text" ? tok.value : `<${tok.name}>`)).join("");
+    expect(joined).toBe("<actor> invited <names> to the group");
+    expect(format(tpl, { actor: "Ann", names: "Bob, Carol" })).toBe("Ann invited Bob, Carol to the group");
   });
 });
 

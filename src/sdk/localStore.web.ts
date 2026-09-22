@@ -37,9 +37,10 @@ function messageRecord(owner: string, m: ChatMessage): MsgRow {
     ownerConv: cursorKeyOf(owner, m.convId),
     owner, convId: m.convId, convSeq: m.convSeq,
     from: m.from, fromNickname: m.fromNickname, fromRole: m.fromRole, content: m.content, contentType: m.contentType, fileName: m.fileName, fileSize: m.fileSize, caption: m.caption, mentions: m.mentions, mentionSpans: m.mentionSpans, mentionAll: m.mentionAll, sysSegments: m.sysSegments, timestamp: m.timestamp,
+    sysEvent: m.sysEvent, sysArgs: m.sysArgs,
     serverMsgId: m.serverMsgId, // 保留真实 server_msg_id（举报消息按它定位）
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
-    replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
+    replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot, replySnapshotKind: m.replySnapshotKind, replySnapshotArgs: m.replySnapshotArgs, replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
     groupId: m.groupId, posterUrl: m.posterUrl,
     mediaW: m.mediaW, mediaH: m.mediaH, duration: m.duration, thumb: m.thumb, waveform: m.waveform,
   };
@@ -242,17 +243,17 @@ async function loadConversation(owner: string, convId: string): Promise<ChatMess
             clientMsgId: r.clientMsgId,
             convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionSpans: r.mentionSpans, mentionAll: r.mentionAll,
             convSeq: 0, timestamp: r.timestamp, status: "failed" as const, note: r.note,
-            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
+            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replySnapshotKind: r.replySnapshotKind, replySnapshotArgs: r.replySnapshotArgs, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
             mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb, waveform: r.waveform,
           }
         : {
             serverMsgId: r.serverMsgId ?? r.id, // 真实 server_msg_id（旧记录无此字段则回退复合键）
             convId: r.convId, from: r.from, fromNickname: r.fromNickname, fromRole: r.fromRole, content: r.content, contentType: r.contentType, fileName: r.fileName, fileSize: r.fileSize, caption: r.caption, mentions: r.mentions, mentionSpans: r.mentionSpans, mentionAll: r.mentionAll,
-            sysSegments: r.sysSegments,
+            sysSegments: r.sysSegments, sysEvent: r.sysEvent, sysArgs: r.sysArgs,
             convSeq: r.convSeq, timestamp: r.timestamp, status: "received" as const,
             recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
-            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
+            replyToConvSeq: r.replyToConvSeq, replySnapshot: r.replySnapshot, replySnapshotKind: r.replySnapshotKind, replySnapshotArgs: r.replySnapshotArgs, replyToFrom: r.replyToFrom, forwardFrom: r.forwardFrom,
             groupId: r.groupId, posterUrl: r.posterUrl,
             mediaW: r.mediaW, mediaH: r.mediaH, duration: r.duration, thumb: r.thumb, waveform: r.waveform,
           },

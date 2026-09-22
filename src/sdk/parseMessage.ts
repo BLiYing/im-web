@@ -9,6 +9,16 @@ import { parseMentionSpans } from "../mention";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/** 脏数据安全地把一个 JSON 值收成 `Record<string,string>`：非对象一律 undefined；非字符串的值丢弃（P3 sys_args/reply_snapshot_args）。 */
+function parseStringRecord(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string") out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** 把一帧消息负载解析成 ChatMessage。入参是**未经校验**的服务端 JSON，一切取值都要自带兜底。 */
 export function parseIncomingMessage(d: any): ChatMessage {
   return {
@@ -32,6 +42,9 @@ export function parseIncomingMessage(d: any): ChatMessage {
     pinnedAt: d.pinned_at || undefined,
     replyToConvSeq: d.reply_to_conv_seq || undefined,
     replySnapshot: d.reply_snapshot || undefined,
+    // P3：引用快照结构化种类 + 参数（脏数据安全：非字符串/空串一律按未识别处理，渲染回退 replySnapshot 整句）。
+    replySnapshotKind: typeof d.reply_snapshot_kind === "string" && d.reply_snapshot_kind ? d.reply_snapshot_kind : undefined,
+    replySnapshotArgs: parseStringRecord(d.reply_snapshot_args),
     replyToFrom: d.reply_to_from || undefined,
     forwardFrom: d.forward_from || undefined,
     groupId: d.group_id || undefined,
@@ -50,5 +63,8 @@ export function parseIncomingMessage(d: any): ChatMessage {
     // 系统消息分段（名字可点 + 换本地显示名）：脏数据安全——非数组/无 text 的项一律丢弃，
     // 一段都不剩就按"无分段"处理，渲染回退 content 整句（与历史系统消息同款）。
     sysSegments: parseSysSegments(d.sys_segments),
+    // P3：系统消息/系统通知的结构化事件 + 参数（脏数据安全同上；空/未识别时渲染回退 sysSegments/content）。
+    sysEvent: typeof d.sys_event === "string" && d.sys_event ? d.sys_event : undefined,
+    sysArgs: parseStringRecord(d.sys_args),
   };
 }

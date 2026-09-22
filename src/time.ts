@@ -16,6 +16,15 @@ export function fullDate(d: Date): string {
   return t("time.full_date", { year: d.getFullYear(), month: monthLabel(d), day: d.getDate() });
 }
 
+/** 「年月日 时:分」统一口径（与 iOS `IMFormatFileDateTime` 对齐）：详情页语音/名片/文件/链接四个 tab、
+ *  系统通知（登录/改密/被踢下线）的 `{at}` 占位符共用，别再各写一遍。日期部分复用 fullDate（随语言变）。 */
+export function fullDateTime(ts: number): string {
+  if (!ts || ts <= 0) return "";
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${fullDate(d)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 /** 把毫秒时间戳格式化为时分。24 小时制 = "HH:mm"；12 小时制 = "h:mm AM/PM"。 */
 export function formatTime(ts: number, fmt: TimeFormat = "24"): string {
   if (!ts) return "";

@@ -65,4 +65,17 @@ describe("convPreview", () => {
     const c = conv({ from: PEER, content_type: "system", content: "用户1002 邀请 用户1001 加入群聊" }, { is_group: true });
     expect(convPreview(c, deps)).toBe("用户1002 邀请 用户1001 加入群聊");
   });
+  // P3：sys_event/sys_args 随 last_message 下发时，预览按 §1 同一套算法本地化——不挂点击，
+  // 人名槽位直接用解析后的纯文本（与聊天页系统行共用 buildGroupSysSegments，只是不再走 renderSysLine）。
+  it("P3：sys_event 非空时按事件模板重建、名字换本机显示名（不可点，纯文本）", () => {
+    const c = conv({
+      from: PEER, content_type: "system", sys_event: "member_remove",
+      sys_segments: [{ uid: PEER, text: "老王" }, { uid: "1003", text: "小赵" }],
+    }, { is_group: true });
+    expect(convPreview(c, deps)).toBe("老王 将 小赵 移出群聊");
+  });
+  it("P3：sys_event 不认识/为空则回退 sys_segments/content（不破坏现有回退路径）", () => {
+    const unknown = conv({ from: PEER, content_type: "system", sys_event: "some_future_event", content: "整句兜底" }, { is_group: true });
+    expect(convPreview(unknown, deps)).toBe("整句兜底");
+  });
 });

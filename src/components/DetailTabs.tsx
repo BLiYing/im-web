@@ -20,17 +20,7 @@ import { parseContactCard } from "../contactCard";
 import { VoiceBubble } from "./VoiceBubble";
 import type { LinkPreview } from "./LinkCard";
 import { useT } from "../i18n";
-import { fullDate } from "../time";
-
-/** 详情页各 tab 的统一时间口径（"年月日 时:分"，与 iOS IMFormatFileDateTime 对齐）：
- *  语音 / 名片 / 文件 / 链接四个 tab 共用一套格式，别再各写各的。
- *  日期部分复用 time.ts 的 fullDate（文案表 time.full_date，随语言变：英文走 "Sep 21, 2025" 短月名）。 */
-function detailFullDateTime(ts: number): string {
-  if (!ts || ts <= 0) return "";
-  const d = new Date(ts);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${fullDate(d)} ${p(d.getHours())}:${p(d.getMinutes())}`;
-}
+import { fullDateTime as detailFullDateTime } from "../time";
 
 export type DetailTab = "members" | "media" | "files" | "voice" | "links" | "contacts";
 

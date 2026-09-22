@@ -5,6 +5,7 @@ import type { ChatMessage, Favorite } from "./sdk/protocol";
 import { mediaDisplaySize } from "./media";
 import { CALL_CONTENT_TYPE } from "./callRecord";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
+import { t as i18nT, type Args } from "./i18n";
 
 /** 整条内容就是一个 http(s) 链接 → 按链接样式渲染（URL 消息 v1，与 iOS IMLooksLikeURL 对齐）。 */
 export const isUrlText = (s: string) => /^https?:\/\/\S+$/.test(s);
@@ -56,13 +57,19 @@ export function chatRecordSnippet(json: string): string {
 }
 export const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.includes('"items"') || s.includes('"t":'));
 
-/** 服务端冻结的英文媒体快照（[image]/[video]/[file]）本地化为中文（与 iOS IMLocalizeSnippet 对齐）。 */
-export const localizeSnippet = (s: string) =>
-  s === "[image]" ? "[图片]" : s === "[video]" ? "[视频]"
-  : s === "[file]" ? "[文件]" : s.startsWith("[file] ") ? "[文件] " + s.slice(7) // 文件带原名（M4-x）
-  : s === "[chat_record]" ? "[聊天记录]" // 旧服务端 token（无标题）兜底
-  : s === "[call]" ? "[音视频通话]"        // 服务端裸 call token 兜底（引用快照预本地化为 [音视频通话]）
-  : s === "[contact]" ? "[个人名片]"      // 同上：老服务端下发的裸 contact token
+/**
+ * 服务端冻结的英文媒体快照 token（`[image]`/`[video]`/…）本地化为当前 App 语言（与 iOS
+ * IMLocalizeSnippet 对齐）。**真实 bug 修复（P3）**：此前硬编码中文输出，英文界面下引用条
+ * 一直显中文——不传 `translate` 时默认用模块级 `t()`（调用时刻的语言，非模块顶层求值）；
+ * `MessageList.tsx` 这类组件应传 `useT()` 的 `tr` 以便切语言即时重渲染。
+ * `[chat_record]` 的 JSON 整段救援（`looksLikeChatRecordJSON`）仍走 `chatRecordSnippet`——
+ * 那是本端 `replyPreviewOf` 共用的老函数、标题本身来自消息内容而非文案表，不在本次范围内。 */
+export const localizeSnippet = (s: string, translate: (key: string, args?: Args) => string = i18nT): string =>
+  s === "[image]" ? translate("preview.image") : s === "[video]" ? translate("preview.video")
+  : s === "[file]" ? translate("preview.file") : s.startsWith("[file] ") ? translate("quote.snapshot.file_named", { name: s.slice(7) }) // 文件带原名（M4-x）
+  : s === "[chat_record]" ? translate("quote.snapshot.chat_record") // 旧服务端 token（无标题）兜底
+  : s === "[call]" ? translate("quote.snapshot.call")        // 服务端裸 call token 兜底
+  : s === "[contact]" ? translate("quote.snapshot.contact")  // 同上：老服务端下发的裸 contact token
   // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
   : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
 
