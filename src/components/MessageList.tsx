@@ -23,7 +23,7 @@ import {
 } from "../messageContent";
 import { IdCard } from "lucide-react";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
-import { CALL_CONTENT_TYPE, CALL_FALLBACK_TEXT, renderCallRecord } from "../callRecord";
+import { CALL_CONTENT_TYPE, renderCallRecord } from "../callRecord";
 import { placeSingleCall } from "../rtc/rtcCall";
 import { CallRecordBody, CallSysItem } from "./CallRecordBubble";
 import { Avatar } from "./Avatar";
@@ -181,10 +181,10 @@ export function MessageList(p: MessageListProps) {
         // 群聊 = 居中系统条（不可点）；解析失败 = 灰色一行兜底，绝不显示 JSON。
         const callView = m.contentType === CALL_CONTENT_TYPE
           ? renderCallRecord(m.content, { viewerIsSender: mine, isGroup: isGroupChat,
-              senderName: mine ? undefined : localNameOf(m.from, m.convId, m.fromNickname) })
+              senderName: mine ? undefined : localNameOf(m.from, m.convId, m.fromNickname) }, tr)
           : null;
         if (m.contentType === CALL_CONTENT_TYPE && (!callView || !callView.tappable)) {
-          return <CallSysItem key={msgKey(m)} seq={m.convSeq} text={callView?.text ?? CALL_FALLBACK_TEXT}
+          return <CallSysItem key={msgKey(m)} seq={m.convSeq} text={callView?.text ?? tr("call.record.unsupported")}
                               dateLabel={showDate ? dayHeader(m.timestamp) : ""} unread={i === firstUnreadIdx} dividerRef={dividerRef} />;
         }
         // 相册宫格（M4+）：同 group_id 聚簇——主行渲染整个宫格，从行跳过。多选态**同样聚簇**：整组作为一个
@@ -380,11 +380,11 @@ export function MessageList(p: MessageListProps) {
                   </span>
                 ) : m.contentType === "chat_record" ? (
                   // 合并转发卡片（镜像 iOS）：标题 + 前几条预览 + 脚注，点击进详情。
-                  (() => { const r = parseChatRecord(m.content); return (
+                  (() => { const r = parseChatRecord(m.content, tr); return (
                     <div className="record-card" onClick={() => setRecordStack([r])}>
                       <div className="record-title">{r.t}</div>
                       <div className="record-preview">{r.items.slice(0, 4).map((it, i) => (
-                        <div key={i} className="record-line">{it.n}: {recordItemPreview(it)}</div>
+                        <div key={i} className="record-line">{it.n}: {recordItemPreview(it, tr)}</div>
                       ))}</div>
                       {/* 脚注行 = 左「聊天记录」+ 右「时间/勾」，与 iOS IMChatRecordCell 的
                           `_footer` 与 `_meta` 同排同布局。时间放进卡片内而不是卡片下方，

@@ -2,12 +2,16 @@
 // content 是极小 JSON：{"cid","m","r","d"[,"g":1]}——call_id / 媒体类型 / 结束原因 / 服务端给的秒数 / 群通话标记。
 // 设计见 IMServer docs/design/CALL_RECORD_DESIGN.md，文案矩阵以 UX 稿 §02 为准；
 // 与 iOS / Android 逐条同口径，**三端共用测试向量**（src/testing/callRecord.vectors.json，源：IMServer docs/conformance/call_record.json）。
+//
+// 2026-09-22 P3 修复：渲染函数此前全是硬编码中文字面量，不看 App 当前语言（与 iOS IMCallRecordRender
+// 早已本地化不同，是本端遗留的 SYMMETRY 缺口）。改按 i18n 文案表 call.record.* 取当前语言；
+// 用到的键与 iOS IMCallRecord.m 逐条同口径，不新增文案。
+import { t as i18nT, type Args } from "./i18n";
 
 /** call 消息的 content_type 常量（与后端 store.ContentTypeCall 一致）。 */
 export const CALL_CONTENT_TYPE = "call";
 
-/** 旧版兜底文案：无法解析时显示，禁止把 JSON 原文露出来。 */
-export const CALL_FALLBACK_TEXT = "[音视频通话] 请升级新版查看";
+type Translate = (key: string, args?: Args) => string;
 
 export type CallMedia = "audio" | "video";
 
@@ -44,13 +48,13 @@ const KNOWN_REASONS = new Set([
   "network", "room_closed", "kicked", "error",
 ]);
 
-/** 主叫看到 / 被叫看到的未接通文案（UX 稿 §02）。 */
-const UNANSWERED_TEXT: Record<string, readonly [caller: string, callee: string]> = {
-  cancel: ["已取消", "未接来电"],
-  reject: ["对方已拒绝", "已拒绝"],
-  no_answer: ["对方无应答", "未接来电"],
-  busy: ["对方忙线", "未接来电"],
-  offline: ["对方不在线", "未接来电"],
+/** 主叫看到 / 被叫看到的未接通文案键（UX 稿 §02）。表里放文案**键**，不在模块顶层取文案，否则切语言不会变。 */
+const UNANSWERED_KEYS: Record<string, readonly [caller: string, callee: string]> = {
+  cancel: ["call.record.cancelled", "call.record.missed"],
+  reject: ["call.record.declined_by_peer", "call.record.declined"],
+  no_answer: ["call.record.peer_no_answer", "call.record.missed"],
+  busy: ["call.record.peer_busy", "call.record.missed"],
+  offline: ["call.record.peer_offline", "call.record.missed"],
 };
 
 /** 时长格式：<1h → mm:ss；≥1h → h:mm:ss。 */
@@ -145,55 +149,60 @@ export interface CallViewer {
   senderName?: string;
 }
 
-/** 渲染一条通话记录；解析失败返回 null。 */
-export function renderCallRecord(content: string | undefined | null, v: CallViewer): CallRender | null {
+/** 渲染一条通话记录；解析失败返回 null。`translate` 默认取模块级 `t()`（调用时刻取语言）；
+ *  组件内渲染要传 `useT()` 的 `tr`，否则切语言不会立即重渲染这条气泡/系统条（见文件头 2026-09-22 注）。 */
+export function renderCallRecord(content: string | undefined | null, v: CallViewer, translate: Translate = i18nT): CallRender | null {
   const rec = parseCallRecord(content);
   if (!rec) return null;
   const reason = KNOWN_REASONS.has(rec.reason) ? rec.reason : "error";
-  return v.isGroup ? renderGroup(rec, reason, v) : renderSingle(rec, reason, v);
+  return v.isGroup ? renderGroup(rec, reason, v, translate) : renderSingle(rec, reason, v, translate);
 }
 
-function renderSingle(rec: CallRecord, reason: string, v: CallViewer): CallRender {
+function renderSingle(rec: CallRecord, reason: string, v: CallViewer, t: Translate): CallRender {
   let text: string;
   let tone: CallTone = "normal";
-  const row = UNANSWERED_TEXT[reason];
+  const row = UNANSWERED_KEYS[reason];
   if (rec.durationSec > 0) {
-    text = `通话时长 ${formatCallDuration(rec.durationSec)}`;
+    text = t("call.record.duration", { duration: formatCallDuration(rec.durationSec) });
   } else if (row) {
-    text = v.viewerIsSender ? row[0] : row[1];
+    text = t(v.viewerIsSender ? row[0] : row[1]);
     // 只有被叫侧真正错过的才红；被叫自己拒绝不红。
     if (!v.viewerIsSender && reason !== "reject") tone = "missed";
   } else {
-    text = "通话未接通";
+    text = t("call.record.not_connected");
   }
-  const prefix = rec.media === "video" ? "[视频通话]" : "[语音通话]";
-  return { icon: rec.media, text, tone, tappable: true, preview: `${prefix} ${text}` };
+  const previewKey = rec.media === "video" ? "call.record.preview_video" : "call.record.preview_voice";
+  return { icon: rec.media, text, tone, tappable: true, preview: t(previewKey, { text }) };
 }
 
-function renderGroup(rec: CallRecord, reason: string, v: CallViewer): CallRender {
-  const who = v.viewerIsSender ? "你" : (v.senderName ?? "");
-  const kind = rec.media === "video" ? "视频" : "语音";
+function renderGroup(rec: CallRecord, reason: string, v: CallViewer, t: Translate): CallRender {
+  // senderName 缺失（理论上不该发生，防御性兜底）→ 退「对方」，与 iOS IMCallRecordRender.groupText 同口径
+  // （此前这里是裸 `?? ""`，会渲染成缺主语的空洞句子——顺手一并修的 SYMMETRY 缺口）。
+  const who = v.viewerIsSender ? t("call.record.who_self") : (v.senderName || t("call.record.who_peer"));
+  const kind = t(rec.media === "video" ? "call.record.kind_video" : "call.record.kind_voice");
   let text: string;
   let brief: string;
   if (rec.durationSec > 0) {
-    text = `${who}发起的群${kind}通话，时长 ${formatCallDuration(rec.durationSec)}`;
-    brief = `时长 ${formatCallDuration(rec.durationSec)}`;
+    const duration = formatCallDuration(rec.durationSec);
+    text = t("call.record.group_duration", { who, kind, duration });
+    brief = t("call.record.tail_duration", { duration });
   } else if (reason === "no_answer") {
-    text = `${who}发起的群${kind}通话，无人接听`;
-    brief = "无人接听";
+    text = t("call.record.group_no_answer", { who, kind });
+    brief = t("call.record.tail_no_answer");
   } else if (reason === "cancel") {
-    text = `${who}取消了群${kind}通话`;
-    brief = "已取消";
+    text = t("call.record.group_cancelled", { who, kind });
+    brief = t("call.record.cancelled");
   } else {
-    text = "群通话已结束";
-    brief = "已结束";
+    text = t("call.record.group_ended");
+    brief = t("call.record.tail_ended");
   }
-  return { icon: rec.media, text, tone: "normal", tappable: false, preview: `[群${kind}通话] ${brief}` };
+  const previewKey = rec.media === "video" ? "call.record.preview_group_video" : "call.record.preview_group_voice";
+  return { icon: rec.media, text, tone: "normal", tappable: false, preview: t(previewKey, { tail: brief }) };
 }
 
 /** 会话列表预览用：解析失败回落 `[音视频通话]`（不漏 JSON）。 */
-export function callRecordPreview(content: string | undefined | null, v: CallViewer): string {
-  return renderCallRecord(content, v)?.preview ?? "[音视频通话]";
+export function callRecordPreview(content: string | undefined | null, v: CallViewer, translate: Translate = i18nT): string {
+  return renderCallRecord(content, v, translate)?.preview ?? translate("quote.snapshot.call");
 }
 
 /** 会话列表这一行是否整行红（被叫侧未接来电）。 */

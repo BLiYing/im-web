@@ -18,19 +18,20 @@ import { buildGroupSysSegments } from "./sysEventRender";
 /** 会话列表预览的类型占位。
  *
  *  `extra` 不是可选的点缀：**voice 与 contact 需要 content_type 之外的东西**
- *  （时长 / 名片快照里的昵称），不给就分别退化成没有时长的 `[语音]` 和一整串 JSON。 */
+ *  （时长 / 名片快照里的昵称），不给就分别退化成没有时长的 `[语音]` 和一整串 JSON。
+ *  2026-09-22 P3 修复：此前硬编码中文，不跟 App 语言；改用模块级 t()（同文件已有先例，见下方 convPreview）。 */
 export function mediaPreview(ct: string, extra?: { duration?: number; content?: string; viewerIsSender?: boolean; isGroup?: boolean }): string | null {
-  if (ct === "image") return "[图片]";
-  if (ct === "video") return "[视频]";
-  if (ct === "file") return "[文件]";
-  if (ct === "chat_record") return "[聊天记录]";
-  if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(extra?.content);
+  if (ct === "image") return t("preview.image");
+  if (ct === "video") return t("preview.video");
+  if (ct === "file") return t("preview.file");
+  if (ct === "chat_record") return t("preview.chat_record");
+  if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(extra?.content, t);
   // 通话记录：文案按「看的人」的视角（主叫 / 被叫两套），所以必须带上 viewerIsSender。
-  if (ct === CALL_CONTENT_TYPE) return callRecordPreview(extra?.content, { viewerIsSender: !!extra?.viewerIsSender, isGroup: !!extra?.isGroup });
+  if (ct === CALL_CONTENT_TYPE) return callRecordPreview(extra?.content, { viewerIsSender: !!extra?.viewerIsSender, isGroup: !!extra?.isGroup }, t);
   if (ct === "voice") {
     const ms = extra?.duration ?? 0;
     const s = Math.max(0, Math.floor(ms / 1000));
-    return `[语音] ${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    return t("preview.voice_duration", { duration: `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}` });
   }
   return null;
 }

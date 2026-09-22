@@ -66,7 +66,7 @@ export function ChatBanners(p: {
                   <span className="pin-banner-from">· {pinnedSenderLabel(p.pinnedShown!, p.isGroupChat)}</span>
                 )}
               </span>
-              <span className="pin-banner-text">{pinnedPreview(p.pinnedShown!)}</span>
+              <span className="pin-banner-text">{pinnedPreview(p.pinnedShown!, tr)}</span>
             </span>
           </button>
           {p.activePinned.length > 1 && (

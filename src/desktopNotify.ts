@@ -7,6 +7,7 @@
 import type { Conversation } from "./sdk/protocol";
 import type { ChatMessage } from "./sdk/protocol";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
+import { t as i18nT } from "./i18n";
 
 /**
  * Dock / 任务栏角标数。
@@ -61,19 +62,20 @@ export function shouldNotify(msg: ChatMessage, ctx: NotifyContext): boolean {
   return true;
 }
 
-/** 通知正文。媒体消息的 content 是 URL，直接显出来是一串路径——按类型给可读占位。 */
+/** 通知正文。媒体消息的 content 是 URL，直接显出来是一串路径——按类型给可读占位。
+ *  2026-09-22 P3 修复：此前硬编码中文，不跟 App 语言；渲染进程内有 i18n 可用，直接取模块级 `t()`。 */
 export function notifyBodyOf(msg: ChatMessage): string {
-  const t = msg.contentType;
-  if (!t || t === "text") return (msg.content || "").slice(0, 120);
+  const ct = msg.contentType;
+  if (!ct || ct === "text") return (msg.content || "").slice(0, 120);
   if (msg.caption) return msg.caption.slice(0, 120);   // 图说优先于类型占位
-  switch (t) {
-    case "image": return "[图片]";
-    case "video": return "[视频]";
-    case "voice": return "[语音]";
-    case "file": return msg.fileName ? `[文件] ${msg.fileName}` : "[文件]";
-    case "contact": return "[名片]";
-    case CALL_CONTENT_TYPE: return "[未接来电]";   // shouldNotify 已放行的只有被叫未接
-    case "chat_record": return "[聊天记录]";
-    default: return "[消息]";
+  switch (ct) {
+    case "image": return i18nT("preview.image");
+    case "video": return i18nT("preview.video");
+    case "voice": return i18nT("preview.voice");
+    case "file": return msg.fileName ? i18nT("quote.snapshot.file_named", { name: msg.fileName }) : i18nT("preview.file");
+    case "contact": return i18nT("notify.body.contact");
+    case CALL_CONTENT_TYPE: return i18nT("notify.body.missed_call");   // shouldNotify 已放行的只有被叫未接
+    case "chat_record": return i18nT("preview.chat_record");
+    default: return i18nT("notify.body.default");
   }
 }

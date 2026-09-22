@@ -108,11 +108,11 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
                 <RecordVoiceItem it={it} index={i} uid={uid} />
               ) : it.ct === "chat_record" ? (
                 // 套娃 mini 卡片：标题 + 前 2 行预览 + 脚注；点击入栈进子记录（任意深度）。sub 走 nestedAt 缓存。
-                (() => { const sub = nestedAt(i) ?? parseChatRecord(it.c); return (
+                (() => { const sub = nestedAt(i) ?? parseChatRecord(it.c, tr); return (
                   <div className="record-card record-card-nested" onClick={() => onDrill(sub)}>
                     <div className="record-title">{sub.t}</div>
                     <div className="record-preview">{sub.items.slice(0, 2).map((si, k) => (
-                      <div key={k} className="record-line">{si.n}: {recordItemPreview(si)}</div>
+                      <div key={k} className="record-line">{si.n}: {recordItemPreview(si, tr)}</div>
                     ))}</div>
                     <div className="record-foot">{tr("record.chat_history")} ›</div>
                   </div>

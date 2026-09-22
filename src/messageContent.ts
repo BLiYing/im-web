@@ -44,8 +44,10 @@ export function splitTextByURL(text: string): Array<{ kind: "t" | "u"; text: str
 }
 
 /** 合并转发卡片的引用快照：`[聊天记录] 标题`。兼容存量截断快照（旧引用把 JSON 截 60 字入库，
- *  解析不出时正则抠 "t":"…" 标题）；全失败回落 `[聊天记录]`。与 iOS IMChatRecordSnippet 同语义。 */
-export function chatRecordSnippet(json: string): string {
+ *  解析不出时正则抠 "t":"…" 标题）；全失败回落 `[聊天记录]`。与 iOS IMChatRecordSnippet 同语义。
+ *  2026-09-22 P3 修复：标签本身（`[聊天记录]`）此前硬编码中文——标题 `title` 来自消息内容本身，
+ *  原样透出（不是文案表的范围），但标签要跟随 App 语言，同 localizeSnippet 的 translate 参数口径。 */
+export function chatRecordSnippet(json: string, translate: (key: string, args?: Args) => string = i18nT): string {
   let title = "";
   try {
     const o = JSON.parse(json);
@@ -53,7 +55,7 @@ export function chatRecordSnippet(json: string): string {
   } catch {
     title = /"t":"([^"]*)"/.exec(json)?.[1] ?? "";
   }
-  return title ? `[聊天记录] ${title}` : "[聊天记录]";
+  return title ? translate("quote.snapshot.chat_record_titled", { title }) : translate("preview.chat_record");
 }
 export const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.includes('"items"') || s.includes('"t":'));
 
@@ -62,8 +64,9 @@ export const looksLikeChatRecordJSON = (s: string) => s.startsWith("{") && (s.in
  * IMLocalizeSnippet 对齐）。**真实 bug 修复（P3）**：此前硬编码中文输出，英文界面下引用条
  * 一直显中文——不传 `translate` 时默认用模块级 `t()`（调用时刻的语言，非模块顶层求值）；
  * `MessageList.tsx` 这类组件应传 `useT()` 的 `tr` 以便切语言即时重渲染。
- * `[chat_record]` 的 JSON 整段救援（`looksLikeChatRecordJSON`）仍走 `chatRecordSnippet`——
- * 那是本端 `replyPreviewOf` 共用的老函数、标题本身来自消息内容而非文案表，不在本次范围内。 */
+ * `[chat_record]` 的 JSON 整段救援（`looksLikeChatRecordJSON`）走 `chatRecordSnippet`——已随本批
+ * 一并改用 `translate`（2026-09-22），故这里把同一个 `translate` 传下去，不能落回默认参数
+ * （否则救援分支会用非响应式的模块级 `t()`，切语言时这一条不跟着重渲染）。 */
 export const localizeSnippet = (s: string, translate: (key: string, args?: Args) => string = i18nT): string =>
   s === "[image]" ? translate("preview.image") : s === "[video]" ? translate("preview.video")
   : s === "[file]" ? translate("preview.file") : s.startsWith("[file] ") ? translate("quote.snapshot.file_named", { name: s.slice(7) }) // 文件带原名（M4-x）
@@ -71,18 +74,24 @@ export const localizeSnippet = (s: string, translate: (key: string, args?: Args)
   : s === "[call]" ? translate("quote.snapshot.call")        // 服务端裸 call token 兜底
   : s === "[contact]" ? translate("quote.snapshot.contact")  // 同上：老服务端下发的裸 contact token
   // 存量救援：旧版引用聊天记录卡片时把整段 JSON 存进快照 → 就地救成「[聊天记录] 标题」。
-  : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s) : s;
+  : looksLikeChatRecordJSON(s) ? chatRecordSnippet(s, translate) : s;
 
-/** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。 */
-export const replyPreviewOf = (m: ChatMessage): string =>
-  // 图说 caption「有字显字」：图文/视频文/文件文带 caption 时引用条显 caption 文字（与服务端冻结快照同口径）。
-  m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file") ? m.caption.slice(0, 60)
-  : m.contentType === "image" ? "[图片]" : m.contentType === "video" ? "[视频]"
-  : m.contentType === "file" ? ("[文件] " + (m.fileName || fileNameFromContent(m.content))).trimEnd()
-  : m.contentType === "chat_record" ? chatRecordSnippet(m.content)
-  : m.contentType === CONTACT_CONTENT_TYPE ? contactCardPreview(m.content)
-  : m.contentType === CALL_CONTENT_TYPE ? "[音视频通话]"    // 通话记录不可被引用；防御：万一有，快照也别露 JSON
-  : (m.content || "").slice(0, 60);
+/** 引用某条消息时的本端快照预览：媒体 → [图片]/[视频]/[文件]，文本截 60 字。
+ *  2026-09-22 P3 修复：`translate` 同 `localizeSnippet` 口径，默认模块级 `t()`；组件内传 `useT()` 的 `tr`。 */
+export function replyPreviewOf(m: ChatMessage, translate: (key: string, args?: Args) => string = i18nT): string {
+  // 图说「有字显字」：图文/视频文/文件文带 caption 时引用条显 caption 文字（与服务端冻结快照同口径）。
+  if (m.caption && (m.contentType === "image" || m.contentType === "video" || m.contentType === "file")) return m.caption.slice(0, 60);
+  if (m.contentType === "image") return translate("preview.image");
+  if (m.contentType === "video") return translate("preview.video");
+  if (m.contentType === "file") {
+    const fn = m.fileName || fileNameFromContent(m.content);
+    return fn ? translate("quote.snapshot.file_named", { name: fn }) : translate("preview.file");
+  }
+  if (m.contentType === "chat_record") return chatRecordSnippet(m.content, translate);
+  if (m.contentType === CONTACT_CONTENT_TYPE) return contactCardPreview(m.content, translate);
+  if (m.contentType === CALL_CONTENT_TYPE) return translate("quote.snapshot.call"); // 通话记录不可被引用；防御：万一有，快照也别露 JSON
+  return (m.content || "").slice(0, 60);
+}
 
 /** 「可搜索/可选/可定位」的消息：已确认（convSeq>0）、非撤回、非系统提示。搜索命中集、日历活跃日、多选勾选共用此一处谓词。 */
 export const isSearchableMessage = (m: Pick<ChatMessage, "convSeq"> & { recalledAt?: number; contentType?: string }): boolean =>
@@ -171,34 +180,42 @@ export function buildRecordSenderKeys(froms: (string | undefined)[]): Map<string
   }
   return keys;
 }
-export function parseChatRecord(content: string): ChatRecord {
+/** `t` 缺省（老快照 / 解析失败）时的兜底标题跟随 App 语言——与 iOS `IMSummarizeRecord`/
+ *  `record.chat_history` 同口径（2026-09-22 P3 修复；此前硬编码中文，默认模块级 `t()`）。 */
+export function parseChatRecord(content: string, translate: (key: string, args?: Args) => string = i18nT): ChatRecord {
+  const fallbackTitle = translate("record.chat_history");
   try {
     const o = JSON.parse(content);
-    if (o && typeof o === "object") return { t: typeof o.t === "string" ? o.t : "聊天记录", items: Array.isArray(o.items) ? o.items : [] };
+    if (o && typeof o === "object") return { t: typeof o.t === "string" ? o.t : fallbackTitle, items: Array.isArray(o.items) ? o.items : [] };
   } catch { /* 非法 JSON */ }
-  return { t: "聊天记录", items: [] };
+  return { t: fallbackTitle, items: [] };
 }
-export const recordItemPreview = (it: RecordItem): string => {
+export function recordItemPreview(it: RecordItem, translate: (key: string, args?: Args) => string = i18nT): string {
   // 图说合并转发「有字显字」：媒体/文件条目带 cap（caption）时优先显文字，否则回退 [图片]/[视频]/[文件名]。
   if (it.cap && (it.ct === "image" || it.ct === "video" || it.ct === "file")) return it.cap.slice(0, 60);
-  if (it.ct === "image") return "[图片]";
-  if (it.ct === "video") return "[视频]";
-  if (it.ct === "file") return `[文件] ${it.fn || fileNameFromContent(it.c)}`.trimEnd();
-  if (it.ct === CONTACT_CONTENT_TYPE) return contactCardPreview(it.c);
-  if (it.ct === CALL_CONTENT_TYPE) return "[音视频通话]";
+  if (it.ct === "image") return translate("preview.image");
+  if (it.ct === "video") return translate("preview.video");
+  if (it.ct === "file") {
+    const fn = it.fn || fileNameFromContent(it.c);
+    return fn ? translate("quote.snapshot.file_named", { name: fn }) : translate("preview.file");
+  }
+  if (it.ct === CONTACT_CONTENT_TYPE) return contactCardPreview(it.c, translate);
+  if (it.ct === CALL_CONTENT_TYPE) return translate("quote.snapshot.call");
   // 语音条目：预览显 [语音] m:ss（有 d 才带时长），别把 URL 铺进套娃卡片的两行预览里。
   if (it.ct === "voice" || it.ct === "audio") {
-    const sec = Math.max(0, Math.floor((it.d ?? 0) / 1000));
-    return it.d ? `[语音] ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` : "[语音]";
+    if (!it.d) return translate("preview.voice");
+    const sec = Math.max(0, Math.floor(it.d / 1000));
+    return translate("preview.voice_duration", { duration: `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}` });
   }
   // 嵌套合并转发：预览显「[聊天记录] 子标题」，不铺子卡片 JSON 原文（套娃卡片）；
-  // 子 JSON 非法时 parseChatRecord 回落标题「聊天记录」，此时不再叠加以免「[聊天记录] 聊天记录」。
+  // 子 JSON 非法时 parseChatRecord 回落本地化默认标题，此时不再叠加以免重复（同 record.chat_history）。
   if (it.ct === "chat_record") {
-    const t = parseChatRecord(it.c).t;
-    return t && t !== "聊天记录" ? `[聊天记录] ${t}` : "[聊天记录]";
+    const t = parseChatRecord(it.c, translate).t;
+    const fallback = translate("record.chat_history");
+    return t && t !== fallback ? translate("quote.snapshot.chat_record_titled", { title: t }) : translate("preview.chat_record");
   }
   return it.c;
-};
+}
 
 /** 从文件消息 URL 取原始显示名：存储名 <随机>__<原名>.<ext> → 取 "__" 之后并解码（与后端/iOS 对齐）。 */
 export function fileNameFromContent(content: string): string {

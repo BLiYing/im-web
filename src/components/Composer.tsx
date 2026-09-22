@@ -234,7 +234,7 @@ export function Composer(p: ComposerProps) {
             {!replyTo.caption && <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />}
             <div className="reply-compose-text">
               <span className="reply-who">{tr("chat.reply.who", { name: replyTo.from === uid ? tr("chat.reply.self") : (isGroupChat ? senderLabel(replyTo) : peerLabel) })}</span>
-              <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>
+              <span className="reply-snippet">{replyPreviewOf(replyTo, tr)}</span>
             </div>
           </div>
           <button className="reply-cancel" onClick={() => setReplyTo(null)} title={tr("chat.reply.cancel")}>✕</button>

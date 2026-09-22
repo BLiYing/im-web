@@ -240,7 +240,7 @@ export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onCheck, onMenu
   }
   let icon: ReactNode, body: ReactNode;
   if (k === "record") {
-    const r = parseChatRecord(f.content);
+    const r = parseChatRecord(f.content, tr);
     icon = <MessagesSquare size={22} />;
     body = <div className="fav-content">{r.t || tr("record.chat_history")}<span className="fav-record-count"> · {tr("fav.record.count", { count: r.items.length })}</span></div>;
   } else {
@@ -280,7 +280,7 @@ export function FavSourceList({ groups, conversations, myUid, convDisplayLabel, 
             <Avatar url={conv ? convAvatarUrl(conv) : undefined} label={g.isMine ? tr("common.me") : name} seed={seed} />
             <span className="fav-src-main">
               <span className="fav-src-name">{name}</span>
-              <span className="fav-src-preview">{favoritePreviewText(g.latest)}</span>
+              <span className="fav-src-preview">{favoritePreviewText(g.latest, tr)}</span>
             </span>
             <span className="fav-src-count">{g.items.length}</span>
             <ChevronRight size={16} className="fav-src-chevron" />

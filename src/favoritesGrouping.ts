@@ -4,6 +4,7 @@
 import type { Favorite } from "./sdk/protocol";
 import { looksLikeChatRecordJSON } from "./messageContent";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
+import { t as i18nT, type Args } from "./i18n";
 
 /** 「我的」桶的分组键（与真实 conv_id 不冲突）。 */
 export const MINE_GROUP_KEY = "__mine__";
@@ -44,14 +45,16 @@ export function sourceGroupName(g: FavoriteSourceGroup, resolve: (convId: string
   return resolve(g.convId) || g.convId;
 }
 
-/** 最近一条收藏的单行预览（与会话列表 [图片]/[文件] 口径一致）。 */
-export function favoritePreviewText(f: Favorite): string {
+/** 最近一条收藏的单行预览（与会话列表 [图片]/[文件] 口径一致）。
+ *  2026-09-22 P3 修复：此前硬编码中文，不跟 App 语言。`translate` 默认模块级 `t()`；
+ *  组件内传 `useT()` 的 `tr` 以便切语言即时重渲染。 */
+export function favoritePreviewText(f: Favorite, translate: (key: string, args?: Args) => string = i18nT): string {
   const ct = f.content_type;
-  if (ct === "image") return f.caption ? `[图片] ${f.caption}` : "[图片]";
-  if (ct === "video") return f.caption ? `[视频] ${f.caption}` : "[视频]";
-  if (ct === "file") return (f.file_name && f.file_name.trim()) || (f.caption ? `[文件] ${f.caption}` : "[文件]");
-  if (ct === "audio" || ct === "voice") return "[语音]";
-  if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return "[聊天记录]";
-  if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(f.content);
+  if (ct === "image") return f.caption ? translate("preview.image_captioned", { caption: f.caption }) : translate("preview.image");
+  if (ct === "video") return f.caption ? translate("preview.video_captioned", { caption: f.caption }) : translate("preview.video");
+  if (ct === "file") return (f.file_name && f.file_name.trim()) || (f.caption ? translate("preview.file_captioned", { caption: f.caption }) : translate("preview.file"));
+  if (ct === "audio" || ct === "voice") return translate("preview.voice");
+  if (ct === "chat_record" || looksLikeChatRecordJSON(f.content)) return translate("preview.chat_record");
+  if (ct === CONTACT_CONTENT_TYPE) return contactCardPreview(f.content, translate);
   return f.content;
 }

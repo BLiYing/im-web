@@ -25,7 +25,7 @@ export function PinnedListModal({ pinned, isGroupChat, timeFormat, canPin, onJum
               <button className="pinned-row-main"
                 onClick={() => { onClose(); onJump(pm.convSeq); }}>
                 <span className="pinned-row-from">{pinnedSenderLabel(pm, isGroupChat) || formatTime(pm.timestamp, timeFormat)}</span>
-                <span className="pinned-row-text">{pinnedPreview(pm)}</span>
+                <span className="pinned-row-text">{pinnedPreview(pm, tr)}</span>
               </button>
               {canPin && (
                 <button className="icon-btn" title={tr("pinned.unpin")}
