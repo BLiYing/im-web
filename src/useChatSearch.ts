@@ -11,7 +11,8 @@ import { type MsgRecord } from "./sdk/localStore";
 import { searchMessages } from "./sdk/localStore.search";
 import { minSeqOf, isSearchableMessage } from "./messageContent";
 import { messageMatchesNeedle, activeDayKeys } from "./searchPredicate";
-import { isSameDay } from "./time";
+import { isSameDay, monthDay } from "./time";
+import { t, getLang } from "./i18n";
 import { pickQuerySource, DEGRADED_SEARCH_NOTICE, DEGRADED_CALENDAR_NOTICE } from "./convQuerySource";
 import { searchConvMessages, fetchConvCalendar, localUtcOffsetMs, type CalendarDay } from "./sdk/convQueriesApi";
 import { prependOlderHits, MAX_EMPTY_PAGES, type SearchHit } from "./searchPaging";
@@ -198,7 +199,7 @@ export function useChatSearch(d: ChatSearchDeps) {
         return;
       }
     } catch {
-      if (gen === searchGenRef.current) setToast("加载更早的搜索结果失败，请重试");
+      if (gen === searchGenRef.current) setToast(t("chat.search.load_older_failed"));
     } finally {
       if (gen === searchGenRef.current) loadingOlderRef.current = false;
     }
@@ -222,7 +223,7 @@ export function useChatSearch(d: ChatSearchDeps) {
       if (!m.from || m.recalledAt || m.contentType === "system" || seen.has(m.from)) continue;
       seen.add(m.from);
       const mem = members.find((x) => x.user_id === m.from);
-      rows.push({ userId: m.from, label: m.from === uid ? "我" : (m.fromNickname || mem?.nickname || m.from), role: mem?.role, avatarUrl: mem?.avatar_url });
+      rows.push({ userId: m.from, label: m.from === uid ? t("common.me") : (m.fromNickname || mem?.nickname || m.from), role: mem?.role, avatarUrl: mem?.avatar_url });
     }
     return rows;
   }, [searchFromPickerOpen, groupConvId, groupInfos, uid, allMessages]);
@@ -273,7 +274,11 @@ export function useChatSearch(d: ChatSearchDeps) {
 
   // ===== 按日期跳转 / 日历：选日 → 跳「timestamp ≥ 当天 0 点」的首条（本机时区）=====
   const searchableMsgs = () => allMessages.filter(isSearchableMessage);
-  const monthLabel = (dt: Date) => `${dt.getFullYear()}年${dt.getMonth() + 1}月`;
+  // 月份数字/缩写口径同 time.ts 的私有 monthLabel（en 用短月名，zh 用数字串），不改 time.ts（本批不动该文件），故本地重复一份。
+  const monthLabel = (dt: Date) => t("chat.search.calendar_month_label", {
+    year: String(dt.getFullYear()),
+    month: getLang() === "en" ? dt.toLocaleDateString("en-US", { month: "short" }) : String(dt.getMonth() + 1),
+  });
   const localActiveDays = useMemo(() => activeDayKeys(allMessages), [allMessages]);
 
   // 日历打点（§4.9 第 3 项）：本地有缺口时，缺口对应的日子会静默变灰——日历"几乎全灰"这种错
@@ -325,28 +330,28 @@ export function useChatSearch(d: ChatSearchDeps) {
     const oldest = list[0]; // 升序，[0]=**本地已有**最旧（不是渲染窗口最旧）
     // 选中日早于本地最旧且本地没到会话开头（minSeq>1）→ 提示；否则会误跳本地最旧并谎称「已跳到最近的 X」（#1）。
     if (oldest && dayStart < oldest.timestamp && minSeqOf(allMessages) > 1) {
-      setToast(`${label}早于已加载范围，请上拉加载更早历史`);
+      setToast(t("chat.search.day_too_early", { label }));
       return;
     }
     const hit = list.find((m) => m.timestamp >= dayStart);
-    if (!hit) { setToast(`${label}及之后无消息`); return; }
+    if (!hit) { setToast(t("chat.search.day_no_messages", { label })); return; }
     setCalendarOpen(false);
     if (!isSameDay(hit.timestamp, dayStart)) {
       const dt = new Date(hit.timestamp);
-      setToast(`${label}无消息，已跳到最近的 ${dt.getMonth() + 1}月${dt.getDate()}日`);
+      setToast(t("chat.search.day_jump_nearest", { label, date: monthDay(dt) }));
     }
     locateInChat(convId, hit.convSeq);
   };
   const jumpToToday = () => {
-    const t = new Date(); t.setHours(0, 0, 0, 0);
+    const now = new Date(); now.setHours(0, 0, 0, 0);
     const list = searchableMsgs();
-    const hit = list.find((m) => m.timestamp >= t.getTime());
+    const hit = list.find((m) => m.timestamp >= now.getTime());
     if (hit) { setCalendarOpen(false); locateInChat(convId, hit.convSeq); return; }
     const last = list[list.length - 1]; // 今天无消息 → 跳最近一条（更早）
-    if (!last) { setToast("暂无消息"); return; }
+    if (!last) { setToast(t("chat.search.no_messages")); return; }
     setCalendarOpen(false);
     const dt = new Date(last.timestamp);
-    setToast(`今天无消息，已跳到 ${dt.getMonth() + 1}月${dt.getDate()}日`);
+    setToast(t("chat.search.today_jump_nearest", { date: monthDay(dt) }));
     locateInChat(convId, last.convSeq);
   };
   // 「最早」：跳到会话首条。**一次锚点开窗直达**——
@@ -355,10 +360,10 @@ export function useChatSearch(d: ChatSearchDeps) {
   const jumpToEarliest = () => {
     setCalendarOpen(false);
     const first = allMessages.find((m) => m.convSeq > 0);
-    if (!first) { setToast("暂无消息"); return; }
+    if (!first) { setToast(t("chat.search.no_messages")); return; }
     // 本地已有第 1 条 → 仍走统一定位（它可能不在渲染窗口里，jumpToSeq 只会滚 DOM、跨不了窗）。
     if (minSeqOf(allMessages) <= 1) { locateInChat(convId, first.convSeq); return; }
-    setToast("正在加载更早历史…");
+    setToast(t("chat.search.loading_earlier"));
     // 借道统一定位入口：目标不在窗口 → 开窗 → 到达后滚动高亮，与其他定位场景同一条路径。
     // **带 earliest 标记**：anchor=1 只是"往最前面开一窗"的写法，1 号本身常常不是一条消息
     //（msg_op 事件行 / 墓碑 / 入群前对我不可见的行都占号）。不带标记的话，服务端明明把最早

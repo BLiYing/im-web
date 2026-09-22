@@ -34,6 +34,8 @@ export interface DesktopBridge {
   getGlobalShortcut?(): Promise<GlobalShortcutState>;
   /** 返回**设完之后的真实状态**（被占用时 enabled=false、taken=true），不是回显入参。 */
   setGlobalShortcut?(on: boolean): Promise<GlobalShortcutState>;
+  /** 把语言偏好推给主进程（托盘菜单 / 原生对话框用）。旧壳没有这个桥就回落 no-op。 */
+  setLanguage?(pref: string): Promise<void>;
   subscribeOpenConversation?(cb: (convId: string) => void): () => void;
   /** 深链。回调拿到扫码原文 `q/g/<token>`；宿主只放行邀请码两种（见 types.ts）。 */
   subscribeDeepLink?(cb: (raw: string) => void): () => void;
@@ -139,6 +141,11 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
     async getGlobalShortcut(): Promise<GlobalShortcutState> {
       if (!bridge.getGlobalShortcut) { fellBack("getGlobalShortcut"); return webPlatform.getGlobalShortcut(); }
       return bridge.getGlobalShortcut();
+    },
+
+    async setLanguage(pref: string): Promise<void> {
+      if (!bridge.setLanguage) { fellBack("setLanguage"); return webPlatform.setLanguage(pref); }
+      return bridge.setLanguage(pref);
     },
 
     async setGlobalShortcut(on: boolean): Promise<GlobalShortcutState> {

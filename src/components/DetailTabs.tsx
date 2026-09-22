@@ -19,14 +19,17 @@ import { ContactRow } from "./ContactRow";
 import { parseContactCard } from "../contactCard";
 import { VoiceBubble } from "./VoiceBubble";
 import type { LinkPreview } from "./LinkCard";
+import { useT } from "../i18n";
+import { fullDate } from "../time";
 
 /** 详情页各 tab 的统一时间口径（"年月日 时:分"，与 iOS IMFormatFileDateTime 对齐）：
- *  语音 / 名片 / 文件 / 链接四个 tab 共用一套格式，别再各写各的。 */
+ *  语音 / 名片 / 文件 / 链接四个 tab 共用一套格式，别再各写各的。
+ *  日期部分复用 time.ts 的 fullDate（文案表 time.full_date，随语言变：英文走 "Sep 21, 2025" 短月名）。 */
 function detailFullDateTime(ts: number): string {
   if (!ts || ts <= 0) return "";
   const d = new Date(ts);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${fullDate(d)} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 export type DetailTab = "members" | "media" | "files" | "voice" | "links" | "contacts";
@@ -57,23 +60,24 @@ function MemberRow({ m, gp, uid, memberLabel, onOpenMember, canManageMember, onM
   canManageMember: (gp: GroupInfo, m: GroupMember) => boolean;
   onMemberMenu: (e: MouseEvent, cid: string, m: GroupMember) => void;
 }) {
+  const tr = useT();
   return (
     <div className="detail-member"
       onClick={() => m.user_id !== uid && onOpenMember(m.user_id)} role="button">
       <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
       <div className="detail-member-body">
-        <div className="detail-member-name">{memberLabel(m)}{m.user_id === uid && <span className="me-tag">我</span>}</div>
+        <div className="detail-member-name">{memberLabel(m)}{m.user_id === uid && <span className="me-tag">{tr("common.me")}</span>}</div>
         {/* 副行 = 群昵称 / @句柄 / 空。**绝不显示 user_id**——那是 10 位随机内部 ID
             （docs/design/ACCOUNT_IDENTITY_REDESIGN.md §5.2）。 */}
         <div className="detail-member-sub">{memberSubtitle(m)}</div>
       </div>
       {/* G2 被禁言标签：服务端把「永久」归一为大正数（MutePermanent = 1<<62），直接 >now 判定。
           与 role 徽标同排、居右紧挨（role 左侧），未禁言时不渲染，不占位。 */}
-      {(m.mute_until ?? 0) > Date.now() && <span className="role-badge mute">禁言中</span>}
-      {m.role === "owner" && <span className="role-badge owner">群主</span>}
-      {m.role === "admin" && <span className="role-badge">管理员</span>}
+      {(m.mute_until ?? 0) > Date.now() && <span className="role-badge mute">{tr("group.member.mute_badge")}</span>}
+      {m.role === "owner" && <span className="role-badge owner">{tr("group.role.owner")}</span>}
+      {m.role === "admin" && <span className="role-badge">{tr("group.role.admin")}</span>}
       {canManageMember(gp, m) && (
-        <button className="mini-btn ghost" title="管理"
+        <button className="mini-btn ghost" title={tr("group.member.manage_title")}
           onClick={(e) => { e.stopPropagation(); onMemberMenu(e, gp.conv_id, m); }}>⋯</button>
       )}
     </div>
@@ -148,6 +152,7 @@ export function DetailTabs({
   onOpenFile: (m: ChatMessage) => void;
   fetchLinkPreview: (u: string) => Promise<LinkPreview>;
 }) {
+  const tr = useT();
   // ==== 成员列表的「滚到底自动续拉」（PERF-members-autoload）====
   // Hook 必须在组件顶层调用，故把这几个派生值提到 return 之前（下面的成员 Tab 直接复用，
   // 别再算第二份——两份判据迟早分叉）。
@@ -188,11 +193,11 @@ export function DetailTabs({
                 // 就得先滚回顶——而"滚了半天没找到才想起来搜"正是最常见的那条路径。
                 <div className="detail-member-search">
                   <Search size={14} className="detail-member-search-ic" />
-                  <input value={search.query} placeholder="搜索成员" aria-label="搜索成员"
+                  <input value={search.query} placeholder={tr("group.member.search")} aria-label={tr("group.member.search")}
                     autoCapitalize="none" autoCorrect="off" spellCheck={false}
                     onChange={(e) => search.setQuery(e.target.value)} />
                   {search.query && (
-                    <button className="detail-member-search-x" title="清空" onClick={() => search.clear()}>
+                    <button className="detail-member-search-x" title={tr("chat.clear.ok")} onClick={() => search.clear()}>
                       <X size={14} />
                     </button>
                   )}
@@ -202,7 +207,7 @@ export function DetailTabs({
                   搜索态也隐藏：它属于浏览态，混在搜索结果里只会被误点。 */}
               {canInvite && !searching && (
                 <button className="detail-row accent" onClick={() => onAddMember(gp.conv_id)}>
-                  <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加成员</span>
+                  <span className="detail-row-ic"><UserPlus size={18} /></span><span>{tr("group.member.add")}</span>
                 </button>
               )}
               {/* 满员告知（**升级前**时态；三条定稿见 docs/design/SUPERGROUP_DESIGN.md §4.1，
@@ -213,21 +218,21 @@ export function DetailTabs({
                   真做出来就是"用户点了申请、运营得自己想起来去后台翻"（TASKS C-superupgrade）。 */}
               {!searching && upgradeHint && (
                 <div className="detail-upgrade-note">
-                  <div className="detail-upgrade-title">成员已达上限 {upgradeHint.maxMembers}</div>
+                  <div className="detail-upgrade-title">{tr("group.upgrade_hint.title", { max: upgradeHint.maxMembers })}</div>
                   <ol className="detail-upgrade-list">
-                    <li>可容纳至 {upgradeHint.maxSuperMembers} 人；成员列表改为分页加载，搜索改走服务端</li>
-                    <li>升级后已读回执、「正在输入」、成员在线态不再显示</li>
-                    <li>升级后成员进出不再产生群消息（「X 加入了群聊」等）</li>
-                    <li>单向操作，升级后不可撤销；需联系管理员办理</li>
+                    <li>{tr("group.upgrade_hint.item_1", { max: upgradeHint.maxSuperMembers })}</li>
+                    <li>{tr("group.upgrade_hint.item_2")}</li>
+                    <li>{tr("group.upgrade_hint.item_3")}</li>
+                    <li>{tr("group.upgrade_hint.item_4")}</li>
                   </ol>
                   <button className="mini-btn ghost" onClick={() => upgradeHint.onCopyGroupID()}>
-                    复制群 ID
+                    {tr("group.upgrade_hint.copy_group_id")}
                   </button>
                 </div>
               )}
               {searching && list.length === 0 && !search.loading && (
                 // 与「群里还没有其他成员」区分开——两种空是两回事。
-                <div className="detail-empty">{search.failed ? "搜索失败，请重试" : "没有匹配的成员"}</div>
+                <div className="detail-empty">{search.failed ? tr("group.picker.search_failed") : tr("group.picker.no_match")}</div>
               )}
               {(() => {
                 // 大列表只渲染视口内的行，DOM 从 N 降到几十。缺 scrollElRef 时（未注入滚动父）
@@ -250,19 +255,19 @@ export function DetailTabs({
               {searching
                 ? search.hasMore && (
                     <button className="detail-row" onClick={() => search.loadMore()}>
-                      <span>{search.loading ? "加载中…" : "加载更多结果"}</span>
+                      <span>{search.loading ? tr("common.loading") : tr("common.load_more_results")}</span>
                     </button>
                   )
                 : hasMoreMembers && (
                     <button className="detail-row" onClick={() => onLoadMoreMembers?.()}>
-                      <span>{membersLoading ? "加载中…" : "加载更多成员"}</span>
+                      <span>{membersLoading ? tr("common.loading") : tr("group.member.load_more")}</span>
                     </button>
                   )}
             </div>
           );
         })()}
         {activeTab === "media" && (
-          media.length === 0 ? <div className="detail-empty">暂无媒体</div> : (
+          media.length === 0 ? <div className="detail-empty">{tr("detail.tab.empty_media")}</div> : (
             <div className="detail-media-grid">
               {/* 门控格子与会话媒体库共用 <MediaTile>（variant=detail：失效格无 ↓ 徽标、仍显尺寸）。
                   点门控格=就地解门控（不进查看器），就绪格才打开查看器（对齐 iOS 详情宫格 档 A，autoPrefetch=NO）。 */}
@@ -279,7 +284,7 @@ export function DetailTabs({
           )
         )}
         {activeTab === "files" && (
-          files.length === 0 ? <div className="detail-empty">暂无文件</div> : (
+          files.length === 0 ? <div className="detail-empty">{tr("detail.tab.empty_files")}</div> : (
             <div className="detail-filelist">
               {files.map((m) => {
                 // 与聊天气泡共用门控/下载缓存（对齐 iOS 详情与聊天共享 IMMediaDownloadCoordinator）：
@@ -291,15 +296,15 @@ export function DetailTabs({
                        className={`detail-fileitem${gate && (gate.phase === "failed" || gate.phase === "expired") ? " failed" : ""}`}
                        onClick={() => (gate ? onGateTap(m) : onOpenFile(m))}
                        onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}
-                       title={gate ? (gate.phase === "expired" ? "文件已失效" : "点击下载")
-                                  : (isPreviewableFile(name) ? "点击预览" : "点击下载")}>
+                       title={gate ? (gate.phase === "expired" ? tr("chat.file.expired") : tr("media.download.tap_to_download"))
+                                  : (isPreviewableFile(name) ? tr("chat.file.tap_preview") : tr("media.download.tap_to_download"))}>
                     {gate ? <FileGateIcon state={gate} /> : <FileTypeIcon name={name} size={34} />}
                     <span className="detail-file-body">
                       <span className="detail-file-name">{name}</span>
                       <span className="detail-file-size">
                         {gate
                           ? (gate.phase === "notStarted"
-                              ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 未下载` : "未下载")
+                              ? (formatFileSize(m.fileSize) ? tr("detail.tab.file_size_not_downloaded", { size: formatFileSize(m.fileSize) }) : tr("fav.file.not_downloaded"))
                               : downloadText(gate, formatFileSize(m.fileSize)))
                           : (formatFileSize(m.fileSize) || "")}
                       </span>
@@ -314,12 +319,12 @@ export function DetailTabs({
           )
         )}
         {activeTab === "voice" && (
-          voices.length === 0 ? <div className="detail-empty">暂无语音</div> : (
+          voices.length === 0 ? <div className="detail-empty">{tr("detail.tab.empty_voice")}</div> : (
             // 语音 tab（2026-08-27 sketch §10 三行格式）：发送者 / 迷你播放器（含波形进度=声纹）/ 年月日时分。
             <div className="detail-filelist detail-voicelist">
               {voices.map((m) => {
                 const mine = m.from === uid;
-                const senderText = mine ? "你自己" : (voiceSenderLabel ? voiceSenderLabel(m) : (m.fromNickname || m.from));
+                const senderText = mine ? tr("chat.detail.you") : (voiceSenderLabel ? voiceSenderLabel(m) : (m.fromNickname || m.from));
                 return (
                   <div key={msgKey(m)} className="detail-voice-row3"
                        onContextMenu={(e) => { e.preventDefault(); onFileMenu(e, m); }}>
@@ -336,7 +341,7 @@ export function DetailTabs({
           )
         )}
         {activeTab === "links" && (
-          links.length === 0 ? <div className="detail-empty">暂无链接</div> : (
+          links.length === 0 ? <div className="detail-empty">{tr("detail.tab.empty_links")}</div> : (
             // 详情页链接 tab（草图 §C）：36×36 favicon + t1 og:title(host 兜底) + t2 host+path(mono) + t3 时间。
             // 无来源、无原文预览（收藏页 §E 才有 source）；点整行=打开链接。
             <div className="detail-filelist">
@@ -354,7 +359,7 @@ export function DetailTabs({
           )
         )}
         {activeTab === "contacts" && (
-          contacts.length === 0 ? <div className="detail-empty">暂无名片</div> : (
+          contacts.length === 0 ? <div className="detail-empty">{tr("detail.tab.empty_contacts")}</div> : (
             // 行组件 ContactRow **与收藏页「名片」分类共用**（§7.1）——这就是"收藏页复用资料详情页"的落地方式。
             <div className="detail-filelist">
               {contacts.map((m) => {

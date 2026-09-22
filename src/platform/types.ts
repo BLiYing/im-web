@@ -140,6 +140,14 @@ export interface Platform {
   setGlobalShortcut(on: boolean): Promise<GlobalShortcutState>;
 
   /**
+   * 把界面语言偏好（`system` | `zh-Hans` | `en`）告诉宿主。桌面主进程据此本地化**页面之外**的文案
+   * （托盘菜单、启动失败对话框）——页面自己的语言存 localStorage，主进程读不到，且窗口收进托盘后
+   * 页面可能压根没在跑，所以必须由页面主动推一份、主进程自己落盘。
+   * 浏览器没有页面之外的文案：no-op。fire-and-forget，失败不影响页面语言。
+   */
+  setLanguage(pref: string): Promise<void>;
+
+  /**
    * 订阅「用户点了系统通知，要打开这个会话」。返回拆除函数。
    *
    * 浏览器侧永远不会回调（web 的 `notify` 恒 false，压根没有通知可点），但接口仍存在——

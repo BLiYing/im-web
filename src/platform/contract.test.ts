@@ -82,6 +82,15 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     expect(typeof await p.setAutoStart(true)).toBe("boolean");
   });
 
+  it("setLanguage 不抛（浏览器 no-op / 旧壳缺桥回落 no-op），桥有则原样透传偏好值", async () => {
+    await expect(make().setLanguage("en")).resolves.toBeUndefined();
+    const seen: string[] = [];
+    const p = createDesktopPlatform({ ...bareBridge, setLanguage: async (v) => { seen.push(v); } });
+    await p.setLanguage("zh-Hans");
+    expect(seen).toEqual(["zh-Hans"]);
+    await expect(createDesktopPlatform({ ...bareBridge }).setLanguage("en")).resolves.toBeUndefined();
+  });
+
   it("全局快捷键三件：supported 为 false 时 get 必须是关着的；set 返回完整形状", async () => {
     const p = make();
     if (!p.globalShortcutSupported()) expect((await p.getGlobalShortcut()).enabled).toBe(false);

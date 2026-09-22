@@ -13,6 +13,7 @@ import { highlightText } from "../searchHighlight";
 import { splitTextByURL } from "../messageContent";
 import { charCountLabel, textTier } from "../longtext";
 import type { ChatMessage } from "../sdk/protocol";
+import { t } from "../i18n";
 
 export interface MessageTextDeps {
   /** 群成员在本群的昵称。用于把 mentions 里的 uid 还原成 `@昵称`。 */
@@ -109,12 +110,12 @@ export function makeMessageTextRenderers(d: MessageTextDeps): MessageTextRendere
     // 折叠切换也不吞事件，让点击冒泡到行去切换选中（与 iOS `self.selecting` 早返回一致）。
     if (tier === "huge") {
       return (
-        <span className="btext longtext-card" onClick={d.selectMode ? undefined : () => { if (window.getSelection()?.toString()) return; d.onOpenReader(m); }} title={d.selectMode ? undefined : "查看全文"}>
+        <span className="btext longtext-card" onClick={d.selectMode ? undefined : () => { if (window.getSelection()?.toString()) return; d.onOpenReader(m); }} title={d.selectMode ? undefined : t("chat.text.view_full")}>
           <span className="lt-card-head">
             <span className="lt-card-icon"><FileText size={16} /></span>
             <span className="lt-card-meta">
-              <span className="lt-card-title">长文本 · {charCountLabel(m.content)}</span>
-              <span className="lt-card-sub">点击查看全文</span>
+              <span className="lt-card-title">{t("chat.text.long_title", { count: charCountLabel(m.content) })}</span>
+              <span className="lt-card-sub">{t("chat.text.tap_view_full")}</span>
             </span>
           </span>
           {/* 预览只切前 200 字：卡片仅 3 行可见，全文塞进 DOM 会让每次列表重渲染 diff 数十 KB 文本节点（全文留给阅读器）。 */}
@@ -129,7 +130,7 @@ export function makeMessageTextRenderers(d: MessageTextDeps): MessageTextRendere
       <span className="btext">
         <span className={expanded ? "lt-body" : "lt-body collapsed"}>{renderMentionText(m, m.content)}</span>
         <span className="lt-toggle" onClick={(e) => { if (d.selectMode) return; e.stopPropagation(); toggleTextExpand(key); }}>
-          {expanded ? <>收起 <ChevronUp size={13} /></> : <>展开全文 <ChevronDown size={13} /></>}
+          {expanded ? <>{t("chat.text.collapse")} <ChevronUp size={13} /></> : <>{t("chat.text.expand")} <ChevronDown size={13} /></>}
         </span>
       </span>
     );

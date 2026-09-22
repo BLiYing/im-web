@@ -22,7 +22,7 @@ import { buildMessageActions, buildConversationActions, type MenuAction, type Me
 import { isViewableMedia, msgKey } from "./album";
 import { jumpDomToSeq } from "./messageJump";
 import { useVoiceTranscript } from "./useVoiceTranscript";
-import { conversationTime } from "./time";
+import { conversationTime, fullDate, monthDay } from "./time";
 import { MessageList } from "./components/MessageList";
 import { DetailPanel } from "./components/DetailPanel";
 import type { DetailTab } from "./components/DetailTabs";
@@ -77,6 +77,9 @@ import { PrivacySecurityPanel } from "./components/settings/PrivacySecurityPanel
 import { BlockedListPanel } from "./components/settings/BlockedListPanel";
 import { ChangePasswordPanel } from "./components/settings/ChangePasswordPanel";
 import { GeneralPanel } from "./components/settings/GeneralPanel";
+import { LanguageSettings } from "./components/settings/LanguagePanel";
+import { langPrefLabel, useT } from "./i18n";
+import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { WallpaperPanel } from "./components/settings/WallpaperPanel";
 import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
@@ -118,12 +121,12 @@ import { visibleSlice } from "./renderWindow";
 import { moreLocalAbove } from "./windowPlan";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
-  MonitorSmartphone, Languages, Smile, Phone, AtSign, Users, Megaphone,
+  MonitorSmartphone, Languages, Smile, Users, Megaphone,
   Headphones, 
   Trash2, BellOff, Menu,
   Pin,
   Search, MessageCircle, X, Forward,
-  QrCode, IdCard, UserPlus } from "lucide-react";
+  UserPlus } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
 type Tab = "chats" | "contacts"; // 左栏顶部页签：消息 / 通讯录（components/SidebarTabs.tsx）
@@ -146,12 +149,7 @@ const FALLBACK_MAX_GROUP_MEMBERS = 500;
  *
  *  **不写具体人数**：上限是部署级配置，硬编码就会与服务端口径分叉（同 SUPERGROUP_DESIGN §3 两层闸门）。
  *  满员告知块能写数字，是因为它本来就要判 serverConfig 才显示。 */
-const SUPER_GROUP_NOTICE = [
-  "1. 成员上限为超级群配额；成员列表分页加载，搜索走服务端（不是本地过滤）",
-  "2. 已读回执、「正在输入」、成员在线态已关闭",
-  "3. 成员进出不再产生群消息（「X 加入了群聊」「A 将 B 移出群聊」等）",
-  "4. 群规模所致，无法改回普通群",
-].join("\n");
+const SUPER_GROUP_NOTICE_KEYS = ["group.text.super_notice_1", "group.text.super_notice_2", "group.text.super_notice_3", "group.text.super_notice_4"];
 
 export default function App() {
   const [phase, setPhase] = useState<Phase>("login");
@@ -257,6 +255,8 @@ export default function App() {
   const [blockedOpen, setBlockedOpen] = useState(false); // 已屏蔽的用户子面板（从隐私页进入）
   const [changePwdOpen, setChangePwdOpen] = useState(false); // 修改密码子面板（从隐私页进入）
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
+  const [languageOpen, setLanguageOpen] = useState(false); // 语言选择子面板
+  const t = useT(); // 同时订阅界面语言：切换时 App 重渲染（须在任何早退之前，见 saveRemark 处「login early-return」注释）
   // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
   // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
   // Web 只吃 Wi-Fi 档（浏览器分不清移动/Wi-Fi），且**始终提供手动下载**；策略本身仍随账号多端同步。
@@ -655,7 +655,7 @@ export default function App() {
   // name 是 **username**（登录凭据）；token 非空则走扫码会话（此时 knownUid 是票据带回的内部 ID）。
   const enterApp = useCallback(async (name: string, pwd: string, token?: string, knownUid?: string, refresh = "") => {
     if (!name && !knownUid) {
-      setAuthErr("请填写用户名");
+      setAuthErr(t("login.error.username_required"));
       return;
     }
     refreshRef.current = refresh;
@@ -736,7 +736,7 @@ export default function App() {
         // 入群前不可见的行都占号），而这一窗**照样带回了最早那一段**，丢掉它才是真的白跑。
         if (!meta.anchorFound && !pend.earliest) {
           pendingLocateRef.current = null;
-          setToast("原消息已被删除");
+          setToast(t("conv.error.original_deleted"));
           return;
         }
         // 只记「窗口已到」，**滚动交给 driveLocate**（下一次渲染后由 effect 推进）。
@@ -765,7 +765,7 @@ export default function App() {
       onGroup: (event, cid, _from, target, result) => {
         // G3 join_result 推给非成员申请人：审批结果只提示，不去拉群资料（被拒时非成员，会 403）。
         if (event === "join_result") {
-          setToast(result === "approved" ? "你的入群申请已通过，进群聊天吧" : "你的入群申请未通过");
+          setToast(t(result === "approved" ? "conv.qr.join_approved" : "conv.qr.join_rejected"));
           if (result === "approved") scheduleListRefresh();
           return;
         }
@@ -775,12 +775,12 @@ export default function App() {
         // 待审列表开着则重拉；未开则给一条轻提示（横幅才是主要落点，保持不吵）。
         if (event === "join_request") {
           void reloadJoinRequests(cid);
-          setToast("有新的入群申请");
+          setToast(t("group.event.join_request_new"));
           return;
         }
         // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
         if ((event === "remove" && target === uidRef.current) || event === "dissolve") {
-          setToast(event === "dissolve" ? "该群已被解散" : "你已被移出群聊");
+          setToast(t(event === "dissolve" ? "group.event.dissolved" : "group.event.removed"));
           setDetail((d) => (d?.convId === cid ? null : d));
           if (currentConvRef.current === cid) {
             currentConvRef.current = "";
@@ -839,10 +839,10 @@ export default function App() {
         if (code === 100101) {
           logout();
           // 重连路径里 100101 只会是「会话被吊销」（活 token 老化只会得 100102），即被踢/退其他/超限 LRU。
-          setAuthErr("此设备的登录已被移除，请重新登录"); // logout 会清 authErr，故放其后
+          setAuthErr(t("login.session_revoked")); // logout 会清 authErr，故放其后
           return;
         }
-        void askConfirm(`${msg}。点"确定"重新登录；"取消"可继续查看本地聊天记录。`, { okText: "重新登录" })
+        void askConfirm(t("login.reconnect_failed_confirm", { msg }), { okText: t("login.relogin") })
           .then((ok) => {
             if (!ok) return;
             logout();
@@ -872,7 +872,7 @@ export default function App() {
       client.disconnect();
       clientRef.current = null;
       setAuthBusy(false);
-      setAuthErr((e as Error).message || "登录失败");
+      setAuthErr((e as Error).message || t("login.error.login_failed"));
       return;
     }
     // 连接成功：client.userId 是服务端分配的**内部 ID**（密码路径由 /login 响应带回，
@@ -933,12 +933,12 @@ export default function App() {
   // 注册账号（用户名 + 昵称 + 密码≥6位）→ 成功后直接登录。
   const doRegister = useCallback(async () => {
     if (!loginName || password.length < 6) {
-      setAuthErr("用户名必填，密码至少 6 位");
+      setAuthErr(t("login.error.register_requirements"));
       return;
     }
     // 昵称必填：全端显示名回退链止于它，留空会让界面露出 10 位数字内部 ID。后端也会拒，这里前置提示。
     if (!nickname.trim()) {
-      setAuthErr("请填写昵称（这是别人看到的名字）");
+      setAuthErr(t("login.error.nickname_required"));
       return;
     }
     setAuthBusy(true);
@@ -947,7 +947,7 @@ export default function App() {
       await registerAccount(loginName, password, nickname.trim());
     } catch (e) {
       setAuthBusy(false);
-      setAuthErr((e as Error).message || "注册失败");
+      setAuthErr((e as Error).message || t("login.error.register_failed"));
       return;
     }
     await enterApp(loginName, password); // 注册成功 → 直接用同一密码登录
@@ -955,7 +955,7 @@ export default function App() {
 
   const openChat = useCallback((p: string) => {
     if (!p || p === uid) {
-      setToast("请输入有效的对方 uid");
+      setToast(t("chat.error.invalid_uid"));
       return;
     }
     const cid = convIdFor(uid, p);
@@ -1174,7 +1174,7 @@ export default function App() {
   // 链接富预览抓取（供 LinkCard；稳定引用避免重复请求）。
   const fetchLinkPreview = useCallback(async (url: string): Promise<LinkPreview> => {
     const c = clientRef.current;
-    if (!c) throw new Error("未连接");
+    if (!c) throw new Error(t("conn.state.disconnected"));
     return c.linkPreview(url);
   }, []);
   // 进入多选态（M4-3）：从消息右键进入时预选当前消息（相册某格 → 只预选该格，逐格勾选 2a）；从标题栏进入不预选。
@@ -1192,7 +1192,7 @@ export default function App() {
     if (next.has(seq)) {
       next.delete(seq); // 取消勾选永远放行
     } else {
-      if (next.size >= SELECT_MAX) { setToast(`最多选择 ${SELECT_MAX} 条`); return; }
+      if (next.size >= SELECT_MAX) { setToast(t("chat.select.max", { count: SELECT_MAX })); return; }
       next.add(seq);
     }
     selectedRef.current = next;
@@ -1291,7 +1291,7 @@ export default function App() {
   // 跳转到被引用的原消息（点击气泡引用条）：高亮该行并滚入视口。
   const jumpToSeq = useCallback((seq: number) => {
     const box = msgsRef.current;
-    if (!box) { setToast("原消息不在当前视图"); return; }
+    if (!box) { setToast(t("conv.locate.not_in_view")); return; }
     // DOM 部分（找节点 / 居中 / 闪烁 / 跳不到的提示）在 messageJump.ts；这里只供 ref 与回调。
     // 跳走后不再「贴底」：否则从底部跳到较早的目标时，下方媒体异步加载完成会触发 onMediaLoad
     // 把 scrollTop 拽回 scrollHeight，定位当场被冲掉。
@@ -1339,7 +1339,7 @@ export default function App() {
     // 开过窗、消息也灌进本地了，却还是找不到 → 锚点是一条**永远不会成为消息的行**
     // （服务端 anchor_found 只保证 im_message 里有这一行，msg_op 事件行同样在那张表里）。
     // 必须就此打住：不打住的话本 effect 会一轮轮重开同一个窗，无限往返。
-    if (pend.windowed) { pendingLocateRef.current = null; setToast("原消息已被删除"); return; }
+    if (pend.windowed) { pendingLocateRef.current = null; setToast(t("conv.error.original_deleted")); return; }
     // 本地库也没有 → 以它为锚点开一窗。回包只把消息灌进本地库并标记 windowed，
     // 剩下的移窗/滚动仍旧走这里（见 onWindow 处的说明）。
     clientRef.current?.requestWindow(pend.convId, pend.seq, WINDOW_SIDE, WINDOW_SIDE);
@@ -1354,14 +1354,14 @@ export default function App() {
   useEffect(() => { driveLocate(); }, [msgsByConv, renderView, driveLocate]);
 
   const locateInChat = useCallback((cid: string, seq: number, opts?: { earliest?: boolean }) => {
-    if (!cid || seq <= 0) { setToast("该消息无法定位"); return; }
+    if (!cid || seq <= 0) { setToast(t("conv.locate.unavailable")); return; }
     pendingLocateRef.current = { convId: cid, seq, earliest: opts?.earliest };
     if (cid !== currentConvRef.current) {
       // 详情所属会话未打开（如从通讯录/群成员进的资料页）→ 先打开它，加载窗口后由 effect 定位。
       if (cid.startsWith("g_")) openGroupChat(cid);
       else {
         const peer = cid.replace(/^u_/, "").split("_u_").find((x) => x !== uid);
-        if (peer) openChat(peer); else { pendingLocateRef.current = null; setToast("该消息无法定位"); }
+        if (peer) openChat(peer); else { pendingLocateRef.current = null; setToast(t("conv.locate.unavailable")); }
       }
       return;
     }
@@ -1394,11 +1394,11 @@ export default function App() {
     setMenu(null);
     // 图说消息（带 caption）：复制**仅复制文本**（caption），与「这类消息的文本操作作用于文本」约定一致。
     // caption 只存在于 image/video/file，故一个非空判断即可覆盖三类。
-    if (m.caption) { void navigator.clipboard?.writeText(m.caption); setToast("已复制"); return; }
+    if (m.caption) { void navigator.clipboard?.writeText(m.caption); setToast(t("common.copied")); return; }
     // 纯图片（无 caption）：复制真实图片字节（可粘贴回输入框直接发图）；失败或非图片：复制文本/URL。
     if (m.contentType === "image") {
-      copyImageToClipboard(m.content).then(() => setToast("已复制图片"))
-        .catch(() => { void navigator.clipboard?.writeText(m.content); setToast("已复制链接"); });
+      copyImageToClipboard(m.content).then(() => setToast(t("common.copied_image")))
+        .catch(() => { void navigator.clipboard?.writeText(m.content); setToast(t("common.copied_link")); });
       return;
     }
     void navigator.clipboard?.writeText(m.content);
@@ -1431,7 +1431,7 @@ export default function App() {
     // 只查窗口的话这个判定基本恒假，「原消息已被撤回」这条提示等于没了。
     const localAll = msgsByConvRef.current[currentConvRef.current] ?? [];
     if (localAll.some((m) => m.convSeq === seq && m.recalledAt)) {
-      setToast("原消息已被撤回");
+      setToast(t("conv.error.original_recalled"));
       void refreshPinned(currentConvRef.current);
       return;
     }
@@ -1467,7 +1467,7 @@ export default function App() {
       try {
         const t = await clientRef.current?.translate(m.content);
         if (t) setTranslations((prev) => ({ ...prev, [m.convSeq]: t }));
-      } catch (e) { setToast(`翻译失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("chat.error.translate_failed", { detail: (e as Error).message })); }
     })();
   }, []);
 
@@ -1516,15 +1516,15 @@ export default function App() {
   // onMessageRemoved 物理移除本地；被拒走 onMsgOpFailed → toast。**不再单独居中确认**——两档子菜单 B
   // 里选中「为所有人删除」这一动作本身即确认（对齐 iOS 子菜单、去掉居中弹窗）。
   const deleteFileForEveryone = useCallback((m: ChatMessage) => {
-    if (m.convSeq <= 0) { setToast("该消息尚未同步，暂不能删除"); return; }
+    if (m.convSeq <= 0) { setToast(t("conv.error.not_synced_cannot_delete")); return; }
     clientRef.current?.deleteMessageForEveryone(m.convId, m.convSeq);
   }, []);
 
   // 仅删除自己（任务2）：仅从我的所有设备移除，对端不受影响。走 REST 落 per-user 隐藏表 + 多设备同步。
   const hideFileForMe = useCallback(async (m: ChatMessage) => {
-    if (m.convSeq <= 0) { setToast("该消息尚未同步，暂不能删除"); return; }
+    if (m.convSeq <= 0) { setToast(t("conv.error.not_synced_cannot_delete")); return; }
     try { await clientRef.current?.hideMessage(m.convId, m.convSeq); }
-    catch (e) { setToast(`删除失败：${(e as Error).message}`); }
+    catch (e) { setToast(t("conv.error.delete_failed_detail", { detail: (e as Error).message })); }
   }, []);
 
   // 能否「为所有人删除」某条消息：我发的，或我是该群群主/管理员（与后端权限一致）。
@@ -1552,7 +1552,7 @@ export default function App() {
           await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted: !!c.muted, marked_unread: false });
         }
         await refreshConversations();
-      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
     })();
   }, [refreshConversations]);
 
@@ -1563,7 +1563,7 @@ export default function App() {
       try {
         await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted: !!c.muted, marked_unread: true });
         await refreshConversations();
-      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
     })();
   }, [refreshConversations]);
 
@@ -1574,7 +1574,7 @@ export default function App() {
       try {
         await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: pinned ? Date.now() : 0, muted: !!c.muted, marked_unread: !!c.marked_unread });
         await refreshConversations();
-      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
     })();
   }, [refreshConversations]);
 
@@ -1585,7 +1585,7 @@ export default function App() {
       try {
         await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted, marked_unread: !!c.marked_unread });
         await refreshConversations();
-      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
     })();
   }, [refreshConversations]);
 
@@ -1597,7 +1597,7 @@ export default function App() {
         await clientRef.current?.deleteConversation(c.conv_id);
         if (currentConvRef.current === c.conv_id) deselect(); // deselect 内部会 refreshConversations
         else await refreshConversations();
-      } catch (e) { setToast(`删除失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("conv.error.delete_failed_detail", { detail: (e as Error).message })); }
     })();
   }, [refreshConversations, deselect]);
 
@@ -1609,9 +1609,9 @@ export default function App() {
         const r = await clientRef.current?.fetchReadReceipts(m.convId, m.convSeq);
         if (!r) return;
         // 超限群（>2000 人）服务端回 enabled=false：静默不开面板，与 iOS 隐藏入口一致。
-        if (!r.enabled) { setToast("该群人数过多，不支持查看已读详情"); return; }
+        if (!r.enabled) { setToast(t("receipts.error.group_too_large")); return; }
         setReadReceipts({ read: r.read, unread: r.unread, tab: "read" });
-      } catch (e) { setToast(`拉取已读状态失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("receipts.error.load_failed", { detail: (e as Error).message })); }
     })();
   }, []);
 
@@ -1839,7 +1839,7 @@ export default function App() {
    */
 
 
-  const stateText = { connected: "已连接", connecting: "连接中…", disconnected: "未连接" }[state];
+  const stateText = { connected: t("conn.state.connected"), connecting: t("conn.state.connecting"), disconnected: t("conn.state.disconnected") }[state];
 
   // 进会话拉一次置顶集合（G0）；切会话时把横幅索引复位到第一条。
   useEffect(() => {
@@ -2342,7 +2342,7 @@ export default function App() {
         convSeq: 0, timestamp: Date.now(), status: "sending",
       });
     } catch (e) {
-      setToast((e as Error).message || "语音发送失败");
+      setToast((e as Error).message || t("chat.voice.send_failed"));
     }
   }, [convId, uid, appendMsg]);
   const sendVoiceEv = useEvent(sendVoice);
@@ -2374,7 +2374,7 @@ export default function App() {
     if (role && role === "member") {
       setManageOpen(false);
       setAdminPanelOpen(false);
-      setToast("你已不是群主或管理员");
+      setToast(t("group.error.not_admin"));
     }
   }, [manageOpen, detail, groupInfos, setToast]);
 
@@ -2544,16 +2544,16 @@ export default function App() {
   const composerMuteReason: string | null = (() => {
     // 系统通知会话（peer=system）：不能回复——同一锁机制统一到 composer disabled + 占位。
     // 见 docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
-    if (!isGroupChat && peer === SYSTEM_UID) return "此会话不支持回复";
+    if (!isGroupChat && peer === SYSTEM_UID) return t("chat.input.disabled_system");
     if (!isGroupChat || !activeGroupInfo) return null;
-    if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return "你已被管理员禁言";
-    if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return "本群已开启全员禁言";
+    if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return t("chat.input.disabled_muted");
+    if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return t("chat.input.disabled_mute_all");
     return null;
   })();
 
   const activeGroupConv = groupConvId ? conversations.find((c) => c.conv_id === groupConvId) : undefined;
   const chatTitle = isGroupChat
-    ? (groupRemark(groupConvId) || activeGroupInfo?.name || activeGroupConv?.name || "群聊")
+    ? (groupRemark(groupConvId) || activeGroupInfo?.name || activeGroupConv?.name || t("common.group_chat"))
     : peerLabel;
   // 同 DetailPanel：优先 member_count。超级群的 members 只含我自己，
   // 用 members.length 会让标题变成「群名（1）」。
@@ -2565,16 +2565,16 @@ export default function App() {
   // 否则用户会把"功能没了"当成 bug 报上来。
   const chatIsSuper = activeGroupInfo?.is_super ?? activeGroupConv?.is_super ?? false;
   const chatSubtitle = isGroupChat
-    ? (chatMemberCount > 0 ? `${chatMemberCount} 位成员${chatIsSuper ? " · 大群" : ""}` : (chatIsSuper ? "大群" : "群聊"))
+    ? (chatMemberCount > 0 ? t(chatIsSuper ? "chat.header.member_count_super" : "chat.header.member_count", { count: chatMemberCount }) : t(chatIsSuper ? "group.text.super" : "common.group_chat"))
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
     : presenceText(presence[peer]);
   // 单聊固定"正在输入"；群里覆盖式记最新一位打字者，副标题拼「{昵称} 正在输入」
   //（对齐 iOS `IMChatViewController+Socket.m` 的 `im_navigationSubtitle`）。
   const visibleChatSubtitle = (() => {
     if (!convId || !typingConv || typingConv.convId !== convId) return chatSubtitle;
-    if (!isGroupChat) return "正在输入";
+    if (!isGroupChat) return t("chat.typing");
     // 备注优先（本机显示）：列表/气泡都显备注了，副标题还显真名会显得是另一个人。
-    return `${localNameOf(typingConv.uid, convId, typingConv.uid)} 正在输入`;
+    return t("chat.typing_named", { name: localNameOf(typingConv.uid, convId, typingConv.uid) });
   })();
   // ===== 首页全局搜索派生（SEARCH_DESIGN §3）：会话/联系人从内存列表，聊天记录用 homeRecordHits（不聚合）=====
   const homeQ = search.homeSearch.trim().toLowerCase();
@@ -2600,8 +2600,8 @@ export default function App() {
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）——convDisplayLabel/convAvatarUrl 已上移至 convLabel 之后（见那里注释）。
   // 收藏来源显示名（副行「来自X」）：本人→我；好友→备注/昵称；群成员→群昵称/昵称；否则 uid（按 UI.md 优先级）。
   const favSourceLabel = (f: Favorite): string => {
-    if (!f.source_from) return "未知";
-    if (f.source_from === uid) return "我";
+    if (!f.source_from) return t("fav.source.unknown");
+    if (f.source_from === uid) return t("common.me");
     const fr = friends.find((x) => x.user_id === f.source_from);
     if (fr) return friendLabel(fr);
     const nick = memberNick(f.source_conv_id, f.source_from);
@@ -2672,11 +2672,11 @@ export default function App() {
 
   const doClearHistory = (cid: string) => {
     void (async () => {
-      if (!(await askConfirm("清空聊天记录？将删除此会话在本机的全部消息，且无法恢复。", { okText: "清空", danger: true }))) return;
+      if (!(await askConfirm(t("chat.clear.confirm"), { okText: t("chat.clear.ok"), danger: true }))) return;
       await clearMessages(uid, cid);
       clearConv(cid); // 内存同步清空（当前会话/缓存）
       setDetailMsgs([]);
-      setToast("聊天记录已清空");
+      setToast(t("chat.clear.done"));
     })();
   };
 
@@ -2690,12 +2690,12 @@ export default function App() {
   // 单聊拉黑/取消拉黑（拉黑二次确认）。
   const doToggleBlock = (peer: string, block: boolean) => {
     void (async () => {
-      if (block && !(await askConfirm("拉黑该联系人？拉黑后将不再收到对方消息。", { okText: "拉黑", danger: true }))) return;
+      if (block && !(await askConfirm(t("friend.block.confirm"), { okText: t("common.block"), danger: true }))) return;
       try {
         await clientRef.current!.friendAction(block ? "block" : "unblock", peer);
         void refreshFriends();
-        setToast(block ? "已拉黑" : "已取消拉黑");
-      } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+        setToast(t(block ? "friend.block.done" : "friend.block.undone"));
+      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
     })();
   };
 
@@ -2704,10 +2704,10 @@ export default function App() {
   // 用户能直接看到关系已变——弹回聊天页反而让人怀疑到底删没删。
   const doRemoveFriend = (peer: string) => {
     void (async () => {
-      if (!(await askConfirm("删除该好友？将从通讯录移除，聊天记录仍保留在本机。", { okText: "删除", danger: true }))) return;
+      if (!(await askConfirm(t("friend.delete.confirm"), { okText: t("common.delete"), danger: true }))) return;
       await doFriendAction(peer, async () => {
         await clientRef.current!.removeFriend(peer);
-        setToast("已删除好友");
+        setToast(t("friend.delete.done"));
       });
     })();
   };
@@ -2732,7 +2732,7 @@ export default function App() {
       void refreshConversations();
       void refreshFriends();
     } catch (e) {
-      setToast(`保存备注失败：${(e as Error).message}`);
+      setToast(t("contact.remark.save_failed", { detail: (e as Error).message }));
     }
   };
   const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
@@ -2740,50 +2740,40 @@ export default function App() {
   // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动：加一项 = append 一条）。
   // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
   const accountRows: Row[] = [
-    { id: "settings", label: "设置", icon: Settings, chevron: true, onClick: () => { setAccountCard(false); setShowSettings(true); } },
-    { id: "favorites", label: "收藏消息", icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
+    { id: "settings", label: t("settings.title"), icon: Settings, chevron: true, onClick: () => { setAccountCard(false); setShowSettings(true); } },
+    { id: "favorites", label: t("common.saved_messages"), icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
   ];
 
   // 设置列表（对齐 Telegram **Web** 版布局；数据驱动：加一行 = append 一条；接后端 = 换 onClick）。
   // Web 版条目与 iOS 版不同——各自镜像对应平台的 Telegram 客户端。
   const settingsGroups: Row[][] = [
     [
-      { id: "general", label: "通用设置", icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
-      { id: "animations", label: "动画与性能", icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon("动画与性能") },
-      { id: "notifications", label: "通知", icon: Bell, iconTint: "red", chevron: true, onClick: () => comingSoon("通知") },
-      { id: "data", label: "数据与存储", icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
-      { id: "privacy", label: "隐私与安全", icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
-      { id: "folders", label: "聊天文件夹", icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon("聊天文件夹") },
-      { id: "devices", label: "已登录设备", icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
-      { id: "language", label: "语言", icon: Languages, iconTint: "purple", value: "简体中文", chevron: true, onClick: () => comingSoon("语言") },
-      { id: "stickers", label: "贴纸与表情", icon: Smile, iconTint: "pink", chevron: true, onClick: () => comingSoon("贴纸与表情") },
+      { id: "general", label: t("settings.row.general"), icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
+      { id: "animations", label: t("settings.row.animations"), icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("settings.row.animations")) },
+      { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => comingSoon(t("settings.row.notifications")) },
+      { id: "data", label: t("settings.row.data_storage"), icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
+      { id: "privacy", label: t("settings.row.privacy"), icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
+      { id: "folders", label: t("settings.row.folders"), icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon(t("settings.row.folders")) },
+      { id: "devices", label: t("settings.row.devices"), icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
+      { id: "language", label: t("settings.language.title"), icon: Languages, iconTint: "purple", value: langPrefLabel(), chevron: true, onClick: () => setLanguageOpen(true) },
+      { id: "stickers", label: t("settings.row.stickers"), icon: Smile, iconTint: "pink", chevron: true, onClick: () => comingSoon(t("settings.row.stickers")) },
     ],
   ];
 
   // 设置页顶部名片下的资料卡（手机号/用户名）。
-  const settingsInfoRows: Row[] = [
-    { id: "phone", label: myInfo?.phone || "未设置", icon: Phone, iconTint: "green", value: "手机号", onClick: () => void openProfile() },
-    // 显示的是**公开句柄**而非 uid——后者是 10 位随机内部 ID，`@4820571639` 对用户毫无意义。
-    { id: "username", label: myInfo?.username ? `@${myInfo.username}` : "未设置", icon: AtSign, iconTint: "blue", value: "用户名", onClick: () => void openProfile() },
-    { id: "qr", label: "我的二维码", icon: QrCode, iconTint: "gray", value: "", chevron: true, onClick: () => void openMyCard() },
-    // 入口 ③（CONTACT_CARD_DESIGN §8.1）：与「我的二维码」并列——二维码给**面对面**，名片消息给**线上**。
-    { id: "shareMyCard", label: "分享我的名片", icon: IdCard, iconTint: "teal", value: "", chevron: true,
-      // username 必须一起带：它是名片副标题 @xxx 的唯一来源，也是收方无昵称时预览的回退值
-      // （contactCardPreview）。漏了它，「分享我的名片」发出去的卡永远没有句柄行。
-      onClick: () => shareContactCard({ userId: uid, username: myInfo?.username, nickname: myInfo?.nickname, avatarUrl: myInfo?.avatar_url }) },
-  ];
+  const settingsInfoRows = buildSettingsInfoRows({ t, myInfo, uid, openProfile, openMyCard, shareContactCard });
 
   // 通讯录顶部入口行（数据驱动）。
   const contactEntries: Row[] = [
-    { id: "groups", label: "群聊", icon: Users, iconTint: "blue", chevron: true, onClick: () => void openGroupsModal() },
+    { id: "groups", label: t("common.group_chat"), icon: Users, iconTint: "blue", chevron: true, onClick: () => void openGroupsModal() },
     // 「新的朋友」独立入口（2026-09-05）：此前它是好友列表上方的一段，好友一多就被挤到看不见，
     // 而"有人加我"恰恰是需要主动去处理的事。红色徽标显待确认数（0 时不显，别摆一个恒亮的 0）——
     // 早先走的是 value（灰色小字），跟"设置项当前值"长得一模一样，一眼扫过去根本不像有待办。
-    { id: "friendRequests", label: "新的朋友", icon: UserPlus, iconTint: "green", chevron: true,
+    { id: "friendRequests", label: t("friend.requests.title"), icon: UserPlus, iconTint: "green", chevron: true,
       badge: incomingCount > 0 ? unreadBadgeText(incomingCount) : undefined,
       onClick: () => { setFriendRequests(true); void refreshFriends(); } },
-    { id: "official", label: "公众号", icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon("公众号") },
-    { id: "service", label: "服务号", icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon("服务号") },
+    { id: "official", label: t("contacts.row.official_accounts"), icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("contacts.row.official_accounts")) },
+    { id: "service", label: t("contacts.row.service_accounts"), icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon(t("contacts.row.service_accounts")) },
   ];
 
   return (
@@ -2793,7 +2783,7 @@ export default function App() {
       <aside className="sidebar">
         <header>
           <div className="account-anchor">
-            <button className="account-menu-btn" title="菜单" aria-label="菜单"
+            <button className="account-menu-btn" title={t("common.menu")} aria-label={t("common.menu")}
               onClick={(e) => { e.stopPropagation(); setAccountCard((v) => !v); }}>
               <Menu size={22} />
             </button>
@@ -2814,9 +2804,9 @@ export default function App() {
           {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
           <div className="home-search">
             <Search size={15} className="home-search-lead" />
-            <input className="home-search-input" value={search.homeSearch} placeholder="搜索"
+            <input className="home-search-input" value={search.homeSearch} placeholder={t("common.search")}
               onChange={(e) => search.setHomeSearch(e.target.value)} />
-            {search.homeSearch && <button className="home-search-clear" title="清除" onClick={() => search.setHomeSearch("")}><X size={14} /></button>}
+            {search.homeSearch && <button className="home-search-clear" title={t("common.clear")} onClick={() => search.setHomeSearch("")}><X size={14} /></button>}
           </div>
           {homeQ ? (
           <HomeSearchResults
@@ -2829,7 +2819,7 @@ export default function App() {
           />
           ) : (
           <>
-          {conversations.length === 0 && <div className="empty">还没有会话，去「通讯录」找人发起一个吧</div>}
+          {conversations.length === 0 && <div className="empty">{t("conv.list.empty_find_contacts")}</div>}
           {conversations.map((c) => (
             <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""}`}
               onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
@@ -2846,7 +2836,7 @@ export default function App() {
                         没有「正在输入」。不标出来就会被当成 bug 报上来（SUPERGROUP_DESIGN §9）。
                         文字 pill 而非图标：标记的价值是**解释**那些消失的能力，图标不自解释；
                         与聊天页副标题、群资料页说明行、后台列表 pill 同一套语汇。 */}
-                    {c.is_super ? <span className="conv-super-tag">大群</span> : null}
+                    {c.is_super ? <span className="conv-super-tag">{t("group.text.super")}</span> : null}
                     {c.muted ? <BellOff size={12} className="conv-mute" /> : null}
                   </span>
                   <span className="convtime">
@@ -2860,10 +2850,10 @@ export default function App() {
                 </div>
                 <div className={`convlast${isMissedCallPreview(c, uid) ? " missed-call" : ""}`}>
                   {/* 群「@我」红字前缀（M4-8）：未读区间内被 @（含 @所有人）。不另加右侧红 @ 角标——左侧红字已够醒目。 */}
-                  {c.is_group && c.mention_unread ? <span className="conv-mention">[有人@我]</span> : null}
+                  {c.is_group && c.mention_unread ? <span className="conv-mention">{t("conv.list.mention_tag")}</span> : null}
                   {/* 待审入群角标（G3）：仅群主/管理员会收到 pending_count>0，一眼看到有人等待审批。 */}
                   {c.is_group && (c.pending_count ?? 0) > 0
-                    ? <span className="conv-pending-badge">待审 {unreadBadgeText(c.pending_count!)}</span>
+                    ? <span className="conv-pending-badge">{t("conv.list.pending_badge", { count: unreadBadgeText(c.pending_count!) })}</span>
                     : null}
                   {convPreview(c)}
                 </div>
@@ -2875,7 +2865,7 @@ export default function App() {
               {c.conv_id === convId ? null
                 : c.unread > 0
                 ? <span className={`badge ${c.muted && !c.mention_unread ? "muted" : ""}`}>{unreadBadgeText(c.unread, c.unread_capped)}</span>
-                : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label="未读" /> : null}
+                : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label={t("common.unread")} /> : null}
             </div>
           ))}
           </>
@@ -2894,7 +2884,7 @@ export default function App() {
         {showSettings && (
           <SettingsPanel
             avatarUrl={myInfo?.avatar_url}
-            name={myInfo?.nickname || (myInfo?.username ? `@${myInfo.username}` : "未命名用户")}
+            name={myInfo?.nickname || (myInfo?.username ? `@${myInfo.username}` : t("common.unnamed_user"))}
             seed={uid}
             stateText={stateText}
             infoRows={settingsInfoRows}
@@ -2913,13 +2903,13 @@ export default function App() {
             onSave={saveDownloadSettings}
             onClearCache={clearMediaCache}
             onReset={() => {
-              void askConfirm("恢复自动下载的出厂默认设置？", { okText: "恢复默认", danger: true }).then((ok) => {
+              void askConfirm(t("settings.download.reset_confirm"), { okText: t("settings.download.reset_ok"), danger: true }).then((ok) => {
                 if (!ok) return;
                 const c = clientRef.current;
                 if (!c) return;
                 void c.resetDownloadSettings()
                   .then((r) => setDlSettings(parseDownloadSettings(r?.settings)))
-                  .catch((e: Error) => setToast(`重置失败：${e.message}`));
+                  .catch((e: Error) => setToast(t("settings.download.reset_failed", { detail: e.message })));
               });
             }}
             onBack={() => setDataStorageOpen(false)}
@@ -2978,8 +2968,8 @@ export default function App() {
         {/* 修改密码子面板（从隐私页进入）：成功后服务端自动下线其它设备。 */}
         {changePwdOpen && (
           <ChangePasswordPanel
-            onSubmit={async (o, n) => { const c = clientRef.current; if (!c) throw new Error("未连接"); await c.changePassword(o, n); }}
-            onDone={() => { setChangePwdOpen(false); setToast("✓ 密码已修改，其它设备已下线"); void loadDevices(); }}
+            onSubmit={async (o, n) => { const c = clientRef.current; if (!c) throw new Error(t("conn.state.disconnected")); await c.changePassword(o, n); }}
+            onDone={() => { setChangePwdOpen(false); setToast(t("settings.password.changed_toast")); void loadDevices(); }}
             onBack={() => setChangePwdOpen(false)}
           />
         )}
@@ -2995,6 +2985,7 @@ export default function App() {
           />
         )}
 
+        {languageOpen && <LanguageSettings onBack={() => setLanguageOpen(false)} />}{/* 语言选择：偏好存 localStorage（每设备）、切换即刻生效 */}
         {/* 聊天壁纸 / 纯色编辑：见 components/settings/WallpaperPanel · WallpaperColorPanel。 */}
         {wallpaperOpen && (
           <WallpaperPanel
@@ -3063,7 +3054,7 @@ export default function App() {
             mentionRows={mentionRows} mentionActive={mentionActive} mediaGate={mediaGate} senderLabel={senderLabel} onMentionNavKey={onMentionNavKey}
           />
         </div>
-        {!convId && <div className="main-empty">选择左侧的会话开始聊天</div>}
+        {!convId && <div className="main-empty">{t("chat.empty_select")}</div>}
       </main>
 
       {cropReq && (
@@ -3106,13 +3097,13 @@ export default function App() {
           onFavorite={() => favoriteMessage(viewer.m)}
           onCopy={() => {
             // 图说（带 caption）：复制文本（与长按菜单「复制」同口径）。
-            if (viewer.m.caption) { void navigator.clipboard?.writeText(viewer.m.caption); setToast("已复制"); return; }
+            if (viewer.m.caption) { void navigator.clipboard?.writeText(viewer.m.caption); setToast(t("common.copied")); return; }
             // 图片：复制图片字节（可粘贴回输入框直接发图）；其余非视频：复制链接。
             if (viewer.m.contentType === "image") {
-              copyImageToClipboard(viewer.m.content).then(() => setToast("已复制图片"))
-                .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接"); });
+              copyImageToClipboard(viewer.m.content).then(() => setToast(t("common.copied_image")))
+                .catch(() => { void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast(t("common.copied_link")); });
             } else {
-              void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast("已复制链接");
+              void navigator.clipboard?.writeText(new URL(viewer.m.content, location.href).href); setToast(t("common.copied_link"));
             }
           }}
           onForward={() => {
@@ -3138,7 +3129,7 @@ export default function App() {
           fontStep={readerFontStep}
           renderBody={renderMentionText}
           onFontStep={setReaderFontStep}
-          onCopy={() => { void navigator.clipboard?.writeText(textReader.content); setToast("已复制全文"); }}
+          onCopy={() => { void navigator.clipboard?.writeText(textReader.content); setToast(t("common.copied_full_text")); }}
           onClose={() => setTextReader(null)}
         />
       )}
@@ -3283,17 +3274,17 @@ export default function App() {
               // stripCaption:YES）。主流长按/查看器/多选/收藏等看得到附言的入口不受影响，仍保留 caption。
               setForwarding([{ ...m, caption: undefined, mentions: undefined, mentionAll: false }]);
             }}>
-              <Forward size={16} className="menu-icon" />转发</button>
+              <Forward size={16} className="menu-icon" />{t("common.forward")}</button>
             {/* 定位=回到聊天：只关会遮聊天的宿主（媒体库 / 查看器）；详情卡是右侧列不遮聊天，按用户要求保持不消失。 */}
             <button onClick={() => { setFileMenu(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
-              <MessageCircle size={16} className="menu-icon" />定位到聊天</button>
+              <MessageCircle size={16} className="menu-icon" />{t("chat.menu.locate")}</button>
             {downloading && (
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
-                <X size={16} className="menu-icon" />取消下载</button>
+                <X size={16} className="menu-icon" />{t("file.menu.cancel_download")}</button>
             )}
             {/* 删除统一走两档路由：可为所有人删则展开子菜单 B，否则直接仅删自己（不再在此平铺两项）。 */}
             <button className="danger" onClick={() => { const x = fileMenu.x, y = fileMenu.y; setFileMenu(null); requestDelete(m, x, y); }}>
-              <Trash2 size={16} className="menu-icon" />删除</button>
+              <Trash2 size={16} className="menu-icon" />{t("common.delete")}</button>
           </AnchoredMenu>
         );
       })()}
@@ -3306,20 +3297,20 @@ export default function App() {
           <AnchoredMenu x={deleteMenu.x} y={deleteMenu.y} className="ctx-menu ctx-submenu-in">
             {/* 破坏性重的「为所有人删除」放最后（destructive-last，与消息/会话菜单约定一致，降低误触不可逆项）。 */}
             <button className="danger" onClick={() => { setDeleteMenu(null); void hideFileForMe(m); }}>
-              <Trash2 size={16} className="menu-icon" />仅删除自己</button>
+              <Trash2 size={16} className="menu-icon" />{t("delete_sheet.only_me")}</button>
             <button className="danger" onClick={() => { setDeleteMenu(null); deleteFileForEveryone(m); }}>
-              <Trash2 size={16} className="menu-icon" />为所有人删除</button>
+              <Trash2 size={16} className="menu-icon" />{t("delete_sheet.everyone")}</button>
           </AnchoredMenu>
         );
       })()}
 
       {friendMenu && (
         <div className="ctx-menu" style={{ left: friendMenu.x, top: friendMenu.y }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.removeFriend(id)); }}>删除好友</button>
+          <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.removeFriend(id)); }}>{t("friend.menu.delete")}</button>
           {blockedSet.has(friendMenu.userId) ? (
-            <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void unblock(id); }}>解除拉黑</button>
+            <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void unblock(id); }}>{t("common.unblock")}</button>
           ) : (
-            <button className="danger" onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.friendAction("block", id)); }}>拉黑</button>
+            <button className="danger" onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.friendAction("block", id)); }}>{t("common.block")}</button>
           )}
         </div>
       )}
@@ -3327,13 +3318,13 @@ export default function App() {
       {contactDraft && (
         <div className="modal-mask" onClick={() => setContactDraft(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>编辑联系人</h3>
-            <label>备注名（Notes）<input value={contactDraft.remark} maxLength={32} placeholder="设置备注名"
+            <h3>{t("contact.edit.title")}</h3>
+            <label>{t("contact.edit.remark_label")}<input value={contactDraft.remark} maxLength={32} placeholder={t("contact.edit.remark_placeholder")}
               onChange={(e) => setContactDraft({ ...contactDraft, remark: e.target.value })} /></label>
-            <div className="modal-hint">备注名仅你可见，显示优先级高于对方昵称。</div>
+            <div className="modal-hint">{t("contact.edit.remark_hint")}</div>
             <div className="modal-actions">
-              <button className="link" onClick={() => setContactDraft(null)}>取消</button>
-              <button className="mini-btn" onClick={() => void saveRemark()}>保存</button>
+              <button className="link" onClick={() => setContactDraft(null)}>{t("common.cancel")}</button>
+              <button className="mini-btn" onClick={() => void saveRemark()}>{t("common.save")}</button>
             </div>
           </div>
         </div>
@@ -3366,7 +3357,7 @@ export default function App() {
               // 「已发送好友申请」，那会误导用户以为还要等对方通过；doFriendAction 的 refreshFriends
               // 会让界面立即切成好友态。
               const became = await clientRef.current!.requestFriend(userId, hello);
-              setToast(became ? "已添加为好友" : "已发送好友申请");
+              setToast(t(became ? "friend.request.became_friends" : "friend.request.sent"));
             });
           }}
           onClose={() => setFriendReqDraft(null)}
@@ -3518,7 +3509,7 @@ export default function App() {
       {cardPicker && (
         <FriendPickerModal
           selected={cardPicker.selected} candidates={contactCandidates} friendLabel={friendLabel}
-          title="选择联系人" confirmLabel="发送" emptyText="还没有好友" maxSelection={CONTACT_MAX_SELECTION}
+          title={t("contact_card.picker.title")} confirmLabel={t("common.send")} emptyText={t("contact_card.picker.empty")} maxSelection={CONTACT_MAX_SELECTION}
           onToggle={toggleContactPick}
           onInvite={confirmContactPick}
           onCancel={closeContactPicker}
@@ -3615,13 +3606,13 @@ export default function App() {
         if (!gp) return null;
         const kind = fullTextModal.kind;
         const isAnn = kind === "announcement";
-        const text = kind === "super" ? SUPER_GROUP_NOTICE : ((isAnn ? gp.announcement : gp.intro) ?? "");
+        const text = kind === "super" ? SUPER_GROUP_NOTICE_KEYS.map((k) => t(k)).join("\n") : ((isAnn ? gp.announcement : gp.intro) ?? "");
         const byName = isAnn && gp.announcement_by ? (memberNick(gp.conv_id, gp.announcement_by) || gp.announcement_by) : "";
         const at = isAnn ? (gp.announcement_at ?? 0) : 0;
         const meta = kind === "super"
-          ? "本群成员规模较大，部分实时能力已关闭"
+          ? t("group.text.super_meta")
           : (isAnn && (byName || at > 0)
-            ? `${byName}${byName && at > 0 ? " · " : ""}${at > 0 ? `${fmtDateTime(at)} 发布` : ""}`
+            ? `${byName}${byName && at > 0 ? " · " : ""}${at > 0 ? t("group.announcement.published_at", { time: fmtDateTime(at) }) : ""}`
             : undefined);
         const close = () => setFullTextModal(null);
         return (
@@ -3630,7 +3621,7 @@ export default function App() {
             text={text}
             meta={meta}
             canEdit={isAnn && gp.my_role !== "member"}
-            onCopy={() => navigator.clipboard?.writeText(text).then(() => setToast("已复制"), () => setToast("复制失败"))}
+            onCopy={() => navigator.clipboard?.writeText(text).then(() => setToast(t("common.copied")), () => setToast(t("common.copy_failed")))}
             onEdit={() => { close(); void doEditAnnouncement(gp); }}
             onClose={close}
           />
@@ -3647,7 +3638,7 @@ export default function App() {
           // 服务端分页 + 搜索：普通群、超级群同一条路（超级群本地成员表只有我自己）。
           groupMembers: async (cid, opts) => {
             const tok = clientRef.current?.authToken ?? "";
-            if (!tok) throw new Error("未登录");
+            if (!tok) throw new Error(t("common.error.not_logged_in"));
             const page = await fetchGroupMembersPage(tok, cid, { cursor: opts.cursor, q: opts.q, limit: 50 });
             return { members: page.members, nextCursor: page.has_more && page.members.length > 0 ? page.next_cursor : "" };
           } }} />
@@ -3665,9 +3656,9 @@ function fmtDateTime(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts), now = new Date();
   const hm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  const md = `${d.getMonth() + 1}月${d.getDate()}日`;
+  const md = monthDay(d);
   if (d.getFullYear() === now.getFullYear()) return `${md} ${hm}`;
-  return `${d.getFullYear()}年${md} ${hm}`;
+  return `${fullDate(d)} ${hm}`;
 }
 
 // 消息列表里的最大 conv_seq（发送中的 0 不计）。

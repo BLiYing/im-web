@@ -53,6 +53,7 @@ if (contract > 0 && deviceId && deviceName) {
     // 2026-09-08）。挂载那一刻主进程可能正等着页面，同步跨进程调用在那里是自找死锁。
     getAutoStart: (): Promise<boolean> => ipcRenderer.invoke("im:get-auto-start") as Promise<boolean>,
     setAutoStart: (on: boolean): Promise<boolean> => ipcRenderer.invoke("im:set-auto-start", on) as Promise<boolean>,
+    setLanguage: (pref: string): Promise<void> => ipcRenderer.invoke("im:set-language", pref) as Promise<void>,
 
     // 全局快捷键（默认关，设置页开）。与开机自启同一个口径：返回**设完之后的真实状态**——
     // 被别的应用占用时 enabled=false、taken=true，设置页据此把开关弹回并说明原因。

@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import type { GroupInfo } from "./sdk/protocol";
 import type { AppServices } from "./AppServicesContext";
 import { adminErrorToast, batchToast, clampBatch } from "./groupAdmin";
+import { t } from "./i18n";
 
 // 群资料写操作簇（改名/简介/公告/禁言/治理开关/我的群昵称）。从 App.tsx 收口出来的第一批——
 // 它们**只依赖稳定服务**（clientRef/askPrompt/setToast/refresh*），故整簇只注入一个 `services`，直接复用
@@ -19,30 +20,30 @@ export function useGroupActions(services: AppServices) {
       void refreshGroupInfo(cid);
       void refreshConversations();
     } catch (e) {
-      setToast(`操作失败：${(e as Error).message}`);
+      setToast(t("common.error.action_failed", { detail: (e as Error).message }));
     }
   }, [refreshGroupInfo, refreshConversations, setToast]);
 
   // 改群名（群主/管理员）：轻量 prompt，回车确定。
   const doRenameGroup = useCallback(async (gp: GroupInfo) => {
-    const name = await askPrompt("修改群名", gp.name, { placeholder: "群名（1~30 字）", okText: "保存", maxLength: 30 });
+    const name = await askPrompt(t("group.info.rename_title"), gp.name, { placeholder: t("group.ops.name_placeholder"), okText: t("common.save"), maxLength: 30 });
     if (name === null || !name.trim() || name.trim() === gp.name) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, name.trim(), gp.avatar_url, gp.intro ?? ""));
   }, [askPrompt, clientRef, doGroupAction]);
 
   // 群简介（G1，群主/管理员）：整体替换，随群资料写。
   const doEditIntro = useCallback(async (gp: GroupInfo) => {
-    const intro = await askPrompt("群简介", gp.intro ?? "", { placeholder: "介绍这个群（≤200 字）", okText: "保存", maxLength: 200, multiline: true });
+    const intro = await askPrompt(t("group.text.intro"), gp.intro ?? "", { placeholder: t("group.ops.intro_placeholder"), okText: t("common.save"), maxLength: 200, multiline: true });
     if (intro === null || intro.trim() === (gp.intro ?? "")) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, gp.avatar_url, intro.trim()));
   }, [askPrompt, clientRef, doGroupAction]);
 
   // 群公告（G1，群主/管理员）：发布走独立接口并落系统消息；清空文本=撤下。
   const doEditAnnouncement = useCallback(async (gp: GroupInfo) => {
-    const text = await askPrompt("群公告", gp.announcement ?? "", {
-      placeholder: "发布后通知全体成员", okText: "发布", maxLength: 500, multiline: true,
+    const text = await askPrompt(t("group.text.announcement"), gp.announcement ?? "", {
+      placeholder: t("group.ops.announcement_placeholder"), okText: t("common.publish"), maxLength: 500, multiline: true,
       // 已有公告时提供「撤下」危险动作 = 发空串（决策 18，与「发布」区分）。
-      extraAction: (gp.announcement ?? "").trim() ? { label: "撤下公告", value: "", danger: true } : undefined,
+      extraAction: (gp.announcement ?? "").trim() ? { label: t("group.ops.announcement_retract"), value: "", danger: true } : undefined,
     });
     if (text === null || text.trim() === (gp.announcement ?? "")) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupAnnouncement(gp.conv_id, text.trim()));
@@ -65,7 +66,7 @@ export function useGroupActions(services: AppServices) {
 
   // 我在本群的昵称（G1，任意成员）：群内可见，留空恢复默认。
   const doEditMyGroupNickname = useCallback(async (gp: GroupInfo) => {
-    const nick = await askPrompt("我在本群的昵称", gp.my_nickname ?? "", { placeholder: "群内可见（≤20 字，留空恢复默认）", okText: "保存", maxLength: 20 });
+    const nick = await askPrompt(t("chat.detail.my_group_nickname"), gp.my_nickname ?? "", { placeholder: t("group.ops.my_nickname_placeholder"), okText: t("common.save"), maxLength: 20 });
     if (nick === null || nick.trim() === (gp.my_nickname ?? "")) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMyNickname(gp.conv_id, nick.trim()));
   }, [askPrompt, clientRef, doGroupAction]);
@@ -94,11 +95,11 @@ export function useGroupActions(services: AppServices) {
 
   // 撤销管理员（仅群主）：SetRole 幂等，重复撤同一人不会报错。
   const doRevokeAdmin = useCallback(async (cid: string, userId: string, label: string) => {
-    const ok = await askConfirm(`撤销 ${label} 的管理员身份？`, { okText: "撤销", danger: true });
+    const ok = await askConfirm(t("group.ops.revoke_admin_confirm", { name: label }), { okText: t("group.admin_list.revoke_btn"), danger: true });
     if (!ok) return;
     try {
       await clientRef.current!.setGroupRole(cid, userId, "member");
-      setToast("已撤销管理员");
+      setToast(t("group.ops.revoke_admin_done"));
     } catch (e) {
       setToast(adminErrorToast(e)); // 通用 doGroupAction 只会透传英文原文，这里按码本地化
     }
@@ -110,8 +111,8 @@ export function useGroupActions(services: AppServices) {
   // 这是后端 store.TransferGroupOwner 的既定行为，客户端不做任何补偿。
   // 成功返回 true，调用方据此关掉群管理/管理员面板——那一刻我已是 member，整页对我不再可见。
   const doTransferOwner = useCallback(async (cid: string, userId: string, label: string): Promise<boolean> => {
-    const ok = await askConfirm(`确定把群主转让给 ${label}？转让后你将变为普通成员，且不可撤销。`,
-      { okText: "转让", danger: true });
+    const ok = await askConfirm(t("group.ops.transfer_confirm_message", { name: label }),
+      { okText: t("group.transfer_owner.confirm"), danger: true });
     if (!ok) return false;
     try {
       await clientRef.current!.transferGroup(cid, userId);
@@ -119,7 +120,7 @@ export function useGroupActions(services: AppServices) {
       setToast(adminErrorToast(e));
       return false;
     }
-    setToast(`已转让给 ${label}`);
+    setToast(t("group.transfer_owner.done", { name: label }));
     void refreshGroupInfo(cid);
     void refreshConversations();
     return true;

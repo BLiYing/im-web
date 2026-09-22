@@ -3,6 +3,7 @@
 // 映射函数是纯的（可单测）；解码函数依赖浏览器 canvas，仅运行期用。
 import jsQR from "jsqr";
 import type { QRUserCard, QRGroupCard } from "./sdk/protocol";
+import { t } from "./i18n";
 
 /** 名片码扫后主按钮态（self=看自己资料、friend=发消息、stranger=加好友、blocked=不给加好友入口）。 */
 export type UserAction = { kind: "self" | "message" | "add" | "blocked"; label: string };
@@ -10,13 +11,13 @@ export type UserAction = { kind: "self" | "message" | "add" | "blocked"; label: 
 export function userCardAction(c: QRUserCard): UserAction {
   switch (c.relation) {
     case "self":
-      return { kind: "self", label: "查看我的资料" };
+      return { kind: "self", label: t("qr.action.view_my_profile") };
     case "friend":
-      return { kind: "message", label: "发消息" };
+      return { kind: "message", label: t("qr.action.send_message") };
     case "blocked":
-      return { kind: "blocked", label: "查看资料" }; // 不因扫码开加好友后门
+      return { kind: "blocked", label: t("qr.branch.view_profile") }; // 不因扫码开加好友后门
     default:
-      return { kind: "add", label: "添加到通讯录" };
+      return { kind: "add", label: t("qr.action.add_contact") };
   }
 }
 
@@ -24,21 +25,21 @@ export function userCardAction(c: QRUserCard): UserAction {
 export type GroupAction = { kind: "enter" | "join" | "apply" | "disabled"; label: string; note?: string };
 
 export function groupCardAction(c: QRGroupCard): GroupAction {
-  if (c.joined) return { kind: "enter", label: "进入群聊" };
+  if (c.joined) return { kind: "enter", label: t("qr.action.enter_group") };
   if (!c.joinable) {
     switch (c.reason) {
       case "full":
-        return { kind: "disabled", label: "该群人数已满", note: "群成员已达上限，暂时无法加入" };
+        return { kind: "disabled", label: t("qr.action.group_full"), note: t("qr.action.group_full_note") };
       case "banned":
-        return { kind: "disabled", label: "无法加入", note: "你已被移出该群，暂时或永久不可加入" };
+        return { kind: "disabled", label: t("qr.action.cannot_join"), note: t("qr.action.banned_note") };
       case "invite_revoked":
-        return { kind: "disabled", label: "无法加入", note: "该群已改为仅管理员可邀请，此邀请已失效" };
+        return { kind: "disabled", label: t("qr.action.cannot_join"), note: t("qr.action.admin_only_note") };
       default:
-        return { kind: "disabled", label: "无法加入", note: "" };
+        return { kind: "disabled", label: t("qr.action.cannot_join"), note: "" };
     }
   }
-  if (c.reason === "approval") return { kind: "apply", label: "申请加入", note: "该群需管理员审批" };
-  return { kind: "join", label: "加入群聊" };
+  if (c.reason === "approval") return { kind: "apply", label: t("qr.action.apply"), note: t("qr.action.apply_note") };
+  return { kind: "join", label: t("qr.action.join") };
 }
 
 /** 外来码（unknown）：判定是不是 URL 并抽出域名主体，供二次确认高亮。纯文本 isUrl=false。 */
@@ -69,13 +70,13 @@ export function describeRaw(raw: string): { kind: RawKind; label: string } {
   const s = (raw || "").trim();
   const m = /\/q\/([ugl])\//.exec(s.startsWith("q/") ? "/" + s : s);
   if (m) {
-    if (m[1] === "u") return { kind: "user", label: "名片码" };
-    if (m[1] === "g") return { kind: "group", label: "群二维码" };
-    return { kind: "login", label: "登录二维码" };
+    if (m[1] === "u") return { kind: "user", label: t("qr.kind.user") };
+    if (m[1] === "g") return { kind: "group", label: t("qr.kind.group") };
+    return { kind: "login", label: t("qr.login.image_alt") };
   }
   const u = classifyUnknown(s);
-  if (u.isUrl) return { kind: "url", label: u.domain || "网页链接" };
-  return { kind: "text", label: s.length > 24 ? s.slice(0, 24) + "…" : s || "（空）" };
+  if (u.isUrl) return { kind: "url", label: u.domain || t("qr.kind.link") };
+  return { kind: "text", label: s.length > 24 ? s.slice(0, 24) + "…" : s || t("qr.result.empty") };
 }
 
 /** 层3（App 内拦截）：url 是否本站邀请链接（**同 hostname** + 路径 /q/u|g/）。

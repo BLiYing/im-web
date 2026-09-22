@@ -5,6 +5,13 @@
 
 ## 当前焦点
 
+> **多语言 P1+P2 进行中（2026-09-22，中文 + 英文；未提交、浏览器未手测）**：P1 基础设施（`src/i18n` 的 `t()`/`useT()`/`setPref` + `LanguagePanel` 设置 ▸ 语言 + 桌面 IPC 同步）已落地，详见设计稿。**P2 存量迁移**已完成批次：设置相关面板、聊天侧组件（Composer/MessageList/ChatHeader/…）、各类 modals、详情/联系人/管理侧组件（DetailPanel/DetailTabs/GroupManagePanel/ContactsTab/AdminListPanel/MemberMenu/HomeSearchResults/ContactRow/Dialogs/SidebarTabs，对应片段 W1-W4，共约 400 键新增）；`tsc -b` 干净、`vitest` 全量 **1428 例绿**、`check-file-size.sh` 全部在预算内（`App.tsx` 3670/3679、`DetailPanel.tsx` 490/600、`MessageList.tsx` 596/600）。**P1+P2 ✅ 已完成**：又完成 W5（`menus.ts`/`useGroupOps.ts`/`useGroupActions.ts`/`groupAdmin.ts`/`useMediaDownload.ts`/`useChatSearch.ts`）+ W6（`sdk/errcode.ts` 错误码映射对齐 iOS `err.*`、`sdk/{presence,imSdk,http,tokenSession,chunkedUpload,voiceApi}.ts`；AST 精确扫描确认 `App.tsx` 实际只剩 1 处真实字面量且已 DEFERRED，此前"约102处"是行级 grep 把注释也算进去的高估）；`tsc -b` 干净、`vitest` 全量 **1434 例绿**、`check-file-size.sh` 全部在预算内（`App.tsx` 3670/3679、`imSdk.ts` 1356/1356 压线未超）。文案表现有 **1348 键**（跨三端共用，见 `../IMServer/docs/i18n/strings.json`）。
+> **P2 范围内刻意 DEFERRED（不是漏改）**：`App.tsx` 好友申请默认招呼语（发给服务端的消息内容）、`messageContent.ts`/`callRecord.ts`（消息预览占位符）、`mention.ts` 的 `MENTION_ALL_LABEL`（@全员 token，进消息正文）——均待 P3 服务端结构化。`sdk/localStore.contract*.ts` 命中的中文是契约测试用例描述/夹具数据，不算漏改。
+> ⚠️ 待清理（非阻塞）：`net.error.avatar_upload_failed` 与 `group.create.avatar_failed` 中文相同英文不同，语义重叠，将来可考虑收口成一个 `common.*`；`menus.ts`「静音/取消静音」与 `ChatHeader.tsx`「免打扰/取消免打扰」指向同一开关但措辞历史遗留不一致（新增 `web.conv.menu.mute/unmute` 保持原样），是否统一待产品定夺。
+> ⚠️ W5 发现会话菜单「静音/取消静音」(`menus.ts`) 与详情页「免打扰/取消免打扰」(`ChatHeader.tsx`) 指向同一个开关但措辞不一致（历史遗留，非本次引入）——保持原文案不变、按规则拆了 `web.conv.menu.mute/unmute` 单独键，是否统一措辞待产品定夺。
+> ⚠️ **模块顶层不许调 `t()`**（切语言不会变）；`test-setup.ts` 固定 `im.language=zh-Hans`（jsdom 的 navigator.languages 是 en-US）；`App.tsx` 行数预算已顶到 3670/3679，新逻辑别往里塞。
+> ⚠️ P2 迁移子代理**曾因周额度限流失败一次**（batch W3，2026-09-21）——失败前的代码改动与文案片段合并均已正常完成，只是收尾报告被打断；每次继续迁移前先核实 git diff 与片段合并状态，务必重新跑一遍 `tsc -b`/`vitest`/`check-i18n.mjs` 确认，别假设失败=没做完。
+>
 > **im-rtc 通话接入（调试密钥联调）✅ 代码完成、待真机联调（2026-09-19，未提交）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
 > `rtcEngine` 换票只走 `signToken`、`rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，
 > 群详情页新增「群通话」（成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。

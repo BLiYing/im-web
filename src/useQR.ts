@@ -10,6 +10,7 @@ import type { GroupInfo, QRCard, QRResolved, UserCard } from "./sdk/protocol";
 import { describeRaw, errorCode } from "./qr";
 import { platform } from "./platform";
 import { LOG_TAG, logger } from "./logging/logger";
+import { t } from "./i18n";
 
 export interface QRDeps {
   phase: "login" | "app";
@@ -77,31 +78,30 @@ export function useQR(d: QRDeps) {
   const openMyCard = async () => {
     try {
       const card = await clientRef.current!.qrMyCard();
-      setQrCardModal({ title: "我的二维码", subtitle: "扫描二维码，加我为朋友",
+      setQrCardModal({ title: t("qr.scan.my_code"), subtitle: t("qr.card.my_subtitle"),
         name: myInfo?.nickname || uid, avatarUrl: myInfo?.avatar_url, card, canReset: true, kind: "me" });
-    } catch (e) { setToast(`获取名片码失败：${(e as Error).message}`); }
+    } catch (e) { setToast(t("qr.toast.my_card_failed", { error: (e as Error).message })); }
   };
 
   // 群二维码 / 群邀请链接同源（码即邀请链接）：asLink 仅改标题与文案，复用同一张卡片模态（内含二维码图 + 复制链接）。
   const openGroupCard = async (cid: string, asLink = false) => {
     const gi = groupInfos[cid];
     const canManage = gi?.my_role === "owner" || gi?.my_role === "admin";
-    const noun = asLink ? "群邀请链接" : "群二维码";
-    const denyVerb = asLink ? "获取群邀请链接" : "出示群二维码";
+    const denyMsg = t(asLink ? "qr.toast.admin_only_link" : "qr.toast.admin_only_code");
     // perm_invite=1 时群码即邀请链接，仅群主/管理员可出示。无权限时不打开模态、直接中文吐司（对齐 iOS）。
     if (gi?.perm_invite && !canManage) {
-      setToast(`群主已开启「仅管理员可邀请」，你无法${denyVerb}`);
+      setToast(denyMsg);
       return;
     }
     try {
       const card = await clientRef.current!.groupQR(cid);
-      setQrCardModal({ title: noun, subtitle: asLink ? "复制或分享链接，邀请好友加入群聊" : "扫描二维码，加入群聊",
-        name: gi?.name || "群聊", avatarUrl: gi?.avatar_url, card, canReset: canManage, kind: "group", convId: cid });
+      setQrCardModal({ title: t(asLink ? "qr.card.group_title_link" : "qr.card.group_title_code"), subtitle: t(asLink ? "qr.card.group_subtitle_link" : "qr.card.group_subtitle_code"),
+        name: gi?.name || t("qr.card.group_default_name"), avatarUrl: gi?.avatar_url, card, canReset: canManage, kind: "group", convId: cid });
     } catch (e) {
       // 服务端兜底（本地 perm_invite 可能过期）：300204 映射为中文，其余透传。
       const msg = errorCode(e) === 300204
-        ? `群主已开启「仅管理员可邀请」，你无法${denyVerb}`
-        : `获取${noun}失败：${(e as Error).message}`;
+        ? denyMsg
+        : t(asLink ? "qr.toast.group_link_failed" : "qr.toast.group_code_failed", { error: (e as Error).message });
       setToast(msg);
     }
   };
@@ -116,9 +116,9 @@ export function useQR(d: QRDeps) {
         ? await clientRef.current!.qrResetMyCard()
         : await clientRef.current!.groupQRReset(m.convId!);
       setQrCardModal({ ...m, card });
-      setToast("二维码已重置，旧码已失效");
+      setToast(t("qr.toast.reset_ok"));
     } catch (e) {
-      setToast(`重置失败：${(e as Error).message}`);
+      setToast(t("qr.toast.reset_failed", { error: (e as Error).message }));
     }
   };
 
@@ -134,11 +134,11 @@ export function useQR(d: QRDeps) {
       const raw = qrResult?.raw ?? "";
       try {
         const info = await clientRef.current!.joinGroupByCode(raw, hello);
-        setToast(`已加入「${info.name}」`);
+        setToast(t("qr.toast.joined", { name: info.name }));
         await refreshConversations();
         openGroupChat(info.conv_id);
       } catch (e) {
-        if (errorCode(e) === 300210) setToast("入群申请已提交，等待管理员审批");
+        if (errorCode(e) === 300210) setToast(t("qr.toast.join_requested"));
         else setToast((e as Error).message);
       }
     },

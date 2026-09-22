@@ -5,6 +5,7 @@
 // IMClient 的转调方法就地传入，信封解包统一走 sdk/http.ts 的 callJson。
 import { callJson } from "./http";
 import { friendlyMessage } from "./errcode";
+import { t } from "../i18n";
 
 /**
  * 上传语音（voice P1）：/api/v1/upload?as=voice——服务端切用 voice 白名单
@@ -17,7 +18,7 @@ export async function uploadVoice(token: string, blob: Blob, fileName: string): 
   const data = await callJson("/api/v1/upload?as=voice", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd,
   });
-  if (!data) throw new Error(friendlyMessage(0, "语音上传失败")); // code=0 但无 data（服务端异常）：给明确文案
+  if (!data) throw new Error(friendlyMessage(0, t("net.error.voice_upload_failed"))); // code=0 但无 data（服务端异常）：给明确文案
   return { url: String(data.url), size: Number(data.size) || blob.size };
 }
 

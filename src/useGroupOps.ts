@@ -17,6 +17,7 @@ import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
 import type { Conversation, GroupBan, GroupInfo, GroupSummary, JoinRequest } from "./sdk/protocol";
 import { errorCode } from "./qr";
+import { t } from "./i18n";
 import { LOG_TAG, logger } from "./logging/logger";
 import type { useDialogs } from "./useDialogs";
 import type { CreateGroupDraft } from "./components/modals/CreateGroupModal";
@@ -70,21 +71,21 @@ export function useGroupOps(d: GroupOpsDeps) {
       const list = await clientRef.current?.listGroups();
       setGroupsModal(list ?? []);
     } catch (e) {
-      setToast(`加载群列表失败：${(e as Error).message}`);
+      setToast(t("group.ops.list_load_failed", { detail: (e as Error).message }));
     }
   };
 
   // 解散群（仅群主，二次确认）。
   const doDissolveGroup = (cid: string) => {
     void (async () => {
-      if (!(await askConfirm("删除并解散该群？所有成员将被移出，且不可恢复。", { okText: "解散", danger: true }))) return;
+      if (!(await askConfirm(t("group.ops.dissolve_confirm_message"), { okText: t("group.ops.dissolve_confirm_ok"), danger: true }))) return;
       try {
         await clientRef.current!.dissolveGroup(cid);
         setDetail(null);
         setGroupInfos((prev) => { const { [cid]: _drop, ...rest } = prev; return rest; });
         if (currentConvRef.current === cid) deselect();
         void refreshConversations();
-      } catch (e) { setToast(`解散失败：${(e as Error).message}`); }
+      } catch (e) { setToast(t("group.ops.dissolve_failed", { detail: (e as Error).message })); }
     })();
   };
 
@@ -92,8 +93,8 @@ export function useGroupOps(d: GroupOpsDeps) {
   const doCreateGroup = async () => {
     if (!createDraft) return;
     const name = createDraft.name.trim();
-    if (!name) { setToast("请输入群名"); return; }
-    if (createDraft.selected.length === 0) { setToast("请至少选择一位好友"); return; }
+    if (!name) { setToast(t("group.ops.name_required")); return; }
+    if (createDraft.selected.length === 0) { setToast(t("group.ops.friend_required")); return; }
     setCreateBusy(true);
     try {
       // 头像随建群一起发：`POST /groups` 的 body 本来就有 avatar_url 位，此前一直传空串。
@@ -105,7 +106,7 @@ export function useGroupOps(d: GroupOpsDeps) {
       await refreshConversations();
       openGroupChat(info.conv_id);
     } catch (e) {
-      setToast(`建群失败：${(e as Error).message}`);
+      setToast(t("group.create.failed", { error: (e as Error).message }));
     } finally {
       setCreateBusy(false);
     }
@@ -113,7 +114,7 @@ export function useGroupOps(d: GroupOpsDeps) {
 
   // 退出群聊（群主会被服务端拦：需先转让）。
   const doLeaveGroup = async (cid: string) => {
-    if (!(await askConfirm("确定退出该群聊？", { okText: "退出", danger: true }))) return;
+    if (!(await askConfirm(t("group.ops.leave_confirm_message"), { okText: t("group.info.leave_confirm"), danger: true }))) return;
     try {
       await clientRef.current!.leaveGroup(cid);
       setDetail(null);
@@ -121,7 +122,7 @@ export function useGroupOps(d: GroupOpsDeps) {
       if (currentConvRef.current === cid) deselect();
       void refreshConversations();
     } catch (e) {
-      setToast(`退出失败：${(e as Error).message}`);
+      setToast(t("group.ops.leave_failed", { detail: (e as Error).message }));
     }
   };
 
@@ -131,7 +132,7 @@ export function useGroupOps(d: GroupOpsDeps) {
       const bans = await clientRef.current!.fetchGroupBans(cid);
       setGroupBansModal({ convId: cid, bans });
       setGroupBans(bans);
-    } catch (e) { setToast(`加载黑名单失败：${(e as Error).message}`); }
+    } catch (e) { setToast(t("group.ops.bans_load_failed", { detail: (e as Error).message })); }
   };
   const doUnban = async (cid: string, userId: string) => {
     try {
@@ -139,8 +140,8 @@ export function useGroupOps(d: GroupOpsDeps) {
       const bans = await clientRef.current!.fetchGroupBans(cid);
       setGroupBansModal({ convId: cid, bans });
       setGroupBans(bans);
-      setToast("已解除");
-    } catch (e) { setToast(`解除失败：${(e as Error).message}`); }
+      setToast(t("group.ops.unban_done"));
+    } catch (e) { setToast(t("group.ops.unban_failed", { detail: (e as Error).message })); }
   };
 
   const openJoinRequests = async (cid: string) => {
@@ -150,7 +151,7 @@ export function useGroupOps(d: GroupOpsDeps) {
       setJoinReqModal({ convId: cid, requests, loading: false });
     } catch (e) {
       setJoinReqModal(null);
-      setToast(`加载入群申请失败：${(e as Error).message}`);
+      setToast(t("group.ops.join_requests_load_failed", { detail: (e as Error).message }));
     }
   };
   const reloadJoinRequests = async (cid: string) => {
@@ -164,22 +165,22 @@ export function useGroupOps(d: GroupOpsDeps) {
       await clientRef.current!.decideJoinRequest(cid, userId, accept);
       await reloadJoinRequests(cid);
       void refreshGroupInfo(cid); // 更新 pending_count 角标
-      setToast(accept ? "已同意入群" : "已拒绝");
-    } catch (e) { setToast(`操作失败：${(e as Error).message}`); }
+      setToast(accept ? t("qr.join_req.approved_toast") : t("qr.join_req.rejected"));
+    } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
   };
 
   // 群备注（G1，仅本人可见）：改我看到的群名，**服务端多端同步**（PUT …/remark）。
   // 成功后重拉会话列表；conv_update 也会把变更同步到本人其它端与本机列表/标题。
   const doEditGroupRemark = async (gp: GroupInfo) => {
     const cur = (conversations.find((c) => c.conv_id === gp.conv_id)?.remark || "").trim();
-    const v = await askPrompt("群备注", cur, { placeholder: `${gp.name}（仅自己可见）`, okText: "保存", maxLength: 30 });
+    const v = await askPrompt(t("chat.detail.group_remark"), cur, { placeholder: t("group.ops.remark_placeholder", { name: gp.name }), okText: t("common.save"), maxLength: 30 });
     if (v === null || v.trim() === cur) return;
     try {
       await clientRef.current?.setConvRemark(gp.conv_id, v.trim());
       logger.info(LOG_TAG.app, "group_remark_updated", { conv: gp.conv_id, len: v.trim().length });
       await refreshConversations(); // 列表状态更新 → chatTitle/列表项/详情行随 remark 重渲染
     } catch (e) {
-      setToast(`保存备注失败：${(e as Error).message}`);
+      setToast(t("group.ops.remark_save_failed", { detail: (e as Error).message }));
     }
   };
 
@@ -194,11 +195,11 @@ export function useGroupOps(d: GroupOpsDeps) {
         file,
         onDone: async (blob) => {
           try {
-            setToast("上传中…");
+            setToast(t("common.uploading"));
             const { url } = await clientRef.current!.uploadAvatar(blob);
             await doGroupAction(gp.conv_id, () => clientRef.current!.updateGroup(gp.conv_id, gp.name, url, gp.intro ?? ""));
-            setToast("群头像已更新");
-          } catch (e) { setToast(`设置群头像失败：${(e as Error).message}`); }
+            setToast(t("group.ops.avatar_updated"));
+          } catch (e) { setToast(t("group.ops.avatar_set_failed", { detail: (e as Error).message })); }
         },
       });
     };
@@ -222,7 +223,7 @@ export function useGroupOps(d: GroupOpsDeps) {
             const { url } = await clientRef.current!.uploadAvatar(blob);
             setCreateDraft((prev) => (prev ? { ...prev, avatarUrl: url } : prev));
           } catch (e) {
-            setToast(`头像上传失败：${(e as Error).message}`);
+            setToast(t("group.ops.avatar_upload_failed", { detail: (e as Error).message }));
           } finally {
             setCreateAvatarBusy(false);
           }
@@ -234,7 +235,7 @@ export function useGroupOps(d: GroupOpsDeps) {
 
   // 邀请成员：提交选中的好友。
   const doInvite = async () => {
-    if (!inviteDraft || inviteDraft.selected.length === 0) { setToast("请选择要邀请的好友"); return; }
+    if (!inviteDraft || inviteDraft.selected.length === 0) { setToast(t("group.ops.invite_select_required")); return; }
     const { convId: cid, selected } = inviteDraft;
     try {
       const added = await clientRef.current!.inviteToGroup(cid, selected);
@@ -247,16 +248,16 @@ export function useGroupOps(d: GroupOpsDeps) {
       // 按**实际加入数**给反馈，而不是按勾选数：已在群里的人会被服务端跳过（幂等，不是错误）。
       // 超级群下这是常态——端上算不出完整的"已在群里"集合（gp.members 只有我自己）。
       const skipped = selected.length - added.length;
-      if (added.length === 0) setToast("所选的人都已在群里");
-      else if (skipped > 0) setToast(`已邀请 ${added.length} 人，其余 ${skipped} 人已在群里`);
+      if (added.length === 0) setToast(t("group.info.invite_all_in"));
+      else if (skipped > 0) setToast(t("group.info.invite_partial", { invited: added.length, skipped }));
     } catch (e) {
       // 按业务码分支（勿直接透传服务端 message，i18n）：300207 = 被邀请者已被移出/冷却期，
       // 用邀请场景的第三人称文案，区别于自加群映射表里的第二人称「你已被移出」。
-      if (errorCode(e) === 300207) setToast("该成员已被移出本群，暂时无法再次邀请");
+      if (errorCode(e) === 300207) setToast(t("group.info.reinvite_blocked"));
       // 300204 = 无邀请权（竞态：打开选择器后群主刚开启「仅管理员可邀请」）。后端此码下发英文默认文案，
       // 且 300204 多场景复用不宜在 FRIENDLY_MESSAGES 一刀切映射，故在此邀请场景就地给中文（对齐 iOS）。
-      else if (errorCode(e) === 300204) setToast("群主已开启「仅管理员可邀请」，你无法邀请成员");
-      else setToast(`邀请失败：${(e as Error).message}`);
+      else if (errorCode(e) === 300204) setToast(t("chat.detail.invite_members_blocked"));
+      else setToast(t("group.ops.invite_failed", { detail: (e as Error).message }));
     }
   };
 

@@ -3,6 +3,8 @@
  *  设计要点：服务端只推「上线」，不推「下线」——在线与否由 online_until 到期本地判定。
  *  好处是漏收一帧不会让状态永久陈旧，代价是对端离开后「在线」最长残留一个租约周期（约 5 分钟）。
  *  故 isOnline 必须**每次读取时按当前时间重算**，不能缓存成 boolean。 */
+import { t } from "../i18n";
+import { monthDay, fullDate } from "../time";
 
 /** 在线态粗档（对齐后端 protocol.Presence* 字符串）。 */
 export type PresenceLevel = "online" | "recently" | "last_week" | "last_month" | "long_ago";
@@ -58,22 +60,22 @@ export function isOnline(p: Presence | undefined, now = Date.now()): boolean {
  *  取不到任何信息时返回空串（调用方据此隐藏副标题，不显示占位）。 */
 export function presenceText(p: Presence | undefined, now = Date.now()): string {
   if (!p) return "";
-  if (isOnline(p, now)) return "在线";
+  if (isOnline(p, now)) return t("common.online");
   if (p.lastSeen > 0) return relativeLastSeen(p.lastSeen, now);
   // 无精确时间（未知或将来被隐私设置抹掉）时回退到粗档文案。
   switch (p.level) {
     // 档位说 online 但租约已过期/缺失：**不能**显示「在线」——没有租约就没有到期时刻，
     // 这个「在线」再也不会被时间推翻，会永久停在错误状态。从宽也只到「最近在线」。
     case "online":
-      return "最近在线";
+      return t("presence.recently");
     case "recently":
-      return "最近在线";
+      return t("presence.recently");
     case "last_week":
-      return "一周内在线";
+      return t("presence.last_week");
     case "last_month":
-      return "一个月内在线";
+      return t("presence.last_month");
     case "long_ago":
-      return "很久未上线";
+      return t("presence.long_ago");
     default:
       return "";
   }
@@ -86,8 +88,8 @@ function pad2(n: number): string {
 /** 由 lastSeen 生成精确相对文案（与 iOS IMPresence 的分级一致）。 */
 function relativeLastSeen(lastSeen: number, now: number): string {
   const elapsed = (now - lastSeen) / 1000;
-  if (elapsed < 60) return "刚刚在线";
-  if (elapsed < 3600) return `${Math.floor(elapsed / 60)} 分钟前在线`;
+  if (elapsed < 60) return t("presence.just_now");
+  if (elapsed < 3600) return t("presence.minutes_ago", { count: Math.floor(elapsed / 60) });
 
   const seen = new Date(lastSeen);
   const hhmm = `${pad2(seen.getHours())}:${pad2(seen.getMinutes())}`;
@@ -97,11 +99,11 @@ function relativeLastSeen(lastSeen: number, now: number): string {
   todayStart.setHours(0, 0, 0, 0);
   const yesterdayStart = new Date(todayStart);
   yesterdayStart.setDate(todayStart.getDate() - 1);
-  if (lastSeen >= todayStart.getTime()) return `今天 ${hhmm} 在线`;
-  if (lastSeen >= yesterdayStart.getTime()) return `昨天 ${hhmm} 在线`;
+  if (lastSeen >= todayStart.getTime()) return t("presence.today_at", { time: hhmm });
+  if (lastSeen >= yesterdayStart.getTime()) return t("presence.yesterday_at", { time: hhmm });
 
   // 跨年时带上年份，避免「1月2日」指向去年却看不出来。
   const sameYear = seen.getFullYear() === new Date(now).getFullYear();
-  const date = `${seen.getMonth() + 1}月${seen.getDate()}日`;
-  return sameYear ? `${date} 在线` : `${seen.getFullYear()}年${date} 在线`;
+  const date = sameYear ? monthDay(seen) : fullDate(seen);
+  return t("presence.on_date", { date });
 }

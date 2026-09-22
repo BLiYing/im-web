@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { QRLoginTab } from "../QRUI";
+import { useT } from "../i18n";
 
 /**
  * 登录页（含恢复登录过渡态 + 密码/扫码两页签）。从 App.tsx 抽出的纯展示组件：
@@ -21,6 +22,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
   onRegister: () => void;
   onQRLogin: (uid: string, token: string, refreshToken: string) => void;
 }) {
+  const tr = useT();
   // 哪个入口在转圈。三个按钮共用 App 的 authBusy，不记来源就会三个一起转。
   // **必须声明在 restoring 早退之前**——Hook 顺序不能被早退打断。
   const [busyAction, setBusyAction] = useState<"login" | "register" | "dev" | null>(null);
@@ -36,36 +38,36 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
         <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
         <h1>IM Web</h1>
         {/* uid 这个 prop 实为 username（见类型注释）；即便如此也别在恢复提示里显身份，简洁即可。 */}
-        <p className="hint restoring-hint">正在恢复登录…</p>
+        <p className="hint restoring-hint">{tr("login.restoring")}</p>
       </div>
     );
   }
   return (
     <div className="login">
       <img className="login-logo" src="/im-logo.png" alt="" aria-hidden="true" />
-      <h1>IM Web 登录</h1>
+      <h1>{tr("web.login.title")}</h1>
       <div className="login-tabs">
-        <button className={`login-tab${loginTab === "password" ? " on" : ""}`} onClick={() => onLoginTab("password")}>密码登录</button>
-        <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => onLoginTab("qr")}>扫码登录</button>
+        <button className={`login-tab${loginTab === "password" ? " on" : ""}`} onClick={() => onLoginTab("password")}>{tr("login.tab_password")}</button>
+        <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => onLoginTab("qr")}>{tr("login.tab_qr")}</button>
       </div>
       {/* 鉴权失效原因（如被踢下线）在两个页签下都要可见——被踢时可能正停在扫码页。 */}
       {authErr && <p className="auth-err">{authErr}</p>}
       {loginTab === "password" ? (
         <>
-          <label>用户名<input value={uid} autoFocus placeholder="a-z、0-9、下划线，≥5 位"
+          <label>{tr("settings.info.username")}<input value={uid} autoFocus placeholder={tr("web.login.username_placeholder")}
             onChange={(e) => onUid(e.target.value.trim())} /></label>
           {/* 昵称只在注册时用得到：它是别人看到的名字，可中文/emoji，与用户名规则完全不同。 */}
-          <label>昵称<input value={nickname} placeholder="注册用，可中文，≤32 字"
+          <label>{tr("login.nickname")}<input value={nickname} placeholder={tr("web.login.nickname_placeholder")}
             onChange={(e) => onNickname(e.target.value)} /></label>
-          <label>密码<input type="password" value={password} placeholder="≥ 6 位"
+          <label>{tr("login.password")}<input type="password" value={password} placeholder={tr("web.login.password_placeholder")}
             onChange={(e) => onPassword(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && password && !authBusy) { setBusyAction("login"); onLogin(password); } }} /></label>
           {/* 「登录」按钮强制要求密码非空——空密码只能走下方「免密登录」明示入口（且需后端 -dev-login），
               避免开发期免密开关下点「登录」变成静默走免密（iOS 端登录页也是这样，密码不填直接走不通）。 */}
           <button className="login-submit" disabled={authBusy || !password}
-            onClick={() => { setBusyAction("login"); onLogin(password); }}>{label("login", "登录", "登录中…")}</button>
+            onClick={() => { setBusyAction("login"); onLogin(password); }}>{label("login", tr("login.button.login"), tr("login.submitting"))}</button>
           <button className="login-submit secondary" disabled={authBusy}
-            onClick={() => { setBusyAction("register"); onRegister(); }}>{label("register", "注册并登录", "注册中…")}</button>
+            onClick={() => { setBusyAction("register"); onRegister(); }}>{label("register", tr("login.button.register"), tr("login.registering"))}</button>
           <p className="hint">
             真账号密码登录。先启动后端 <code>go run ./cmd/imserver</code>。<br />
             仅调试：<button className="link-inline" disabled={authBusy}

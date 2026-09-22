@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { formatTime, conversationTime, dayHeader } from "./time";
+import { setPref } from "./i18n";
 
 // 用本地时分构造时间戳（formatTime 用 getHours/getMinutes，按本地时区，故与时区无关）。
 const at = (h: number, m: number) => new Date(2026, 0, 1, h, m, 0).getTime();
@@ -63,3 +64,19 @@ describe("conversationTime：会话列表四段式", () => {
     expect(conversationTime(0, "24")).toBe("");
   });
 });
+
+describe("英文界面（多语言）", () => {
+  afterEach(() => setPref("zh-Hans"));
+  it("会话列表四段式与日期分隔用英文词汇", () => {
+    setPref("en");
+    const now = new Date();
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    expect(conversationTime(y.getTime())).toBe("Yesterday");
+    expect(dayHeader(now.getTime())).toBe("Today");
+    const old = new Date(2020, 8, 21, 10, 0).getTime();
+    expect(conversationTime(old)).toBe("Sep 21, 2020");
+    const thisYear = new Date(now.getFullYear(), 0, 5, 10, 0);
+    if (!isSameDayAsToday(thisYear)) expect(conversationTime(thisYear.getTime())).toBe("Jan 5");
+  });
+});
+function isSameDayAsToday(d: Date) { const n = new Date(); return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate(); }

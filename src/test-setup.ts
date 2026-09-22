@@ -12,3 +12,7 @@ const ls = {
   get length() { return mem.size; },
 };
 Object.defineProperty(globalThis, "localStorage", { value: ls, configurable: true, writable: true });
+
+// 多语言：测试默认固定简体中文（否则 jsdom/Node 的 navigator.languages=en-US 会让「跟随系统」解析成 en，
+// 打破现有中文断言）。需要测别的语言的用例自行 setPref。
+localStorage.setItem("im.language", "zh-Hans");

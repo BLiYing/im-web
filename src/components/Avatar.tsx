@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { SYSTEM_UID } from "../sdk/protocol";
+import { useT } from "../i18n";
 
 // 可复用头像组件与首字母底色算法。从 App.tsx 抽出（纯展示，无业务依赖）。
 
@@ -21,6 +22,7 @@ export function avatarColor(seed: string): string {
 export function Avatar({ url, label, seed, cls = "avatar", children, onClick }: {
   url?: string; label: string; seed?: string; cls?: string; children?: React.ReactNode; onClick?: () => void;
 }) {
+  const tr = useT();
   // 头像 <img> 加载失败（多为 avatar_url 指向的 /uploads 文件已被服务端清理/删除 → 404）时，
   // 回退首字母色圈，与 iOS 一致；否则浏览器会画自带的「破图问号」。url 变更（换头像/切账号）后重试。
   const [failed, setFailed] = useState(false);
@@ -31,7 +33,7 @@ export function Avatar({ url, label, seed, cls = "avatar", children, onClick }: 
     return (
       <div className={cls} onClick={onClick} role={onClick ? "button" : undefined}
            style={{ ...(onClick ? { cursor: "pointer" } : null), background: "#fff" }}>
-        <img className="avatar-img" src="/im-logo.png" alt="系统通知" />
+        <img className="avatar-img" src="/im-logo.png" alt={tr("common.system_notice")} />
         {children}
       </div>
     );

@@ -17,6 +17,7 @@
 import { tracedFetch } from "./http";
 import { friendlyMessage } from "./errcode";
 import { logger, LOG_TAG } from "../logging/logger";
+import { t } from "../i18n";
 
 /** 单片大小 = 服务端 init 响应建议值与其单片上限（8MB）。 */
 export const CHUNK_SIZE = 8 * 1024 * 1024;
@@ -42,7 +43,7 @@ export interface ChunkedResult { url: string; contentType: string; size: number 
 
 /** 用户主动取消：调用方据此静默移除气泡，而不是当失败报错。 */
 export class UploadCancelledError extends Error {
-  constructor() { super("已取消发送"); this.name = "UploadCancelledError"; }
+  constructor() { super(t("net.error.upload_cancelled")); this.name = "UploadCancelledError"; }
 }
 
 /** 服务端业务拒绝（HTTP 层成功但 code≠0）——与网络失败分流的依据。 */
@@ -141,9 +142,9 @@ export class ChunkedUploadTask {
     // 服务端 offset 完好——必须走网络重试路径保留 offset，绝不能当业务拒绝清 upload_id 从 0 重传
     // （否则一次代理抖动就白传已上传的 1.9GB）。抛普通 Error（非 BusinessError）即落到 catch 的网络分支。
     if (!body || typeof body.code !== "number") {
-      throw new Error(`服务器响应异常 (HTTP ${resp.status})`);
+      throw new Error(t("net.error.bad_response", { status: String(resp.status) }));
     }
-    if (body.code !== 0) throw new BusinessError(body.code, friendlyMessage(body.code, body.message || "上传失败"));
+    if (body.code !== 0) throw new BusinessError(body.code, friendlyMessage(body.code, body.message || t("net.error.upload_failed")));
     return body.data ?? {};
   }
 
@@ -194,7 +195,7 @@ export class ChunkedUploadTask {
         // 空闲超时触发的 abort：视为网络类失败，但给出面向用户的明确文案（不再干等）。
         this.idleTimedOut = false;
         if (this.cancelled || this.finished || gen !== this.generation || this.paused) return;
-        const msg = "读取文件超时——文件可能尚未从 iCloud 下载到本地，请确认已下载后重试";
+        const msg = t("net.error.upload_idle_timeout");
         if (this.idleTimeoutCount >= 1) { // 已续过一次仍超时：字节源确实卡死，明确失败
           logger.warn(LOG_TAG.media, "upload_idle_timeout_failed", { client_msg_id: this.key, upload_id: this.uploadId ?? "-" });
           this.fail(new Error(msg));

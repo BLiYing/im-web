@@ -4,6 +4,7 @@
 import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import { CALL_CONTENT_TYPE } from "./callRecord";
+import { t } from "./i18n";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
   Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle, Download, Eye,
@@ -82,52 +83,52 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     // 放首位，对齐 iOS 长按菜单顶部的读者行。人数在弹出的名单里显示（菜单构建是同步的，不做异步取数）。
     // **大群不显示**：超级群整套已读语义是关掉的（SUPERGROUP_DESIGN §4），2 万人"全员已读"永不成立，
     // 服务端也会回 enabled=false。留着这一行只会让人点了才被告知"人数过多不支持"。
-    { id: "readReceipts", label: "已读详情", icon: Eye,
+    { id: "readReceipts", label: t("receipts.title"), icon: Eye,
       visible: (c) => !!c.isGroup && !c.isSuper && c.m.from === c.uid && c.m.convSeq > 0, run: (c) => h.readReceipts(c.m) },
     // 语音转文字（服务端识别，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md）：只对已发出的 voice 可用。
     // 已展开 → 变「取消转文字」（只收起本地面板，不删服务端结果——缓存是会话共享的）。
-    { id: "transcribe", label: "转文字", icon: FileText,
+    { id: "transcribe", label: t("chat.msg_menu.transcribe"), icon: FileText,
       visible: (c) => c.m.contentType === "voice" && c.m.convSeq > 0 && !c.m.recalledAt && !c.hasTranscript,
       run: (c) => h.transcribe(c.m) },
-    { id: "transcribeOff", label: "取消转文字", icon: FileText,
+    { id: "transcribeOff", label: t("chat.msg_menu.transcribe_cancel"), icon: FileText,
       visible: (c) => c.m.contentType === "voice" && c.m.convSeq > 0 && !c.m.recalledAt && !!c.hasTranscript,
       run: (c) => h.transcribe(c.m) },
     // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发）。
-    { id: "copy", label: "复制", icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image" || !!c.m.caption, run: (c) => h.copy(c.m) },
-    { id: "reply", label: "引用", icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
-    { id: "forward", label: "转发", icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
+    { id: "copy", label: t("common.copy"), icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image" || !!c.m.caption, run: (c) => h.copy(c.m) },
+    { id: "reply", label: t("chat.msg_menu.reply"), icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
+    { id: "forward", label: t("common.forward"), icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
     // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
     // 必须 convSeq>0：未发出的乐观行 content 是本地 blob: URL，收藏它会存成一条永久失效的死链。
-    { id: "favorite", label: "收藏", icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
+    { id: "favorite", label: t("common.favorite"), icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
     // 下载：图片/视频/文件保存到本地（浏览器下载目录）。复用应用内已下的 blob，否则拉远端。必须有 content（乐观行 blob: 不算）。
-    { id: "download", label: "下载", icon: Download,
+    { id: "download", label: t("common.download"), icon: Download,
       visible: (c) => !c.m.recalledAt && c.m.convSeq > 0 && !!c.m.content
         && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
       run: (c) => h.download(c.m) },
-    { id: "recall", label: "撤回", icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
+    { id: "recall", label: t("chat.msg_menu.recall"), icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },
     // 置顶↔取消置顶（G0）：**切换对**，按当前状态只显示其一（与会话菜单的置顶同款写法）。
     // 撤回态不可置顶（横幅会指向一条墓碑）；未发出的乐观行（convSeq=0）也不行。
-    { id: "pin", label: "置顶", icon: Pin,
+    { id: "pin", label: t("conv.menu.pin"), icon: Pin,
       visible: (c) => !!c.canPin && c.m.convSeq > 0 && !c.m.recalledAt && !c.m.pinnedAt && c.m.contentType !== "system",
       run: (c) => h.pin(c.m, true) },
-    { id: "unpin", label: "取消置顶", icon: PinOff,
+    { id: "unpin", label: t("conv.menu.unpin"), icon: PinOff,
       visible: (c) => !!c.canPin && c.m.convSeq > 0 && !!c.m.pinnedAt, run: (c) => h.pin(c.m, false) },
-    { id: "edit", label: "编辑", icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
-    { id: "multiSelect", label: "多选", icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
-    { id: "translate", label: "翻译", icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
+    { id: "edit", label: t("common.edit"), icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
+    { id: "multiSelect", label: t("forward.picker.multi"), icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
+    { id: "translate", label: t("chat.msg_menu.translate"), icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
     // 举报（2026-09-06 由「举报消息 / 举报发送者」合并为单项）：对用户来说这本就是同一个动作，
     // 两个入口只让人犹豫选哪个；而消息类工单的信息是用户类的**超集**——服务端已按 (conv_id, conv_seq)
     // 反查发送者，管理员的一键禁言/封号照常落到那个人身上。「只举报这个人」的入口保留在资料页。
-    { id: "report", label: "举报", icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
+    { id: "report", label: t("common.report"), icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
     // 取消发送：仅本人、仍在发送/失败的媒体/文件出箱行（convSeq=0，尚未发出去；发出去后走撤回）。
     // 限 image/video/file——文本 sending 是 WS 帧已发出等 ack，无上传可取消，列出来会误导。与 iOS 同语义。
-    { id: "cancelSend", label: "取消发送", icon: XCircle,
+    { id: "cancelSend", label: t("chat.msg_menu.cancel_send"), icon: XCircle,
       visible: (c) => c.m.from === c.uid && c.m.convSeq === 0
         && (c.m.status === "sending" || c.m.status === "failed")
         && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
       run: (c) => h.cancelSend(c.m) },
     // 删除对发送中的本地件隐藏：删除只删行不停上传，传完仍会发出去（僵尸任务）；要撤走用「取消发送」。
-    { id: "delete", label: "删除", icon: Trash2, danger: true,
+    { id: "delete", label: t("common.delete"), icon: Trash2, danger: true,
       visible: (c) => !(c.m.status === "sending" && c.m.convSeq === 0), run: (c) => h.delete(c.m) },
   ];
   // 通话记录是系统事实、不是「说过的话」：长按只留「删除」（仅为我删除）——不可复制 / 引用 / 转发 / 收藏 / 撤回 / 置顶 / 多选 / 举报。
@@ -166,22 +167,24 @@ function isDownloadableFavorite(f: Favorite): boolean {
  */
 export function buildFavoriteActions(h: FavoriteHandlers): MenuAction<FavoriteCtx>[] {
   return [
-    { id: "forward", label: "转发", icon: Forward, visible: () => true, run: (c) => h.forward(c.f) },
-    { id: "copy", label: "复制", icon: Copy, visible: (c) => isCopyableFavorite(c.f), run: (c) => h.copy(c.f) },
-    { id: "download", label: "下载", icon: Download, visible: (c) => isDownloadableFavorite(c.f), run: (c) => h.download(c.f) },
-    { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.f) },
+    { id: "forward", label: t("common.forward"), icon: Forward, visible: () => true, run: (c) => h.forward(c.f) },
+    { id: "copy", label: t("common.copy"), icon: Copy, visible: (c) => isCopyableFavorite(c.f), run: (c) => h.copy(c.f) },
+    { id: "download", label: t("common.download"), icon: Download, visible: (c) => isDownloadableFavorite(c.f), run: (c) => h.download(c.f) },
+    { id: "delete", label: t("common.delete"), icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.f) },
   ];
 }
 
 export function buildConversationActions(h: ConversationHandlers): MenuAction<ConvCtx>[] {
   return [
-    { id: "pin", label: "置顶", icon: Pin, visible: (c) => !c.c.pinned_at, run: (c) => h.setPinned(c.c, true) },
-    { id: "unpin", label: "取消置顶", icon: PinOff, visible: (c) => !!c.c.pinned_at, run: (c) => h.setPinned(c.c, false) },
-    { id: "mute", label: "静音", icon: BellOff, visible: (c) => !c.c.muted, run: (c) => h.setMuted(c.c, true) },
-    { id: "unmute", label: "取消静音", icon: Bell, visible: (c) => !!c.c.muted, run: (c) => h.setMuted(c.c, false) },
+    { id: "pin", label: t("conv.menu.pin"), icon: Pin, visible: (c) => !c.c.pinned_at, run: (c) => h.setPinned(c.c, true) },
+    { id: "unpin", label: t("conv.menu.unpin"), icon: PinOff, visible: (c) => !!c.c.pinned_at, run: (c) => h.setPinned(c.c, false) },
+    // ⚠️ 静音/取消静音文案在此用 web.conv.menu.mute（“静音”），与 ChatHeader 下拉菜单的 conv.menu.mute（“免打扰”）
+    // 措辞不同——两处指向同一个 muted 状态，但迁移前就已经这样，非本次改动引入，未强行统一措辞（见迁移报告）。
+    { id: "mute", label: t("web.conv.menu.mute"), icon: BellOff, visible: (c) => !c.c.muted, run: (c) => h.setMuted(c.c, true) },
+    { id: "unmute", label: t("web.conv.menu.unmute"), icon: Bell, visible: (c) => !!c.c.muted, run: (c) => h.setMuted(c.c, false) },
     // 已读↔未读：有未读数或被手动标未读 → 「设为已读」；否则（已读态）→ 「标为未读」。
-    { id: "markRead", label: "设为已读", icon: CheckCheck, visible: (c) => c.c.unread > 0 || !!c.c.marked_unread, run: (c) => h.markRead(c.c) },
-    { id: "markUnread", label: "标为未读", icon: Circle, visible: (c) => c.c.unread === 0 && !c.c.marked_unread, run: (c) => h.markUnread(c.c) },
-    { id: "delete", label: "删除", icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.c) },
+    { id: "markRead", label: t("conv.menu.mark_read"), icon: CheckCheck, visible: (c) => c.c.unread > 0 || !!c.c.marked_unread, run: (c) => h.markRead(c.c) },
+    { id: "markUnread", label: t("conv.menu.mark_unread"), icon: Circle, visible: (c) => c.c.unread === 0 && !c.c.marked_unread, run: (c) => h.markUnread(c.c) },
+    { id: "delete", label: t("common.delete"), icon: Trash2, danger: true, visible: () => true, run: (c) => h.delete(c.c) },
   ];
 }

@@ -9,6 +9,7 @@ import type { useChatSearch } from "../useChatSearch";
 import { useAppServices } from "../AppServicesContext";
 import { Avatar } from "./Avatar";
 import { ChatSearchBar } from "./ChatSearchBar";
+import { useT } from "../i18n";
 
 export interface ChatHeaderActions {
   deselect: () => void;
@@ -43,6 +44,7 @@ export interface ChatHeaderProps {
 }
 
 export function ChatHeader(p: ChatHeaderProps) {
+  const tr = useT();
   const { searchOpen, isGroupChat, peer, groupConvId, searchQuery, setSearchQuery, search, chatTitle, chatAvatarURL, visibleChatSubtitle,
     chatMenu, setChatMenu, groupInfos, groupConv, peerConv, peerBlocked, actions } = p;
   const { comingSoon } = useAppServices();
@@ -64,10 +66,10 @@ export function ChatHeader(p: ChatHeaderProps) {
         />
       ) : (
       <>
-      {(peer || isGroupChat) && <button className="link back-btn" onClick={actions.deselect}>‹ 会话</button>}
+      {(peer || isGroupChat) && <button className="link back-btn" onClick={actions.deselect}>{tr("chat.header.back")}</button>}
       {(isGroupChat || peer) ? (
         <button className="chat-identity"
-          title={isGroupChat ? "查看群资料" : "查看资料"}
+          title={isGroupChat ? tr("chat.header.view_group_profile") : tr("chat.header.view_profile")}
           onClick={() => isGroupChat ? actions.openGroupPanel(groupConvId) : actions.openPeerDetail(peer, true)}>
           <Avatar url={chatAvatarURL} label={chatTitle} seed={groupConvId || peer} cls="chat-avatar" />
           <span className="chat-identity-copy">
@@ -76,33 +78,33 @@ export function ChatHeader(p: ChatHeaderProps) {
           </span>
         </button>
       ) : (
-        <span className="muted">未选择会话</span>
+        <span className="muted">{tr("chat.header.none_selected")}</span>
       )}
       <span className="chat-head-right">
         {(peer || isGroupChat) && (
           <>
-            <button className={`icon-btn${searchOpen ? " active" : ""}`} title="搜索聊天内容" onClick={() => (searchOpen ? search.closeInChatSearch() : search.openInChatSearch())}><Search size={20} /></button>
-            {!isGroupChat && <button className="icon-btn" title="呼叫" onClick={() => comingSoon("语音通话")}><Phone size={20} /></button>}
+            <button className={`icon-btn${searchOpen ? " active" : ""}`} title={tr("chat.search.placeholder")} onClick={() => (searchOpen ? search.closeInChatSearch() : search.openInChatSearch())}><Search size={20} /></button>
+            {!isGroupChat && <button className="icon-btn" title={tr("chat.header.call")} onClick={() => comingSoon(tr("chat.header.voice_call"))}><Phone size={20} /></button>}
             <span className="chat-anchor">
-              <button className="icon-btn" title="更多" onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
+              <button className="icon-btn" title={tr("common.more")} onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
             {chatMenu && (
               <div className="menu-card chat-menu" onClick={(e) => e.stopPropagation()}>
                 {(isGroupChat ? [
-                  { id: "info", label: "群资料", icon: Info, run: () => actions.openGroupPanel(groupConvId) },
+                  { id: "info", label: tr("chat.menu.group_info"), icon: Info, run: () => actions.openGroupPanel(groupConvId) },
                   // 「仅管理员可邀请」开启且我非管理员 → 隐藏邀请入口（对齐 iOS / 详情面板）。
                   ...(!groupInfos[groupConvId]?.perm_invite || groupInfos[groupConvId]?.my_role !== "member"
-                    ? [{ id: "invite", label: "邀请成员", icon: UserPlus, run: () => actions.setInviteDraft({ convId: groupConvId, selected: [] }) }]
+                    ? [{ id: "invite", label: tr("chat.menu.invite"), icon: UserPlus, run: () => actions.setInviteDraft({ convId: groupConvId, selected: [] }) }]
                     : []),
-                  { id: "mute", label: groupConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (groupConv) actions.setConvMuted(groupConv, !groupConv.muted); } },
-                  { id: "select", label: "选择消息", icon: CheckSquare, run: () => actions.enterSelectMode() },
-                  { id: "leave", label: "退出群聊", icon: LogOut, danger: true, run: () => void actions.doLeaveGroup(groupConvId) },
+                  { id: "mute", label: groupConv?.muted ? tr("conv.menu.unmute") : tr("conv.menu.mute"), icon: BellOff, run: () => { if (groupConv) actions.setConvMuted(groupConv, !groupConv.muted); } },
+                  { id: "select", label: tr("chat.menu.select_messages"), icon: CheckSquare, run: () => actions.enterSelectMode() },
+                  { id: "leave", label: tr("group.info.leave"), icon: LogOut, danger: true, run: () => void actions.doLeaveGroup(groupConvId) },
                 ] : [
-                  { id: "edit", label: "编辑联系人", icon: SquarePen, run: () => actions.setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
-                  { id: "call", label: "视频通话", icon: Video, run: () => comingSoon("视频通话") },
-                  { id: "mute", label: peerConv?.muted ? "取消免打扰" : "免打扰", icon: BellOff, run: () => { if (peerConv) actions.setConvMuted(peerConv, !peerConv.muted); } },
-                  { id: "select", label: "选择消息", icon: CheckSquare, run: () => actions.enterSelectMode() },
-                  { id: "block", label: peerBlocked ? "取消拉黑" : "拉黑", icon: Ban, danger: !peerBlocked, run: () => actions.doToggleBlock(peer, !peerBlocked) },
-                  { id: "del", label: "删除会话", icon: Trash2, danger: true, run: () => { if (peerConv) actions.deleteConv(peerConv); } },
+                  { id: "edit", label: tr("chat.menu.edit_contact"), icon: SquarePen, run: () => actions.setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
+                  { id: "call", label: tr("chat.header.video_call"), icon: Video, run: () => comingSoon(tr("chat.header.video_call")) },
+                  { id: "mute", label: peerConv?.muted ? tr("conv.menu.unmute") : tr("conv.menu.mute"), icon: BellOff, run: () => { if (peerConv) actions.setConvMuted(peerConv, !peerConv.muted); } },
+                  { id: "select", label: tr("chat.menu.select_messages"), icon: CheckSquare, run: () => actions.enterSelectMode() },
+                  { id: "block", label: peerBlocked ? tr("chat.menu.unblock") : tr("common.block"), icon: Ban, danger: !peerBlocked, run: () => actions.doToggleBlock(peer, !peerBlocked) },
+                  { id: "del", label: tr("chat.menu.delete_conversation"), icon: Trash2, danger: true, run: () => { if (peerConv) actions.deleteConv(peerConv); } },
                 ]).map((r) => (
                   <button key={r.id} className={`menu-card-row${"danger" in r && r.danger ? " danger" : ""}`}
                     onClick={() => { setChatMenu(false); r.run(); }}>

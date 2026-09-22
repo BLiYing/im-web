@@ -40,7 +40,7 @@ export async function runShellCheck(
   const fail: string[] = [];
 
   try {
-    installTray(win);
+    installTray(win, (key) => key);   // 自检只验图标资源可读，文案取键本身即可
     say("[shell] ✓ 托盘装上了（图标资源可读）");
   } catch (e) {
     say(`[shell] ✗ 装托盘失败：${String(e)}`);

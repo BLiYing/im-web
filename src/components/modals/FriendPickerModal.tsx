@@ -4,6 +4,7 @@ import { filterByQuery } from "../../listSearch";
 import { ListSearchInput, isSearching } from "../ListSearchInput";
 import { Modal } from "../Modal";
 import { CheckRow } from "../rows";
+import { useT } from "../../i18n";
 
 /**
  * **通用好友多选弹窗**：群邀请成员 / 分享个人名片共用（镜像 iOS IMGroupMemberPickerViewController 的多用途）。
@@ -12,7 +13,7 @@ import { CheckRow } from "../rows";
  */
 export function FriendPickerModal({
   selected, candidates, friendLabel, onToggle, onInvite, onCancel,
-  title = "邀请成员", confirmLabel = "邀请", emptyText = "好友都已在群里了", maxSelection = 0,
+  title: titleProp, confirmLabel: confirmLabelProp, emptyText: emptyTextProp, maxSelection = 0,
 }: {
   selected: string[];
   candidates: FriendEntry[]; // 群场景=已排除在群内的好友；名片场景=全部好友
@@ -26,6 +27,10 @@ export function FriendPickerModal({
   /** 最多可选人数；**0 = 不限**（默认，群邀请场景）。分享名片传 9，与转发选择页多选上限一致。 */
   maxSelection?: number;
 }) {
+  const tr = useT();
+  const title = titleProp ?? tr("friend.picker.default_title");
+  const confirmLabel = confirmLabelProp ?? tr("common.invite");
+  const emptyText = emptyTextProp ?? tr("friend.picker.default_empty");
   const [q, setQ] = useState("");
   // 可见行按显示名（含好友备注）与 uid 匹配；选中集 selected 存的是 uid、与过滤无关，
   // 先勾选再搜索把人过滤掉，点「邀请」时仍会带上他。
@@ -35,9 +40,9 @@ export function FriendPickerModal({
   return (
     <Modal onClose={onCancel}>
         <h3>{title}</h3>
-        {candidates.length > 0 && <ListSearchInput value={q} onChange={setQ} placeholder="搜索好友" />}
+        {candidates.length > 0 && <ListSearchInput value={q} onChange={setQ} placeholder={tr("friend.picker.search_placeholder")} />}
         {visible.length === 0 && (
-          <div className="empty">{isSearching(q) ? "没有匹配的好友" : emptyText}</div>
+          <div className="empty">{isSearching(q) ? tr("friend.picker.no_match") : emptyText}</div>
         )}
         <div className="modal-list">
           {visible.map((f) => {
@@ -53,7 +58,7 @@ export function FriendPickerModal({
           })}
         </div>
         <div className="modal-actions">
-          <button className="link" onClick={onCancel}>取消</button>
+          <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
           <button className="mini-btn" disabled={selected.length === 0} onClick={onInvite}>
             {confirmLabel}{selected.length > 0
               ? `（${selected.length}${maxSelection > 0 ? `/${maxSelection}` : ""}）` : ""}

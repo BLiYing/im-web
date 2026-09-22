@@ -8,6 +8,7 @@ import { useAppServices } from "../AppServicesContext";
 import { Avatar } from "./Avatar";
 import { VirtualList } from "../VirtualList";
 import { renderRow, type Row } from "./rows";
+import { useT } from "../i18n";
 
 export interface ContactsTabProps {
   searchQ: string;
@@ -38,17 +39,18 @@ export function ContactsTab(p: ContactsTabProps) {
   const { searchQ, setSearchQ, doSearch, onScan, contactEntries, contactsScrollRef, searchResults, friendStatus, labelOf, openFriendChat,
     busyUser, doFriendAction, accepted, filteredAccepted, contactFilter, setContactFilter, contactFilterQ, friendLabel, presence, setFriendMenu } = p;
   const { clientRef, askFriendRequest } = useAppServices();
+  const tr = useT();
   return (
     <div className="contacts">
       <div className="newchat">
         {/* 找人只认**完整 username / 手机号**（后端 SearchUsers 是等值匹配，防枚举）。
             原文案写「完整 uid」是双重错误：内部 ID 用户根本看不到（docs/UI.md 用户标识），
             真拿 uid 去搜也搜不到——SQL 里压根没有 user_id 这一路。 */}
-        <input value={searchQ} placeholder="对方用户名或手机号"
+        <input value={searchQ} placeholder={tr("contacts.search.placeholder")}
           onChange={(e) => setSearchQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }} />
-        <button onClick={() => void doSearch()}>搜索</button>
-        <button className="newchat-qr" title="扫一扫 / 我的二维码" aria-label="扫一扫" onClick={onScan}><QrCode size={18} /></button>
+        <button onClick={() => void doSearch()}>{tr("common.search")}</button>
+        <button className="newchat-qr" title={tr("contacts.scan.title")} aria-label={tr("conv.menu.scan")} onClick={onScan}><QrCode size={18} /></button>
       </div>
       <div className="contact-entries">
         {contactEntries.map((r) => renderRow(r, "entry-row"))}
@@ -56,8 +58,8 @@ export function ContactsTab(p: ContactsTabProps) {
       <div className="convlist" ref={contactsScrollRef}>
         {searchResults !== null && (
           <>
-            <div className="section-label">搜索结果</div>
-            {searchResults.length === 0 && <div className="empty">没有找到匹配的用户</div>}
+            <div className="section-label">{tr("contacts.search.results_title")}</div>
+            {searchResults.length === 0 && <div className="empty">{tr("contacts.search.no_results")}</div>}
             {searchResults.map((u) => {
               const st = friendStatus.get(u.user_id);
               return (
@@ -71,17 +73,17 @@ export function ContactsTab(p: ContactsTabProps) {
                   </div>
                   <div className="row-actions">
                     {st === "accepted" ? (
-                      <button className="mini-btn" onClick={() => openFriendChat(u.user_id)}>发消息</button>
+                      <button className="mini-btn" onClick={() => openFriendChat(u.user_id)}>{tr("qr.action.send_message")}</button>
                     ) : st === "requested" ? (
-                      <button className="mini-btn ghost" disabled>已申请</button>
+                      <button className="mini-btn ghost" disabled>{tr("contacts.search.action_requested")}</button>
                     ) : st === "pending" ? (
                       <button className="mini-btn" disabled={busyUser === u.user_id}
-                        onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("accept", u.user_id))}>同意</button>
+                        onClick={() => void doFriendAction(u.user_id, () => clientRef.current!.friendAction("accept", u.user_id))}>{tr("common.agree")}</button>
                     ) : st === "blocked" ? (
-                      <button className="mini-btn ghost" disabled>已拉黑</button>
+                      <button className="mini-btn ghost" disabled>{tr("common.blocked")}</button>
                     ) : (
                       <button className="mini-btn" disabled={busyUser === u.user_id}
-                        onClick={() => askFriendRequest(u.user_id, labelOf(u.user_id, u.nickname, u.username))}>加好友</button>
+                        onClick={() => askFriendRequest(u.user_id, labelOf(u.user_id, u.nickname, u.username))}>{tr("contacts.search.action_add")}</button>
                     )}
                   </div>
                 </div>
@@ -94,14 +96,14 @@ export function ContactsTab(p: ContactsTabProps) {
             此处不再内联渲染：好友一多它就被挤到看不见，而"有人加我"恰恰要主动去处理。 */}
 
         <div className="section-label with-action friends-head">
-          <span>好友（{contactFilterQ ? `${filteredAccepted.length}/${accepted.length}` : accepted.length}）</span>
+          <span>{contactFilterQ ? tr("contacts.friends.header_filtered", { filtered: filteredAccepted.length, total: accepted.length }) : tr("contacts.friends.header_count", { count: accepted.length })}</span>
           {accepted.length > 0 && (
-            <input className="contact-filter-input" value={contactFilter} placeholder="搜索好友"
+            <input className="contact-filter-input" value={contactFilter} placeholder={tr("friend.picker.search_placeholder")}
               onChange={(e) => setContactFilter(e.target.value)} />
           )}
         </div>
-        {accepted.length === 0 && <div className="empty">还没有好友，上面搜索用户添加吧</div>}
-        {accepted.length > 0 && filteredAccepted.length === 0 && <div className="empty">没有匹配的好友</div>}
+        {accepted.length === 0 && <div className="empty">{tr("contacts.friends.empty")}</div>}
+        {accepted.length > 0 && filteredAccepted.length === 0 && <div className="empty">{tr("friend.picker.no_match")}</div>}
         {/* 好友列表虚拟化：只渲染视口内可见行，2000 好友首屏渲染从 ≈530ms 降到 <100ms
             （LOAD_TESTING 场景⑥）。共用 .convlist 滚动，上方搜索/新朋友/标签同处一个滚动条。 */}
         <VirtualList
@@ -114,12 +116,12 @@ export function ContactsTab(p: ContactsTabProps) {
                 {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
               </Avatar>
               <div className="convbody">
-                <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">已拉黑</span>}</div>
+                <div className="convpeer">{friendLabel(f)}{f.blocked && <span className="tag-blocked">{tr("common.blocked")}</span>}</div>
                 {/* 同上：句柄而非内部 ID。没有句柄就留空行（不显示任何 ID）。 */}
                 <div className="convlast">{f.username ? `@${f.username}` : ""}</div>
               </div>
               <div className="row-actions">
-                <button className="mini-btn ghost" title="更多"
+                <button className="mini-btn ghost" title={tr("common.more")}
                   onClick={(e) => { e.stopPropagation(); setFriendMenu({ x: e.clientX, y: e.clientY, userId: f.user_id }); }}>⋯</button>
               </div>
             </div>

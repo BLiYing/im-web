@@ -4,6 +4,7 @@ import { albumRowPattern } from "../album";
 import { formatMediaDuration } from "../media";
 import { formatFileSize } from "../fileMetadata";
 import { videoFrameSrc } from "../messageContent";
+import { useT } from "../i18n";
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
@@ -20,6 +21,7 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
   isSelected?: (m: ChatMessage) => boolean; // 该格是否已选（conv_seq ∈ 选择集）
   onToggleTile?: (m: ChatMessage) => void; // 切换该格选中
 }) {
+  const tr = useT();
   const W = 240, GAP = 2;
   const pattern = albumRowPattern(members.length);
   let idx = 0;
@@ -49,7 +51,7 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
                 onClick={(e) => { if (selectMode) { e.stopPropagation(); if (tileSelectable) { onToggleTile?.(m); } return; } onOpen(m); }}
                 onContextMenu={(e) => { if (selectMode) { e.preventDefault(); return; } onMenu(e, m); }}>
                 {gated
-                  ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt="未下载" /> : <span className="gate-empty" />)
+                  ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt={tr("fav.file.not_downloaded")} /> : <span className="gate-empty" />)
                   : m.contentType === "video"
                     ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError?.(m)} /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => onMediaError?.(m)} />)
                     : <img src={m.content} alt="" onError={() => onMediaError?.(m)} />}

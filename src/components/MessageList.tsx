@@ -5,6 +5,7 @@
 // - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
 import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useT } from "../i18n";
 import type { ChatMessage } from "../sdk/protocol";
 import { pickNextVoiceRelay, voiceRelayMid } from "../voiceRelay";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
@@ -68,6 +69,7 @@ export interface MessageListProps {
 }
 
 export function MessageList(p: MessageListProps) {
+  const tr = useT();
   const {
     messages, peer, isGroupChat, isSuperGroup, uid, selectMode, selected, menu, readSeq, firstUnreadIdx,
     timeFormat, translations, transcripts, uploadProgress, dividerRef,
@@ -149,7 +151,7 @@ export function MessageList(p: MessageListProps) {
             <div className="msg-item" data-seq={m.convSeq} key={msgKey(m)}>
               {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
               {i === firstUnreadIdx && (
-                <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                <div className="unread-divider" ref={dividerRef}><span>{tr("chat.unread_divider")}</span></div>
               )}
               <div className="sys-line"><span>{renderSysLine(m, uid, localNameOf, openPeerDetail)}</span></div>
             </div>
@@ -162,12 +164,12 @@ export function MessageList(p: MessageListProps) {
             <div className="msg-item" data-seq={m.convSeq} key={msgKey(m)}>
               {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
               {i === firstUnreadIdx && (
-                <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                <div className="unread-divider" ref={dividerRef}><span>{tr("chat.unread_divider")}</span></div>
               )}
               <div className="sys-line">
-                <span>{mine ? "你撤回了一条消息" : `${isGroupChat ? senderLabel(m) : "对方"}撤回了一条消息`}</span>
+                <span>{mine ? tr("conv.list.recalled_self") : isGroupChat ? tr("conv.list.recalled_member", { name: senderLabel(m) }) : tr("conv.list.recalled_peer")}</span>
                 {canReEdit && (
-                  <button className="reedit-btn" onClick={() => setInput(m.content)}>重新编辑</button>
+                  <button className="reedit-btn" onClick={() => setInput(m.content)}>{tr("chat.message.reedit")}</button>
                 )}
               </div>
             </div>
@@ -205,7 +207,7 @@ export function MessageList(p: MessageListProps) {
             <div className="bubble-line">
               {albumFailed && (
                 <button type="button" className="fail-badge" disabled={!albumResendable}
-                        title={notedMember?.note || (albumResendable ? "发送失败，点击重发" : "发送失败")}
+                        title={notedMember?.note || (albumResendable ? tr("chat.message.send_failed_resend") : tr("common.send_failed"))}
                         onClick={() => resendMessage(m, messages)}>!</button>
               )}
               <AlbumGrid members={members}
@@ -225,7 +227,7 @@ export function MessageList(p: MessageListProps) {
             <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} data-seq-end={albumEndSeq || undefined} key={msgKey(m)}>
               {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
               {i === firstUnreadIdx && (
-                <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+                <div className="unread-divider" ref={dividerRef}><span>{tr("chat.unread_divider")}</span></div>
               )}
               <div className={`row ${mine ? "me" : "them"}${selectMode ? " selecting" : ""}`}>
                 {/* 左侧勾选框 = 整组全选/全不选 + 全选态指示（逐格勾选走宫格内 album-sel）。 */}
@@ -242,8 +244,8 @@ export function MessageList(p: MessageListProps) {
                       {showSender && (
                       <span className="sender-row">
                         <span className="sender-name">{senderLabel(m)}</span>
-                        {senderRole(m) === "owner" && <span className="role-badge owner">群主</span>}
-                        {senderRole(m) === "admin" && <span className="role-badge">管理员</span>}
+                        {senderRole(m) === "owner" && <span className="role-badge owner">{tr("group.role.owner")}</span>}
+                        {senderRole(m) === "admin" && <span className="role-badge">{tr("group.role.admin")}</span>}
                       </span>
                     )}
                       {grid}
@@ -256,7 +258,7 @@ export function MessageList(p: MessageListProps) {
                 <div className="sys-note">
                   <span>{notedMember.note}</span>
                   {notedMember.noteCode === 200103 && peer && (
-                    <button className="sys-note-action" onClick={() => requestFriendFromNote(peer)}>发送好友申请</button>
+                    <button className="sys-note-action" onClick={() => requestFriendFromNote(peer)}>{tr("chat.system.send_friend_request")}</button>
                   )}
                 </div>
               )}
@@ -282,10 +284,9 @@ export function MessageList(p: MessageListProps) {
         // 两处各写一遍迟早漂移（改了"已编辑"标记只改一处之类）。
         const metaNode = (
           <span className="bmeta">
-            {m.editedAt ? <span className="edited-tag">已编辑 </span> : null}
+            {m.editedAt ? <span className="edited-tag">{tr("chat.message.edited")} </span> : null}
             {mine ? (
-              m.status === "sending" ? "发送中…"
-                : m.status === "failed" ? (m.note ? null : <span className="failed">发送失败 ✗</span>)
+              m.status === "sending" ? tr("common.sending") : m.status === "failed" ? (m.note ? null : <span className="failed">{tr("chat.message.send_failed_mark")}</span>)
                   : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span> : null}</>
             ) : (
               formatTime(m.timestamp, timeFormat)
@@ -308,11 +309,11 @@ export function MessageList(p: MessageListProps) {
             <div className="bubble-line">
               {mine && m.status === "failed" && (
                 <button type="button" className="fail-badge" disabled={!canResend}
-                        title={m.note || (canResend ? "发送失败，点击重发" : "发送失败")}
+                        title={m.note || (canResend ? tr("chat.message.send_failed_resend") : tr("common.send_failed"))}
                         onClick={() => resendMessage(m)}>!</button>
               )}
               <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${callView ? " call-bubble" : ""}${menuActive ? " ctx-active" : ""}`}
-                onClick={callView && !selectMode ? () => { if (!placeSingleCall(peer, callView.icon === "video")) setToast("通话服务未就绪"); } : undefined}
+                onClick={callView && !selectMode ? () => { if (!placeSingleCall(peer, callView.icon === "video")) setToast(tr("chat.message.call_unavailable")); } : undefined}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                 {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
                 {m.replyToConvSeq ? (
@@ -325,9 +326,9 @@ export function MessageList(p: MessageListProps) {
                       return q ? <QuoteThumb m={q} gated={!!mediaGate(q)} /> : <QuoteSnapshotIcon snapshot={m.replySnapshot} />; })()}
                     <span className="quote-lines">
                       {isGroupChat && m.replyToFrom && (
-                        <span className="quote-who">{m.replyToFrom === uid ? "你" : localNameOf(m.replyToFrom, m.convId, m.replyToFrom)}</span>
+                        <span className="quote-who">{m.replyToFrom === uid ? tr("common.you") : localNameOf(m.replyToFrom, m.convId, m.replyToFrom)}</span>
                       )}
-                      <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || "原消息"}</span>
+                      <span className="quote-text">{localizeSnippet(m.replySnapshot || "") || tr("chat.quote.original_fallback")}</span>
                     </span>
                   </div>
                 ) : null}
@@ -341,16 +342,16 @@ export function MessageList(p: MessageListProps) {
                     {/* 门控（未下载）：不拉原图/原视频，只显 thumb 模糊占位（~200B data URI），没有就留灰底。 */}
                     {gate
                       ? (m.thumb
-                          ? <img className="msg-image msg-image-blur" src={m.thumb} alt="未下载" />
+                          ? <img className="msg-image msg-image-blur" src={m.thumb} alt={tr("fav.file.not_downloaded")} />
                           : <span className="msg-image msg-image-empty" />)
                       : m.contentType === "video"
                         ? (m.posterUrl
-                            ? <img className="msg-image" src={m.posterUrl} alt="视频" onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />
+                            ? <img className="msg-image" src={m.posterUrl} alt={tr("common.video")} onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />
                             : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} onError={() => void onPassiveMediaError(m)} />)
-                        : <img className="msg-image" src={mediaSrc(m)} alt="图片" onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />}
+                        : <img className="msg-image" src={mediaSrc(m)} alt={tr("common.image")} onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />}
                     {gate
                       ? (gate.phase === "expired"
-                          ? <span className="play-badge expired" title="已失效">⊘</span>
+                          ? <span className="play-badge expired" title={tr("media.placeholder.expired")}>⊘</span>
                           : downloadGlyph(gate) && <span className="play-badge">{downloadGlyph(gate)}</span>)
                       : uploading
                       ? (chunkedTaskFor(m.clientMsgId ?? "") && <span className="play-badge">{uploadPaused ? "↑" : "⏸"}</span>)
@@ -368,9 +369,9 @@ export function MessageList(p: MessageListProps) {
                     <span className="media-badge media-badge-br">
                       {mine
                         // 只有真正在传输才显「发送中…」；暂停时回落显示时间（与 iOS 一致）。
-                        ? (m.status === "sending" ? (uploadPaused ? formatTime(m.timestamp, timeFormat) : "发送中…")
+                        ? (m.status === "sending" ? (uploadPaused ? formatTime(m.timestamp, timeFormat) : tr("common.sending"))
                           // 被拒收（有 note）时失败已由红❗+下方系统行表达，角标只显时间，不重复报错（与 iOS 一致）。
-                          : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : "未发送 ✗")
+                          : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : tr("chat.message.not_sent_mark"))
                           : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span> : null}</>)
                         : formatTime(m.timestamp, timeFormat)}
                     </span>
@@ -387,7 +388,7 @@ export function MessageList(p: MessageListProps) {
                           `_footer` 与 `_meta` 同排同布局。时间放进卡片内而不是卡片下方，
                           两端才真正一致（名片卡 .contact-card-foot 早已是这个形态）。 */}
                       <div className="record-foot">
-                        <span>聊天记录</span>
+                        <span>{tr("record.chat_history")}</span>
                         {metaNode}
                       </div>
                     </div>
@@ -399,7 +400,7 @@ export function MessageList(p: MessageListProps) {
                   (() => {
                     const card = parseContactCard(m.content);
                     // 脏名片（JSON 非法 / 缺 u）：退化成一行灰字、不可点——历史里不留点不动的死卡。
-                    if (!card) return <div className="contact-card dirty">[个人名片]</div>;
+                    if (!card) return <div className="contact-card dirty">{tr("record.dirty_card")}</div>;
                     // 主标题走**收方本地**显示名（备注优先），与会话/详情页同源，不会一处备注一处昵称。
                     const shown = localNameOf(card.userId, m.convId, card.nickname);
                     return (
@@ -416,7 +417,7 @@ export function MessageList(p: MessageListProps) {
                             （那边是 _footText 与 _meta 同排、_meta 贴右）。时间放进卡片内而不是卡片下方的
                             .bmeta，两端才真正一致。 */}
                         <div className="contact-card-foot">
-                          <span className="contact-card-foot-label"><IdCard size={12} aria-hidden="true" />个人名片</span>
+                          <span className="contact-card-foot-label"><IdCard size={12} aria-hidden="true" />{tr("contact.card.footer")}</span>
                           {metaNode}
                         </div>
                       </div>
@@ -437,13 +438,12 @@ export function MessageList(p: MessageListProps) {
                                  : uploading ? () => toggleUploadPause(m) : undefined}>
                       <FileTypeIcon name={m.fileName || ""} size={30} />
                       <span className="msg-file-body">
-                        <span className="msg-file-name">{m.fileName || "文件"}</span>
+                        <span className="msg-file-name">{m.fileName || tr("common.file")}</span>
                         <span className="msg-file-size">
-                          {m.status === "failed"
-                            ? `${formatFileSize(m.fileSize)} · 上传失败，点击重试`
+                          {m.status === "failed" ? tr("chat.file.upload_failed_retry", { size: formatFileSize(m.fileSize) })
                             : uploading
                               ? `${formatUploadProgress(uploading.sent, uploading.total)}${
-                                  chunkedTaskFor(m.clientMsgId ?? "") ? (uploadPaused ? " · 已暂停，点击继续" : " · 点击暂停") : ""}`
+                                  chunkedTaskFor(m.clientMsgId ?? "") ? ` · ${uploadPaused ? tr("chat.file.paused_tap_resume") : tr("chat.file.tap_pause")}` : ""}`
                               : formatFileSize(m.fileSize)}
                         </span>
                         {/* 失败态不显进度条：0% 的空条会让人以为"还没开始传"。 */}
@@ -460,13 +460,13 @@ export function MessageList(p: MessageListProps) {
                     // 进度改由 FileGateIcon 的圆环表示（去底部线性条），图标槽位恒定 → 状态切换不撑高卡片。
                     <span className={`msg-file${gate.phase === "failed" || gate.phase === "expired" ? " failed" : ""}`}
                           onClick={() => onGateTap(m)}
-                          title={gate.phase === "expired" ? "文件已失效" : "点击下载"}>
+                          title={gate.phase === "expired" ? tr("chat.file.expired") : tr("media.download.tap_to_download")}>
                       <FileGateIcon state={gate} />
                       <span className="msg-file-body">
                         <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
                         <span className="msg-file-size">
                           {gate.phase === "notStarted"
-                            ? (formatFileSize(m.fileSize) ? `${formatFileSize(m.fileSize)} · 点击下载` : "点击下载")
+                            ? (formatFileSize(m.fileSize) ? tr("chat.file.size_tap_download", { size: formatFileSize(m.fileSize) }) : tr("media.download.tap_to_download"))
                             : downloadText(gate, formatFileSize(m.fileSize))}
                         </span>
                       </span>
@@ -474,7 +474,7 @@ export function MessageList(p: MessageListProps) {
                   ) : (
                     // 就绪：点击路由（可预览类型新标签预览 / 其余另存，对齐 iOS QuickLook）。已手动下过走应用内 blob。
                     <span className="msg-file clickable" onClick={() => openReadyFile(m)}
-                          title={isPreviewableFile(m.fileName || fileNameFromContent(m.content)) ? "点击预览" : "点击下载"}>
+                          title={isPreviewableFile(m.fileName || fileNameFromContent(m.content)) ? tr("chat.file.tap_preview") : tr("media.download.tap_to_download")}>
                       <FileTypeIcon name={m.fileName || fileNameFromContent(m.content)} size={30} />
                       <span className="msg-file-body">
                         <span className="msg-file-name">{m.fileName || fileNameFromContent(m.content)}</span>
@@ -515,10 +515,10 @@ export function MessageList(p: MessageListProps) {
             {m.convSeq > 0 && transcripts?.[m.convSeq] !== undefined && (
               <div className={`voice-transcript${mine ? " mine" : ""}`}>
                 <span className="voice-transcript-text">
-                  {transcripts[m.convSeq] || "识别中…"}
+                  {transcripts[m.convSeq] || tr("chat.voice.transcribing")}
                 </span>
                 {transcripts[m.convSeq] && (
-                  <span className="voice-transcript-foot">📝 由服务器识别，结果可能不完全准确</span>
+                  <span className="voice-transcript-foot">{tr("chat.voice.transcript_note")}</span>
                 )}
               </div>
             )}
@@ -528,13 +528,13 @@ export function MessageList(p: MessageListProps) {
           <div className={`msg-item${grouped ? " grouped" : ""}`} data-seq={m.convSeq} key={msgKey(m)}>
             {showDate && <div className="date-pill"><span>{dayHeader(m.timestamp)}</span></div>}
             {i === firstUnreadIdx && (
-              <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>
+              <div className="unread-divider" ref={dividerRef}><span>{tr("chat.unread_divider")}</span></div>
             )}
             <div className={`row ${mine ? "me" : "them"}${selectMode ? " selecting" : ""}`}
               onClick={!selectMode ? undefined
                 : selectableInMultiSelect(m) ? () => toggleSelected(m.convSeq)
                 // 发送中/失败的本地件：无勾选圈，点按直接提示原因（系统行/撤回墓碑静默）。
-                : m.convSeq <= 0 && m.contentType !== "system" ? () => setToast("发送中/失败的消息不可选择")
+                : m.convSeq <= 0 && m.contentType !== "system" ? () => setToast(tr("chat.select.unsent_blocked"))
                 : undefined}>
               {selectMode && selectableInMultiSelect(m) && (
                 <span className={`sel-check${selected.has(m.convSeq) ? " on" : ""}`}>{selected.has(m.convSeq) ? "✓" : ""}</span>
@@ -549,8 +549,8 @@ export function MessageList(p: MessageListProps) {
                     {showSender && (
                       <span className="sender-row">
                         <span className="sender-name">{senderLabel(m)}</span>
-                        {senderRole(m) === "owner" && <span className="role-badge owner">群主</span>}
-                        {senderRole(m) === "admin" && <span className="role-badge">管理员</span>}
+                        {senderRole(m) === "owner" && <span className="role-badge owner">{tr("group.role.owner")}</span>}
+                        {senderRole(m) === "admin" && <span className="role-badge">{tr("group.role.admin")}</span>}
                       </span>
                     )}
                     {bubbleBlock}
@@ -564,7 +564,7 @@ export function MessageList(p: MessageListProps) {
                 {/* 恢复入口：仅非好友(200103) 给——被拉黑(200102) 刻意不给，服务端对两者回同样的
                     模糊文案以不泄露拉黑，给了入口反而会因申请被 200102 拒而暴露。 */}
                 {m.noteCode === 200103 && peer && (
-                  <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>发送好友申请</button>
+                  <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>{tr("chat.system.send_friend_request")}</button>
                 )}
               </div>
             )}

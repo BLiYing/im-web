@@ -1,6 +1,7 @@
 import type { GroupMember } from "../../sdk/protocol";
 import { Avatar } from "../Avatar";
 import { Modal } from "../Modal";
+import { useT } from "../../i18n";
 
 export type ReadReceipts = { read: string[]; unread: string[]; tab: "read" | "unread" };
 
@@ -13,16 +14,17 @@ export function ReadReceiptsModal({ data, lookupMember, memberLabel, onTab, onCl
   onTab: (tab: "read" | "unread") => void;
   onClose: () => void;
 }) {
+  const tr = useT();
   const ids = data.tab === "read" ? data.read : data.unread;
   return (
     <Modal className="modal readby-modal" onClose={onClose}>
-        <div className="modal-title">已读详情</div>
+        <div className="modal-title">{tr("receipts.title")}</div>
         <div className="readby-tabs">
           <button className={data.tab === "read" ? "on" : ""} onClick={() => onTab("read")}>
-            已读 {data.read.length}
+            {tr("receipts.tab_read", { count: data.read.length })}
           </button>
           <button className={data.tab === "unread" ? "on" : ""} onClick={() => onTab("unread")}>
-            未读 {data.unread.length}
+            {tr("receipts.tab_unread", { count: data.unread.length })}
           </button>
         </div>
         <div className="readby-list">
@@ -33,18 +35,18 @@ export function ReadReceiptsModal({ data, lookupMember, memberLabel, onTab, onCl
               <div key={memberId} className="readby-row">
                 <Avatar label={label} seed={memberId} url={gm?.avatar_url} cls="avatar mention-avatar" />
                 <span className="mention-name">{label}</span>
-                {gm?.role === "owner" && <span className="role-badge owner">群主</span>}
-                {gm?.role === "admin" && <span className="role-badge">管理员</span>}
+                {gm?.role === "owner" && <span className="role-badge owner">{tr("group.role.owner")}</span>}
+                {gm?.role === "admin" && <span className="role-badge">{tr("group.role.admin")}</span>}
               </div>
             );
           })}
           {ids.length === 0 && (
             <div className="readby-empty">
-              {data.tab === "read" ? "还没有人读过这条消息" : "所有人都已读"}
+              {data.tab === "read" ? tr("receipts.empty_read") : tr("receipts.empty_unread")}
             </div>
           )}
         </div>
-        <button className="modal-close" onClick={onClose}>关闭</button>
+        <button className="modal-close" onClick={onClose}>{tr("common.close")}</button>
     </Modal>
   );
 }

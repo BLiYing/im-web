@@ -5,6 +5,7 @@ import { MAX_ADMIN_BATCH, memberSubtitle } from "../../groupAdmin";
 import { ListSearchInput, isSearching } from "../ListSearchInput";
 import { Modal } from "../Modal";
 import { CheckRow } from "../rows";
+import { useT } from "../../i18n";
 
 /**
  * 添加管理员弹窗：**群成员**多选（≤5），骨架与 FriendPickerModal 同族（Modal + ListSearchInput + CheckRow）。
@@ -25,6 +26,7 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
    */
   remote?: { query: string; setQuery: (v: string) => void; failed: boolean };
 }) {
+  const tr = useT();
   const [localQ, setLocalQ] = useState("");
   const q = remote ? remote.query : localQ;
   const setQ = remote ? remote.setQuery : setLocalQ;
@@ -38,13 +40,13 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
 
   return (
     <Modal onClose={onCancel}>
-      <h3>添加管理员</h3>
-      {(remote || candidates.length > 0) && <ListSearchInput value={q} onChange={setQ} placeholder="搜索群成员" />}
+      <h3>{tr("group.admin_picker.title")}</h3>
+      {(remote || candidates.length > 0) && <ListSearchInput value={q} onChange={setQ} placeholder={tr("group.picker.search_placeholder")} />}
       {visible.length === 0 && (
         <div className="empty">
-          {remote?.failed ? "搜索失败，请重试"
-            : isSearching(q) ? "没有匹配的成员"
-            : remote ? "输入关键词搜索群成员" : "群里还没有其他成员"}
+          {remote?.failed ? tr("group.picker.search_failed")
+            : isSearching(q) ? tr("group.picker.no_match")
+            : remote ? tr("group.picker.search_hint") : tr("group.picker.no_others")}
         </div>
       )}
       <div className="modal-list">
@@ -62,12 +64,12 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
         })}
       </div>
       {selected.length >= MAX_ADMIN_BATCH && (
-        <div className="detail-foot-note">一次最多添加 {MAX_ADMIN_BATCH} 位管理员。</div>
+        <div className="detail-foot-note">{tr("group.admin_picker.limit_note", { max: MAX_ADMIN_BATCH })}</div>
       )}
       <div className="modal-actions">
-        <button className="link" onClick={onCancel}>取消</button>
+        <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
         <button className="mini-btn" disabled={selected.length === 0} onClick={onConfirm}>
-          添加{selected.length > 0 ? `（${selected.length}/${MAX_ADMIN_BATCH}）` : ""}
+          {selected.length > 0 ? tr("group.admin_picker.add_count", { selected: selected.length, max: MAX_ADMIN_BATCH }) : tr("common.add")}
         </button>
       </div>
     </Modal>

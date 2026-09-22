@@ -2,6 +2,7 @@ import { ChevronLeft, UserPlus } from "lucide-react";
 import type { GroupInfo, GroupMember } from "../sdk/protocol";
 import { adminsOf, ownerOf, memberSubtitle } from "../groupAdmin";
 import { Avatar } from "./Avatar";
+import { useT } from "../i18n";
 
 /**
  * 群管理 →「管理员」二级面板：群主（只读一行）+ 管理员列表（撤销）+「添加管理员」（仅群主）。
@@ -18,6 +19,7 @@ export function AdminListPanel({ gp, uid, memberLabel, onBack, onAdd, onRevoke, 
   onRevoke: (m: GroupMember) => void;
   onOpenMember: (userId: string) => void;
 }) {
+  const tr = useT();
   const isOwner = gp.my_role === "owner";
   const owner = ownerOf(gp);
   const admins = adminsOf(gp);
@@ -30,16 +32,16 @@ export function AdminListPanel({ gp, uid, memberLabel, onBack, onAdd, onRevoke, 
         <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
         <div className="detail-member-body">
           <div className="detail-member-name">
-            {memberLabel(m)}{m.user_id === uid && <span className="me-tag">我</span>}
+            {memberLabel(m)}{m.user_id === uid && <span className="me-tag">{tr("common.me")}</span>}
           </div>
           <div className="detail-member-sub">{sub}</div>
         </div>
         <span className={`role-badge${badge === "owner" ? " owner" : ""}`}>
-          {badge === "owner" ? "群主" : "管理员"}
+          {badge === "owner" ? tr("group.role.owner") : tr("group.role.admin")}
         </span>
         {badge === "admin" && isOwner && (
-          <button className="mini-btn danger" title="撤销管理员"
-            onClick={(e) => { e.stopPropagation(); onRevoke(m); }}>撤销</button>
+          <button className="mini-btn danger" title={tr("group.member_action.revoke_admin")}
+            onClick={(e) => { e.stopPropagation(); onRevoke(m); }}>{tr("group.admin_list.revoke_btn")}</button>
         )}
       </div>
     );
@@ -49,27 +51,27 @@ export function AdminListPanel({ gp, uid, memberLabel, onBack, onAdd, onRevoke, 
     <div className="detail-manage">
       <div className="detail-manage-head">
         <button className="icon-btn" onClick={onBack}><ChevronLeft size={20} /></button>
-        <span>管理员</span>
+        <span>{tr("group.role.admin")}</span>
       </div>
-      <div className="detail-card-title">群主</div>
+      <div className="detail-card-title">{tr("group.role.owner")}</div>
       <div className="detail-card">
-        {owner ? row(owner, "owner") : <div className="detail-empty">群主信息缺失</div>}
+        {owner ? row(owner, "owner") : <div className="detail-empty">{tr("group.admin_list.owner_missing")}</div>}
       </div>
-      <div className="detail-card-title">管理员 · {admins.length}</div>
+      <div className="detail-card-title">{tr("group.admin_list.count_title", { count: admins.length })}</div>
       <div className="detail-card">
         {isOwner && (
           <button className="detail-row accent" onClick={onAdd}>
-            <span className="detail-row-ic"><UserPlus size={18} /></span><span>添加管理员</span>
+            <span className="detail-row-ic"><UserPlus size={18} /></span><span>{tr("group.admin_picker.title")}</span>
           </button>
         )}
         {admins.length === 0
-          ? <div className="detail-empty">还没有管理员</div>
+          ? <div className="detail-empty">{tr("group.admin_list.empty")}</div>
           : admins.map((m) => row(m, "admin"))}
       </div>
       <div className="detail-foot-note">
         {isOwner
-          ? "管理员可审批入群、禁言与移出普通成员，但不能设置管理员或转让群组。"
-          : "只有群主可以增减管理员。"}
+          ? tr("group.manage.permission_note")
+          : tr("group.admin_list.owner_only_note")}
       </div>
     </div>
   );

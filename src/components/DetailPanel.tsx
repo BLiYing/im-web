@@ -26,6 +26,7 @@ import { useMemberSearch } from "../useMemberSearch";
 import { SYSTEM_UID } from "../sdk/protocol";
 import { placeGroupCall, placeSingleCall } from "../rtc/rtcCall";
 import { RtcGroupCallPicker } from "../rtc/RtcGroupCallPicker";
+import { useT } from "../i18n";
 
 export type DetailTarget = { convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean };
 
@@ -137,10 +138,11 @@ export function DetailPanel(p: DetailPanelProps) {
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail, serverConfig,
   } = p;
   const { clientRef, setToast, askFriendRequest } = useAppServices();
+  const tr = useT();
   // 群通话选人弹窗（通话服务不就绪时点按钮只提示，不开弹窗）。
   const [groupCallPick, setGroupCallPick] = useState(false);
   const startCall = (peer: string, video: boolean) => {
-    if (!placeSingleCall(peer, video)) setToast("通话服务未就绪");
+    if (!placeSingleCall(peer, video)) setToast(tr("chat.message.call_unavailable"));
   };
   const { setViewer, onGateTap, onPassiveMediaError, openReadyFile, fetchLinkPreview } = useChatActions();
   // 成员搜索：只对群会话有意义（单聊没有成员表）。恒走服务端 ?q=，理由见 useMemberSearch 头注释。
@@ -156,7 +158,7 @@ export function DetailPanel(p: DetailPanelProps) {
     const isOwner = !!gp && gp.my_role === "owner";
     // 「仅管理员可邀请」开启且我非管理员 → 隐藏所有邀请类入口（群二维码/群邀请链接/添加成员），对齐 iOS。
     const canInviteHere = !gp?.perm_invite || canManage;
-    const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || "群聊")
+    const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || tr("common.group_chat"))
       : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || d.peer || "");
     // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
     // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
@@ -174,7 +176,7 @@ export function DetailPanel(p: DetailPanelProps) {
     // 用 members.length 会显示成「1 位成员」。member_count 恒是真实人数。
     const memberTotal = gp?.member_count ?? gp?.members.length ?? conv?.member_count ?? 0;
     // 「大群」标注：让用户明白为什么这里看不到已读/正在输入/在线态（否则会当成 bug 报上来）。
-    const superTag = (gp?.is_super ?? conv?.is_super) ? " · 大群" : "";
+    // 现由 chat.header.member_count_super 一并生成（含「· 大群」后缀，见下方 subtitle）。
     // 满员告知：**普通群人满 + 本部署开了超级群**才给。三个条件缺一不可——
     //   · 已是大群 → 没有可升的了；
     //   · 部署没开超级群 → 入口是死的，联系管理员他也办不了（后端直接拒 upgrade-super）；
@@ -188,11 +190,11 @@ export function DetailPanel(p: DetailPanelProps) {
           maxSuperMembers: serverConfig.max_supergroup_members,
           onCopyGroupID: () => {
             void navigator.clipboard?.writeText(gp.conv_id);
-            setToast("已复制群 ID");
+            setToast(tr("chat.detail.group_id_copied"));
           },
         }
       : undefined;
-    const subtitle = d.isGroup ? `${memberTotal} 位成员${superTag}` : (peerPresenceText ?? "");
+    const subtitle = d.isGroup ? tr(isSuperHere ? "chat.header.member_count_super" : "chat.header.member_count", { count: memberTotal }) : (peerPresenceText ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
     const muted = !!conv?.muted;
     const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
@@ -227,11 +229,11 @@ export function DetailPanel(p: DetailPanelProps) {
       isPresentable(m) && m.contentType === CONTACT_CONTENT_TYPE && parseContactCard(m.content) !== null
     ).sort((a, b) => b.convSeq - a.convSeq);
     // 语音 / 名片 tab 与 iOS 对齐：有该类消息才出现（其余 tab 维持恒显的既有 Web 行为）。名片**置末**。
-    const voiceTabs: Array<{ k: typeof detailTab; label: string }> = voices.length > 0 ? [{ k: "voice", label: "语音" }] : [];
-    const contactTabs: Array<{ k: typeof detailTab; label: string }> = contacts.length > 0 ? [{ k: "contacts", label: "名片" }] : [];
+    const voiceTabs: Array<{ k: typeof detailTab; label: string }> = voices.length > 0 ? [{ k: "voice", label: tr("favorites.category.voice") }] : [];
+    const contactTabs: Array<{ k: typeof detailTab; label: string }> = contacts.length > 0 ? [{ k: "contacts", label: tr("favorites.category.contact") }] : [];
     const tabs: Array<{ k: typeof detailTab; label: string }> = d.isGroup
-      ? [{ k: "members", label: "成员" }, { k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }, ...contactTabs]
-      : [{ k: "media", label: "媒体" }, { k: "files", label: "文件" }, ...voiceTabs, { k: "links", label: "链接" }, ...contactTabs];
+      ? [{ k: "members", label: tr("group.member.tab_label") }, { k: "media", label: tr("favorites.category.media") }, { k: "files", label: tr("common.file") }, ...voiceTabs, { k: "links", label: tr("favorites.category.links") }, ...contactTabs]
+      : [{ k: "media", label: tr("favorites.category.media") }, { k: "files", label: tr("common.file") }, ...voiceTabs, { k: "links", label: tr("favorites.category.links") }, ...contactTabs];
     const activeTab = tabs.some((t) => t.k === detailTab) ? detailTab : tabs[0].k;
 
     return (
@@ -240,8 +242,8 @@ export function DetailPanel(p: DetailPanelProps) {
           {!manageOpen && (
             // 标题栏随面板滚动固定在顶部（对齐 iOS 大标题折叠为常驻导航栏）：关闭按钮一并锁在标题栏内。
             <div className="detail-sticky-head">
-              <button className="detail-close" title="关闭" onClick={onClose}><X size={20} /></button>
-              <div className="detail-topbar">{d.isGroup ? "群组信息" : "用户信息"}</div>
+              <button className="detail-close" title={tr("common.close")} onClick={onClose}><X size={20} /></button>
+              <div className="detail-topbar">{d.isGroup ? tr("chat.detail.title_group") : tr("chat.detail.title_user")}</div>
             </div>
           )}
 
@@ -264,7 +266,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 <div className="detail-avatar-wrap">
                   <Avatar url={avatarUrl} label={title} seed={d.isGroup ? d.convId : (d.peer ?? "")} cls="detail-avatar" />
                   {canManage && (
-                    <button className="detail-cam" title="设置群头像" onClick={() => pickGroupAvatar(gp!)}><Camera size={15} /></button>
+                    <button className="detail-cam" title={tr("chat.detail.set_group_avatar")} onClick={() => pickGroupAvatar(gp!)}><Camera size={15} /></button>
                   )}
                 </div>
                 <div className="detail-name">{title}</div>
@@ -277,20 +279,20 @@ export function DetailPanel(p: DetailPanelProps) {
                     少走一次就少一次理由，收件人那边又变回"只有一个名字"。 */}
                 {!isSystemPeer && !d.isGroup && !detailPeerIsFriend && (
                   <button className="detail-pill" onClick={() => askFriendRequest(d.peer!, title)}>
-                    <UserPlus size={20} /><span>加好友</span></button>
+                    <UserPlus size={20} /><span>{tr("contacts.search.action_add")}</span></button>
                 )}
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
-                  <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>消息</span></button>
+                  <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>{tr("chat.detail.pill_message")}</span></button>
                 )}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, false)}><Phone size={20} /><span>呼叫</span></button>}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, true)}><Video size={20} /><span>视频</span></button>}
-                {d.isGroup && showDetailBody && <button className="detail-pill" onClick={() => setGroupCallPick(true)}><Users size={20} /><span>群通话</span></button>}
-                {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>搜索</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, false)}><Phone size={20} /><span>{tr("chat.header.call")}</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, true)}><Video size={20} /><span>{tr("common.video")}</span></button>}
+                {d.isGroup && showDetailBody && <button className="detail-pill" onClick={() => setGroupCallPick(true)}><Users size={20} /><span>{tr("chat.detail.pill_group_call")}</span></button>}
+                {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>{tr("common.search")}</span></button>}
                 {/* 「更多」：单聊**非好友**不显示——菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友），
                     此时页面只应给一个主入口「加好友」（与 iOS actionPillSpecs 同口径）。系统通知会话例外：它只有这一个入口。 */}
                 {(d.isGroup || isSystemPeer || detailPeerIsFriend) && (
                 <div className="detail-pill-anchor">
-                  <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>更多</span></button>
+                  <button className="detail-pill" onClick={() => setDetailMore((v) => !v)}><MoreHorizontal size={20} /><span>{tr("common.more")}</span></button>
                   {detailMore && (
                     <div className="menu-card detail-more" onClick={(e) => e.stopPropagation()}>
                       {/* 入口 ②「推荐给朋友」（CONTACT_CARD_DESIGN §8.1）：把正在看的这个人推给别的会话。
@@ -301,28 +303,28 @@ export function DetailPanel(p: DetailPanelProps) {
                           // 昵称取 peerNickname（服务端下发的真实昵称），**不是**页面标题——后者备注优先，
                           // 发出去就泄露"我给你起的外号"（§2.4）。
                           onShareContact({ userId: d.peer!, username: peerUsername(d.peer!), nickname: detailPeerNickname, avatarUrl: detailPeerAvatar });
-                        }}><IdCard size={16} className="menu-icon" />推荐给朋友</button>
+                        }}><IdCard size={16} className="menu-icon" />{tr("chat.detail.recommend_to_friend")}</button>
                       )}
-                      <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />清空聊天记录</button>
+                      <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />{tr("chat.detail.clear_history")}</button>
                       {!isSystemPeer && !d.isGroup && (
-                        <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? "取消拉黑" : "拉黑"}</button>
+                        <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? tr("chat.menu.unblock") : tr("common.block")}</button>
                       )}
                       {/* 举报这个人（target_type=user）。2026-09-06 长按菜单把「举报消息/举报发送者」合并成
                           单个「举报消息」后，**针对人本身**的举报只剩这一个入口——删掉那一项时若不在这里补上，
                           等于静默丢掉了一整个能力（合并前两端资料页都没有举报）。系统通知会话不给。 */}
                       {!isSystemPeer && !d.isGroup && d.peer && (
-                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doReportPeer(d.peer!, detailPeerNickname); }}><Flag size={16} className="menu-icon" />举报</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doReportPeer(d.peer!, detailPeerNickname); }}><Flag size={16} className="menu-icon" />{tr("common.report")}</button>
                       )}
                       {d.isGroup && (
-                        <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />退出群组</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />{tr("chat.detail.leave_group")}</button>
                       )}
                       {isOwner && (
-                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />删除群组</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />{tr("chat.detail.dissolve_group")}</button>
                       )}
                       {/* 删除好友：破坏性最重，按本仓 destructive-last 约定放末位（与消息/会话菜单一致）。
                           删完不关面板——好友列表刷新后本页自动切成非好友视图（只剩「加好友」）。 */}
                       {!isSystemPeer && !d.isGroup && detailPeerIsFriend && d.peer && (
-                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doRemoveFriend(d.peer!); }}><UserMinus size={16} className="menu-icon" />删除好友</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doRemoveFriend(d.peer!); }}><UserMinus size={16} className="menu-icon" />{tr("friend.menu.delete")}</button>
                       )}
                     </div>
                   )}
@@ -332,12 +334,12 @@ export function DetailPanel(p: DetailPanelProps) {
               {/* 已注销用户：一段空态替代全部资料/页签（§6 第四分支）。头部头像+名字仍显快照，
                   与「卡片本身仍显示快照、历史记录不该凭空变空」同口径。 */}
               {peerDeleted && !d.isGroup && (
-                <div className="detail-card detail-empty" style={{ marginTop: 8 }}>该用户不存在或已注销</div>
+                <div className="detail-card detail-empty" style={{ marginTop: 8 }}>{tr("chat.detail.deleted_user")}</div>
               )}
               {/* 系统通知会话：一段说明卡替代普通用户资料页的备注/设置/页签。 */}
               {isSystemPeer && (
                 <div className="detail-card" style={{ marginTop: 8, fontSize: 13, lineHeight: 1.6, color: "var(--muted, #666)" }}>
-                  这是官方通知会话，用于发送<b style={{ color: "var(--fg, #222)" }}>登录提醒、账号安全</b>等系统事件。你不能回复此会话。
+                  {tr("chat.detail.system_notice_prefix")}<b style={{ color: "var(--fg, #222)" }}>{tr("chat.detail.system_notice_bold")}</b>{tr("chat.detail.system_notice_suffix")}
                 </div>
               )}
 
@@ -347,13 +349,13 @@ export function DetailPanel(p: DetailPanelProps) {
                 <div className="detail-card">
                   {gp.announcement && (
                     <button className="detail-row" onClick={() => openGroupText("announcement", d.convId)}>
-                      <span className="detail-row-ic"><Megaphone size={18} /></span><span>群公告</span>
+                      <span className="detail-row-ic"><Megaphone size={18} /></span><span>{tr("group.text.announcement")}</span>
                       <span className="detail-row-val">{gp.announcement}</span><ChevronRight size={16} className="detail-row-chev" />
                     </button>
                   )}
                   {gp.intro && (
                     <button className="detail-row" onClick={() => openGroupText("intro", d.convId)}>
-                      <span className="detail-row-ic"><Info size={18} /></span><span>群简介</span>
+                      <span className="detail-row-ic"><Info size={18} /></span><span>{tr("group.text.intro")}</span>
                       <span className="detail-row-val">{gp.intro}</span><ChevronRight size={16} className="detail-row-chev" />
                     </button>
                   )}
@@ -367,38 +369,38 @@ export function DetailPanel(p: DetailPanelProps) {
                       改 SUPER_GROUP_NOTICE 的列表时**记得同步这个数**。 */}
                   {isSuperHere && (
                     <button className="detail-row" onClick={() => openGroupText("super", d.convId)}>
-                      <span className="detail-row-ic"><UsersRound size={18} /></span><span>大群</span>
-                      <span className="detail-row-val">已关闭 4 项能力</span><ChevronRight size={16} className="detail-row-chev" />
+                      <span className="detail-row-ic"><UsersRound size={18} /></span><span>{tr("group.text.super")}</span>
+                      <span className="detail-row-val">{tr("chat.detail.super_group_perks_off")}</span><ChevronRight size={16} className="detail-row-chev" />
                     </button>
                   )}
                 </div>
               )}
               {/* ---- 设置：置顶 / 免打扰 (+群管理) ---- */}
               <div className="detail-card">
-                <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>置顶聊天</span>
+                <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>{tr("chat.detail.pinned")}</span>
                   <button className={`switch ${pinned ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvPinned(conv, !pinned)} /></div>
-                <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>消息免打扰</span>
+                <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>{tr("chat.detail.muted")}</span>
                   <button className={`switch ${muted ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvMuted(conv, !muted)} /></div>
                 {/* 进「群管理」时显式复位管理员二级面板：不复位的话，上次从管理员页直接退出抽屉后，
                     下次点「群管理」会一步跨进管理员列表（层级状态是两个独立布尔，不会自己归位）。 */}
                 {canManage && (
                   <button className="detail-row" onClick={() => { setAdminPanelOpen(false); setManageOpen(true); }}>
-                    <span className="detail-row-ic"><Settings2 size={18} /></span><span>群管理</span>
+                    <span className="detail-row-ic"><Settings2 size={18} /></span><span>{tr("group.manage.title")}</span>
                     {(gp?.pending_count ?? 0) > 0
                       ? <span className="detail-badge">{gp!.pending_count}</span>
-                      : <span className="detail-row-val muted">仅群主/管理员</span>}
+                      : <span className="detail-row-val muted">{tr("chat.detail.manage_hint")}</span>}
                     <ChevronRight size={16} className="detail-row-chev" />
                   </button>
                 )}
                 {d.isGroup && canInviteHere && (
                   <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
-                    <span className="detail-row-ic"><QrCode size={18} /></span><span>群二维码</span>
+                    <span className="detail-row-ic"><QrCode size={18} /></span><span>{tr("qr.card.group_title_code")}</span>
                     <ChevronRight size={16} className="detail-row-chev end" />
                   </button>
                 )}
                 {d.isGroup && canInviteHere && (
                   <button className="detail-row" onClick={() => void openGroupCard(d.convId, true)}>
-                    <span className="detail-row-ic"><Link2 size={18} /></span><span>群邀请链接</span>
+                    <span className="detail-row-ic"><Link2 size={18} /></span><span>{tr("qr.card.group_title_link")}</span>
                     <ChevronRight size={16} className="detail-row-chev end" />
                   </button>
                 )}
@@ -408,12 +410,12 @@ export function DetailPanel(p: DetailPanelProps) {
               {d.isGroup && gp && (
                 <div className="detail-card">
                   <button className="detail-row" onClick={() => void doEditMyGroupNickname(gp)}>
-                    <span className="detail-row-ic"><SquarePen size={18} /></span><span>我在本群的昵称</span>
-                    <span className="detail-row-val">{gp.my_nickname || "未设置"}</span><ChevronRight size={16} className="detail-row-chev" />
+                    <span className="detail-row-ic"><SquarePen size={18} /></span><span>{tr("chat.detail.my_group_nickname")}</span>
+                    <span className="detail-row-val">{gp.my_nickname || tr("settings.info.not_set")}</span><ChevronRight size={16} className="detail-row-chev" />
                   </button>
                   <button className="detail-row" onClick={() => void doEditGroupRemark(gp)}>
-                    <span className="detail-row-ic"><Bookmark size={18} /></span><span>群备注</span>
-                    <span className="detail-row-val">{groupRemark(gp.conv_id) || "未设置"}</span><ChevronRight size={16} className="detail-row-chev" />
+                    <span className="detail-row-ic"><Bookmark size={18} /></span><span>{tr("chat.detail.group_remark")}</span>
+                    <span className="detail-row-val">{groupRemark(gp.conv_id) || tr("settings.info.not_set")}</span><ChevronRight size={16} className="detail-row-chev" />
                   </button>
                 </div>
               )}
@@ -422,19 +424,19 @@ export function DetailPanel(p: DetailPanelProps) {
               {!d.isGroup && (
                 <div className="detail-card">
                   <button className="detail-row" onClick={() => setContactDraft({ peer: d.peer!, remark: conv?.peer_remark ?? "" })}>
-                    <span className="detail-row-ic"><SquarePen size={18} /></span><span>备注名</span>
-                    <span className="detail-row-val">{conv?.peer_remark || "点击设置"}</span><ChevronRight size={16} className="detail-row-chev" />
+                    <span className="detail-row-ic"><SquarePen size={18} /></span><span>{tr("chat.detail.remark_name")}</span>
+                    <span className="detail-row-val">{conv?.peer_remark || tr("chat.detail.tap_to_set")}</span><ChevronRight size={16} className="detail-row-chev" />
                   </button>
                   {/* 显示公开句柄，不是 d.peer（内部 ID）。拿不到时整行不渲染——
                       标签写着"用户名"却显示一串随机数字，是最刺眼的一处错配。 */}
                   {d.peer && peerUsername(d.peer) && (
                     // 点整行即复制句柄（不带 @）：用户名是要拿去搜人/发给别人的，看得见却复制不走等于没有。
                     // Web 上「长按」没有原生语义，点击就是它的等价物（iOS 那端是长按菜单「复制」）。
-                    <button className="detail-row" title="点击复制用户名" onClick={() => {
+                    <button className="detail-row" title={tr("chat.detail.copy_username_title")} onClick={() => {
                       const handle = peerUsername(d.peer!) ?? "";
                       if (!handle) return;
-                      void navigator.clipboard?.writeText(handle).then(() => setToast("已复制用户名"), () => setToast("复制失败"));
-                    }}><span className="detail-row-ic"><AtSign size={18} /></span><span>用户名</span><span className="detail-row-val accent">@{peerUsername(d.peer)}</span></button>
+                      void navigator.clipboard?.writeText(handle).then(() => setToast(tr("chat.detail.username_copied")), () => setToast(tr("common.copy_failed")));
+                    }}><span className="detail-row-ic"><AtSign size={18} /></span><span>{tr("settings.info.username")}</span><span className="detail-row-val accent">@{peerUsername(d.peer)}</span></button>
                   )}
                 </div>
               )}
@@ -454,7 +456,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 contactSourceLabel={(m) => {
                   // 「由 X 分享」只在群聊显——单聊详情页里发送者只可能是我或对方，写出来纯冗余（与 iOS 一致）。
                   if (!d.isGroup) return undefined;
-                  if (m.from === uid) return "你自己";
+                  if (m.from === uid) return tr("chat.detail.you");
                   return contactDisplayName(m.from, m.fromNickname);
                 }}
                 onOpenContact={openPeerDetail}
@@ -480,7 +482,7 @@ export function DetailPanel(p: DetailPanelProps) {
             onCancel={() => setGroupCallPick(false)}
             onConfirm={(uids) => {
               setGroupCallPick(false);
-              if (placeGroupCall(d.convId, uids)) onClose(); else setToast("通话服务未就绪");
+              if (placeGroupCall(d.convId, uids)) onClose(); else setToast(tr("chat.message.call_unavailable"));
             }} />
         )}
       </div>

@@ -22,7 +22,7 @@ import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, typ
 import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
 import { friendlyMessage } from "./errcode";
-import * as voiceApi from "./voiceApi";
+import * as voiceApi from "./voiceApi"; import { t } from "../i18n";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -140,7 +140,7 @@ export class IMClient extends IMRestApi {
     onDead: (code, message) => {
       this.refreshToken = ""; this.handlers.onRefreshToken?.("");
       this.manualClose = true; // 别让"凭据已死"退化成一次临时抖动被自动重连盖过去
-      this.handlers.onAuthError?.(message || "登录已失效，请重新登录", code);
+      this.handlers.onAuthError?.(message || t("common.login_expired"), code);
     },
   });
 
@@ -277,7 +277,7 @@ export class IMClient extends IMRestApi {
     this.connectionGeneration++;
     this.stopPing();
     this.clearReconnectTimer();
-    this.sendTimers.forEach((t) => clearTimeout(t)); // 退出后别再触发"发送失败"回调
+    this.sendTimers.forEach((tm) => clearTimeout(tm)); // 退出后别再触发"发送失败"回调
     this.sendTimers.clear();
     this.pendingSends.clear();
     this.syncedSeq.clear();
@@ -527,7 +527,7 @@ export class IMClient extends IMRestApi {
       const resp = await tracedFetch("/api/v1/upload", { method: "POST", headers: auth, body: fd });
       body = await resp.json().catch(() => ({ code: -1, data: {} }));
     }
-    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "上传失败"));
+    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || t("net.error.upload_failed")));
     const serverSize = Number(body.data.size);
     return {
       url: body.data.url as string,
@@ -552,7 +552,7 @@ export class IMClient extends IMRestApi {
     const auth = { Authorization: `Bearer ${this.token}` };
     const resp = await tracedFetch("/api/v1/avatar", { method: "POST", headers: auth, body: fd });
     const body = await resp.json().catch(() => ({ code: -1, data: {} as Record<string, unknown> }));
-    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || "头像上传失败"));
+    if (body.code !== 0 || !body.data) throw new Error(friendlyMessage(body.code, body.message || t("net.error.avatar_upload_failed")));
     return { url: body.data.url as string };
   }
 
@@ -771,7 +771,7 @@ export class IMClient extends IMRestApi {
       const code = (e as { code?: number }).code;
       if (isAuthCode(code)) {
         this.manualClose = true; // 停止后续自动重连
-        this.handlers.onAuthError?.((e as Error).message || "登录已失效，请重新登录", code);
+        this.handlers.onAuthError?.((e as Error).message || t("common.login_expired"), code);
       } else if (!this.manualClose) {
         this.scheduleReconnect();
       }
@@ -1040,14 +1040,14 @@ export class IMClient extends IMRestApi {
             code: d.code,
             message: d.message,
           });
-          this.handlers.onMsgOpFailed?.(op.op, op.convId, op.targetConvSeq, d.message || "操作失败");
+          this.handlers.onMsgOpFailed?.(op.op, op.convId, op.targetConvSeq, d.message || t("common.action_failed"));
           break;
         }
         // 带 client_msg_id 的错误 = 对某条 send_msg 的拒绝（如被拉黑）：标记该条失败 + 提示。
         if (cmid) {
           const timer = this.sendTimers.get(cmid);
           if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(cmid); }
-          const note = d.message || "发送失败";
+          const note = d.message || t("common.send_failed");
           // 被拒（如被拉黑）服务端永不接受、无 conv_seq → 把该条按失败态 + 系统提示落库，刷新/重进会话仍在。
           const pend = this.pendingSends.get(cmid);
           if (pend) {
@@ -1347,7 +1347,7 @@ export async function registerAccount(username: string, password: string, nickna
     body: JSON.stringify({ username, password, nickname }),
   });
   if (body.code !== 0) {
-    throw new Error(friendlyMessage(body.code, body.message || "注册失败"));
+    throw new Error(friendlyMessage(body.code, body.message || t("login.error.register_failed")));
   }
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { UserPlus } from "lucide-react";
 import { Modal } from "../Modal";
+import { useT } from "../../i18n";
 
 /** 好友申请上限（rune）。与后端 `friend.MaxHelloRunes` 一致——服务端超长会**截断**而不是报错，
  *  端上先拦一道只是为了让用户当场知道写不下了，而不是发完才发现被剪掉半句。 */
@@ -20,6 +21,7 @@ export function FriendRequestModal({ name, defaultHello, busy, onSend, onClose }
   onSend: (hello: string) => void;
   onClose: () => void;
 }) {
+  const tr = useT();
   const [hello, setHello] = useState(defaultHello);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // 光标落到**末尾**再聚焦。`autoFocus` 单用会把光标停在预填文案的最前面，
@@ -32,17 +34,17 @@ export function FriendRequestModal({ name, defaultHello, busy, onSend, onClose }
   }, []);
   return (
     <Modal className="modal friendreq-modal" onClose={onClose}>
-      <h3 className="modal-title"><UserPlus size={18} /> 添加好友</h3>
-      <div className="friendreq-target">发送给 <b>{name}</b></div>
-      <label className="friendreq-label" htmlFor="friendreq-hello">验证消息（选填，对方会看到）</label>
+      <h3 className="modal-title"><UserPlus size={18} /> {tr("friend.request.title")}</h3>
+      <div className="friendreq-target">{tr("friend.request.send_to")} <b>{name}</b></div>
+      <label className="friendreq-label" htmlFor="friendreq-hello">{tr("friend.request.hello_label")}</label>
       <textarea id="friendreq-hello" ref={inputRef} className="friendreq-input" rows={3} maxLength={MAX_FRIEND_HELLO}
-        value={hello} placeholder="说一句，让对方知道你是谁"
+        value={hello} placeholder={tr("friend.request.hello_placeholder")}
         onChange={(e) => setHello(e.target.value)} />
       <div className="friendreq-count">{hello.length}/{MAX_FRIEND_HELLO}</div>
       <div className="modal-actions">
-        <button className="link" onClick={onClose}>取消</button>
+        <button className="link" onClick={onClose}>{tr("common.cancel")}</button>
         <button className="mini-btn" disabled={busy} onClick={() => onSend(hello.trim())}>
-          {busy ? "发送中…" : "发送申请"}
+          {busy ? tr("friend.request.sending") : tr("friend.request.submit")}
         </button>
       </div>
     </Modal>

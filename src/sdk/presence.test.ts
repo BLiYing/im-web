@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   EMPTY_PRESENCE,
@@ -8,6 +8,7 @@ import {
   presenceText,
   type Presence,
 } from "./presence";
+import { setPref } from "../i18n";
 
 // 在线态租约模型（2026-08-05，与 iOS IMPresenceTests 同构）：
 // 服务端只推上线、不推下线，故「是否在线」必须每次按当前时间与租约重算。
@@ -108,5 +109,45 @@ describe("副标题文案分级", () => {
     expect(presenceText({ level: "last_month", onlineUntil: 0, lastSeen: 0 }, NOW)).toBe("一个月内在线");
     expect(presenceText({ level: "long_ago", onlineUntil: 0, lastSeen: 0 }, NOW)).toBe("很久未上线");
     expect(presenceText({ onlineUntil: 0, lastSeen: 0 }, NOW)).toBe("");
+  });
+});
+
+// P2 W6：presenceText 改走文案表（complexity: 复数「N 分钟前」+ 今天/昨天/跨年占位符）。
+// 钉住中英两种输出，防止 t()/monthDay/fullDate 接线错位。
+describe("副标题文案：英文界面 + 跨年（P2 W6）", () => {
+  afterEach(() => setPref("zh-Hans"));
+  const at = (lastSeen: number): Presence => ({ onlineUntil: 0, lastSeen });
+
+  it("英文：在线 / 刚刚 / 复数分钟 / 粗档", () => {
+    setPref("en");
+    expect(presenceText({ level: "online", onlineUntil: NOW + 1000, lastSeen: 0 }, NOW)).toBe("Online");
+    expect(presenceText(at(NOW - 30_000), NOW)).toBe("Last seen just now");
+    expect(presenceText(at(NOW - 1 * 60_000), NOW)).toBe("Last seen 1 minute ago"); // 单数
+    expect(presenceText(at(NOW - 5 * 60_000), NOW)).toBe("Last seen 5 minutes ago"); // 复数
+    expect(presenceText({ level: "long_ago", onlineUntil: 0, lastSeen: 0 }, NOW)).toBe("Offline for a while");
+  });
+
+  it("英文：今天/昨天带时刻占位符", () => {
+    setPref("en");
+    const localNoon = new Date(NOW);
+    localNoon.setHours(12, 0, 0, 0);
+    const now = localNoon.getTime();
+    const morning = new Date(localNoon);
+    morning.setHours(8, 30, 0, 0);
+    expect(presenceText(at(morning.getTime()), now)).toBe("Last seen today at 08:30");
+  });
+
+  it("跨年：今年用 月/日，往年带年份（中英各一）", () => {
+    const now = Date.UTC(2026, 8, 21, 12, 0, 0); // 2026-09-21
+    const thisYear = Date.UTC(2026, 2, 3, 10, 0, 0); // 同年 3月3日
+    const lastYear = Date.UTC(2025, 8, 21, 10, 0, 0); // 去年同月同日
+
+    setPref("zh-Hans");
+    expect(presenceText(at(thisYear), now)).toBe("3月3日 在线");
+    expect(presenceText(at(lastYear), now)).toBe("2025年9月21日 在线");
+
+    setPref("en");
+    expect(presenceText(at(thisYear), now)).toBe("Last seen Mar 3");
+    expect(presenceText(at(lastYear), now)).toBe("Last seen Sep 21, 2025");
   });
 });

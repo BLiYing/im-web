@@ -17,6 +17,7 @@ import { AnchoredMenu } from "../AnchoredMenu";
 import {
   FavContactRow, FavFileRow, FavMediaGrid, FavRow, FavSourceList, FavVoiceRow, favDate, favFileName, favKind, sourceNameOf, type FavoritesMediaGlue,
 } from "./FavoritesItems";
+import { useT } from "../../i18n";
 
 /**
  * pick 模式一次最多可选条数——**独立常量，随时可调**；与 iOS `kIMFavoritesPickMaxSelection` 拉齐。
@@ -62,6 +63,7 @@ export function FavoritesModal({
   onClose: () => void;
   fetchLinkPreview: (u: string) => Promise<{ url: string; title?: string; description?: string; image?: string; site_name?: string }>;
 }) {
+  const tr = useT();
   const isPick = mode === "pick";
   const [viewMode, setViewMode] = useState<FavoritesViewMode>(() => (isPick ? "messages" : loadFavoritesViewMode()));
   const [modeMenu, setModeMenu] = useState<{ x: number; y: number } | null>(null);
@@ -115,7 +117,7 @@ export function FavoritesModal({
    *  上限判定与吐司在 updater **之外**算——同 useForward.toggleForwardTarget，避免 StrictMode 双调用重复吐司。 */
   const toggleSelect = (id: number) => {
     if (selected.has(id)) { setSelected((prev) => { const n = new Set(prev); n.delete(id); return n; }); return; }
-    if (selected.size >= FAV_PICK_MAX) { onPickLimit?.(`最多选择 ${FAV_PICK_MAX} 项`); return; }
+    if (selected.size >= FAV_PICK_MAX) { onPickLimit?.(tr("fav.pick_limit", { max: FAV_PICK_MAX })); return; }
     setSelected((prev) => new Set(prev).add(id));
   };
   const openMenu = isPick ? undefined : (e: MouseEvent, f: Favorite) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, f }); };
@@ -145,9 +147,9 @@ export function FavoritesModal({
   const openSource = (g: FavoriteSourceGroup) => { setSource(g); setQuery(""); };
 
   const inSourceList = viewMode === "chats" && !liveSource;
-  const sourceTitle = liveSource ? `来自 ${sourceNameOf(liveSource, conversations, convDisplayLabel)} · ${liveSource.items.length} 条` : "";
+  const sourceTitle = liveSource ? tr("fav.source_title", { name: sourceNameOf(liveSource, conversations, convDisplayLabel), count: liveSource.items.length }) : "";
   const label = kind ? CATEGORY_LABELS[kind] : "";
-  const emptyText = query.trim() ? "未找到相关收藏" : categories.length === 0 ? "还没有收藏" : `暂无${label}`;
+  const emptyText = query.trim() ? tr("fav.empty_search") : categories.length === 0 ? tr("fav.empty") : tr("fav.empty_category", { label });
 
   // 滚到底自动加载下一页。留 120px 余量提前触发，让加载发生在用户真正见底之前。
   //
@@ -169,16 +171,16 @@ export function FavoritesModal({
       <div className="modal-title fwd-title fav-head">
         <span className="fav-head-main">
           {liveSource && (
-            <button className="fav-back" title="返回来源列表" onClick={() => { setSource(null); setQuery(""); }}><ChevronLeft size={18} /></button>
+            <button className="fav-back" title={tr("fav.back_to_sources")} onClick={() => { setSource(null); setQuery(""); }}><ChevronLeft size={18} /></button>
           )}
           <span className="fav-head-titles">
             {/* 显示**服务端总数**而非已加载条数：分页后 favorites.length 只是当前已拉到的部分。 */}
-            <span>{liveSource ? sourceTitle : isPick ? "从收藏发送" : `我的收藏（${total || favorites.length}）`}</span>
+            <span>{liveSource ? sourceTitle : isPick ? tr("fav.pick_title") : tr("fav.title", { count: total || favorites.length })}</span>
             {!isPick && <span className="fav-subtitle">{VIEW_MODE_LABELS[viewMode]}</span>}
           </span>
         </span>
         {isPick ? null : (
-          <button className="fav-more" title="查看方式"
+          <button className="fav-more" title={tr("fav.view_mode")}
             onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setModeMenu({ x: r.right - 180, y: r.bottom + 4 }); }}>
             <MoreHorizontal size={18} />
           </button>
@@ -188,10 +190,10 @@ export function FavoritesModal({
       {inSourceList ? (
         <>
           <div className="fav-search">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索来源会话" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tr("fav.search_sources")} />
           </div>
           {shownGroups.length === 0
-            ? <div className="fwd-empty">{query.trim() ? "未找到相关会话" : "还没有收藏"}</div>
+            ? <div className="fwd-empty">{query.trim() ? tr("fav.no_matching_chats") : tr("fav.empty")}</div>
             : <FavSourceList groups={shownGroups} conversations={conversations} myUid={myUid}
                 convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl} onOpen={openSource} />}
         </>
@@ -211,7 +213,7 @@ export function FavoritesModal({
           {kind && (
             <div className="fav-search">
               <span className="fav-scope">{label}</span>
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`在${label}中搜索`} />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tr("fav.search_in", { label })} />
             </div>
           )}
 
@@ -264,14 +266,14 @@ export function FavoritesModal({
       {/* pick 多选态：底部发送(N)。 */}
       {isPick ? (
         <div className="fwd-actions">
-          <button className="link" onClick={onClose}>取消</button>
+          <button className="link" onClick={onClose}>{tr("common.cancel")}</button>
           <button className="mini-btn" disabled={selected.size === 0}
             onClick={() => onPick?.(favorites.filter((f) => selected.has(f.id)))}>
-            发送{selected.size > 0 ? `(${selected.size})` : ""}
+            {selected.size > 0 ? tr("common.send_count", { count: selected.size }) : tr("common.send")}
           </button>
         </div>
       ) : (
-        <button className="modal-close" onClick={onClose}>{isPick ? "取消" : "关闭"}</button>
+        <button className="modal-close" onClick={onClose}>{isPick ? tr("common.cancel") : tr("common.close")}</button>
       )}
 
       {/* 模式菜单（互斥 ✓）：以消息模式 / 以聊天模式查看。 */}
@@ -301,13 +303,13 @@ export function FavoritesModal({
       {/* 文本阅读器：只读全文、可选中复制（§5.6 Web 版）。 */}
       {reader && (
         <Modal className="modal fav-reader" onClose={() => setReader(null)}>
-          <div className="modal-title">收藏内容</div>
+          <div className="modal-title">{tr("fav.reader.title")}</div>
           <div className="fav-reader-text">{reader.content}</div>
           <div className="fav-meta">
-            <span className="fav-src">来自{sourceLabel(reader)}</span>
+            <span className="fav-src">{tr("fav.from", { source: sourceLabel(reader) })}</span>
             {favDate(reader.created_at) && <> · {favDate(reader.created_at)}</>}
           </div>
-          <button className="modal-close" onClick={() => setReader(null)}>关闭</button>
+          <button className="modal-close" onClick={() => setReader(null)}>{tr("common.close")}</button>
         </Modal>
       )}
     </Modal>

@@ -6,6 +6,7 @@ import type { DownloadState } from "../../download";
 import { downloadText } from "../../download";
 import { FileTypeIcon } from "../../FileTypeIcon";
 import { fileNameFromContent, favoriteToMessage, isPreviewableFile, looksLikeChatRecordJSON, parseChatRecord, firstURLInText } from "../../messageContent";
+import { fullDate } from "../../time";
 import { formatFileSize } from "../../fileMetadata";
 import { favoritePreviewText, sourceGroupName, type FavoriteSourceGroup } from "../../favoritesGrouping";
 import { MediaTile } from "../MediaTile";
@@ -16,6 +17,7 @@ import { ContactRow } from "../ContactRow";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { VoiceBubble } from "../VoiceBubble";
 import type { LinkPreview } from "../LinkCard";
+import { useT } from "../../i18n";
 
 /**
  * 收藏弹窗的各展示件（B 方案，FAVORITES_DESIGN §14 ③）：
@@ -59,18 +61,19 @@ export function favDate(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts);
   const p2 = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+  return `${fullDate(d)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
 }
 
 /** 行副信息：**时间与「来自X」分两行、颜色分开**（时间 tertiary / 来源 accent，与链接卡的来源行同色）。
  *  曾挤成一行「来自X · 年月日时分」：备注名或群昵称一长，时间就被截没（用户反馈）。
  *  与 iOS `IMFavoriteRowCell` / `IMFavoriteVoiceCell` / `IMDetailFileCell` 同款两行布局。 */
 export function FavMeta({ source, ts }: { source: string; ts: number }) {
-  const t = favDate(ts);
+  const tr = useT();
+  const dt = favDate(ts);
   return (
     <div className="fav-meta">
-      {t && <span className="fav-time">{t}</span>}
-      {source && <span className="fav-src">来自{source}</span>}
+      {dt && <span className="fav-time">{dt}</span>}
+      {source && <span className="fav-src">{tr("fav.from", { source })}</span>}
     </div>
   );
 }
@@ -81,10 +84,11 @@ export function FavMeta({ source, ts }: { source: string; ts: number }) {
 export function FavTrailing({ pickMulti, on, onCheck, onDelete, checkClass = "fav-check" }: {
   pickMulti: boolean; on: boolean; onCheck?: () => void; onDelete?: () => void; checkClass?: string;
 }) {
+  const tr = useT();
   if (pickMulti) {
     return (
       <button type="button" className={`checkbox ${checkClass}${on ? " on" : ""}`}
-        title={on ? "取消选择" : "选择"} aria-pressed={on}
+        title={on ? tr("fav.row.deselect") : tr("fav.row.select")} aria-pressed={on}
         onClick={(e) => { e.stopPropagation(); onCheck?.(); }}>
         {on && <Check size={13} />}
       </button>
@@ -92,7 +96,7 @@ export function FavTrailing({ pickMulti, on, onCheck, onDelete, checkClass = "fa
   }
   if (!onDelete) return null;
   return (
-    <button className="fav-del" title="删除收藏" onClick={(e) => { e.stopPropagation(); onDelete(); }}>✕</button>
+    <button className="fav-del" title={tr("fav.row.delete")} onClick={(e) => { e.stopPropagation(); onDelete(); }}>✕</button>
   );
 }
 
@@ -144,25 +148,26 @@ export function FavFileRow({ f, on, pickMulti, sourceLabel, glue, onClick, onChe
   glue: FavoritesMediaGlue;
   onClick: (m: ChatMessage, gate: DownloadState | undefined) => void;
 }) {
+  const tr = useT();
   const m = favoriteToMessage(f);
   const gate = glue.gateOf(m);
   const name = favFileName(f);
   const size = formatFileSize(f.file_size);
   const failed = !!gate && (gate.phase === "failed" || gate.phase === "expired");
   const meta = gate
-    ? (gate.phase === "notStarted" ? (size ? `${size} · 未下载` : "未下载") : downloadText(gate, size))
+    ? (gate.phase === "notStarted" ? (size ? tr("fav.file.size_not_downloaded", { size }) : tr("fav.file.not_downloaded")) : downloadText(gate, size))
     : size;
   return (
     <div className={`detail-fileitem fav-fileitem${failed ? " failed" : ""}${pickMulti && on ? " on" : ""}`}
       onClick={() => onClick(m, gate)} onContextMenu={onMenu}
-      title={gate ? (gate.phase === "expired" ? "文件已失效" : "点击下载") : (isPreviewableFile(name) ? "点击预览" : "点击下载")}>
+      title={gate ? (gate.phase === "expired" ? tr("fav.file.expired") : tr("fav.file.click_download")) : (isPreviewableFile(name) ? tr("fav.file.click_preview") : tr("fav.file.click_download"))}>
       {gate ? <FileGateIcon state={gate} /> : <FileTypeIcon name={name} size={34} />}
       <span className="detail-file-body">
         <span className="detail-file-name">{name}</span>
         {f.caption && <span className="fav-caption">{f.caption}</span>}
         {meta && <span className="detail-file-size">{meta}</span>}
         {favDate(f.created_at) && <span className="fav-time">{favDate(f.created_at)}</span>}
-        <span className="fav-src">来自{sourceLabel(f)}</span>
+        <span className="fav-src">{tr("fav.from", { source: sourceLabel(f) })}</span>
       </span>
       <FavTrailing pickMulti={pickMulti} on={on} onCheck={onCheck} onDelete={onDelete} />
     </div>
@@ -212,6 +217,7 @@ export function FavContactRow({ f, on, pickMulti, sourceLabel, displayName, onCl
 export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onCheck, onMenu, onDelete, fetchLinkPreview }: RowCommon & {
   fetchLinkPreview?: (u: string) => Promise<LinkPreview>; // link kind 时必传（其它 kind 忽略）
 }) {
+  const tr = useT();
   const k = favKind(f);
   if (k === "link" && fetchLinkPreview) {
     // 链接分类：草图 §D——URL 卡（favicon + og:title + host+path + 时间）+ 原文引用（有正文时）+ 来源。
@@ -236,7 +242,7 @@ export function FavRow({ f, on, pickMulti, sourceLabel, onClick, onCheck, onMenu
   if (k === "record") {
     const r = parseChatRecord(f.content);
     icon = <MessagesSquare size={22} />;
-    body = <div className="fav-content">{r.t || "聊天记录"}<span className="fav-record-count"> · {r.items.length} 条消息</span></div>;
+    body = <div className="fav-content">{r.t || tr("record.chat_history")}<span className="fav-record-count"> · {tr("fav.record.count", { count: r.items.length })}</span></div>;
   } else {
     icon = <MessageSquareQuote size={22} />;
     body = <div className="fav-content">{f.content}</div>;
@@ -262,6 +268,7 @@ export function FavSourceList({ groups, conversations, myUid, convDisplayLabel, 
   convAvatarUrl: (c: Conversation) => string | undefined;
   onOpen: (g: FavoriteSourceGroup) => void;
 }) {
+  const tr = useT();
   return (
     <div className="fav-list fav-src-list">
       {groups.map((g) => {
@@ -270,7 +277,7 @@ export function FavSourceList({ groups, conversations, myUid, convDisplayLabel, 
         const seed = g.isMine ? myUid : conv ? (conv.is_group ? conv.conv_id : conv.peer) : g.convId || "";
         return (
           <button key={g.key} className="fav-src-row" onClick={() => onOpen(g)}>
-            <Avatar url={conv ? convAvatarUrl(conv) : undefined} label={g.isMine ? "我" : name} seed={seed} />
+            <Avatar url={conv ? convAvatarUrl(conv) : undefined} label={g.isMine ? tr("common.me") : name} seed={seed} />
             <span className="fav-src-main">
               <span className="fav-src-name">{name}</span>
               <span className="fav-src-preview">{favoritePreviewText(g.latest)}</span>

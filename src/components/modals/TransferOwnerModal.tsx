@@ -5,6 +5,7 @@ import { memberSubtitle } from "../../groupAdmin";
 import { ListSearchInput, isSearching } from "../ListSearchInput";
 import { Modal } from "../Modal";
 import { Avatar } from "../Avatar";
+import { useT } from "../../i18n";
 
 /**
  * 选择新群主：**单选即确认**——点中一行立刻走二次确认，不再要求点一次「确定」。
@@ -23,6 +24,7 @@ export function TransferOwnerModal({ candidates, memberLabel, onPick, onCancel, 
    */
   remote?: { query: string; setQuery: (v: string) => void; failed: boolean };
 }) {
+  const tr = useT();
   const [localQ, setLocalQ] = useState("");
   const q = remote ? remote.query : localQ;
   const setQ = remote ? remote.setQuery : setLocalQ;
@@ -34,13 +36,13 @@ export function TransferOwnerModal({ candidates, memberLabel, onPick, onCancel, 
 
   return (
     <Modal onClose={onCancel}>
-      <h3>选择新群主</h3>
-      {(remote || candidates.length > 0) && <ListSearchInput value={q} onChange={setQ} placeholder="搜索群成员" />}
+      <h3>{tr("group.transfer_owner.title")}</h3>
+      {(remote || candidates.length > 0) && <ListSearchInput value={q} onChange={setQ} placeholder={tr("group.picker.search_placeholder")} />}
       {visible.length === 0 && (
         <div className="empty">
-          {remote?.failed ? "搜索失败，请重试"
-            : isSearching(q) ? "没有匹配的成员"
-            : remote ? "输入关键词搜索群成员" : "群里还没有其他成员"}
+          {remote?.failed ? tr("group.picker.search_failed")
+            : isSearching(q) ? tr("group.picker.no_match")
+            : remote ? tr("group.picker.search_hint") : tr("group.picker.no_others")}
         </div>
       )}
       <div className="modal-list">
@@ -50,14 +52,14 @@ export function TransferOwnerModal({ candidates, memberLabel, onPick, onCancel, 
             <button key={m.user_id} className="check-row" onClick={() => onPick(m)}>
               <Avatar url={m.avatar_url} label={memberLabel(m)} seed={m.user_id} />
               <span className="row-label">{sub ? `${memberLabel(m)}  ${sub}` : memberLabel(m)}</span>
-              {m.role === "admin" && <span className="role-badge">管理员</span>}
+              {m.role === "admin" && <span className="role-badge">{tr("group.role.admin")}</span>}
             </button>
           );
         })}
       </div>
-      <div className="detail-foot-note">转让后你将立即变为普通成员，且不可撤销。</div>
+      <div className="detail-foot-note">{tr("group.transfer_owner.warning")}</div>
       <div className="modal-actions">
-        <button className="link" onClick={onCancel}>取消</button>
+        <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
       </div>
     </Modal>
   );

@@ -14,6 +14,7 @@ import { parseDownloadSettings, shouldAutoDownload, type DownloadSettings, type 
 import { cachePutBlob, cacheMatchBlob, cacheClear, loadStrSet, saveStrSet, expiredKey, downloadedFilesKey } from "./mediaCache";
 import { loadOptedIn, saveOptedIn, optedInKey } from "./optedIn";
 import { fileNameFromContent, isPreviewableFile } from "./messageContent";
+import { t } from "./i18n";
 import { LOG_TAG, logger } from "./logging/logger";
 import { platform } from "./platform";
 
@@ -95,7 +96,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
       setDlSettings(parseDownloadSettings(res?.settings)); // 以服务端规整后的为准
     } catch (e) {
       logger.warn(LOG_TAG.media, "download_settings_save_failed", { error: (e as Error).message, rollback: true });
-      setToast(`保存失败：${(e as Error).message}`);
+      setToast(t("media.settings_save_failed", { detail: (e as Error).message }));
       void refreshDownloadSettings();
     }
   }, [refreshDownloadSettings]);
@@ -149,7 +150,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     }
     // 另存：用远端 URL 时先验失效——避免"能看却下不了"只丢一个浏览器下载失败（见铁律 A 讨论）。
     if (url === m.content && await markExpiredIfGoneRef.current(m)) {
-      setToast(m.contentType === "image" ? "图片已失效" : m.contentType === "video" ? "视频已失效" : "文件已失效");
+      setToast(m.contentType === "image" ? t("media.image_expired") : m.contentType === "video" ? t("media.video_expired") : t("chat.file.expired"));
       return;
     }
     await platform().saveFile({ url, name });
@@ -166,7 +167,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     // 用远端 URL 时先验失效：Chrome 可能靠 HTTP 缓存还显示着图，但源已删——下载会 404。先探一次，
     // 命中则 toast「已失效」+ 标记（下次渲染各面统一显失效），不再丢一个懵的浏览器下载失败（铁律 A 讨论）。
     if (url === m.content && await markExpiredIfGoneRef.current(m)) {
-      setToast(m.contentType === "image" ? "图片已失效" : m.contentType === "video" ? "视频已失效" : "文件已失效");
+      setToast(m.contentType === "image" ? t("media.image_expired") : m.contentType === "video" ? t("media.video_expired") : t("chat.file.expired"));
       return;
     }
     await platform().saveFile({ url, name });

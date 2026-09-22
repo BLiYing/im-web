@@ -45,17 +45,31 @@ export function setTrayTooltip(text: string): void {
   if (tray && !tray.isDestroyed()) tray.setToolTip(text);
 }
 
-export function installTray(win: BrowserWindow): () => void {
-  tray = new Tray(trayIconPath());
-  tray.setToolTip("IM Desktop");
+/** 托盘菜单文案取用（语言由 main/language.ts 持有，切语言时 refreshTrayMenu 会重取）。 */
+type TrayText = (key: string) => string;
+let trayWin: BrowserWindow | null = null;
+let trayText: TrayText | null = null;
 
-  const menu = Menu.buildFromTemplate([
-    { label: "显示主窗口", click: () => showWindow(win) },
+function buildTrayMenu(win: BrowserWindow, t: TrayText): Electron.Menu {
+  return Menu.buildFromTemplate([
+    { label: t("desktop.tray.show_window"), click: () => showWindow(win) },
     { type: "separator" },
     // 这一条是唯一能真退出的入口——点它才把 quitting 置上。
-    { label: "退出 IM Desktop", click: () => { beginQuit(); app.quit(); } },
+    { label: t("desktop.tray.quit"), click: () => { beginQuit(); app.quit(); } },
   ]);
-  tray.setContextMenu(menu);
+}
+
+/** 切语言后重建托盘菜单。托盘还没装（启动早期）时静默忽略——装的时候会按当时的语言建。 */
+export function refreshTrayMenu(): void {
+  if (tray && !tray.isDestroyed() && trayWin && trayText) tray.setContextMenu(buildTrayMenu(trayWin, trayText));
+}
+
+export function installTray(win: BrowserWindow, t: TrayText): () => void {
+  tray = new Tray(trayIconPath());
+  tray.setToolTip("IM Desktop");
+  trayWin = win;
+  trayText = t;
+  tray.setContextMenu(buildTrayMenu(win, t));
   // 左键点托盘：Windows/Linux 的习惯是切换显示；macOS 左键默认就弹菜单，这里不额外接管。
   if (process.platform !== "darwin") {
     tray.on("click", () => { if (win.isVisible()) win.hide(); else showWindow(win); });
@@ -72,5 +86,7 @@ export function installTray(win: BrowserWindow): () => void {
     win.off("close", onClose);
     tray?.destroy();
     tray = null;
+    trayWin = null;
+    trayText = null;
   };
 }

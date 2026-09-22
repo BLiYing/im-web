@@ -1,6 +1,7 @@
 import { LOG_TAG, logger } from "../logging/logger";
 import { formatRequestBody, formatResponseText } from "../logging/sanitize";
 import { friendlyMessage } from "./errcode";
+import { t } from "../i18n";
 
 const includeBusinessContent = import.meta.env.DEV;
 
@@ -71,7 +72,7 @@ export function tracedUpload(
         req: requestID, method: "POST", path,
         duration_ms: Math.round((performance.now() - started) * 10) / 10,
       });
-      reject(new Error("网络错误，上传失败"));
+      reject(new Error(t("net.error.xhr_upload_failed")));
     };
     xhr.send(body);
   });
@@ -138,12 +139,12 @@ export async function fetchEnvelope<T = any>(input: RequestInfo | URL, init?: Re
   try {
     resp = await tracedFetch(input, init);
   } catch {
-    throw new Error("无法连接服务器，请确认后端已启动"); // fetch reject：网络/连接失败
+    throw new Error(t("net.error.cannot_connect")); // fetch reject：网络/连接失败
   }
   try {
     return await resp.json();
   } catch {
-    throw new Error("服务器无响应，请确认后端已启动"); // 空/非 JSON：原"Unexpected end of JSON input"
+    throw new Error(t("net.error.no_response")); // 空/非 JSON：原"Unexpected end of JSON input"
   }
 }
 

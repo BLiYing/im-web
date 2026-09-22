@@ -82,6 +82,9 @@ export const webPlatform: Platform = {
   async getAutoStart(): Promise<boolean> { return false; },
   async setAutoStart(_on: boolean): Promise<boolean> { return false; },
 
+  // 浏览器没有页面之外的文案（托盘 / 原生对话框）——不适用。
+  async setLanguage(_pref: string): Promise<void> { /* no-op */ },
+
   // 网页拿不到系统级按键——不适用。label 给空串：设置页根本不渲染这一项。
   globalShortcutSupported(): boolean { return false; },
   async getGlobalShortcut(): Promise<GlobalShortcutState> { return { enabled: false, label: "" }; },

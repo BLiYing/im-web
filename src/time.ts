@@ -1,7 +1,20 @@
 // 全站统一的时间格式化：会话列表时间、聊天消息时间等“显示时分”的地方都复用本方法。
 // fmt 来自"通用设置 ▸ 时间格式"（12/24 小时制）。
 
+import { getLang, t } from "./i18n";
+
 export type TimeFormat = "12" | "24";
+
+/** 月份标签：zh 给数字串（配「{month}月」），en 给缩写（Sep）。文案模板在文案表 time.month_day / time.full_date。 */
+function monthLabel(d: Date): string {
+  return getLang() === "en" ? d.toLocaleDateString("en-US", { month: "short" }) : String(d.getMonth() + 1);
+}
+export function monthDay(d: Date): string {
+  return t("time.month_day", { month: monthLabel(d), day: d.getDate() });
+}
+export function fullDate(d: Date): string {
+  return t("time.full_date", { year: d.getFullYear(), month: monthLabel(d), day: d.getDate() });
+}
 
 /** 把毫秒时间戳格式化为时分。24 小时制 = "HH:mm"；12 小时制 = "h:mm AM/PM"。 */
 export function formatTime(ts: number, fmt: TimeFormat = "24"): string {
@@ -42,9 +55,9 @@ export function conversationTime(ts: number, fmt: TimeFormat = "24"): string {
   const d = new Date(ts), now = new Date();
   if (isSameDay(ts, now.getTime())) return formatTime(ts, fmt);
   const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-  if (isSameDay(ts, yesterday.getTime())) return "昨天";
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  if (isSameDay(ts, yesterday.getTime())) return t("time.yesterday");
+  if (d.getFullYear() === now.getFullYear()) return monthDay(d);
+  return fullDate(d);
 }
 
 // 毫秒时间戳 → 日期分隔文案：今天/昨天/M月d日（今年）/yyyy年M月d日（往年）。
@@ -52,8 +65,8 @@ export function dayHeader(ts: number): string {
   if (!ts) return "";
   const d = new Date(ts), now = new Date();
   const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-  if (isSameDay(ts, now.getTime())) return "今天";
-  if (isSameDay(ts, yesterday.getTime())) return "昨天";
-  if (d.getFullYear() === now.getFullYear()) return `${d.getMonth() + 1}月${d.getDate()}日`;
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  if (isSameDay(ts, now.getTime())) return t("time.today");
+  if (isSameDay(ts, yesterday.getTime())) return t("time.yesterday");
+  if (d.getFullYear() === now.getFullYear()) return monthDay(d);
+  return fullDate(d);
 }

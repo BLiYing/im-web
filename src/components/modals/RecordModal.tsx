@@ -5,9 +5,11 @@ import { fileNameFromContent, parseChatRecord, recordItemPreview, recordSenderKe
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { Avatar } from "../Avatar";
 import { formatFileSize } from "../../fileMetadata";
+import { monthDay } from "../../time";
 import { Modal } from "../Modal";
 import { VideoThumb } from "../VideoThumb";
 import { VoiceBubble } from "../VoiceBubble";
+import { useT } from "../../i18n";
 
 /** 条目右上角的时间：`ts` 是打包端带的原消息时间。老记录没有 → 空串，整块不渲染。
  *  同一天只显 HH:mm，跨天带 M月d日（记录里常横跨多天，只显时分会看不出来）。 */
@@ -16,7 +18,7 @@ function recordItemTime(ts: number | undefined): string {
   const d = new Date(ts), now = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
-  return d.toDateString() === now.toDateString() ? hm : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+  return d.toDateString() === now.toDateString() ? hm : `${monthDay(d)} ${hm}`;
 }
 
 /** 记录里的语音条目。**时长只有打包端带了 `d` 才有**（2026-08-30 起两端都带）——
@@ -64,11 +66,12 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
   onOpenContact: (userId: string) => void;
   onClose: () => void;
 }) {
+  const tr = useT();
   return (
     <Modal className="modal record-modal" onClose={onClose}>
         <div className="modal-title record-head">
           {canGoBack && (
-            <button className="icon-btn" title="返回" onClick={onBack}>
+            <button className="icon-btn" title={tr("common.back")} onClick={onBack}>
               <ChevronLeft size={22} />
             </button>
           )}
@@ -90,7 +93,7 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
               </div>
               <div className="record-item-body">
               {it.ct === "image" ? (
-                <img className="record-item-media" src={it.c} alt="图片" onClick={() => onOpenMedia(i, it.c, "image")} />
+                <img className="record-item-media" src={it.c} alt={tr("common.image")} onClick={() => onOpenMedia(i, it.c, "image")} />
               ) : it.ct === "video" ? (
                 <VideoThumb content={it.c} videoClass="record-item-media" onClick={() => onOpenMedia(i, it.c, "video")} />
               ) : it.ct === "file" ? (
@@ -111,7 +114,7 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
                     <div className="record-preview">{sub.items.slice(0, 2).map((si, k) => (
                       <div key={k} className="record-line">{si.n}: {recordItemPreview(si)}</div>
                     ))}</div>
-                    <div className="record-foot">聊天记录 ›</div>
+                    <div className="record-foot">{tr("record.chat_history")} ›</div>
                   </div>
                 ); })()
               ) : it.ct === CONTACT_CONTENT_TYPE ? (
@@ -119,18 +122,18 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
                 // 脏名片解析不出 → 退化成灰字不可点，与气泡侧同口径。
                 (() => {
                   const card = parseContactCard(it.c);
-                  if (!card) return <div className="contact-card dirty">[个人名片]</div>;
+                  if (!card) return <div className="contact-card dirty">{tr("record.dirty_card")}</div>;
                   return (
                     <div className="contact-card" onClick={() => onOpenContact(card.userId)}>
                       <div className="contact-card-head">
                         {/* 显示名末级不落 userId；标识行显 @句柄，没有就不渲染。 */}
-                        <Avatar url={card.avatarUrl} label={card.nickname || (card.username ? `@${card.username}` : "未命名用户")} seed={card.userId} cls="avatar" />
+                        <Avatar url={card.avatarUrl} label={card.nickname || (card.username ? `@${card.username}` : tr("common.unnamed_user"))} seed={card.userId} cls="avatar" />
                         <div className="contact-card-body">
-                          <div className="contact-card-name">{card.nickname || (card.username ? `@${card.username}` : "未命名用户")}</div>
+                          <div className="contact-card-name">{card.nickname || (card.username ? `@${card.username}` : tr("common.unnamed_user"))}</div>
                           {card.username && <div className="contact-card-id">@{card.username}</div>}
                         </div>
                       </div>
-                      <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>
+                      <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />{tr("contact.card.footer")}</div>
                     </div>
                   );
                 })()
@@ -145,7 +148,7 @@ export function RecordModal({ view, canGoBack, nestedAt, uid, onBack, onDrill, o
             </div>
           ); })}
         </div>
-        <button className="modal-close" onClick={onClose}>关闭</button>
+        <button className="modal-close" onClick={onClose}>{tr("common.close")}</button>
     </Modal>
   );
 }

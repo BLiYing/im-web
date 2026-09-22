@@ -1,6 +1,7 @@
 import type { MouseEvent } from "react";
 import { Avatar } from "./Avatar";
 import type { ContactCard } from "../contactCard";
+import { useT } from "../i18n";
 
 /**
  * 个人名片的「列表行」——**会话详情页「名片」页签**与**收藏页「名片」分类共用同一个组件**
@@ -21,8 +22,9 @@ export function ContactRow({ card, displayName, sourceName, timeText, onClick, o
   onClick?: () => void;
   onContextMenu?: (e: MouseEvent) => void;
 }) {
+  const tr = useT();
   // 末级不落 userId（10 位随机数字内部 ID）；退到 @句柄，再退到占位。
-  const shown = displayName || card.nickname || (card.username ? `@${card.username}` : "未命名用户");
+  const shown = displayName || card.nickname || (card.username ? `@${card.username}` : tr("common.unnamed_user"));
   return (
     <div className="contact-row" onClick={onClick} onContextMenu={onContextMenu}>
       <Avatar url={card.avatarUrl} label={shown} seed={card.userId} cls="avatar contact-row-avatar" />
@@ -30,7 +32,7 @@ export function ContactRow({ card, displayName, sourceName, timeText, onClick, o
         <div className="contact-row-name">{shown}</div>
         {/* 副标题 = @句柄。绝不显示 card.userId——那是内部 ID。 */}
         <div className="contact-row-sub">{card.username ? `@${card.username}` : ""}</div>
-        {sourceName && <div className="contact-row-source">由 {sourceName} 分享</div>}
+        {sourceName && <div className="contact-row-source">{tr("contact_card.row.shared_by", { source: sourceName })}</div>}
       </div>
       {timeText && <div className="contact-row-time">{timeText}</div>}
     </div>

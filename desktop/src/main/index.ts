@@ -14,7 +14,8 @@ import { runPerf } from "./perf";
 import { runShellCheck } from "./shellCheck";
 import { runC3Check } from "./c3Check";
 import { checkDistFreshness, freshnessMessage } from "./distFreshness";
-import { beginQuit, installTray, isQuitting, setTrayTooltip, showWindow } from "./tray";
+import { beginQuit, installTray, isQuitting, refreshTrayMenu, setTrayTooltip, showWindow } from "./tray";
+import { createLanguageState } from "./language";
 import { exitCodeAfterLock, lockDataFor, shouldFocusOnSecondInstance } from "./singleInstance";
 import { createDeepLinkRouter, DEEP_LINK_SCHEME, IPC_DEEP_LINK_AVAILABLE, IPC_DEEP_LINK_DRAIN } from "./deepLink";
 import { getAutoStart, installWakeSignals, notify, setAutoStart, setBadge } from "./shellCaps";
@@ -100,6 +101,13 @@ if (lockExit === null) {
 
 // 全局快捷键（**默认关**，设置里开；见 globalShortcutCap.ts）。要等 ready 才能注册，这里只建。
 // 偏好落 device.json（跟窗口状态同一份），这样登录前、页面还没起来时就能按偏好注册上。
+// 界面语言（页面之外的文案：托盘菜单 / 启动失败对话框）。页面经 im:set-language 推偏好，这里落盘。
+const language = createLanguageState({
+  file: join(app.getPath("userData"), "lang.json"),
+  systemLangs: () => app.getPreferredSystemLanguages(),
+  onChange: () => refreshTrayMenu(),
+});
+
 const shortcut = createGlobalShortcut({
   registry: globalShortcut,
   platform: process.platform,
@@ -203,6 +211,7 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   // 全局快捷键：与开机自启同口径，set 返回**设完之后的真实状态**（被占用时 enabled=false、taken=true）。
   ipcMain.handle("im:get-global-shortcut", () => shortcut.state());
   ipcMain.handle("im:set-global-shortcut", (_e, on: unknown) => shortcut.set(on === true));
+  ipcMain.handle("im:set-language", (_e, pref: unknown) => { language.set(pref); });
   ipcMain.handle("im:get-auto-start", () => getAutoStart());
   ipcMain.handle("im:set-auto-start", (_e, on: unknown) => setAutoStart(on === true));
 
@@ -261,7 +270,7 @@ function fatal(stage: string, e: unknown): void {
   if (!app.isPackaged && msg.includes("ERR_CONNECTION_REFUSED")) {
     process.stderr.write("[im-desktop]   dev 模式要先在仓库根跑 `npm run dev`（Vite :5173）\n");
   }
-  dialog.showErrorBox("IM Desktop 启动失败", `${stage}：${msg}`);
+  dialog.showErrorBox(language.t("desktop.startup_failed"), `${stage}：${msg}`);
   app.exit(1);
 }
 
@@ -338,7 +347,7 @@ app.whenReady().then(async () => {
   }
 
   // 托盘 + 「关闭 = 收起」。自检模式不装：它会在菜单栏留个图标，而自检紧接着就 exit。
-  installTray(win);
+  installTray(win, (key) => language.t(key));
   // 按偏好注册全局快捷键。只在正常启动走到这里——自检模式在上面已经 return，不许替用户抢键。
   shortcut.restore();
 

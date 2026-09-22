@@ -7,6 +7,7 @@ import { Modal } from "../Modal";
 import { CheckRow } from "../rows";
 import { Avatar } from "../Avatar";
 import { defaultGroupName, publicNameOf, runeLength, truncateRunes, MAX_GROUP_NAME_LEN } from "../../groupName";
+import { useT } from "../../i18n";
 
 export type CreateGroupDraft = {
   name: string;
@@ -42,6 +43,7 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
   onCreate: () => void;
   onCancel: () => void;
 }) {
+  const tr = useT();
   const [q, setQ] = useState("");
   const [step, setStep] = useState<1 | 2>(1);
   const [hint, setHint] = useState("");
@@ -64,7 +66,7 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
 
   const removeMember = (id: string) => {
     // 不允许删到 0：与第一步「选 0 人不能下一步」同口径。让用户先删空再报错，是把错误留到最后一步。
-    if (draft.selected.length <= 1) { setHint("至少选择一位好友"); return; }
+    if (draft.selected.length <= 1) { setHint(tr("group.create.min_friends")); return; }
     const selected = draft.selected.filter((x) => x !== id);
     setHint("");
     onChange(draft.nameEdited ? { ...draft, selected } : { ...draft, selected, name: suggestName(selected) });
@@ -74,9 +76,9 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
     const nameEmpty = draft.name.trim().length === 0;
     return (
       <Modal className="modal create-modal" onClose={onCancel}>
-        <h3 className="create-head">创建群聊<span className="create-step">2 / 2</span></h3>
+        <h3 className="create-head">{tr("group.create.title")}<span className="create-step">2 / 2</span></h3>
         <div className="create-profile">
-          <button className="edit-avatar sm" title="设置群头像" disabled={avatarBusy} onClick={onPickAvatar}>
+          <button className="edit-avatar sm" title={tr("group.create.set_avatar")} disabled={avatarBusy} onClick={onPickAvatar}>
             {/* 没设头像时圈里就是群名首字——建成后会话列表看到的正是这个样子。
                 seed 用**固定串**而不是群名：群名每敲一个字都会换一次底色，看着像闪。
                 建成后列表按 conv_id 重新播种，颜色会变一次，这是可接受的。 */}
@@ -84,8 +86,8 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             <span className="edit-cam"><Camera size={13} /></span>
           </button>
           <label className="create-name">
-            <span className="section-label">群名称</span>
-            <input className="create-name-input" value={draft.name} autoFocus={false} placeholder="群聊名称"
+            <span className="section-label">{tr("group.create.name_label")}</span>
+            <input className="create-name-input" value={draft.name} autoFocus={false} placeholder={tr("group.create.name_placeholder")}
               onChange={(e) => {
                 setHint("");   // 别让「至少选择一位好友」那句停在屏幕上（浏览器实测发现它会滞留）
                 onChange({ ...draft, name: truncateRunes(e.target.value, MAX_GROUP_NAME_LEN), nameEdited: true });
@@ -93,7 +95,7 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             <span className="field-count">{runeLength(draft.name)}/{MAX_GROUP_NAME_LEN}</span>
           </label>
         </div>
-        <div className="section-label">成员 · {draft.selected.length} 人（加我 {draft.selected.length + 1} 人）</div>
+        <div className="section-label">{tr("group.create.members_summary", { count: draft.selected.length, total: draft.selected.length + 1 })}</div>
         <div className="member-chips">
           {draft.selected.map((id) => {
             const f = byId.get(id);
@@ -102,17 +104,17 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
               <span className="member-chip" key={id}>
                 <Avatar url={f?.avatar_url} label={label} seed={id} cls="avatar chip-av" />
                 <span className="chip-name">{label}</span>
-                <button className="chip-x" title="移除" onClick={() => removeMember(id)}>✕</button>
+                <button className="chip-x" title={tr("common.remove")} onClick={() => removeMember(id)}>✕</button>
               </span>
             );
           })}
-          <button className="member-chip add" onClick={() => setStep(1)}>＋ 添加</button>
+          <button className="member-chip add" onClick={() => setStep(1)}>{tr("group.create.add_more")}</button>
         </div>
         {hint && <p className="create-hint">{hint}</p>}
         <div className="modal-actions">
-          <button className="link" onClick={() => setStep(1)}>上一步</button>
-          <button className="link" onClick={onCancel}>取消</button>
-          <button className="mini-btn" disabled={busy || nameEmpty} onClick={onCreate}>创建</button>
+          <button className="link" onClick={() => setStep(1)}>{tr("common.previous")}</button>
+          <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
+          <button className="mini-btn" disabled={busy || nameEmpty} onClick={onCreate}>{tr("common.create")}</button>
         </div>
       </Modal>
     );
@@ -120,9 +122,9 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
 
   return (
     <Modal onClose={onCancel}>
-        <h3 className="create-head">创建群聊<span className="create-step">1 / 2</span></h3>
+        <h3 className="create-head">{tr("group.create.title")}<span className="create-step">1 / 2</span></h3>
         <div className="section-label with-action">
-          <span>选择好友（已选 {draft.selected.length}）</span>
+          <span>{tr("group.create.select_friends", { count: draft.selected.length })}</span>
           {visible.length > 0 && (() => {
             // 全选只作用于**当前可见行**：搜了「张」还去勾上没显示的两百人，用户不会预期。
             // 无搜索词时 visible === accepted，行为与加搜索前一致。
@@ -135,14 +137,14 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             return (
               <button type="button" className="section-action"
                 onClick={() => onChange({ ...draft, selected: next })}>
-                {allOn ? "取消全选" : "全选"}
+                {allOn ? tr("common.deselect_all") : tr("common.select_all")}
               </button>
             );
           })()}
         </div>
-        {accepted.length > 0 && <ListSearchInput value={q} onChange={setQ} placeholder="搜索好友" />}
+        {accepted.length > 0 && <ListSearchInput value={q} onChange={setQ} placeholder={tr("friend.picker.search_placeholder")} />}
         {visible.length === 0 && (
-          <div className="empty">{isSearching(q) ? "没有匹配的好友" : "还没有好友，先去通讯录添加吧"}</div>
+          <div className="empty">{isSearching(q) ? tr("friend.picker.no_match") : tr("group.create.no_friends")}</div>
         )}
         <div className="modal-list">
           {visible.map((f) => {
@@ -157,8 +159,8 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
           })}
         </div>
         <div className="modal-actions">
-          <button className="link" onClick={onCancel}>取消</button>
-          <button className="mini-btn" disabled={draft.selected.length === 0} onClick={() => goStep2(draft)}>下一步</button>
+          <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
+          <button className="mini-btn" disabled={draft.selected.length === 0} onClick={() => goStep2(draft)}>{tr("common.next")}</button>
         </div>
     </Modal>
   );

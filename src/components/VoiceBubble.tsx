@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage } from "../sdk/protocol";
 import { voiceRelayMid } from "../voiceRelay";
 import { formatTime, type TimeFormat } from "../time";
+import { useT } from "../i18n";
 
 /// 波形柱数：按可绘制宽度动态定；这里按 ~5.5px pitch 估算，实际下采见组件内。
 const WAVE_MIN_BARS = 20;
@@ -150,6 +151,7 @@ function fmt(ms: number): string {
 }
 
 export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readByPeer = false, showTick = true, timeFormat = "24" }: VoiceBubbleProps) {
+  const tr = useT();
   const [tick, setTick] = useState(0);
   const waveRef = useRef<HTMLDivElement | null>(null);
   const [barCount, setBarCount] = useState(28);
@@ -282,13 +284,13 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readBy
          onClick={toggle} role="button">
       {/* 未播红点：气泡**右上角**（与 iOS IMVoiceBubbleCell 同位置）。曾挤在时长行里跟时长/倍速
           抢位置，长语音时容易被推没；红点是"这条我处理过没有"的角标，本就该在角上。 */}
-      {!played && !isCurrent && <span className="voice-unplayed" aria-label="未播放" />}
+      {!played && !isCurrent && <span className="voice-unplayed" aria-label={tr("chat.voice.unplayed")} />}
       {/* 播放器行：▶ 与「波形 + 时长行」垂直居中。时间行在这一行**之外**——
           曾放进 .voice-center 里，把居中轴往下拽，视觉上 ▶ 比波形低一截（2026-08-27 修）。 */}
       <div className="voice-player-row">
       <button className={`voice-play${mine ? " mine" : ""}`}
               type="button"
-              aria-label={playing ? "暂停" : "播放"}
+              aria-label={playing ? tr("common.pause") : tr("common.play")}
               onClick={(e) => { e.stopPropagation(); toggle(); }}>
         {playing ? "❚❚" : "▶"}
       </button>
@@ -324,8 +326,8 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readBy
       {(timeStr || showsTicks) && (
         <div className="voice-time-row">
           <span className="voice-meta-text">
-            {mine && m.status === "sending" ? "发送中…"
-              : mine && m.status === "failed" ? "未发送 ✗"
+            {mine && m.status === "sending" ? tr("common.sending")
+              : mine && m.status === "failed" ? tr("chat.message.not_sent_mark")
               : timeStr}
             {showsTicks && (
               <span className={readByPeer ? "voice-tick read" : "voice-tick"}>{" "}{readByPeer ? "✓✓" : "✓"}</span>

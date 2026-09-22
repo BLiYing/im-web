@@ -11,6 +11,7 @@
 //   ③ 才轮到 `POST /login`——只剩两种情形：首次登录，和老会话里那份明文密码的一次性迁移。
 import { fetchEnvelope } from "./http";
 import { friendlyMessage } from "./errcode";
+import { t } from "../i18n";
 
 /** 鉴权类业务码：拿到这些说明「这枚凭据永远不会再好起来」，重试无意义。 */
 export const CODE_TOKEN_REVOKED = 100101; // 会话被吊销 / 被踢下线
@@ -64,7 +65,7 @@ export async function renewWithRefresh(refreshToken: string): Promise<{ token: s
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
   if (body.code !== 0 || !body.data?.token || !body.data?.uid) {
-    throw authError(body.code, body.message ?? "续期失败");
+    throw authError(body.code, body.message ?? t("net.error.renew_failed"));
   }
   return { token: body.data.token, uid: body.data.uid };
 }
@@ -82,7 +83,7 @@ export async function acquireToken(c: TokenCredentials, uid: string): Promise<To
       headers: { Authorization: `Bearer ${c.token}` },
     });
     if (probe.code === 0) return { token: c.token, uid }; // 仍有效，复用（身份不变）
-    if (probe.code === CODE_TOKEN_REVOKED) throw authError(probe.code, probe.message ?? "登录已失效");
+    if (probe.code === CODE_TOKEN_REVOKED) throw authError(probe.code, probe.message ?? t("common.login_expired"));
   }
 
   // 续期：常态路径。凭据被明确拒绝时**不再往下试密码**——扫码会话压根没有密码，
@@ -95,7 +96,7 @@ export async function acquireToken(c: TokenCredentials, uid: string): Promise<To
 
   // 扫码会话无密码可回退：任何失效都救不了 → 回登录页。
   if (c.qrSession || !c.username) {
-    throw authError(CODE_TOKEN_EXPIRED, "登录已失效");
+    throw authError(CODE_TOKEN_EXPIRED, t("common.login_expired"));
   }
 
   const body = await fetchEnvelope<{ token?: string; uid?: string; refresh_token?: string }>("/api/v1/login", {
@@ -107,7 +108,7 @@ export async function acquireToken(c: TokenCredentials, uid: string): Promise<To
     }),
   });
   if (body.code !== 0 || !body.data?.token || !body.data?.uid) {
-    throw authError(body.code, body.message ?? "登录失败");
+    throw authError(body.code, body.message ?? t("login.error.login_failed"));
   }
   // data.uid 是服务端分配的内部 ID；首次登录前本端并不知道自己是谁。
   return { token: body.data.token, uid: body.data.uid, refreshToken: body.data.refresh_token ?? "" };

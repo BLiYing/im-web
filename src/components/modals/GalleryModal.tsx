@@ -3,6 +3,7 @@ import type { DownloadState } from "../../download";
 import { msgKey } from "../../album";
 import { MediaTile } from "../MediaTile";
 import { Modal } from "../Modal";
+import { useT } from "../../i18n";
 
 /** 会话媒体库：蒙层 + 时间序网格；点击复用查看器（fromGallery=不再显示媒体库按钮）。
  *  与资料卡片「媒体」页签同款门控（未下载磨砂 + ↓ + 尺寸，点=就地下载；就绪进查看器；右键=文件菜单）。
@@ -16,12 +17,13 @@ export function GalleryModal({ items, gateOf, onGate, onOpen, onMenu, onMediaErr
   onMediaError: (m: ChatMessage) => void;
   onClose: () => void;
 }) {
+  const tr = useT();
   return (
     <Modal className="gallery-panel" onClose={onClose}>
-        <div className="modal-title">图片与视频</div>
+        <div className="modal-title">{tr("gallery.title")}</div>
         <div className="gallery-grid">
           {items.length === 0 && (
-            <div className="fwd-empty">暂无图片或视频</div>
+            <div className="fwd-empty">{tr("gallery.empty")}</div>
           )}
           {items.map((mm) => {
             const gate = gateOf(mm);

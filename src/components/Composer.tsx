@@ -10,6 +10,7 @@ import type { ChatMessage } from "../sdk/protocol";
 import type { AttachmentPickMode } from "../attachments";
 import { VoiceRecorder, VOICE_COUNTDOWN_START_MS, VOICE_MAX_MS } from "../voiceRecorder";
 import { platform } from "../platform";
+import { t, useT } from "../i18n";
 import { pauseVoicePlayback } from "./VoiceBubble";
 import type { DownloadState } from "../download";
 import { replyPreviewOf } from "../messageContent";
@@ -59,6 +60,7 @@ export interface ComposerProps {
 }
 
 export function Composer(p: ComposerProps) {
+  const tr = useT(); // JSX 用 tr（订阅语言）；回调里用模块级 t（调用时刻读语言）
   const {
     convId, peer, uid, isGroupChat, peerLabel, peerBlocked, input, sendKey, composerMuteReason, showJump, jumpCount, jumpCapped,
     editingMsg, replyTo, selectMode, selected, reportableSender, reportHasMine, pastedImages, attachPanel, attachItems,
@@ -135,18 +137,18 @@ export function Composer(p: ComposerProps) {
         onCancel: (reason) => {
           setRecording(false);
           recorderRef.current = null;
-          if (reason === "tooShort") setToast("说话时间太短");
-          else if (reason === "error") setToast("录音失败，请重试");
+          if (reason === "tooShort") setToast(t("chat.voice.too_short"));
+          else if (reason === "error") setToast(t("chat.voice.record_failed"));
         },
         onMaxReached: () => {
           // §12 硬闸：桌面天然锁定 → 自动送出；toast 告知用户"到点已自动发送"（分钟数由常量派生）。
-          setToast(`语音已达 ${VOICE_MAX_MS / 60000} 分钟上限，自动发送`);
+          setToast(t("chat.voice.max_reached", { minutes: VOICE_MAX_MS / 60000 }));
         },
       });
     } catch (e) {
       setRecording(false);
       recorderRef.current = null;
-      setToast((e as Error).message || "无法开始录音");
+      setToast((e as Error).message || t("chat.voice.cannot_start"));
     }
   }, [recording, voiceProbe.supported, convId, sendVoice, setToast, stopPreview]);
 
@@ -162,14 +164,14 @@ export function Composer(p: ComposerProps) {
   const togglePreview = useCallback(() => {
     if (previewing) { stopPreview(); return; }
     const blob = recorderRef.current?.previewBlob();
-    if (!blob) { setToast("还没有录到内容"); return; }
+    if (!blob) { setToast(t("chat.voice.nothing_recorded")); return; }
     pauseVoicePlayback(); // 全站同一时刻只响一路：预听要盖过正在放的语音气泡
     const a = new Audio(URL.createObjectURL(blob));
     previewRef.current = a;
     a.onended = () => stopPreview();
-    a.onerror = () => { stopPreview(); setToast("预听失败"); };
+    a.onerror = () => { stopPreview(); setToast(t("chat.voice.preview_failed")); };
     setPreviewing(true);
-    void a.play().catch(() => { stopPreview(); setToast("预听失败"); });
+    void a.play().catch(() => { stopPreview(); setToast(t("chat.voice.preview_failed")); });
   }, [previewing, stopPreview, setToast]);
 
   // 切走会话 = 这段录音不再属于眼前这一页：**暂停并留着**，回到原会话还能续录/预听/发送。
@@ -180,7 +182,7 @@ export function Composer(p: ComposerProps) {
     stopPreview();
     const r = recorderRef.current;
     if (r && !r.isPaused()) { r.pause(); setVoicePaused(true); }
-    setToast("已暂停录音，回到原会话可继续或发送");
+    setToast(t("chat.voice.paused_toast"));
   }, [convId, recording, recordConv, stopPreview, setToast]);
 
   // 卸载兜底：预听的 audio 与 objectURL 不能随组件一起被丢下（声音会继续响）。
@@ -202,63 +204,63 @@ export function Composer(p: ComposerProps) {
   return (
     <>
       {showJump && convId && (
-        <button className="jump-btn" onClick={jumpToBottom} title="跳到最新消息">
+        <button className="jump-btn" onClick={jumpToBottom} title={tr("chat.jump_to_latest")}>
           ↓{jumpCount > 0 && <span className="jump-badge">{unreadBadgeText(jumpCount, jumpCapped)}</span>}
         </button>
       )}
       {peerBlocked && peer && (
         // 微信式单向：拉黑者仍可发、对方能收到；这里只给一条非阻断提示 + 解除入口，不禁用输入。
-        <div className="block-hint">已将对方加入黑名单（TA 发来的消息会被拒收）<button className="link-inline" onClick={() => void unblock(peer)}>解除拉黑</button></div>
+        <div className="block-hint">{tr("chat.block.hint")}<button className="link-inline" onClick={() => void unblock(peer)}>{tr("common.unblock")}</button></div>
       )}
       {editingMsg && (
         // 编辑态条（M4-5）：输入框上方显示"编辑消息" + 取消（恢复普通发送）。
         // 点预览区 → 定位到正在编辑的原消息（与引用条一致）；✕ 独立在点击区外。
         <div className="reply-compose">
-          <div className="reply-compose-hit" onClick={() => locateInChat(editingMsg.convId, editingMsg.convSeq)} title="跳到原消息">
+          <div className="reply-compose-hit" onClick={() => locateInChat(editingMsg.convId, editingMsg.convSeq)} title={tr("chat.jump_to_original")}>
             <div className="reply-compose-text">
-              <span className="reply-who">编辑消息</span>
+              <span className="reply-who">{tr("chat.edit.title")}</span>
               <span className="reply-snippet">{(editingMsg.content || "").slice(0, 80)}</span>
             </div>
           </div>
-          <button className="reply-cancel" onClick={() => { setEditingMsg(null); setInput(""); }} title="取消编辑">✕</button>
+          <button className="reply-cancel" onClick={() => { setEditingMsg(null); setInput(""); }} title={tr("chat.edit.cancel")}>✕</button>
         </div>
       )}
       {replyTo && (
         // 引用回复条（M4-2）：输入框上方显示被引用消息预览 + 取消；图片/视频显示小缩略图。
         // 点预览区（缩略图+文字，不含 ✕）→ 定位到被引用的原消息（与 iOS 一致）；✕ 独立在点击区外。
         <div className="reply-compose">
-          <div className="reply-compose-hit" onClick={() => locateInChat(replyTo.convId, replyTo.convSeq)} title="跳到原消息">
+          <div className="reply-compose-hit" onClick={() => locateInChat(replyTo.convId, replyTo.convSeq)} title={tr("chat.jump_to_original")}>
             {/* 图说消息（带 caption）：引用预览只显文本，不挂缩略图（与气泡内引用条一致，简化少出错）。 */}
             {!replyTo.caption && <QuoteThumb m={replyTo} gated={!!mediaGate(replyTo)} />}
             <div className="reply-compose-text">
-              <span className="reply-who">回复 {replyTo.from === uid ? "自己" : (isGroupChat ? senderLabel(replyTo) : peerLabel)}</span>
+              <span className="reply-who">{tr("chat.reply.who", { name: replyTo.from === uid ? tr("chat.reply.self") : (isGroupChat ? senderLabel(replyTo) : peerLabel) })}</span>
               <span className="reply-snippet">{replyPreviewOf(replyTo)}</span>
             </div>
           </div>
-          <button className="reply-cancel" onClick={() => setReplyTo(null)} title="取消引用">✕</button>
+          <button className="reply-cancel" onClick={() => setReplyTo(null)} title={tr("chat.reply.cancel")}>✕</button>
         </div>
       )}
       {selectMode ? (
         // 多选态工具栏（M4-3）：批量 转发/举报/收藏/删除——独立圆形 Liquid Glass 按钮、无工具栏背景（与 iOS 拉齐）。
         <footer className="select-bar">
-          <button className="link-inline" onClick={() => { setDelConfirm(false); exitSelectMode(); }}>取消</button>
-          <span className="select-count">已选 {selected.size}</span>
-          <button className="sel-action" title="转发" aria-label="转发" disabled={selected.size === 0} onClick={forwardSelected}><Forward size={22} aria-hidden="true" /></button>
+          <button className="link-inline" onClick={() => { setDelConfirm(false); exitSelectMode(); }}>{tr("common.cancel")}</button>
+          <span className="select-count">{tr("chat.select.selected", { count: selected.size })}</span>
+          <button className="sel-action" title={tr("common.forward")} aria-label={tr("common.forward")} disabled={selected.size === 0} onClick={forwardSelected}><Forward size={22} aria-hidden="true" /></button>
           {/* 举报（2026-09-06）：仅当所选**全是同一个对方**发的才可点，否则**置灰不隐藏**——
               隐藏会让栏内按钮数随勾选变化，每勾一下按钮就左右跳一次。灰态的原因用 title 说明
               （鼠标悬停即见；disabled 按钮不触发 onClick，没法靠点击提示）。 */}
-          <button className="sel-action" title={reportableSender || selected.size === 0 ? "举报"
-                    : reportHasMine ? "不能举报自己的消息" : "一次只能举报同一个人的消息"}
-                  aria-label="举报" disabled={!reportableSender} onClick={reportSelected}><Flag size={22} aria-hidden="true" /></button>
-          <button className="sel-action" title="收藏" aria-label="收藏" disabled={selected.size === 0} onClick={favoriteSelected}><Bookmark size={22} aria-hidden="true" /></button>
+          <button className="sel-action" title={reportableSender || selected.size === 0 ? tr("common.report")
+                    : reportHasMine ? tr("chat.select.report_own") : tr("chat.select.report_multi")}
+                  aria-label={tr("common.report")} disabled={!reportableSender} onClick={reportSelected}><Flag size={22} aria-hidden="true" /></button>
+          <button className="sel-action" title={tr("common.favorite")} aria-label={tr("common.favorite")} disabled={selected.size === 0} onClick={favoriteSelected}><Bookmark size={22} aria-hidden="true" /></button>
           {/* 删除：点按不直接删，先在按钮**上方**弹「仅为我删除」确认气泡，点它才删（与 iOS 拉齐）。 */}
           <span className="sel-del-wrap">
-            <button className="sel-action danger" title="删除" aria-label="删除" disabled={selected.size === 0} onClick={() => setDelConfirm(true)}><Trash2 size={22} aria-hidden="true" /></button>
+            <button className="sel-action danger" title={tr("common.delete")} aria-label={tr("common.delete")} disabled={selected.size === 0} onClick={() => setDelConfirm(true)}><Trash2 size={22} aria-hidden="true" /></button>
             {delConfirm && selected.size > 0 && (
               <>
                 <span className="sel-del-backdrop" onClick={() => setDelConfirm(false)} />
                 <span className="sel-del-pop" role="menu">
-                  <button className="sel-del-only" role="menuitem" onClick={() => { setDelConfirm(false); deleteSelected(); }}>仅为我删除</button>
+                  <button className="sel-del-only" role="menuitem" onClick={() => { setDelConfirm(false); deleteSelected(); }}>{tr("chat.select.delete_for_me")}</button>
                 </span>
               </>
             )}
@@ -272,21 +274,21 @@ export function Composer(p: ComposerProps) {
               {pastedImages.map((pi, i) => (
                 pi.kind === "image" ? (
                   <div key={pi.url} className="paste-thumb">
-                    <img src={pi.url} alt="待发送图片" />
-                    <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                    <img src={pi.url} alt={tr("chat.paste.pending_image_alt")} />
+                    <button className="paste-remove" title={tr("common.remove")} onClick={() => removePastedImage(i)}>✕</button>
                   </div>
                 ) : pi.kind === "video" ? (
                   // 视频：用 <video> 显首帧（muted+metadata），角标示意可播放；发送仍与图片同批走 sendMediaBatch。
                   <div key={pi.url} className="paste-thumb paste-video">
                     <video src={pi.url} muted preload="metadata" playsInline />
                     <span className="paste-video-badge" aria-hidden>▶</span>
-                    <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                    <button className="paste-remove" title={tr("common.remove")} onClick={() => removePastedImage(i)}>✕</button>
                   </div>
                 ) : (
                   <div key={pi.url} className="paste-thumb paste-file">
                     <FileTypeIcon name={pi.file.name} size={26} />
                     <span className="paste-file-name" title={pi.file.name}>{pi.file.name}</span>
-                    <button className="paste-remove" title="移除" onClick={() => removePastedImage(i)}>✕</button>
+                    <button className="paste-remove" title={tr("common.remove")} onClick={() => removePastedImage(i)}>✕</button>
                   </div>
                 )
               ))}
@@ -296,7 +298,7 @@ export function Composer(p: ComposerProps) {
             <div className="attach-anchor" ref={attachAnchorRef}
               onMouseEnter={() => { cancelAttachClose(); if (convId) setAttachPanel(true); }}
               onMouseLeave={scheduleAttachClose}>
-              <button className="attach-btn" disabled={!convId} title="附件"
+              <button className="attach-btn" disabled={!convId} title={tr("chat.attach.title")}
                 aria-expanded={attachPanel && !!convId}
                 onClick={() => setAttachPanel(true)}>＋</button>
               {attachPanel && convId && (
@@ -312,12 +314,12 @@ export function Composer(p: ComposerProps) {
                   {/* 从收藏发送（对齐 iOS Pick）：打开收藏弹窗 pick 模式，选中项发进当前会话。 */}
                   <button className="attach-item" role="menuitem" onClick={openFavoritesPick}>
                     <Bookmark size={24} aria-hidden="true" />
-                    <span>收藏</span>
+                    <span>{tr("common.favorite")}</span>
                   </button>
                   {/* 个人名片（CONTACT_CARD_DESIGN §8.1 入口 ①）：选好友 → 二次确认 → 发进当前会话。 */}
                   <button className="attach-item" role="menuitem" onClick={openContactPicker}>
                     <IdCard size={24} aria-hidden="true" />
-                    <span>个人名片</span>
+                    <span>{tr("chat.attach.contact_card")}</span>
                   </button>
                 </div>
               )}
@@ -331,9 +333,9 @@ export function Composer(p: ComposerProps) {
                 支持 ↑/↓ 移动、Enter/Tab 选中、Esc 关闭（见 composer 的 onKeyDown）。
                 「@所有人」仅群主/管理员可见——普通成员整行不渲染（服务端另有角色校验）。 */}
             {mentionQuery !== null && (
-              <div className="mention-panel" role="listbox" aria-label="提醒谁" ref={mentionPanelRef}>
+              <div className="mention-panel" role="listbox" aria-label={tr("chat.mention.title")} ref={mentionPanelRef}>
                 {/* 顶部搜索框＝独立搜索：从空开始、不被消息框 @后文字回填；在此打字则以它为准过滤（否则列表跟随 @后字符）。 */}
-                <input className="mention-search" value={mentionFilter} placeholder="搜索成员" aria-label="搜索成员"
+                <input className="mention-search" value={mentionFilter} placeholder={tr("group.member.search")} aria-label={tr("group.member.search")}
                   onChange={(e) => setMentionFilter(e.target.value)}
                   onKeyDown={(e) => { onMentionNavKey(e); }} />
                 {mentionRows.length > 0 ? mentionRows.map((r, i) => (
@@ -358,14 +360,14 @@ export function Composer(p: ComposerProps) {
                       <span className="mention-name">{r.label}</span>
                       {r.note && <span className="mention-note">{r.note}</span>}
                     </span>
-                    {r.role === "owner" && <span className="role-badge owner">群主</span>}
-                    {r.role === "admin" && <span className="role-badge">管理员</span>}
+                    {r.role === "owner" && <span className="role-badge owner">{tr("group.role.owner")}</span>}
+                    {r.role === "admin" && <span className="role-badge">{tr("group.role.admin")}</span>}
                   </button>
-                )) : <div className="mention-empty">无匹配成员</div>}
+                )) : <div className="mention-empty">{tr("chat.mention.empty")}</div>}
               </div>
             )}
             <textarea ref={composerRef} value={input} rows={1} disabled={!composerUsable}
-              placeholder={composerMuteReason || (convId ? (sendKey === "cmd" ? "输入消息，Cmd+Enter 发送…" : "输入消息，回车发送…") : "先选择左侧的会话…")}
+              placeholder={composerMuteReason || (convId ? (sendKey === "cmd" ? tr("chat.input.placeholder_cmd") : tr("chat.input.placeholder_enter")) : tr("chat.input.placeholder_no_conv"))}
               onChange={(e) => onInputChange(e.target.value)}
               onPaste={onComposerPaste}
               onKeyDown={(e) => {
@@ -381,40 +383,40 @@ export function Composer(p: ComposerProps) {
               // （2026-09-07 实测：Chrome 已支持点名 AAC 的 audio/mp4，第一级探测即命中；置灰分支留给探测失败的浏览器。）
               <button className="mic-btn"
                       disabled={!composerUsable || !voiceProbe.supported}
-                      title={voiceProbe.supported ? "点击开始录音" : "当前浏览器不支持录制语音，可在 App 内发送"}
+                      title={voiceProbe.supported ? tr("chat.voice.start") : tr("chat.voice.unsupported")}
                       onClick={startVoiceRecord}>
                 <Mic size={18} aria-hidden="true" />
               </button>
             ) : (
-              <button onClick={send} disabled={!composerUsable}>发送</button>
+              <button onClick={send} disabled={!composerUsable}>{tr("common.send")}</button>
             )}
           </footer>
           {/* 录音条只挂在**录音所属的那个会话**上：切走时录音已暂停留底，回来才重新露出。 */}
           {recordingHere && (
-            <div className="voice-recorder-bar" role="dialog" aria-label="录音中">
+            <div className="voice-recorder-bar" role="dialog" aria-label={tr("chat.voice.recording")}>
               <span className="rd" />
               {/* §12 倒数：4:50 起 timer 变红 + 显"还剩 Ns"，到 5:00 自动送出（onMaxReached）。 */}
               <span className={`rec-timer${recordElapsed >= VOICE_COUNTDOWN_START_MS ? " over" : ""}`}>
                 {Math.floor(recordElapsed / 60000)}:{String(Math.floor(recordElapsed / 1000) % 60).padStart(2, "0")}
                 {recordElapsed >= VOICE_COUNTDOWN_START_MS && recordElapsed < VOICE_MAX_MS &&
-                  <span className="rec-countdown"> · 还剩 {Math.max(0, Math.ceil((VOICE_MAX_MS - recordElapsed) / 1000))}s</span>}
+                  <span className="rec-countdown"> · {tr("chat.voice.remaining", { seconds: Math.max(0, Math.ceil((VOICE_MAX_MS - recordElapsed) / 1000)) })}</span>}
               </span>
               <span className="rec-livewave" aria-hidden>
                 {recordAmps.map((a, i) => (
                   <i key={i} style={{ height: `${Math.max(3, a * 20)}px` }} />
                 ))}
               </span>
-              <button className="rec-btn cancel" type="button" onClick={cancelVoice}>取消</button>
-              <button className="rec-btn cancel" type="button" onClick={togglePauseVoice}>{voicePaused ? "继续" : "暂停"}</button>
+              <button className="rec-btn cancel" type="button" onClick={cancelVoice}>{tr("common.cancel")}</button>
+              <button className="rec-btn cancel" type="button" onClick={togglePauseVoice}>{voicePaused ? tr("common.resume") : tr("common.pause")}</button>
               {/* 暂停后才给预听（iOS 锁定条同款）：录制中拿到的片段随时会被续上，边录边听没有意义。 */}
               {voicePaused && (
                 <button className="rec-btn preview" type="button" onClick={togglePreview}>
-                  {previewing ? "停止" : "预听"}
+                  {previewing ? tr("common.stop") : tr("chat.voice.preview")}
                 </button>
               )}
-              <button className="rec-btn send" type="button" onClick={stopVoiceSend}>发送</button>
+              <button className="rec-btn send" type="button" onClick={stopVoiceSend}>{tr("common.send")}</button>
               <span className="rec-hint" style={{ fontSize: 11, opacity: 0.7 }}>
-                <kbd>Space</kbd> 暂停 · <kbd>Esc</kbd> 取消 · <kbd>Enter</kbd> 发送
+                <kbd>Space</kbd> {tr("common.pause")} · <kbd>Esc</kbd> {tr("common.cancel")} · <kbd>Enter</kbd> {tr("common.send")}
               </span>
             </div>
           )}

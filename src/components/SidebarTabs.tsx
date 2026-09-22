@@ -6,6 +6,7 @@
 import type { Conversation } from "../sdk/protocol";
 import { badgeCountOf } from "../desktopNotify";
 import { unreadBadgeText } from "../unreadBadge";
+import { useT } from "../i18n";
 
 export type SidebarTab = "chats" | "contacts";
 
@@ -19,14 +20,15 @@ export interface SidebarTabsProps {
 }
 
 export function SidebarTabs({ tab, conversations, incomingCount, onChats, onContacts }: SidebarTabsProps) {
+  const tr = useT();
   const hasUnread = badgeCountOf(conversations) > 0;
   return (
     <div className="tabs">
       <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={onChats}>
-        消息{hasUnread && <span className="tab-dot" role="status" aria-label="有未读消息" />}
+        {tr("sidebar.tab.chats")}{hasUnread && <span className="tab-dot" role="status" aria-label={tr("sidebar.tab.unread_aria")} />}
       </button>
       <button className={`tab ${tab === "contacts" ? "active" : ""}`} onClick={onContacts}>
-        通讯录{incomingCount > 0 && <span className="tab-badge">{unreadBadgeText(incomingCount)}</span>}
+        {tr("contacts.title")}{incomingCount > 0 && <span className="tab-badge">{unreadBadgeText(incomingCount)}</span>}
       </button>
     </div>
   );

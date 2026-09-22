@@ -2,6 +2,7 @@ import type { ContactCard } from "../../contactCard";
 import { Modal } from "../Modal";
 import { Avatar } from "../Avatar";
 import { IdCard } from "lucide-react";
+import { t, useT } from "../../i18n";
 
 /**
  * 发送名片前的二次确认（CONTACT_CARD_DESIGN §4.2 / §8.2）。
@@ -18,22 +19,23 @@ export function ConfirmSendCardModal({ cards, targetName, displayName, onSend, o
   onSend: () => void;
   onCancel: () => void;
 }) {
+  const tr = useT();
   if (cards.length === 0) return null;
   const first = cards[0];
   // 末级不落 userId（10 位随机数字内部 ID）；退到 @句柄，再退到占位。
   const nameOf = (c: { userId: string; username?: string; nickname?: string }) =>
-    displayName?.(c.userId, c.nickname) ?? c.nickname ?? (c.username ? `@${c.username}` : "未命名用户");
+    displayName?.(c.userId, c.nickname) ?? c.nickname ?? (c.username ? `@${c.username}` : t("common.unnamed_user"));
   const firstName = nameOf(first);
   // ≥2 张时首卡出全卡，其余折叠成一行显示名（≤3 个，再多显「等 N 人」）——9 张卡会把弹窗撑爆。
   const rest = cards.slice(1);
   const restNames = rest.slice(0, 3).map(nameOf);
   const restText = rest.length === 0 ? ""
-    : rest.length > restNames.length ? `${restNames.join(" · ")} 等 ${rest.length} 人`
+    : rest.length > restNames.length ? t("contact.card.more_people", { names: restNames.join(" · "), count: rest.length })
     : restNames.join(" · ");
 
   return (
     <Modal onClose={onCancel}>
-      <h3>{cards.length === 1 ? `发送名片给「${targetName}」` : `发送 ${cards.length} 张名片给「${targetName}」`}</h3>
+      <h3>{cards.length === 1 ? tr("contact.card.send_one", { name: targetName }) : tr("contact.card.send_many", { count: cards.length, name: targetName })}</h3>
       <div className="card-confirm-preview">
         <div className="contact-card">
           <div className="contact-card-head">
@@ -44,13 +46,13 @@ export function ConfirmSendCardModal({ cards, targetName, displayName, onSend, o
               {first.username && <div className="contact-card-id">@{first.username}</div>}
             </div>
           </div>
-          <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />个人名片</div>
+          <div className="contact-card-foot"><IdCard size={12} aria-hidden="true" />{tr("contact.card.footer")}</div>
         </div>
         {restText && <div className="card-confirm-rest">{restText}</div>}
       </div>
       <div className="modal-actions">
-        <button className="link" onClick={onCancel}>取消</button>
-        <button className="mini-btn" onClick={onSend}>发送</button>
+        <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
+        <button className="mini-btn" onClick={onSend}>{tr("common.send")}</button>
       </div>
     </Modal>
   );

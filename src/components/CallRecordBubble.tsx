@@ -5,6 +5,7 @@
 import type { RefObject } from "react";
 import { Phone, Video } from "lucide-react";
 import type { CallRender } from "../callRecord";
+import { useT } from "../i18n";
 
 /** 气泡内的图标 + 文字。 */
 export function CallRecordBody({ view }: { view: CallRender }) {
@@ -21,10 +22,11 @@ export function CallRecordBody({ view }: { view: CallRender }) {
 export function CallSysItem({ seq, text, dateLabel, unread, dividerRef }: {
   seq: number; text: string; dateLabel: string; unread: boolean; dividerRef: RefObject<HTMLDivElement>;
 }) {
+  const tr = useT();
   return (
     <div className="msg-item" data-seq={seq}>
       {dateLabel && <div className="date-pill"><span>{dateLabel}</span></div>}
-      {unread && <div className="unread-divider" ref={dividerRef}><span>未读消息</span></div>}
+      {unread && <div className="unread-divider" ref={dividerRef}><span>{tr("chat.unread_divider")}</span></div>}
       <div className="sys-line"><span>{text}</span></div>
     </div>
   );

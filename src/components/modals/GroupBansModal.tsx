@@ -1,6 +1,7 @@
 import type { GroupBan } from "../../sdk/protocol";
 import { displayNameOf } from "../../remarks";
 import { Modal } from "../Modal";
+import { useT } from "../../i18n";
 
 /** 群黑名单弹窗（G2）：解除拉黑。
  *
@@ -13,25 +14,26 @@ export function GroupBansModal({ bans, remarks, onUnban, onClose }: {
   onUnban: (userId: string) => void;
   onClose: () => void;
 }) {
+  const tr = useT();
   return (
     <Modal className="modal pinned-modal" onClose={onClose}>
-        <div className="modal-title">黑名单（{bans.length}）</div>
+        <div className="modal-title">{tr("group.bans.title", { count: bans.length })}</div>
         <div className="pinned-list">
           {bans.length === 0 ? (
-            <div className="detail-empty">暂无被拉黑成员</div>
+            <div className="detail-empty">{tr("group.bans.empty")}</div>
           ) : bans.map((b) => (
             <div className="pinned-row" key={b.user_id}>
               <div className="pinned-row-main" style={{ cursor: "default" }}>
                 <span className="pinned-row-from">{displayNameOf(b.user_id, remarks, b.nickname, b.username)}</span>
                 <span className="pinned-row-text">
-                  {b.username ? `@${b.username} · ` : ""}{b.expires_at === 0 ? "永久" : "冷却中"}
+                  {b.username ? `@${b.username} · ` : ""}{b.expires_at === 0 ? tr("common.permanent") : tr("group.bans.cooling")}
                 </span>
               </div>
-              <button className="mini-btn danger" onClick={() => onUnban(b.user_id)}>解除</button>
+              <button className="mini-btn danger" onClick={() => onUnban(b.user_id)}>{tr("group.bans.unban")}</button>
             </div>
           ))}
         </div>
-        <button className="modal-close" onClick={onClose}>关闭</button>
+        <button className="modal-close" onClick={onClose}>{tr("common.close")}</button>
     </Modal>
   );
 }

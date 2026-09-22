@@ -5,6 +5,7 @@ import { Avatar } from "../Avatar";
 import { ListSearchInput, isSearching } from "../ListSearchInput";
 import { filterByQuery } from "../../listSearch";
 import { Modal } from "../Modal";
+import { useT } from "../../i18n";
 
 /** 转发会话选择器（M4-3）：默认单选点一下即发；「多选」切换成勾选态，底部「发送(N)」批量转发（上限 9，对齐 iOS）。
  *  纯展示：会话列表与显示名/头像解析、动作全部由 App 注入。
@@ -26,6 +27,7 @@ export function ForwardPicker({
   onForward: (convs: Conversation[]) => void; // 单选传 [c]；多选传选中的会话集
   onClose: () => void;
 }) {
+  const tr = useT();
   const [q, setQ] = useState("");
   // 可转发目标 = 会话全集减去「系统通知」单聊：那是只读会话，服务端直接拒 send_msg to=system
   // （护栏见 IMServer/docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §2.2），列出来只会点了报错。
@@ -42,20 +44,20 @@ export function ForwardPicker({
   return (
     <Modal className="modal fwd-picker" onClose={onClose}>
         <div className="modal-title fwd-title">
-          <span>转发到（{count} 条）</span>
+          <span>{tr("forward.picker.title", { count })}</span>
           <button className="section-action" onClick={onToggleMulti}>
-            {multi ? "取消多选" : "多选"}
+            {multi ? tr("forward.picker.multi_cancel") : tr("forward.picker.multi")}
           </button>
         </div>
         {count > 1 && (
           <div className="fwd-mode">
-            <button className={mode === "each" ? "on" : ""} onClick={() => onSetMode("each")}>逐条转发</button>
-            <button className={mode === "merged" ? "on" : ""} onClick={() => onSetMode("merged")}>合并转发</button>
+            <button className={mode === "each" ? "on" : ""} onClick={() => onSetMode("each")}>{tr("forward.mode.each")}</button>
+            <button className={mode === "merged" ? "on" : ""} onClick={() => onSetMode("merged")}>{tr("forward.mode.merged")}</button>
           </div>
         )}
-        <ListSearchInput value={q} onChange={setQ} placeholder="搜索会话" />
+        <ListSearchInput value={q} onChange={setQ} placeholder={tr("forward.picker.search_placeholder")} />
         <div className="fwd-list">
-          {visible.length === 0 && <div className="fwd-empty">{isSearching(q) ? "无匹配会话" : "暂无会话"}</div>}
+          {visible.length === 0 && <div className="fwd-empty">{isSearching(q) ? tr("forward.picker.no_match") : tr("forward.picker.empty")}</div>}
           {visible.map((c) => {
             const on = targets.includes(c.conv_id);
             return (
@@ -70,16 +72,16 @@ export function ForwardPicker({
         </div>
         {multi ? (
           <div className="fwd-actions">
-            <button className="link" onClick={onClose}>取消</button>
+            <button className="link" onClick={onClose}>{tr("common.cancel")}</button>
             <button className="mini-btn" disabled={targets.length === 0}
               // 刻意遍历 selectable（可转发全集）而非 visible：先勾选、再输入搜索词把它过滤掉的会话
               // 仍在 targets 里，按 visible 取就会静默少发一个人。
               onClick={() => onForward(selectable.filter((c) => targets.includes(c.conv_id)))}>
-              发送{targets.length > 0 ? `(${targets.length})` : ""}
+              {targets.length > 0 ? tr("common.send_count", { count: targets.length }) : tr("common.send")}
             </button>
           </div>
         ) : (
-          <button className="modal-close" onClick={onClose}>取消</button>
+          <button className="modal-close" onClick={onClose}>{tr("common.cancel")}</button>
         )}
     </Modal>
   );

@@ -4,6 +4,7 @@
 import { UserPlus, Megaphone, Pin, X, List } from "lucide-react";
 import type { GroupInfo, PinnedMessage } from "../sdk/protocol";
 import { pinnedPreview, pinnedSenderLabel } from "../pinned";
+import { useT } from "../i18n";
 
 export function ChatBanners(p: {
   isGroupChat: boolean;
@@ -20,6 +21,7 @@ export function ChatBanners(p: {
   onJumpPinned: () => void;                    // 点条=跳到该置顶并轮转到下一条
   onOpenPinnedList: () => void;
 }) {
+  const tr = useT();
   const gi = p.groupInfo;
   const showApprove = p.isGroupChat && (gi?.my_role === "owner" || gi?.my_role === "admin") && (gi?.pending_count ?? 0) > 0;
   const showAnnounce = p.isGroupChat && !!gi?.announcement && !p.dismissedBanners[p.annDismissKey];
@@ -32,8 +34,8 @@ export function ChatBanners(p: {
           <span className="pin-banner-main" style={{ cursor: "pointer" }}>
             <span className="pin-banner-bar" />
             <span className="pin-banner-copy">
-              <span className="pin-banner-kicker"><UserPlus size={12} /> 入群申请</span>
-              <span className="pin-banner-text">{gi!.pending_count} 人申请加入本群 · 点击审批</span>
+              <span className="pin-banner-kicker"><UserPlus size={12} /> {tr("chat.banner.join_request")}</span>
+              <span className="pin-banner-text">{tr("chat.banner.join_pending", { count: gi!.pending_count ?? 0 })}</span>
             </span>
           </span>
         </div>
@@ -44,21 +46,21 @@ export function ChatBanners(p: {
           <button className="pin-banner-main" onClick={p.onOpenAnnouncement}>
             <span className="pin-banner-bar" />
             <span className="pin-banner-copy">
-              <span className="pin-banner-kicker"><Megaphone size={12} /> 群公告</span>
+              <span className="pin-banner-kicker"><Megaphone size={12} /> {tr("group.text.announcement")}</span>
               <span className="pin-banner-text">{gi!.announcement}</span>
             </span>
           </button>
-          <button className="icon-btn pin-banner-close" title="收起公告" onClick={() => p.dismiss(p.annDismissKey)}><X size={16} /></button>
+          <button className="icon-btn pin-banner-close" title={tr("chat.banner.collapse_announcement")} onClick={() => p.dismiss(p.annDismissKey)}><X size={16} /></button>
         </div>
       )}
       {/* 置顶消息横幅（G0）：点条=跳到那条并轮转到下一条；右侧 ☰=展开全部置顶。 */}
       {showPinned && (
         <div className="pin-banner">
-          <button className="pin-banner-main" title="跳转到该消息" onClick={p.onJumpPinned}>
+          <button className="pin-banner-main" title={tr("chat.banner.jump_to_message")} onClick={p.onJumpPinned}>
             <span className={`pin-banner-bar${p.activePinned.length > 1 ? " multi" : ""}`} />
             <span className="pin-banner-copy">
               <span className="pin-banner-kicker">
-                <Pin size={12} /> 置顶消息
+                <Pin size={12} /> {tr("chat.banner.pinned")}
                 {p.activePinned.length > 1 && <span className="pin-banner-count">{p.pinnedShownIdx + 1}/{p.activePinned.length}</span>}
                 {pinnedSenderLabel(p.pinnedShown!, p.isGroupChat) && (
                   <span className="pin-banner-from">· {pinnedSenderLabel(p.pinnedShown!, p.isGroupChat)}</span>
@@ -68,9 +70,9 @@ export function ChatBanners(p: {
             </span>
           </button>
           {p.activePinned.length > 1 && (
-            <button className="icon-btn pin-banner-list" title="全部置顶消息" onClick={p.onOpenPinnedList}><List size={18} /></button>
+            <button className="icon-btn pin-banner-list" title={tr("chat.banner.all_pinned")} onClick={p.onOpenPinnedList}><List size={18} /></button>
           )}
-          <button className="icon-btn pin-banner-close" title="收起置顶" onClick={() => p.dismiss(p.pinDismissKey)}><X size={16} /></button>
+          <button className="icon-btn pin-banner-close" title={tr("chat.banner.collapse_pinned")} onClick={() => p.dismiss(p.pinDismissKey)}><X size={16} /></button>
         </div>
       )}
     </>
