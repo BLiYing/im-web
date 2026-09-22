@@ -39,9 +39,16 @@ export function groupFavoritesBySource(favs: Favorite[], myUid: string): Favorit
   return groups;
 }
 
-/** 来源组显示名：「我的」固定；已知会话走 resolve；来源已不存在 → 显 conv_id 兜底（§14 ③，不隐藏）。 */
-export function sourceGroupName(g: FavoriteSourceGroup, resolve: (convId: string) => string | undefined): string {
-  if (g.isMine || !g.convId) return "我的";
+/** 来源组显示名：「我的」桶固定；已知会话走 resolve；来源已不存在 → 显 conv_id 兜底（§14 ③，不隐藏）。
+ *  2026-09-22 P3 修复：此前硬编码"我的"，不跟 App 语言；复用 common.me（"我"）——与同一行左侧头像的
+ *  无障碍标签、以及 iOS 对应实现（IMFavoritesViewController 的 kIMFavoritesMeBucket 桶名）保持一致，
+ *  避免同一行文字与无障碍标签不一致。translate 默认模块级 t()；组件内传 useT() 的 tr。 */
+export function sourceGroupName(
+  g: FavoriteSourceGroup,
+  resolve: (convId: string) => string | undefined,
+  translate: (key: string, args?: Args) => string = i18nT,
+): string {
+  if (g.isMine || !g.convId) return translate("common.me");
   return resolve(g.convId) || g.convId;
 }
 

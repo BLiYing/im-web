@@ -43,15 +43,20 @@ export interface ConvPreviewDeps {
   localNameOf: (id: string, convId: string, fallback?: string) => string;
 }
 
-/** 一条会话的预览行。 */
+/** 一条会话的预览行。
+ *  2026-09-22 P3 修复：撤回文案 / 发送者前缀「我」此前硬编码中文，不跟 App 语言（与
+ *  iOS IMConversationListViewController 早已本地化的同一段逻辑不对称）。「{who}: {text}」
+ *  前缀本身是纯冒号+空格拼接，与 iOS 同一取舍——不是语法结构，改语言不需要挪位置，
+ *  故不另建模板键，直接拼字符串。 */
 export function convPreview(c: Conversation, d: ConvPreviewDeps): string {
-  if (!c.last_message) return "（无消息）";
+  if (!c.last_message) return t("conv.list.no_message");
   const m = c.last_message;
   const lastName = (fallback?: string) => d.localNameOf(m.from, c.conv_id, fallback);
   // 撤回消息预览（后端已脱敏 content）：显示"撤回了一条消息"（微信式）。
   if (m.recalled_at) {
-    const who = m.from === d.uid ? "你" : (c.is_group ? lastName(m.from_nickname) : "对方");
-    return `${who}撤回了一条消息`;
+    if (m.from === d.uid) return t("conv.list.recalled_self");
+    if (c.is_group) return t("conv.list.recalled_member", { name: lastName(m.from_nickname) });
+    return t("conv.list.recalled_peer");
   }
   const media = mediaPreview(m.content_type, { duration: m.duration, content: m.content, viewerIsSender: m.from === d.uid, isGroup: c.is_group });
   // 系统消息：P3 起 sys_event 认识就先按 App 语言重建分段（不挂点击，纯文本），不认识/为空回退
@@ -69,7 +74,7 @@ export function convPreview(c: Conversation, d: ConvPreviewDeps): string {
   // 图说 caption「有字显字」（Telegram 模型）：带 caption 时直接显 caption，否则回退 [图片]/[视频]/[文件]。
   const text = m.caption || media || m.content;
   if (!c.is_group) return text;
-  const who = m.from === d.uid ? "我" : lastName(m.from_nickname);
+  const who = m.from === d.uid ? t("common.me") : lastName(m.from_nickname);
   return `${who}: ${text}`;
 }
 

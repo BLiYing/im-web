@@ -17,7 +17,7 @@ import { ContactRow } from "../ContactRow";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../../contactCard";
 import { VoiceBubble } from "../VoiceBubble";
 import type { LinkPreview } from "../LinkCard";
-import { useT } from "../../i18n";
+import { useT, type Args } from "../../i18n";
 
 /**
  * 收藏弹窗的各展示件（B 方案，FAVORITES_DESIGN §14 ③）：
@@ -273,7 +273,7 @@ export function FavSourceList({ groups, conversations, myUid, convDisplayLabel, 
     <div className="fav-list fav-src-list">
       {groups.map((g) => {
         const conv = g.convId ? conversations.find((c) => c.conv_id === g.convId) : undefined;
-        const name = sourceGroupName(g, () => (conv ? convDisplayLabel(conv) : undefined));
+        const name = sourceGroupName(g, () => (conv ? convDisplayLabel(conv) : undefined), tr);
         const seed = g.isMine ? myUid : conv ? (conv.is_group ? conv.conv_id : conv.peer) : g.convId || "";
         return (
           <button key={g.key} className="fav-src-row" onClick={() => onOpen(g)}>
@@ -292,6 +292,9 @@ export function FavSourceList({ groups, conversations, myUid, convDisplayLabel, 
 }
 
 /** 聊天模式的来源组显示名（标题「来自 X · N 条」与搜索过滤共用）。 */
-export function sourceNameOf(g: FavoriteSourceGroup, conversations: Conversation[], convDisplayLabel: (c: Conversation) => string): string {
-  return sourceGroupName(g, (id) => { const c = conversations.find((x) => x.conv_id === id); return c ? convDisplayLabel(c) : undefined; });
+export function sourceNameOf(
+  g: FavoriteSourceGroup, conversations: Conversation[], convDisplayLabel: (c: Conversation) => string,
+  translate?: (key: string, args?: Args) => string,
+): string {
+  return sourceGroupName(g, (id) => { const c = conversations.find((x) => x.conv_id === id); return c ? convDisplayLabel(c) : undefined; }, translate);
 }

@@ -47,7 +47,9 @@ describe("sourceGroupName", () => {
   ], "1001");
   it("已知会话用解析名", () => { expect(sourceGroupName(known, () => "设计组")).toBe("设计组"); });
   it("来源已不存在 → 显 conv_id 兜底、不隐藏", () => { expect(sourceGroupName(known, () => undefined)).toBe("g_1"); });
-  it("「我的」固定名", () => { expect(sourceGroupName(mine, () => "x")).toBe("我的"); });
+  // 2026-09-22 P3 修复：改用 common.me（"我"），与同一行头像的无障碍标签、iOS 对应实现（"我"）一致；
+  // 此前硬编码的「我的」与旁边头像的 "我" 标签本就不一致。
+  it("「我的」固定名", () => { expect(sourceGroupName(mine, () => "x")).toBe("我"); });
 });
 
 describe("favoritePreviewText", () => {

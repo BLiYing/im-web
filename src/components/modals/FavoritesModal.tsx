@@ -101,8 +101,8 @@ export function FavoritesModal({
   // 聊天模式来源列表：搜索 = 搜来源会话名。
   const shownGroups = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return q ? groups.filter((g) => sourceNameOf(g, conversations, convDisplayLabel).toLowerCase().includes(q)) : groups;
-  }, [groups, query, conversations, convDisplayLabel]);
+    return q ? groups.filter((g) => sourceNameOf(g, conversations, convDisplayLabel, tr).toLowerCase().includes(q)) : groups;
+  }, [groups, query, conversations, convDisplayLabel, tr]);
 
   // 浮层（右键菜单 / 模式菜单）开着时，点别处（非菜单内）关闭。
   useEffect(() => {
@@ -147,7 +147,7 @@ export function FavoritesModal({
   const openSource = (g: FavoriteSourceGroup) => { setSource(g); setQuery(""); };
 
   const inSourceList = viewMode === "chats" && !liveSource;
-  const sourceTitle = liveSource ? tr("fav.source_title", { name: sourceNameOf(liveSource, conversations, convDisplayLabel), count: liveSource.items.length }) : "";
+  const sourceTitle = liveSource ? tr("fav.source_title", { name: sourceNameOf(liveSource, conversations, convDisplayLabel, tr), count: liveSource.items.length }) : "";
   const label = kind ? CATEGORY_LABELS[kind] : "";
   const emptyText = query.trim() ? tr("fav.empty_search") : categories.length === 0 ? tr("fav.empty") : tr("fav.empty_category", { label });
 
