@@ -30,6 +30,7 @@ function mount(over: Partial<{ uploadFile: unknown; sendMedia: unknown }> = {}) 
   const deps: MediaSendDeps = {
     uid: "u1", peer: "u2", groupConvId: "", clientRef: fakeClientRef(client),
     setToast: vi.fn(), appendMsg: vi.fn(), patchMsg: vi.fn(), removeMsgRow: vi.fn(),
+    retryVoiceUpload: vi.fn(),
   };
   return { ...renderHook(() => useMediaSend(deps)), deps, client };
 }
@@ -72,6 +73,13 @@ describe("useMediaSend", () => {
     await act(async () => { result.current.retryUpload({ clientMsgId: key, convId: "u_u1_u_u2", from: "u1", content: "", contentType: "file", convSeq: 0, timestamp: 1, status: "failed" }); });
     expect(deps.removeMsgRow).toHaveBeenCalledWith("u_u1_u_u2", key);
     await waitFor(() => expect(client.sendMedia).toHaveBeenCalled());
+  });
+  it("resendMessage：voice 的 retry-upload 分支不走本 Hook 的 retryUpload（无留存 File），改派注入的 retryVoiceUpload", () => {
+    const { result, deps } = mount();
+    const voiceFailed = { clientMsgId: "v1", convId: "u_u1_u_u2", from: "u1", content: "blob:x", contentType: "voice", convSeq: 0, timestamp: 1, status: "failed" as const };
+    act(() => result.current.resendMessage(voiceFailed));
+    expect(deps.retryVoiceUpload).toHaveBeenCalledWith(voiceFailed);
+    expect(deps.removeMsgRow).not.toHaveBeenCalled(); // 没经过通用 retryUpload（那条会先 removeMsgRow）
   });
   it("cancelSendMessage：移除气泡行 + 清进度/留存", () => {
     const { result, deps } = mount();

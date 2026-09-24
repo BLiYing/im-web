@@ -30,10 +30,13 @@ export interface MediaSendDeps {
   appendMsg: (convId: string, m: ChatMessage) => void;
   patchMsg: (cid: string, clientMsgId: string, patch: Partial<ChatMessage>) => void;
   removeMsgRow: (cid: string, key: string) => void;
+  /** 语音上传失败的重试（见 useVoiceSend）：语音不走本 Hook 的 pendingFilesRef/retryUpload
+   *  （与 iOS `im_resendSingleMessage:` 按 contentType 分两条腿同一取舍），resendOne 据此分派。 */
+  retryVoiceUpload: (m: ChatMessage) => void;
 }
 
 export function useMediaSend(d: MediaSendDeps) {
-  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow } = d;
+  const { uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow, retryVoiceUpload } = d;
   const [attachPanel, setAttachPanel] = useState(false); // 附件面板（图片或视频/文件，M4-6）
 
   const pendingFilesRef = useRef<Map<string, { file: File; mode: AttachmentPickMode; convId: string; groupId?: string; caption?: string; mentions?: string[]; mentionAll?: boolean }>>(new Map());
@@ -328,7 +331,11 @@ export function useMediaSend(d: MediaSendDeps) {
   const resendOne = useCallback((one: ChatMessage) => {
     switch (resendPolicyFor(one, one.from === uid)) {
       case "none": return;             // 红❗此时本就不可点，走到这里只可能是并发改了状态
-      case "retry-upload": retryUpload(one); return;
+      case "retry-upload":
+        // 语音上传不走本 Hook 的常驻 pendingFilesRef（单列一条路，见 useVoiceSend 顶部注释），
+        // 与 iOS `im_resendSingleMessage:` 按 contentType 分派同一取舍。
+        if (one.contentType === "voice") { retryVoiceUpload(one); return; }
+        retryUpload(one); return;
       case "same-id": {
         const client = clientRef.current;
         // to：单聊=对端 uid，群聊=""（服务端按 conv_id 写扩散）。与首发同一个取值来源。
@@ -339,7 +346,7 @@ export function useMediaSend(d: MediaSendDeps) {
         return;
       }
     }
-  }, [uid, peer, clientRef, patchMsg, setToast, retryUpload]);
+  }, [uid, peer, clientRef, patchMsg, setToast, retryUpload, retryVoiceUpload]);
 
   /// 红❗点击的唯一入口（与 iOS `im_resendMessage:` 同一套）：按 `resendPolicyFor` 分派——
   /// 上传失败 → 用留存的 File 重传（换新 localId）；send_msg 失败 → 按**原 clientMsgId** 重发

@@ -49,6 +49,7 @@ import { hitSnippet } from "./searchPredicate";
 import { useChatSearch } from "./useChatSearch";
 import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
+import { useVoiceSend } from "./useVoiceSend";
 import { useForward } from "./useForward";
 import { useFavorites } from "./useFavorites";
 import { useGroupOps } from "./useGroupOps";
@@ -1040,13 +1041,17 @@ export default function App() {
   // 在气泡左上角显“3.9 MB / 7.9 MB”（镜像 iOS）。传完/失败即删键，角标切回视频时长。
   // 失败的媒体/文件消息要能重试，就必须留住原始 File（浏览器无法从消息里还原它）。仅内存，刷新即失效。
   // 记 convId/groupId：重试时按**原会话/原相册**重发（不耦合当前打开的会话，宫格成员回原格）。
+  // 语音发送簇 → useVoiceSend：录音条松手立即插占位、上传失败原地转 Failed（红❗可重传，不重录）。
+  // 须先于 useMediaSend——resendOne 的语音分支要注入它的 retryVoiceUpload。
+  const { sendVoice, retryVoiceUpload } = useVoiceSend({ uid, convId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
+
   // 媒体/文件发送簇 → useMediaSend（阶段 5）：attachPanel/粘贴攒批/上传进度/批发·单发流水线/重试/附件入口。
   // 须在 clientRef/useMessageStore/uid/peer/groupConvId/setToast 之后、send()（deps 捕获 sendMediaBatch/uploadAndSend/pastedImages）之前。
   const {
     attachPanel, setAttachPanel, pendingFilesRef, uploadProgress, teardownOutboxUpload, hasActiveSend, toggleUploadPause,
     cancelSendMessage, pastedImages, setPastedImages, removePastedImage, onComposerPaste, addPastedFiles, sendMediaBatch, uploadAndSend,
     retryUpload, resendMessage, onMediaBubbleTap, fileInputRef, attachAnchorRef, cancelAttachClose, scheduleAttachClose, attachItems, pickFile, onFilePicked,
-  } = useMediaSend({ uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
+  } = useMediaSend({ uid, peer, groupConvId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow, retryVoiceUpload });
 
   // @提及簇 → useMentions（阶段 7b）：须在 send()（读 mentionCandidates/mentionAllPending）之前；convId 在此处尚未定义，
   // 用与其定义完全相同的表达式就地计算（脚本已断言一致）。
@@ -2320,31 +2325,8 @@ export default function App() {
   const onInputChangeEv = useEvent(onInputChange);
   const onComposerPasteEv = useEvent(onComposerPaste);
   const sendEv = useEvent(send);
-  // Web P1 语音：上传 ?as=voice → sendMedia contentType=voice + waveform，**发出即乐观回显一行**
-  // （status=sending，applyAck 按 clientMsgId 转 sent/failed）。此前没有回显行，ack patch 落空，
-  // 发送后要刷新页面才看得到（2026-08-26 修）。
-  // targetConvId：这段语音**录的时候**属于哪个会话。录音条是长驻组件，在 A 录到一半切到 B 再发送，
-  // 拿"当前会话"就把话发给了 B（用户实测）。调用方传所属会话，缺省才回落到当前会话。
-  const sendVoice = useCallback(async (blob: Blob, fileName: string, waveformBase64: string, durationMs: number, targetConvId?: string) => {
-    const client = clientRef.current;
-    const cid = targetConvId || convId;
-    if (!client || !cid) return;
-    // 收件人由**目标会话**推出，不能沿用当前会话的 peer（同上：切走后 peer 已经是别人了）。
-    const to = cid.startsWith("g_") ? "" : (cid.replace(/^u_/, "").split("_u_").find((x) => x !== uid) ?? "");
-    try {
-      const { url, size } = await client.uploadVoice(blob, fileName);
-      const clientMsgId = client.sendMedia(url, "voice", to, cid, {
-        duration: durationMs, fileSize: size, waveform: waveformBase64,
-      });
-      appendMsg(cid, {
-        clientMsgId, convId: cid, from: uid, content: url, contentType: "voice",
-        duration: durationMs, waveform: waveformBase64, fileSize: size,
-        convSeq: 0, timestamp: Date.now(), status: "sending",
-      });
-    } catch (e) {
-      setToast((e as Error).message || t("chat.voice.send_failed"));
-    }
-  }, [convId, uid, appendMsg]);
+  // Web P1 语音：发送/失败重试逻辑已收进 useVoiceSend（松手立即插占位，上传失败原地转 Failed
+  // 可重传，对齐 iOS，见该文件顶部注释与 2026-09-24 current_task）；这里只包一层恒定身份。
   const sendVoiceEv = useEvent(sendVoice);
 
   const chatActions = useMemo<ChatActions>(() => ({

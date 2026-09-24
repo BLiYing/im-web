@@ -5,6 +5,25 @@
 
 ## 当前焦点
 
+> **语音发送失败重发 ✅ 已补（2026-09-24，未提交）**：用户报告"web 端似乎没有解决发送失败之后可以重发"，实查
+> 文本/图片/视频/文件的失败重发早已对齐 iOS（`resendPolicy.ts`/`sdk/resend.ts`/`useMediaSend.ts`，commit f110f39），
+> 唯独**语音**是真缺口——旧 `sendVoice`（原在 App.tsx）等上传成功才上屏，失败只弹一句 toast，没有气泡没有红❗，
+> 录的那段音频直接丢。新增 `src/useVoiceSend.ts`：松手立即插 Sending 占位（content 用本地 `blob:` URL，与图片/
+> 视频同一套局部字节标记）、上传失败占位原地转 Failed 且留存原始 Blob，红❗重试用同一份字节重新上传（不重录）；
+> `useMediaSend#resendOne` 按 `contentType==="voice"` 分派给它，其余仍走既有 `retryUpload`。
+> **顺带修了 `resendPolicy.ts` 的判据顺序 bug**：本地占位（`blob:`）必须排在 `note` 判断之前——语音上传失败若
+> 也挂 note，旧顺序会先判 note 命中「拒收→不可重发」，红❗照显却点不动；这正是 iOS `IMResendPolicyForMessage`
+> 2026-08-30 code-review 抓到过的同一处易错点，Web 此前顺序写反但一直没有路径产生"本地占位+note"组合，故未暴露
+> ——补了 `resendPolicy.test.ts` 两条用例钉住（含反向守住：content 空+note 仍不可重发）。
+> 复查 iOS 侧同名逻辑（`IMResendPolicyForMessage`/`IMChatViewController+Resend.m`/`+Voice.m`/`IMSocketManager`
+> 的 ack 重发与幂等重发）**未发现新 bug**——该处此前已多轮 code-review 修过，注释与测试都很扎实。
+> `npm run build`（`tsc -b && vite build`）零错误；`npx vitest run` 全量 **1474/1474 绿**（新增
+> `useVoiceSend.test.ts` 6 例 + `resendPolicy.test.ts` +2 例 + `useMediaSend.test.ts` +1 例）；
+> `./scripts/check-file-size.sh` 通过（App.tsx 因挪走 sendVoice 反而降到 3652 行）。
+> ⚠️ **未手测**（本次会话 Claude in Chrome 扩展未连接，无法起浏览器）：录音上传失败 → 红❗出现 → 点击 →
+> 用同一份录音重传成功；已知限制与图片/文件同款——重试依赖内存里留存的 Blob，**刷新页面即失效**。
+> 详情见 `../IMServer/docs/CLIENT_PARITY.md` 的「发送失败重发」行 2026-09-24 补记。
+
 > **多语言 P1+P2+P3 ✅ 已完成（2026-09-22，中文 + 英文；P1+P2 已 commit 1ae0c52 推送，P3 未提交；浏览器未手测）**：P1 基础设施（`src/i18n` 的 `t()`/`useT()`/`setPref` + `LanguagePanel` 设置 ▸ 语言 + 桌面 IPC 同步）。**P2** 存量迁移全覆盖：设置面板、聊天侧组件、各类 modals、详情/联系人/管理侧组件、`menus.ts`/`useGroupOps.ts`/`useChatSearch.ts` 等 hooks、`sdk/errcode.ts` 错误码（对齐 iOS `err.*`）；`tsc -b` 干净、`vitest` 全量 **1434 例绿**。
 > **P3 客户端消费**（未提交，另一次会话完成）：新增 `src/sysEventRender.ts`（`buildGroupSysSegments`/`buildSysNoticeText`/`localizeReplySnapshot`，消费服务端 `sys_event`/`sys_args`/`reply_snapshot_kind`/`_args`，占位符分词——从 `format()` 抽出的 `tokenizeTemplate()` 复用——不在代码里拼句子结构）；`sdk/protocol.ts`/`parseMessage.ts`/`localStore.web.ts` 补齐四个新字段的解析/落库；`MessageList.tsx`/`convPreview.ts` 接入。**顺手修了真实 bug**：`messageContent.ts` 的 `localizeSnippet` 此前硬编码中文，不跟随 App 语言，现改用 `t()`。`tsc -b` 干净、`vitest` 全量 **1466/1466 绿**、`check-file-size.sh` 全部在预算内（`MessageList.tsx` 恰好压线 600/600，WARN 不 FAIL）。文案表现有 **1386 键**（跨三端共用，见 `../IMServer/docs/i18n/strings.json`）。
 > ⚠️ 已知缺口（详见 `../IMServer/docs/design/I18N_DESIGN.md` §6.1）：`messageContent.ts` 的 `chatRecordSnippet()`（旧版 JSON 快照就地救标题的兜底分支）仍硬编码中文；桌面若切到 SQLite 本地库后端（`desktop/src/main/sqliteRows.ts`/`sqliteStore.ts`），四个新字段未接入（当前多数场景走 IndexedDB，不受影响）。

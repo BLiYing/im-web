@@ -36,6 +36,17 @@ describe("resendPolicyFor（与 iOS IMResendPolicyForMessage 同口径）", () =
     expect(resendPolicyFor(failed({ content: "", contentType: "file", fileName: "a.zip" }), true)).toBe("retry-upload");
   });
 
+  it("本地还留着字节（blob: 占位）时，note 判断必须让路——与 iOS 同一处易错点", () => {
+    // 语音上传失败会无条件写一句 note（"语音上传失败"，见 useVoiceSend），但服务端从没见过这条
+    // （content 仍是本地 blobUrl）——note 在这里不代表"被拒收"，必须仍然可重传（对齐 iOS
+    // testPendingLocalRefWithUploadErrorNoteStillRetriesUpload）。
+    expect(resendPolicyFor(failed({ content: "blob:http://x/voice-1", contentType: "voice", note: "语音上传失败" }), true)).toBe("retry-upload");
+  });
+
+  it("反向守住：content 为空又带 note 时不可重发（没有本地字节可留，不是同一种失败）", () => {
+    expect(resendPolicyFor(failed({ content: "", contentType: "voice", note: "发送中断，请重新录制" }), true)).toBe("none");
+  });
+
   it("内容已就绪（正文 / 已上传的服务器 URL）走原 clientMsgId 重发", () => {
     expect(resendPolicyFor(failed(), true)).toBe("same-id");
     expect(resendPolicyFor(failed({ content: "/media/2026/08/a.jpg", contentType: "image" }), true)).toBe("same-id");

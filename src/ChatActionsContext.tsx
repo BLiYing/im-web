@@ -57,9 +57,10 @@ export interface ChatActions {
   /** 文件进预览条（粘贴与拖入共用；useCallback 空依赖，身份恒定，可直接进 Context）。 */
   addPastedFiles: (files: File[], source?: "paste" | "drop") => void;
   send: () => void;
-  /** Web P1 语音：Composer 录制完毕后回调 App 走 uploadVoice + sendMedia contentType=voice。 */
+  /** Web P1 语音：Composer 录制完毕后回调 App，走 useVoiceSend 的 sendVoice（立即占位 + 后台
+   *  uploadVoice/sendMedia，失败原地转 Failed 供红❗重传，见该 Hook）。 */
   /** targetConvId：这段语音录制时所属的会话（录音条长驻，切会话后 convId 已经不是它了）。 */
-  sendVoice: (blob: Blob, fileName: string, waveformBase64: string, durationMs: number, targetConvId?: string) => Promise<void>;
+  sendVoice: (blob: Blob, fileName: string, waveformBase64: string, durationMs: number, targetConvId?: string) => void;
   attachAnchorRef: RefObject<HTMLDivElement>;
   fileInputRef: RefObject<HTMLInputElement>;
   mentionPanelRef: RefObject<HTMLDivElement>;
