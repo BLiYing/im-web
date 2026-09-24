@@ -120,7 +120,7 @@
   更强的做法是 httpOnly cookie，需要后端配套，未做。
 
 ## 关联工程 / 常用命令
-- 后端 `/Users/liying/IOSProject/IMServer`；iOS `/Users/liying/IOSProject/IMProgram`。
+- 后端 `/Users/dev/IOSProject/IMServer`；iOS `/Users/dev/IOSProject/IMProgram`。
 - 开发：`npm run dev`（:5173，已代理 `/api`、`/ws` → :8080）；构建：`npm run build`（tsc -b + vite）。
 - 回归：`npx tsc -b && npx vitest run`。
 - SDK/UI 分层：协议能力在 `src/sdk/`，组件只调它；排序去重按 `conv_seq`（发送态用 client_msg_id）。

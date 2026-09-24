@@ -70,5 +70,5 @@ npm run build                                  # 声明"完成"前必跑：tsc -
 ```
 
 ## 关联工程
-- 后端：/Users/liying/IOSProject/IMServer（协议 `docs/PROTOCOL.md`、交互蓝图 `docs/CHAT_UX.md`）
-- iOS 客户端：/Users/liying/IOSProject/IMProgram（功能对齐，见 CLIENT_PARITY.md）
+- 后端：/Users/dev/IOSProject/IMServer（协议 `docs/PROTOCOL.md`、交互蓝图 `docs/CHAT_UX.md`）
+- iOS 客户端：/Users/dev/IOSProject/IMProgram（功能对齐，见 CLIENT_PARITY.md）

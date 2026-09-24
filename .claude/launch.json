@@ -5,7 +5,7 @@
       "name": "im-web-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "/Users/liying/IOSProject/im-web",
+      "cwd": "/Users/dev/IOSProject/im-web",
       "port": 5173
     }
   ]
