@@ -60,7 +60,7 @@ export function ChatHeader(p: ChatHeaderProps) {
           searchFrom={search.searchFrom} searchFromName={search.searchFromName} clearSearchFrom={search.clearSearchFrom}
           searchFromPickerOpen={search.searchFromPickerOpen} setSearchFromPickerOpen={search.setSearchFromPickerOpen}
           searchFromRows={search.searchFromRows} openFromPicker={search.openFromPicker} pickSearchFrom={search.pickSearchFrom}
-          calendarOpen={search.calendarOpen} setCalendarOpen={search.setCalendarOpen}
+          calendarOpen={search.calendarOpen} toggleCalendar={search.toggleCalendar}
           calendarMonth={search.calendarMonth} setCalendarMonth={search.setCalendarMonth} activeDays={search.activeDays}
           jumpToDay={search.jumpToDay} jumpToEarliest={search.jumpToEarliest} jumpToToday={search.jumpToToday} monthLabel={search.monthLabel}
         />

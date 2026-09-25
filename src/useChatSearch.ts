@@ -239,6 +239,16 @@ export function useChatSearch(d: ChatSearchDeps) {
     requestAnimationFrame(() => searchInputRef.current?.focus());
   };
   const openFromPicker = () => { setSearchFromPickerOpen(true); setCalendarOpen(false); };
+  /** 📅 钮点击：对齐 iOS（`IMChatDateJumpViewController` 每次都是新实例，天然从当月开）——
+   *  开的那一刻把月份复位到当月，不留上次翻到的月份。不复位的话：在 A 会话把日历翻到别的月关掉，
+   *  切到 B 会话再点 📅，看到的是 A 会话翻到的那个月（`calendarMonth` 是 useChatSearch 单例状态、
+   *  不随会话或搜索开关重置），B 会话那个月大概率没有任何打点，一进来就要手动翻回本月。
+   *  只在**打开**那一刻复位（关闭/搜索内其它收口路径不碰它）——与 iOS「每次呼出都是新的」同语义。 */
+  const toggleCalendar = () => {
+    setSearchFromPickerOpen(false);
+    if (!calendarOpen) { const dt = new Date(); setCalendarMonth({ y: dt.getFullYear(), m: dt.getMonth() }); }
+    setCalendarOpen((v) => !v);
+  };
   const pickSearchFrom = (memberUid: string, name: string) => {
     setSearchFrom(memberUid); setSearchFromName(name);
     setSearchFromPickerOpen(false);
@@ -392,7 +402,7 @@ export function useChatSearch(d: ChatSearchDeps) {
   return {
     searchNeedle, searchHits, searchHitIdx, hitsTruncated: serverFresh && hitsTruncated, gotoSearchHit, openInChatSearch, armInChatSearch, closeInChatSearch, searchInputRef,
     searchFrom, searchFromName, searchFromPickerOpen, setSearchFromPickerOpen, searchFromRows, openFromPicker, pickSearchFrom, clearSearchFrom,
-    calendarOpen, setCalendarOpen, calendarMonth, setCalendarMonth, activeDays, jumpToDay, jumpToToday, jumpToEarliest, monthLabel,
+    calendarOpen, toggleCalendar, calendarMonth, setCalendarMonth, activeDays, jumpToDay, jumpToToday, jumpToEarliest, monthLabel,
     // 降级提示（§4.9）：离线 + 本地有缺口时，UI 必须把"只搜了已下载的部分"说出来。
     searchNotice: searchDegraded ? DEGRADED_SEARCH_NOTICE : "",
     calendarNotice: calendarDegraded ? DEGRADED_CALENDAR_NOTICE : "",

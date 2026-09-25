@@ -31,7 +31,8 @@ export function ChatSearchBar(p: {
   pickSearchFrom: (userId: string, label: string) => void;
   // 日历
   calendarOpen: boolean;
-  setCalendarOpen: (fn: (v: boolean) => boolean) => void;
+  /** 📅 钮点击：开的那一刻把月份复位到当月（对齐 iOS 每次呼出都是新实例），别直接摸 calendarOpen 状态。 */
+  toggleCalendar: () => void;
   calendarMonth: { y: number; m: number };
   setCalendarMonth: (fn: (c: { y: number; m: number }) => { y: number; m: number }) => void;
   activeDays: Set<string>;
@@ -77,7 +78,7 @@ export function ChatSearchBar(p: {
           <button className="icon-btn chat-search-icbtn" title={tr("chat.search.by_member")} onClick={p.openFromPicker}><User size={16} /></button>
         )}
         <button className={`icon-btn chat-search-icbtn${p.calendarOpen ? " active" : ""}`} title={tr("chat.search.by_date")}
-          onClick={() => { p.setSearchFromPickerOpen(false); p.setCalendarOpen((v) => !v); }}><Calendar size={16} /></button>
+          onClick={p.toggleCalendar}><Calendar size={16} /></button>
         <button className="chat-search-cancel" onClick={p.closeInChatSearch}>{tr("common.cancel")}</button>
       </div>
       {/* 👤 来自：群成员下拉（取向 C，复用群成员数据 + @ 打字过滤），锚在标题栏下方。 */}

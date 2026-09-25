@@ -5,24 +5,32 @@
 
 ## 当前焦点
 
-> **语音发送失败重发 ✅ 已补（2026-09-24，未提交）**：用户报告"web 端似乎没有解决发送失败之后可以重发"，实查
-> 文本/图片/视频/文件的失败重发早已对齐 iOS（`resendPolicy.ts`/`sdk/resend.ts`/`useMediaSend.ts`，commit f110f39），
-> 唯独**语音**是真缺口——旧 `sendVoice`（原在 App.tsx）等上传成功才上屏，失败只弹一句 toast，没有气泡没有红❗，
-> 录的那段音频直接丢。新增 `src/useVoiceSend.ts`：松手立即插 Sending 占位（content 用本地 `blob:` URL，与图片/
-> 视频同一套局部字节标记）、上传失败占位原地转 Failed 且留存原始 Blob，红❗重试用同一份字节重新上传（不重录）；
-> `useMediaSend#resendOne` 按 `contentType==="voice"` 分派给它，其余仍走既有 `retryUpload`。
-> **顺带修了 `resendPolicy.ts` 的判据顺序 bug**：本地占位（`blob:`）必须排在 `note` 判断之前——语音上传失败若
-> 也挂 note，旧顺序会先判 note 命中「拒收→不可重发」，红❗照显却点不动；这正是 iOS `IMResendPolicyForMessage`
-> 2026-08-30 code-review 抓到过的同一处易错点，Web 此前顺序写反但一直没有路径产生"本地占位+note"组合，故未暴露
-> ——补了 `resendPolicy.test.ts` 两条用例钉住（含反向守住：content 空+note 仍不可重发）。
+> **会话内搜索 📅 日历「翻月留痕跨会话」✅ 已修（2026-09-24，未提交）**：用户要求手测「聊天信息」页的
+> 会话内搜索 + 日历，浏览器实测搜索本身（文本命中/▲▼导航/来自:发件人过滤/来自与日历互斥）与日历核心功能
+> （选日跳转·含"跳最近一天"与"当天无消息"两条提示分支·Earliest/Today 快捷·月份翻页）**均正确，未发现回归**；
+> 唯一真问题：`calendarMonth` 是 `useChatSearch` 单例状态，`closeInChatSearch`/切会话都不重置它——在 A 会话
+> 把日历翻到别的月再关掉，切到 B 会话点 📅，看到的是 A 会话翻到的那个月（不是当月），与 iOS 每次呼出都是
+> 新实例 `IMChatDateJumpViewController`（天然从当月开）不对齐。修法：`useChatSearch` 新增 `toggleCalendar`
+> （替换原先直接导出的 `setCalendarOpen`），**只在打开那一刻**把 `calendarMonth` 复位到当月，关闭/翻月操作
+> 本身不受影响；`ChatSearchBar.tsx`/`ChatHeader.tsx` 改用它。新增 `useChatSearch.calendar.test.ts`
+> 2 例（含互斥回归），先红后绿确认过。`npm run build` 零错误；`npx vitest run` 全量 **1476/1476 绿**；
+> `check-file-size.sh` 通过。浏览器实测复现"跨会话翻月留痕"→ 确认修复生效（Dec 2026 不再泄漏到下一个会话）。
+>
+> **语音发送失败重发 ✅ 已补（2026-09-24，已提交 `d03a45e`）**：用户报告"web 端似乎没有解决发送失败之后可以重发"，
+> 实查文本/图片/视频/文件的失败重发早已对齐 iOS（`resendPolicy.ts`/`sdk/resend.ts`/`useMediaSend.ts`，
+> commit f110f39），唯独**语音**是真缺口——旧 `sendVoice`（原在 App.tsx）等上传成功才上屏，失败只弹一句
+> toast，没有气泡没有红❗，录的那段音频直接丢。新增 `src/useVoiceSend.ts`：松手立即插 Sending 占位（content
+> 用本地 `blob:` URL，与图片/视频同一套局部字节标记）、上传失败占位原地转 Failed 且留存原始 Blob，红❗重试
+> 用同一份字节重新上传（不重录）；`useMediaSend#resendOne` 按 `contentType==="voice"` 分派给它，其余仍走
+> 既有 `retryUpload`。**顺带修了 `resendPolicy.ts` 的判据顺序 bug**：本地占位（`blob:`）必须排在 `note`
+> 判断之前——语音上传失败若也挂 note，旧顺序会先判 note 命中「拒收→不可重发」，红❗照显却点不动；这正是
+> iOS `IMResendPolicyForMessage` 2026-08-30 code-review 抓到过的同一处易错点，Web 此前顺序写反但一直没有
+> 路径产生"本地占位+note"组合，故未暴露——补了 `resendPolicy.test.ts` 两条用例钉住。
 > 复查 iOS 侧同名逻辑（`IMResendPolicyForMessage`/`IMChatViewController+Resend.m`/`+Voice.m`/`IMSocketManager`
 > 的 ack 重发与幂等重发）**未发现新 bug**——该处此前已多轮 code-review 修过，注释与测试都很扎实。
-> `npm run build`（`tsc -b && vite build`）零错误；`npx vitest run` 全量 **1474/1474 绿**（新增
-> `useVoiceSend.test.ts` 6 例 + `resendPolicy.test.ts` +2 例 + `useMediaSend.test.ts` +1 例）；
-> `./scripts/check-file-size.sh` 通过（App.tsx 因挪走 sendVoice 反而降到 3652 行）。
-> ⚠️ **未手测**（本次会话 Claude in Chrome 扩展未连接，无法起浏览器）：录音上传失败 → 红❗出现 → 点击 →
-> 用同一份录音重传成功；已知限制与图片/文件同款——重试依赖内存里留存的 Blob，**刷新页面即失效**。
-> 详情见 `../IMServer/docs/CLIENT_PARITY.md` 的「发送失败重发」行 2026-09-24 补记。
+> **浏览器实测通过**（真后端 + IndexedDB，故障注入模拟文本 ack 超时/语音上传失败）：文本与语音均验证
+> 失败→红❗→点击重发→成功、刷新后持久化不重复。已知限制与图片/文件同款——语音重试依赖内存里留存的
+> Blob，**刷新页面即失效**。详情见 `../IMServer/docs/CLIENT_PARITY.md` 的「发送失败重发」行 2026-09-24 补记。
 
 > **多语言 P1+P2+P3 ✅ 已完成（2026-09-22，中文 + 英文；P1+P2 已 commit 1ae0c52 推送，P3 未提交；浏览器未手测）**：P1 基础设施（`src/i18n` 的 `t()`/`useT()`/`setPref` + `LanguagePanel` 设置 ▸ 语言 + 桌面 IPC 同步）。**P2** 存量迁移全覆盖：设置面板、聊天侧组件、各类 modals、详情/联系人/管理侧组件、`menus.ts`/`useGroupOps.ts`/`useChatSearch.ts` 等 hooks、`sdk/errcode.ts` 错误码（对齐 iOS `err.*`）；`tsc -b` 干净、`vitest` 全量 **1434 例绿**。
 > **P3 客户端消费**（未提交，另一次会话完成）：新增 `src/sysEventRender.ts`（`buildGroupSysSegments`/`buildSysNoticeText`/`localizeReplySnapshot`，消费服务端 `sys_event`/`sys_args`/`reply_snapshot_kind`/`_args`，占位符分词——从 `format()` 抽出的 `tokenizeTemplate()` 复用——不在代码里拼句子结构）；`sdk/protocol.ts`/`parseMessage.ts`/`localStore.web.ts` 补齐四个新字段的解析/落库；`MessageList.tsx`/`convPreview.ts` 接入。**顺手修了真实 bug**：`messageContent.ts` 的 `localizeSnippet` 此前硬编码中文，不跟随 App 语言，现改用 `t()`。`tsc -b` 干净、`vitest` 全量 **1466/1466 绿**、`check-file-size.sh` 全部在预算内（`MessageList.tsx` 恰好压线 600/600，WARN 不 FAIL）。文案表现有 **1386 键**（跨三端共用，见 `../IMServer/docs/i18n/strings.json`）。
