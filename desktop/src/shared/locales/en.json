@@ -63,6 +63,7 @@
   "blocked.unblock": "Unblock",
   "blocked.unblock_failed": "Couldn’t unblock: {error}",
   "call.record.cancelled": "Cancelled",
+  "call.record.cancelled_by_peer": "Cancelled",
   "call.record.declined": "Declined",
   "call.record.declined_by_peer": "Declined",
   "call.record.duration": "Call duration {duration}",

@@ -50,7 +50,7 @@ const KNOWN_REASONS = new Set([
 
 /** 主叫看到 / 被叫看到的未接通文案键（UX 稿 §02）。表里放文案**键**，不在模块顶层取文案，否则切语言不会变。 */
 const UNANSWERED_KEYS: Record<string, readonly [caller: string, callee: string]> = {
-  cancel: ["call.record.cancelled", "call.record.missed"],
+  cancel: ["call.record.cancelled", "call.record.cancelled_by_peer"],
   reject: ["call.record.declined_by_peer", "call.record.declined"],
   no_answer: ["call.record.peer_no_answer", "call.record.missed"],
   busy: ["call.record.peer_busy", "call.record.missed"],

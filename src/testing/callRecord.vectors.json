@@ -63,10 +63,10 @@
    "viewerIsSender": false,
    "isGroup": false,
    "expect": {
-    "text": "未接来电",
+    "text": "对方已取消",
     "tone": "missed",
     "tappable": true,
-    "preview": "[语音通话] 未接来电"
+    "preview": "[语音通话] 对方已取消"
    }
   },
   {
