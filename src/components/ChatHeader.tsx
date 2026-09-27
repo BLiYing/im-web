@@ -1,9 +1,9 @@
-// ChatHeader：聊天列标题栏——搜索态下换成 ChatSearchBar；否则 返回钮 + 身份区（头像/标题/副标题）+ 右侧 搜索/呼叫/⋯ 菜单
+// ChatHeader：聊天列标题栏——搜索态下换成 ChatSearchBar；否则 返回钮 + 身份区（头像/标题/副标题）+ 右侧 搜索/⋯ 菜单
 // （群：群资料/邀请成员/免打扰/选择消息/退出群聊；单聊：编辑联系人/视频通话/免打扰/选择消息/拉黑/删除会话）。
 // 阶段 9 从 App.tsx 平移的纯展示组件（JSX 逐字一致；菜单动作打包为 actions 注入，search 为 useChatSearch 返回整体透传，
 // comingSoon 取自 AppServicesContext）。
 import type { Dispatch, SetStateAction } from "react";
-import { Search, Phone, MoreVertical, Info, UserPlus, BellOff, CheckSquare, LogOut, SquarePen, Video, Ban, Trash2 } from "lucide-react";
+import { Search, MoreVertical, Info, UserPlus, BellOff, CheckSquare, LogOut, SquarePen, Video, Ban, Trash2 } from "lucide-react";
 import type { Conversation, GroupInfo } from "../sdk/protocol";
 import type { useChatSearch } from "../useChatSearch";
 import { useAppServices } from "../AppServicesContext";
@@ -84,7 +84,6 @@ export function ChatHeader(p: ChatHeaderProps) {
         {(peer || isGroupChat) && (
           <>
             <button className={`icon-btn${searchOpen ? " active" : ""}`} title={tr("chat.search.placeholder")} onClick={() => (searchOpen ? search.closeInChatSearch() : search.openInChatSearch())}><Search size={20} /></button>
-            {!isGroupChat && <button className="icon-btn" title={tr("chat.header.call")} onClick={() => comingSoon(tr("chat.header.voice_call"))}><Phone size={20} /></button>}
             <span className="chat-anchor">
               <button className="icon-btn" title={tr("common.more")} onClick={(e) => { e.stopPropagation(); setChatMenu((v) => !v); }}><MoreVertical size={20} /></button>
             {chatMenu && (

@@ -18,12 +18,12 @@ function base(over: Partial<ChatHeaderProps> = {}): ChatHeaderProps {
 const mount = (p: ChatHeaderProps) => render(<AppServicesProvider value={services}><ChatHeader {...p} /></AppServicesProvider>);
 
 describe("ChatHeader", () => {
-  it("单聊：标题/副标题；返回 → deselect；身份区 → openPeerDetail(peer, true)；呼叫 → comingSoon", () => {
-    const p = base(); const { getByText, getByTitle, container } = mount(p);
+  it("单聊：标题/副标题；返回 → deselect；身份区 → openPeerDetail(peer, true)；标题栏无呼叫钮（通话入口在资料页）", () => {
+    const p = base(); const { getByText, getByTitle, queryByTitle, container } = mount(p);
     expect(container.querySelector(".chat-title")?.textContent).toBe("小明"); expect(getByText("在线")).toBeTruthy(); // 头像首字也含「小」，按类定位
     fireEvent.click(getByText("‹ 会话")); expect(p.actions.deselect).toHaveBeenCalled();
     fireEvent.click(getByTitle("查看资料")); expect(p.actions.openPeerDetail).toHaveBeenCalledWith("u2", true);
-    fireEvent.click(getByTitle("呼叫")); expect(services.comingSoon).toHaveBeenCalledWith("语音通话");
+    expect(queryByTitle("呼叫")).toBeNull();
   });
   it("单聊菜单：编辑联系人/免打扰/选择消息/拉黑/删除会话 接线，点后关菜单", () => {
     const p = base({ chatMenu: true }); const { getByText } = mount(p);
