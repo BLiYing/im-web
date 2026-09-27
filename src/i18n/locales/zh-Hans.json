@@ -666,7 +666,6 @@
   "detail.tab.file_size_downloaded": "{size} · 已下载",
   "detail.tab.file_size_not_downloaded": "{size} · 未下载",
   "detail.tab.link_note": "链接由本机已加载的聊天记录扫出，往上翻得越多、这里越全。点一条在 App 内打开。",
-  "detail.tab.voice_note": "归档里暂不能播放（长按可定位回聊天、转发或删除）。",
   "device.active.days_ago": {
     "other": "{count} 天前活跃"
   },
