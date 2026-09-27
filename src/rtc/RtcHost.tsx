@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CallEngine } from "im-rtc-call-engine";
 import { CallOverlay, CallProvider, ProfileProvider, useCall } from "im-rtc-call-uikit-react";
 import type { InviteMemberProvider, ProfileResolver } from "im-rtc-call-uikit-react";
+import { useLang } from "../i18n";
 import { logger, LOG_TAG } from "../logging/logger";
 import { startRtcEngine } from "./rtcEngine";
 import { registerCallActions } from "./rtcCall";
@@ -43,6 +44,9 @@ export function RtcHost({ uid, profiles, profileKey, record }: {
   profileKey: readonly unknown[];
 }): ReactNode {
   const [engine, setEngine] = useState<CallEngine | null>(null);
+  // 已解析的界面语言（不是"跟系统"，是用户在设置里选的那个），直接映射到 Kit 的 locale——
+  // 与 iOS/Android 同一个选择：绕开 uikit 自带的 resolveLocale('auto', ...)，避免两套"跟系统"判据打架。
+  const lang = useLang();
 
   useEffect(() => {
     if (!uid) return undefined;
@@ -119,7 +123,13 @@ export function RtcHost({ uid, profiles, profileKey, record }: {
   if (!engine) return null;
   return (
     <ProfileProvider resolver={resolver}>
-      <CallProvider engine={engine} inviteMemberProvider={inviteProvider} bannerFirst ringtoneMuted={false}>
+      <CallProvider
+        engine={engine}
+        inviteMemberProvider={inviteProvider}
+        bannerFirst
+        ringtoneMuted={false}
+        locale={lang === "zh-Hans" ? "zh-CN" : "en"}
+      >
         <ActionsBridge />
         <CallOverlay />
       </CallProvider>

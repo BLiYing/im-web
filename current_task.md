@@ -5,6 +5,14 @@
 
 ## 当前焦点
 
+> **im-rtc 2.1.0 通话 Kit 多语言接线到「设置 ▸ 语言」（三端，2026-09-27）**：`src/rtc/RtcHost.tsx` 的
+> `<CallProvider>` 此前完全没传 `locale`，SDK 2.1.0 的多语言能力升级后一直没生效。加 `const lang = useLang()`
+> （`src/i18n`），`<CallProvider locale={lang === "zh-Hans" ? "zh-CN" : "en"}>`——直接喂已解析值，**不用**
+> uikit 自带的 `resolveLocale('auto', …)`，与 iOS/Android 同一个选择（避免两套"跟系统"判据打架）。
+> 因为 `useLang()` 是响应式 hook，语言设置变化会自动重渲染生效，不需要像 iOS/Android 那样手动挂一个
+> 变更监听。`npm run build` 零错误。三端对称改动见 `../IMServer/docs/SYMMETRY.md`。
+> **未做**：浏览器里实际切一次语言、发起一次通话看 Kit 文案是否跟着变。
+
 > **通话记录：被叫侧 `cancel` 文案「未接来电」→「对方已取消」（三端 + 设计文档，2026-09-27，与用户讨论后拍板）**：
 > `cancel`（主叫主动撤回）跟真正错过（`no_answer`/`busy`/`offline`）不是一回事，只改这一种 reason 的措辞，其余三种
 > 与推送文案不变；`tone`（红/计未读/推送）完全不变，纯文案改动。本端改动：`src/callRecord.ts` 的
