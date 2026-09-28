@@ -64,7 +64,7 @@
   "blocked.unblock": "Unblock",
   "blocked.unblock_failed": "Couldn’t unblock: {error}",
   "call.history.empty": "No call history",
-  "call.history.group_call": "Group {kind} call · {count} people",
+  "call.history.group_subtitle": "Group {kind} call · {count} people",
   "call.history.load_failed": "Failed to load, tap to retry",
   "call.history.tab_all": "All",
   "call.history.tab_missed": "Missed",

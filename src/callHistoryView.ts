@@ -103,7 +103,7 @@ export function callHistoryLine(r: CallHistoryRecord, myUid: string, translate: 
   const outgoing = r.caller === myUid;
   if (r.isGroup) {
     const kind = translate(media === "video" ? "call.record.kind_video" : "call.record.kind_voice");
-    return { icon: media, text: translate("call.history.group_call", { kind, count: groupCallSize(r) }), missed, outgoing };
+    return { icon: media, text: translate("call.history.group_subtitle", { kind, count: groupCallSize(r) }), missed, outgoing };
   }
   const content = buildCallRecord({ callId: r.callId, mediaType: media, reason: r.reason, durationSec: r.durationSec, isGroup: false });
   const rendered = content ? renderCallRecord(content, { viewerIsSender: outgoing, isGroup: false }, translate) : null;
