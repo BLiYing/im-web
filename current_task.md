@@ -5,6 +5,39 @@
 
 ## 当前焦点
 
+> **im-rtc 换票：从调试密钥迁移到 IMServer 真实换票接口 ✅（2026-09-28，本端已完成，iOS/Android 待迁移）**：
+> 此前 `signToken`（`src/rtc/rtcEngine.ts`）用 `VITE_RTC_DEBUG_SECRET` 在本地直接签接入票——联调期
+> 临时方案，代码里早写明"上线前换成 IMServer 换票接口"。本次落地：
+> - `signToken` 改签名为 `(getAuthToken: () => string)`，带上**当前 IM 会话的 Bearer token**
+>   （不是登录那一刻的快照——用 `App.tsx` 新增的 `getRtcAuthToken`，`useCallback` 空依赖数组，
+>   实时读 `clientRef.current.authToken`）调 IMServer 新接口 `POST /api/v1/rtc/token`（走既有
+>   `callJson`，天然复用 100102 自动续期重试与统一错误码解包）；`device_id` 不由本端传，
+>   IMServer 从登录会话登记值里取——天然等于本端 `platform().deviceId()`（同一个值，登录帧本就用它）。
+> - `RtcConfig` 精简为只剩 `wsUrl`；`RtcHost` 新增 `getAuthToken` prop（引用必须稳定，是内部
+>   `useEffect` 依赖之一）。
+> - `.env.local` 只留 `VITE_RTC_WS_URL`；去掉的三项若外部脚本/文档仍引用需同步清理（已扫过
+>   `src/` 无残留引用）。
+> - **StrictMode 下重复换票已修**（同日顺手修）：开发环境 `RtcHost` 的登录 effect 会被连续跑两次
+>   （mount→cleanup→mount，几乎无间隔），此前 `cancelled` 只挡得住"处理结果"、挡不住"请求已发出"——
+>   调试密钥时代这只是白算一次 HMAC，换真实换票后会白打一次后端。改法：`useEffect` 里建
+>   `AbortController`，cleanup 时 `controller.abort()`；`signToken`/`startRtcEngine` 新增可选
+>   `signal` 参数透传给 `callJson`（`tracedFetch` 本就展开 `init` 全部字段给原生 `fetch`，`http.ts`
+>   零改动）。新增测试验证 `signal` 确实传到底层 fetch，变异验红过。
+> - 单测：`src/rtc/rtc.test.ts` 新增 `signToken` 四例（带 token 换票成功 / 未登录直接拒绝不发请求 /
+>   服务端 `600001` 原样抛出 / signal 已中止时请求被真中止），均变异验红过；`rtcConfig` 相关用例同步精简。
+> - `tsc -b` 干净、`vitest` 全量 **1479/1479 绿**、`npm run build` 零错误。
+> - 三端对称登记 `../IMServer/docs/SYMMETRY.md`（`im-web src/rtc/rtcEngine.ts`）：iOS `IMRtcConfig.h`/
+>   `IMRtcCall.m`、Android `rtc/RtcConfig.kt` 仍在用调试密钥，尚未迁移——迁移前对照本端 `signToken` 实现。
+> - **浏览器端到端实测 ✅ 已做（同日）**：`./scripts/dev.sh` 已接好 `IM_RTC_SECRET_KEY` 环境变量
+>   （见 IMServer `current_task.md`），用真实密钥重启后端后在浏览器实测——Console 确认 StrictMode
+>   去重生效（第一次请求真的 `AbortError`，只有第二次拿到 200）、`sys.hello` 握手成功、`rtc_start`；
+>   点「呼叫」真的把 `call.invite` 送到了 im-rtc-server（回「对方当前不在线」，是服务端真实业务判断，
+>   不是本地假象），会话列表也正确记了这条通话记录。**未做**：真机（非浏览器）实测；双人实际接通
+>   （目前只验证到发起呼叫这一步，未开两个身份互相拨打）；未验证清空本地 `debugSecret` 配置后旧路径
+>   确实已完全不可达（代码层面已删，行为上应等价，未专门回归）。
+> - **前提**：IMServer 需 `export IM_RTC_SECRET_KEY=<控制台密钥>` 后再跑 `./scripts/dev.sh`，否则本
+>   接口回 `600001`、通话入口不可用（这是正常降级，不是 bug）。
+
 > **im-rtc 2.1.0 通话 Kit 多语言接线到「设置 ▸ 语言」（三端，2026-09-27）**：`src/rtc/RtcHost.tsx` 的
 > `<CallProvider>` 此前完全没传 `locale`，SDK 2.1.0 的多语言能力升级后一直没生效。加 `const lang = useLang()`
 > （`src/i18n`），`<CallProvider locale={lang === "zh-Hans" ? "zh-CN" : "en"}>`——直接喂已解析值，**不用**
@@ -33,15 +66,14 @@
 > ⚠️ **模块顶层不许调 `t()`**（切语言不会变）；`test-setup.ts` 固定 `im.language=zh-Hans`（jsdom 的 navigator.languages 是 en-US）；`App.tsx` 行数预算已顶到 3670/3679，新逻辑别往里塞。
 > ⚠️ P2 迁移子代理**曾因周额度限流失败一次**（batch W3，2026-09-21）——失败前的代码改动与文案片段合并均已正常完成，只是收尾报告被打断；每次继续迁移前先核实 git diff 与片段合并状态，务必重新跑一遍 `tsc -b`/`vitest`/`check-i18n.mjs` 确认，别假设失败=没做完。
 >
-> **im-rtc 通话接入（调试密钥联调）✅ 代码完成、待真机联调（2026-09-19，未提交）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
-> `rtcEngine` 换票只走 `signToken`、`rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，
-> 群详情页新增「群通话」（成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。
-> SDK 默认用 npm 正式版 `im-rtc-call-engine` / `im-rtc-call-uikit-react`（2026-09-20 已从本地 tgz 切过来；
-> **2.0.0 → 2.1.0 已于 2026-09-27 升级**，见「当前焦点」）。
-> **本地包集成保留、默认关闭**：验未发布的 SDK 改动时 `./scripts/sdk-source.sh local`（等价于 package.json 里两个
-> `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`，先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`），验完 `./scripts/sdk-source.sh npm` 切回；
-> 本地档期间别提交 package.json / package-lock.json，装完 `npx vite --force`。配置在 `.env.local`（gitignored：`VITE_RTC_WS_URL/APP_ID/KEY_ID/DEBUG_SECRET`，缺项则通话入口不可用）。
-> 单测 `src/rtc/rtc.test.ts`（变异验红）；全量 vitest 1324 + `npm run build` 绿。未做：附件面板「音视频」不接（将移除）、设置页「接口/调试」开关（等换票接口一期）。
+> **im-rtc 通话接入（首版接线，SDK 版本/本地包集成说明）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
+> `rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，群详情页「群通话」
+> （成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。SDK 用 npm 正式版
+> `im-rtc-call-engine` / `im-rtc-call-uikit-react`（2.1.0）。**本地包集成保留、默认关闭**：验未发布的 SDK 改动时
+> `./scripts/sdk-source.sh local`（等价于 package.json 两个 `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`，
+> 先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`），验完 `./scripts/sdk-source.sh npm` 切回；本地档期间别提交
+> package.json / package-lock.json，装完 `npx vite --force`。换票机制见「当前焦点」（已迁移到 IMServer 真实接口）。
+> 未做：附件面板「音视频」不接（将移除）、设置页「接口/调试」开关。
 
 > **第三批用户报告（Web 部分）✅ 2026-09-15（用户复测通过，已提交；tsc + vitest 1312 条全绿、变异验红）**：
 > 左栏页签「会话」→「消息」（三端统一）；「消息」页签补未读蓝点——此前只有 Android 有。页签从 App.tsx 抽到

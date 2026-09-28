@@ -2,6 +2,22 @@
 
 ---
 
+# 归档于 2026-09-28（im-rtc 通话接入·调试密钥联调阶段的状态 —— 从活快照转入，被换票接口迁移顶下）
+
+> **im-rtc 通话接入（调试密钥联调）✅ 代码完成、待真机联调（2026-09-19，未提交）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
+> `rtcEngine` 换票只走 `signToken`、`rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，
+> 群详情页新增「群通话」（成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。
+> SDK 默认用 npm 正式版 `im-rtc-call-engine` / `im-rtc-call-uikit-react`（2026-09-20 已从本地 tgz 切过来；
+> **2.0.0 → 2.1.0 已于 2026-09-27 升级**）。
+> **本地包集成保留、默认关闭**：验未发布的 SDK 改动时 `./scripts/sdk-source.sh local`（等价于 package.json 里两个
+> `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`，先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`），验完 `./scripts/sdk-source.sh npm` 切回；
+> 本地档期间别提交 package.json / package-lock.json，装完 `npx vite --force`。配置在 `.env.local`（gitignored：`VITE_RTC_WS_URL/APP_ID/KEY_ID/DEBUG_SECRET`，缺项则通话入口不可用）。
+> 单测 `src/rtc/rtc.test.ts`（变异验红）；全量 vitest 1324 + `npm run build` 绿。未做：附件面板「音视频」不接（将移除）、设置页「接口/调试」开关（等换票接口一期）。
+>
+> 此状态已被 2026-09-28 的换票接口迁移取代（本端不再用 `VITE_RTC_APP_ID`/`KEY_ID`/`DEBUG_SECRET` 本地签票），见活快照当前焦点。
+
+---
+
 # 归档于 2026-09-27b（im-rtc 音视频 SDK 2.0.0→2.1.0 三端版本升级 —— 从活快照转入，被通话记录 cancel 文案细化顶下）
 
 > **im-rtc 音视频 SDK 2.0.0 → 2.1.0（三端同步，2026-09-27）**：`package.json` 的

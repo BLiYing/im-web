@@ -1,23 +1,74 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadRtcConfig, rtcConfigProblem } from "./rtcConfig";
+import { signToken } from "./rtcEngine";
 import { buildInviteCandidates, rtcNameOf } from "./rtcProfiles";
 import { callCandidates, togglePick } from "./RtcGroupCallPicker";
 import { MAX_GROUP_CALL_PICK } from "./rtcCall";
 import type { GroupMember } from "../sdk/protocol";
 
-const full = { wsUrl: "ws://h:8787/v1/ws", appId: "10000002", keyId: "dbg-1", debugSecret: "s" };
+const full = { wsUrl: "ws://h:8787/v1/ws" };
 
 describe("rtcConfig", () => {
   it("配置齐全 → 无问题", () => expect(rtcConfigProblem(full)).toBeNull());
-  it("非 dbg- 密钥 ID 被拒", () => expect(rtcConfigProblem({ ...full, keyId: "k-1" })).toContain("dbg-"));
   it("信令地址必须是 ws/wss", () => expect(rtcConfigProblem({ ...full, wsUrl: "http://h" })).toContain("ws://"));
-  it("缺密钥 → load 返回 null", () => {
-    expect(loadRtcConfig({ VITE_RTC_WS_URL: full.wsUrl, VITE_RTC_APP_ID: "1", VITE_RTC_KEY_ID: "dbg-1" })).toBeNull();
+  it("缺信令地址 → load 返回 null", () => {
+    expect(loadRtcConfig({})).toBeNull();
   });
   it("环境变量齐全 → 返回配置", () => {
-    expect(loadRtcConfig({
-      VITE_RTC_WS_URL: full.wsUrl, VITE_RTC_APP_ID: "10000002", VITE_RTC_KEY_ID: "dbg-1", VITE_RTC_DEBUG_SECRET: "s",
-    })).toEqual(full);
+    expect(loadRtcConfig({ VITE_RTC_WS_URL: full.wsUrl })).toEqual(full);
+  });
+});
+
+/** 造一个信封响应，供 stubFetch 用。 */
+function envelope(body: unknown): Response {
+  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+/** 记录每次请求，按路径给出预置响应（与 sdk/tokenSession.test.ts 同款写法）。 */
+function stubFetch(routes: Record<string, unknown>) {
+  const calls: { path: string; auth: string }[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input).split("?")[0];
+    calls.push({ path, auth: new Headers(init?.headers).get("Authorization") || "" });
+    if (!(path in routes)) throw new Error(`unexpected request: ${path}`);
+    return envelope(routes[path]);
+  }));
+  return calls;
+}
+
+describe("signToken", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it("带上当前 IM 会话 token 换票，返回 im-rtc 接入票", async () => {
+    const calls = stubFetch({
+      "/api/v1/rtc/token": { code: 0, data: { token: "rtc-jwt", expires_at_ms: 1, expires_in_sec: 43200 } },
+    });
+    const got = await signToken(() => "IM-TOKEN");
+    expect(got).toBe("rtc-jwt");
+    expect(calls).toEqual([{ path: "/api/v1/rtc/token", auth: "Bearer IM-TOKEN" }]);
+  });
+
+  it("取不到 IM token（未登录）直接拒绝，不发请求", async () => {
+    const calls = stubFetch({});
+    await expect(signToken(() => "")).rejects.toThrow("尚未登录");
+    expect(calls).toEqual([]);
+  });
+
+  it("IMServer 未配置 im-rtc → 600001，原样按业务码抛出", async () => {
+    stubFetch({ "/api/v1/rtc/token": { code: 600001, message: "rtc not configured" } });
+    await expect(signToken(() => "IM-TOKEN")).rejects.toMatchObject({ code: 600001 });
+  });
+
+  // signal 透传（防 StrictMode 下重复换票，见 RtcHost.tsx 的 AbortController）：mock fetch 里
+  // 读 init.signal 来断言它真的传到了底层 fetch，而不是半路被 callJson/fetchEnvelope 弄丢。
+  it("signal 已中止 → 请求被中止而失败，不是拿到响应后才拒绝", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      return envelope({ code: 0, data: { token: "should-not-be-reached" } });
+    }));
+    await expect(signToken(() => "IM-TOKEN", controller.signal)).rejects.toThrow();
   });
 });
 

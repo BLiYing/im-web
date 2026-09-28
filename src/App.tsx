@@ -1891,6 +1891,9 @@ export default function App() {
   // localComplete 直接问 SDK 有没有收到过该会话的 too_long——它是"本地有缺口"的权威来源，
   // 比在 UI 层再算一遍区间可靠（同一事实两处推导迟早分叉）。
   const localComplete = !clientRef.current?.hasGap(convId);
+  // RtcHost 换票用：引用必须稳定（RtcHost 的 effect 拿它当依赖），空依赖数组只建一次，
+  // 调用时刻经 clientRef.current 读到的永远是当前值（不是这里闭包住的快照）。
+  const getRtcAuthToken = useCallback(() => clientRef.current?.authToken ?? "", []);
   const search = useChatSearch({
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
     allMessages: allLocal, convId, groupConvId, uid, groupInfos, conversations,
@@ -3615,7 +3618,7 @@ export default function App() {
       {promptDlg && <PromptDialog dlg={promptDlg} set={setPromptDlg} />}
 
       {/* im-rtc 通话：登录态下挂载 = 起引擎，退出登录卸载 = 销毁；名字头像走本页的解析链。 */}
-      <RtcHost uid={uid} record={{ clientRef, appendMsg }} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
+      <RtcHost uid={uid} getAuthToken={getRtcAuthToken} record={{ clientRef, appendMsg }} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
         profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles,
           // 服务端分页 + 搜索：普通群、超级群同一条路（超级群本地成员表只有我自己）。
           groupMembers: async (cid, opts) => {

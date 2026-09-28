@@ -35,8 +35,12 @@ function ActionsBridge(): null {
   return null;
 }
 
-export function RtcHost({ uid, profiles, profileKey, record }: {
+export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
   uid: string;
+  /** 当前 IM 会话的 Bearer token（实时取值，不是快照）：换票/续票用，见 rtcEngine.ts signToken。
+   *  调用方须保证引用稳定（如 `useCallback(() => ref.current?.authToken ?? "", [])`）——它是本
+   *  effect 的依赖之一，引用不稳会导致每次渲染都重建 RTC 引擎。 */
+  getAuthToken: () => string;
   /** 通话记录发消息所需的 IM 出口：每通电话终局后 SDK 给一次 callSummary，由主叫发一条 content_type=call（见 useCallRecordSend）。 */
   record: Omit<CallRecordSendDeps, "uid">;
   profiles: RtcProfiles;
@@ -50,10 +54,13 @@ export function RtcHost({ uid, profiles, profileKey, record }: {
 
   useEffect(() => {
     if (!uid) return undefined;
-    // StrictMode 会把 effect 跑两遍：用 cancelled 挡住第一遍还没登完就被清理的那次。
+    // StrictMode 会把 effect 跑两遍：cancelled 挡住第一遍还没登完就被清理的那次；
+    // controller 真正中止第一遍的换票请求（见 rtcEngine.ts startRtcEngine 的 signal 注释）——
+    // 不然调试密钥时代不明显的"白算一次"，换成真实网络换票后会变成白打一次后端 + 消耗配额。
     let cancelled = false;
     let dispose: (() => void) | null = null;
-    void startRtcEngine(uid, () => setEngine(null)).then((h) => {
+    const controller = new AbortController();
+    void startRtcEngine(uid, getAuthToken, () => setEngine(null), controller.signal).then((h) => {
       if (!h) return;
       if (cancelled) { h.dispose(); return; }
       dispose = h.dispose;
@@ -61,10 +68,11 @@ export function RtcHost({ uid, profiles, profileKey, record }: {
     });
     return () => {
       cancelled = true;
+      controller.abort();
       dispose?.();
       setEngine(null);
     };
-  }, [uid]);
+  }, [uid, getAuthToken]);
 
   // 通话记录：订阅 SDK 的 callSummary。宿主不自己记通话上下文，事实由 SDK 一次给齐；发不发（role==caller）由 planCallRecord 判。
   const { sendCallRecord } = useCallRecordSend({ ...record, uid });
