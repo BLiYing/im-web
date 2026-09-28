@@ -16,14 +16,26 @@ export function registerCallActions(a: CallActions | null): void {
 // 监听 `callEnd`（uikit 的 CallActions 不含这两个）。与上面 registerCallActions 同一套模块级出口模式：
 // RtcHost 起停引擎时登记 / 反登记，见那里 setEngine 旁的 registerCallEngine 调用。
 let currentEngine: CallEngine | null = null;
+/** 引擎实例更替时通知订阅者（当前只有 `useCallHistory` 用）。不是通用事件总线，只报"变了"，
+ * 不带 payload——订阅者自己用 getCallEngine() 取最新值，逻辑更简单也不怕通知顺序问题。 */
+const engineListeners = new Set<() => void>();
 
 export function registerCallEngine(e: CallEngine | null): void {
   currentEngine = e;
+  engineListeners.forEach((fn) => fn());
 }
 
 /** 通话服务未就绪（未登录 / 引擎没起来）时返回 null，调用方按此显示「未登录」态而非报错。 */
 export function getCallEngine(): CallEngine | null {
   return currentEngine;
+}
+
+/** 订阅引擎更替（含从有到无、从无到有）；返回取消订阅函数。用于组件挂载时引擎还没就绪、
+ * 之后才 registerCallEngine 就绪的场景——不订阅这个事件就永远等不到"引擎后来才好了"这个通知
+ * （/code-review 2026-09-29 发现：useCallHistory 原先只在挂载那一刻读一次 getCallEngine()）。 */
+export function onCallEngineChange(listener: () => void): () => void {
+  engineListeners.add(listener);
+  return () => engineListeners.delete(listener);
 }
 
 /** 通话服务是否就绪。 */

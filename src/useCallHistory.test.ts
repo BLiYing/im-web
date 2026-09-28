@@ -8,7 +8,26 @@ import type { CallHistoryPage, CallHistoryRecord } from "im-rtc-call-engine";
 import { getCallEngine } from "./rtc/rtcCall";
 import { useCallHistory } from "./useCallHistory";
 
-vi.mock("./rtc/rtcCall", () => ({ getCallEngine: vi.fn() }));
+// engineChangeListeners 用 vi.hoisted 声明：vi.mock 工厂会被提升到文件顶部，直接引用外层 const
+// 在提升后可能还没初始化（TDZ），hoisted 是官方推荐的绕开方式。
+const { engineChangeListeners } = vi.hoisted(() => ({ engineChangeListeners: [] as Array<() => void> }));
+
+vi.mock("./rtc/rtcCall", () => ({
+  getCallEngine: vi.fn(),
+  onCallEngineChange: vi.fn((fn: () => void) => {
+    engineChangeListeners.push(fn);
+    return () => {
+      const i = engineChangeListeners.indexOf(fn);
+      if (i >= 0) engineChangeListeners.splice(i, 1);
+    };
+  }),
+}));
+
+/** 模拟 rtcCall.ts 的 registerCallEngine 在真实场景下的效果：引擎变了，通知所有订阅者。
+ * 调用前先用 vi.mocked(getCallEngine).mockReturnValue(...) 把新引擎摆好。 */
+function fireEngineChange(): void {
+  engineChangeListeners.slice().forEach((fn) => fn());
+}
 
 afterEach(cleanup);
 
@@ -99,5 +118,74 @@ describe("useCallHistory", () => {
     const { result } = renderHook(() => useCallHistory("me"));
     await waitFor(() => expect(result.current.error).toBe("network"));
     expect(result.current.records).toEqual([]);
+  });
+
+  // /code-review 2026-09-29 发现：下面三条此前都会失败——engine 只在挂载那一刻读一次，
+  // 后来才就绪/换了新实例都感知不到；未接自动续页失败后会立刻无限重试。
+
+  it("挂载时引擎未就绪，之后才就绪：自动重新拉首页，不永久卡在 network 错误态", async () => {
+    vi.mocked(getCallEngine).mockReturnValue(null);
+    const { result } = renderHook(() => useCallHistory("me"));
+    await waitFor(() => expect(result.current.error).toBe("network"));
+
+    const { engine, pending } = controllableEngine();
+    vi.mocked(getCallEngine).mockReturnValue(engine);
+    act(() => fireEngineChange()); // 对应真实的 registerCallEngine(h.engine) 通知
+
+    await waitFor(() => expect(pending.length).toBe(1));
+    act(() => pending[0].resolve({ records: [rec("a")], nextCursor: null }));
+    await waitFor(() => expect(result.current.records.length).toBe(1));
+    expect(result.current.error).toBe("");
+  });
+
+  it("引擎更替后重新订阅新引擎的 callEnd，不再监听已经换掉的旧引擎", async () => {
+    const engineA = controllableEngine();
+    vi.mocked(getCallEngine).mockReturnValue(engineA.engine);
+    const { result } = renderHook(() => useCallHistory("me"));
+    await waitFor(() => expect(engineA.pending.length).toBe(1));
+    act(() => engineA.pending[0].resolve({ records: [rec("a")], nextCursor: null }));
+    await waitFor(() => expect(result.current.records.map((r) => r.callId)).toEqual(["a"]));
+
+    // 换引擎（对应踢下线后重新登录）。
+    const engineB = controllableEngine();
+    vi.mocked(getCallEngine).mockReturnValue(engineB.engine);
+    act(() => fireEngineChange());
+    await waitFor(() => expect(engineB.pending.length).toBe(1)); // 引擎更替本身也重拉一次首页
+    act(() => engineB.pending[0].resolve({ records: [rec("b")], nextCursor: null }));
+    await waitFor(() => expect(result.current.records.map((r) => r.callId)).toEqual(["b"]));
+
+    // 旧引擎发 callEnd：监听已经不在它身上了，不该触发新请求。
+    act(() => engineA.emitCallEnd());
+    expect(engineA.pending.length).toBe(1);
+    expect(engineB.pending.length).toBe(1);
+
+    // 新引擎发 callEnd：应该触发重拉首页。
+    act(() => engineB.emitCallEnd());
+    await waitFor(() => expect(engineB.pending.length).toBe(2));
+  });
+
+  it("未接自动续页遇到持续失败时停止自动重试（不打成死循环），点重试才继续", async () => {
+    const { engine, pending } = controllableEngine();
+    vi.mocked(getCallEngine).mockReturnValue(engine);
+    const { result } = renderHook(() => useCallHistory("me"));
+    act(() => result.current.setTab("missed"));
+
+    await waitFor(() => expect(pending.length).toBe(1));
+    // 首页 1 条非未接、还没到底 → 未接自动续页该发第 2 页。
+    act(() => pending[0].resolve({ records: [rec("a", { caller: "me", durationSec: 5 })], nextCursor: 2 }));
+    await waitFor(() => expect(pending.length).toBe(2));
+
+    // 第 2 页失败：不该无限重试冒出第 3、4…个请求。
+    act(() => pending[1].reject(new Error("boom")));
+    await waitFor(() => expect(result.current.error).toBe("network"));
+    await new Promise((r) => setTimeout(r, 20)); // 真死循环这里请求数会持续暴涨
+    expect(pending.length).toBe(2);
+
+    // 用户点重试：重新发一次（沿用同一游标），成功后错误态清空。
+    act(() => result.current.retry());
+    await waitFor(() => expect(pending.length).toBe(3));
+    expect(pending[2].cursor).toBe(2);
+    act(() => pending[2].resolve({ records: [], nextCursor: null }));
+    await waitFor(() => expect(result.current.error).toBe(""));
   });
 });
