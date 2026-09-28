@@ -7,7 +7,7 @@ import type { InviteMemberProvider, ProfileResolver } from "im-rtc-call-uikit-re
 import { useLang } from "../i18n";
 import { logger, LOG_TAG } from "../logging/logger";
 import { startRtcEngine } from "./rtcEngine";
-import { registerCallActions } from "./rtcCall";
+import { registerCallActions, registerCallEngine } from "./rtcCall";
 import { buildInviteCandidates, type InviteMemberLike } from "./rtcProfiles";
 import { useCallRecordSend, type CallRecordSendDeps } from "../useCallRecordSend";
 
@@ -60,17 +60,20 @@ export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
     let cancelled = false;
     let dispose: (() => void) | null = null;
     const controller = new AbortController();
-    void startRtcEngine(uid, getAuthToken, () => setEngine(null), controller.signal).then((h) => {
+    // onDead：引擎在拿到之后意外死掉（如被踢下线）；一并把模块级出口注销，通话记录页随之回落「未登录」态。
+    void startRtcEngine(uid, getAuthToken, () => { setEngine(null); registerCallEngine(null); }, controller.signal).then((h) => {
       if (!h) return;
       if (cancelled) { h.dispose(); return; }
       dispose = h.dispose;
       setEngine(h.engine);
+      registerCallEngine(h.engine);
     });
     return () => {
       cancelled = true;
       controller.abort();
       dispose?.();
       setEngine(null);
+      registerCallEngine(null);
     };
   }, [uid, getAuthToken]);
 
