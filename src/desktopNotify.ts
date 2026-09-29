@@ -8,19 +8,25 @@ import type { Conversation } from "./sdk/protocol";
 import type { ChatMessage } from "./sdk/protocol";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 import { t as i18nT } from "./i18n";
+import { alertDecision, type AlertContext } from "./alertDecision";
+import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "./notifySettings";
 
 /**
  * Dock / 任务栏角标数。
  *
- * **免打扰的会话不计入**：这是各家 IM 的通行做法，也是免打扰本身的意思——
+ * **免打扰的会话默认不计入**：这是各家 IM 的通行做法，也是免打扰本身的意思——
  * 把静音群算进角标，用户就得为了消掉那个红点去点开一个他明确说过不想被打扰的会话。
  * 但**免打扰里 @我 的仍要计**（`mention_unread`）：设免打扰是「别为每条消息烦我」，
  * 不是「@我也别告诉我」。这条与 iOS/Web 会话行的红点口径一致（`UI.md` 未读红点那节）。
+ *
+ * `includeMuted`（NOTIFICATIONS_DESIGN §3.4，设置 ▸ 通知 ▸「包含免打扰会话」）：
+ * **默认 `false` = 上面这条现行口径**；调用方不传就是老行为，改口径只影响传 `true` 的调用点。
+ * 打开后免打扰会话也按未读数全额计入（不再降级成「有事记 1」）。
  */
-export function badgeCountOf(convs: readonly Conversation[]): number {
+export function badgeCountOf(convs: readonly Conversation[], includeMuted = false): number {
   let n = 0;
   for (const c of convs) {
-    if (!c.muted) n += c.unread ?? 0;
+    if (!c.muted || includeMuted) n += c.unread ?? 0;
     else if (c.mention_unread) n += 1;   // 静音里被 @：只记 1，表示「这里有事」，不放大成条数
   }
   return n;
@@ -43,23 +49,41 @@ export interface NotifyContext {
 /**
  * 要不要为这条入站消息弹系统通知。
  *
- * 顺序是有讲究的：**先排除「本来就该看到」的情形**（自己发的、正在看的、窗口在前台），
- * 再看免打扰。反过来写会让「免打扰会话里自己发的消息」走到 mention 分支上去。
+ * **NOTIFICATIONS_DESIGN §3.1 起，本函数是 `alertDecision` 的薄封装**（"absorb shouldNotify"）：
+ * 真正的判据表在 `alertDecision.ts`，那边有三端共用的一致性向量兜着。本函数只做两件
+ * `alertDecision` 管不到的窄事——① 没有 `convId` 的畸形消息直接拒绝（`AlertContext` 没有
+ * 「这条消息本身合不合法」这个概念，那是消息域的活）；② 把窄接口 `NotifyContext`（无
+ * `convType`/`settings`/节流等字段）适配成 `AlertContext`：按「全部开关都开、不节流、不在
+ * 通话中」的固定盘算——这些正是 `NotifyContext` 从未表达过的维度，保持旧调用点行为不变。
+ *
+ * **仍然保留**（没有直接删掉、全部调用点迁去 `alertDecision`）：`useDesktopIntegration.ts` 的
+ * 真实通知链路已经改走 `alertDecision`（带完整设置/节流/免打扰穿透/通话中判断），本函数只留给
+ * 历史测试与可能的窄场景调用方——它的契约比 `alertDecision` 窄，语义不会再演进。
  */
 export function shouldNotify(msg: ChatMessage, ctx: NotifyContext): boolean {
-  if (!msg.convId) return false;
-  // 群系统消息（入群/退群/设管理员…）不通知：它在列表里渲染成居中系统行，本就不是「有人跟你说话」；
-  // 而且它的 content 不是人话，通知正文会落到 default 显示成「[消息]」——大群里这类事件很密。
-  if (msg.contentType === "system") return false;
-  if (msg.recalledAt) return false;   // 已撤回的（同步时可能带着撤回标记过来）
-  if (msg.from === ctx.selfUid) return false;                       // 自己发的（含多端抄送）
-  // 通话记录只推被叫「未接来电」（其余被叫本来就响过铃；群系统条不推）。入站的 call 消息发送者必是主叫，我就是被叫。
-  if (msg.contentType === CALL_CONTENT_TYPE
-      && !isMissedCall(msg.content, { viewerIsSender: false, isGroup: callRecordIsGroup(msg.content) })) return false;
-  if (ctx.windowFocused && msg.convId === ctx.currentConvId) return false; // 正看着这个会话
-  if (ctx.windowFocused) return false;                              // 前台：交给应用内的红点/声音
-  if (ctx.muted) return ctx.mentionsMe;                             // 免打扰：只有 @我 才穿透
-  return true;
+  if (!msg.convId) return false;   // 点了也不知道该开哪个会话——AlertContext 没有这个概念，在此单独拦
+  const isCall = msg.contentType === CALL_CONTENT_TYPE;
+  const missedForMe = isCall && isMissedCall(msg.content, { viewerIsSender: false, isGroup: callRecordIsGroup(msg.content) });
+  const alertCtx: AlertContext = {
+    platform: "desktop",
+    isLive: true,
+    isSelf: msg.from === ctx.selfUid,
+    isSystem: msg.contentType === "system",
+    isRecalled: !!msg.recalledAt,
+    isCallRecord: isCall,
+    missedCallForMe: !!missedForMe,
+    convType: "private",   // NotifyContext 不带会话类型；private/group 默认值相同（§3.7 全开），选哪个不影响结果
+    muted: ctx.muted,
+    mentionsMe: ctx.mentionsMe,
+    appActive: true,
+    windowFocused: ctx.windowFocused,
+    viewingConv: ctx.windowFocused && msg.convId === ctx.currentConvId,
+    inCall: false,
+    nowMs: 0,
+    lastSoundAtMs: -Infinity,   // 永不节流：NotifyContext 从没表达过节流窗口
+    settings: DEFAULT_NOTIFY_SETTINGS as NotifySettings,   // 全部开关开：还原旧 shouldNotify 的固定行为
+  };
+  return alertDecision(alertCtx).osNotify;
 }
 
 /** 通知正文。媒体消息的 content 是 URL，直接显出来是一串路径——按类型给可读占位。

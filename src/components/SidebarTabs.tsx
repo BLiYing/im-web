@@ -15,13 +15,15 @@ export interface SidebarTabsProps {
   conversations: readonly Conversation[];
   /** 待处理的好友申请数（「通讯录」页签的数字角标）。 */
   incomingCount: number;
+  /** 通知设置 ▸ 角标计数 ▸「包含免打扰会话」（NOTIFICATIONS_DESIGN §3.4）；默认 false=现行口径。 */
+  includeMuted?: boolean;
   onChats: () => void;
   onContacts: () => void;
 }
 
-export function SidebarTabs({ tab, conversations, incomingCount, onChats, onContacts }: SidebarTabsProps) {
+export function SidebarTabs({ tab, conversations, incomingCount, includeMuted = false, onChats, onContacts }: SidebarTabsProps) {
   const tr = useT();
-  const hasUnread = badgeCountOf(conversations) > 0;
+  const hasUnread = badgeCountOf(conversations, includeMuted) > 0;
   return (
     <div className="tabs">
       <button className={`tab ${tab === "chats" ? "active" : ""}`} onClick={onChats}>

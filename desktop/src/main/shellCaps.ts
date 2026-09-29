@@ -39,6 +39,10 @@ export function setBadge(count: number, tooltip: (text: string) => void): boolea
  * ⚠️ **返回 true 只代表「我们把它交给系统了」**。用户在系统设置里关掉本应用的通知权限、
  * 或开着勿扰时，`show()` 不报错也不显示，Electron 没有 API 能查到——这条残留的不确定性
  * 无法消除，故在此写明：调用方不该把 true 当成「用户一定看见了」。
+ *
+ * `silent: true`（NOTIFICATIONS_DESIGN §3.2 桌面系统通知行）：声音统一由渲染进程按
+ * 设置 ▸ 通知页的开关/音量播放（见 `src/alertPlayer.ts`），这里若不静音，系统默认通知音会跟
+ * App 自己的提示音叠成两声。
  */
 export function notify(
   win: BrowserWindow | null,
@@ -48,7 +52,7 @@ export function notify(
 ): boolean {
   if (!Notification.isSupported()) return false;
   try {
-    const n = new Notification({ title, body });
+    const n = new Notification({ title, body, silent: true });
     n.on("click", () => {
       if (!win || win.isDestroyed()) return;
       if (win.isMinimized()) win.restore();

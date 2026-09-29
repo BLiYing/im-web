@@ -5,6 +5,43 @@
 
 ## 当前焦点
 
+> **通知与提示音 P0 ✅ 代码完成（2026-09-29，浏览器 gm0100 已验证核心交互，未接后端实测收发）**：
+> 设计 `../IMServer/docs/design/NOTIFICATIONS_DESIGN.md`；30 条共用判据向量 `alert_decision.json`。
+> - **新文件**：`src/notifySettings.ts`（模型 + `im.notif.v1` localStorage 持久化，per-field 回落 + Hook）、
+>   `src/alertDecision.ts`（纯函数，30/30 向量绿）、`src/alertPlayer.ts`（预加载 Audio、ogg→mp3 兜底、
+>   1.5s 节流 + 试听不节流）、`components/settings/NotificationsPanel.tsx`（一页平铺，浏览器版桌面通知行
+>   降级占位、例外列表合并私聊+群聊）。
+> - **接线**：`useDesktopIntegration.ts#notifyInbound` 改走 `alertDecision`（不再是原地判断的 `shouldNotify`，
+>   那个函数现在是薄封装、保留给窄场景/旧测试）；桌面 `shellCaps.ts#notify` 加 `silent:true`（声音统一由本页控制，
+>   不再叠系统默认音）；`desktopNotify.ts#badgeCountOf` 加 `includeMuted` 入参（默认 false=现行口径），
+>   `SidebarTabs`/`useDesktopIntegration` 两个调用点都接了 `notif.settings.badge.includeMuted`。
+> - **Web「静音」改「免打扰」**（决策 §9-5）：`web.conv.menu.mute/unmute` 生成物已改中文值，`src/menus.ts`
+>   删掉解释「为何不同」的旧注释、doc comment 里的「静音」字样一并改成「免打扰」。
+> - **测试**：新增 `notifySettings.test.ts`(11) / `alertDecision.test.ts`(34，含 30 条向量) /
+>   `alertPlayer.test.ts`(8) / `useDesktopIntegration.test.ts`(12) / `NotificationsPanel.test.tsx`(10) +
+>   `desktopNotify.test.ts` 补 2 条；`npm run build` 零错误，`npx vitest run` **1591/1591 绿**（含 desktop 端
+>   `npm test` 116/116）。关键分支（notifyInbound 接线、音量滑杆 onChange/onMouseUp 分工）都先红后绿验证过——
+>   后者过程中真的抓到一个 bug：React 给 `<input type=range>` 的 `onChange` 实际绑的是原生 `input` 事件而非
+>   `change`，「拖动只刷新数字、松手才提交+试听」必须靠 `onMouseUp`/`onTouchEnd`/`onKeyUp` 才成立，已修。
+> - **浏览器验证**（gm0100，:5174 无会话）：设置 ▸ 通知 主页/例外列表/重置确认弹窗渲染与交互都过，
+>   `包含免打扰会话` 开关切换即时生效、重置能恢复默认、刷新页面设置不丢、控制台无报错；截图见
+>   `/private/tmp/claude-502/-Users-dev-IOSProject-im-client/02a2407d-ade3-4d4c-b18b-26026d267944/scratchpad/web-notif/`。
+>   **未测**：真实收发消息触发 `alertDecision` 全链路（该账号无好友/会话）、提示音 `<select>` 原生下拉
+>   （自动化点不动系统级 popup）、桌面 Electron 壳里的 `silent:true` 实际效果（未跑 `npm run dev`/打包）。
+> - **已知缺口**：① `notif.exceptions.empty_private` 被借用当 Web 合并例外列表的空态文案（私聊+群聊合并，
+>   没有对应的「合并空态」i18n key，未回写 IMServer 源表——若日后要精确文案需新增 `notif.exceptions.empty_all`
+>   之类的 key）；② P1 范围明确不做：应用内横幅、定时免打扰、「添加例外」入口、移动端 `inApp.*`
+>   （本端无移动壳，字段留着但 UI 不碰）。
+> - **App.tsx 体量收口 ✅（2026-09-29，随本轮一起处理）**：通知接线把 App.tsx 顶到 3695 行，超出
+>   `check-file-size.sh` 登记的 3679 天花板。把设置页体系的 12 个子面板路由（SettingsPanel/DataStoragePanel/
+>   EditProfilePanel/DevicesPanel/PrivacySecurityPanel/BlockedListPanel/ChangePasswordPanel/GeneralPanel/
+>   NotificationsPanel/LanguageSettings/WallpaperPanel/WallpaperColorPanel）整体抽到新文件
+>   `components/settings/SettingsPanelsHost.tsx`（CODING_STYLE §7 决策树②）——不只搬 JSX，`onReset`/`onSubmit`/
+>   `onOpenConv` 等胶水回调体也随迁，改经 `useAppServices()`/`useT()` 直接取 `clientRef`/`setToast`/`comingSoon`/
+>   `askConfirm`/`t`，App 侧收窄成一次组件调用（~30 行 props 透传）。App.tsx 3679 → 3559 行；天花板棘轮
+>   3679 → 3579（脚本注释登记依据）。拆成两个提交：`refactor(web)` 先落地（11 个面板，不含通知）、
+>   `feat(web)` 通知本身把第 12 个面板（NotificationsPanel）接进同一个 host。
+
 > **六条用户报告第 6 项：消息列表补常驻可见滚动条 ✅（2026-09-29，浏览器截图验证）**：
 > 系统原生滚动条在 macOS「滚动时显示」偏好下是覆盖式 overlay，只在滚动瞬间一闪而过（实测
 > `.msgs` 的 `offsetWidth === clientWidth`，确认即使给 `::-webkit-scrollbar` 定制样式，Chrome

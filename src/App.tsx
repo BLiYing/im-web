@@ -68,6 +68,7 @@ import { useDialogs } from "./useDialogs";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
 import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
+import { useNotifySettings } from "./notifySettings";
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
@@ -245,6 +246,7 @@ export default function App() {
   const [blockedOpen, setBlockedOpen] = useState(false); // 已屏蔽的用户子面板（从隐私页进入）
   const [changePwdOpen, setChangePwdOpen] = useState(false); // 修改密码子面板（从隐私页进入）
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
+  const [notificationsOpen, setNotificationsOpen] = useState(false); // 通知设置子面板（NOTIFICATIONS_DESIGN）
   const [languageOpen, setLanguageOpen] = useState(false); // 语言选择子面板
   const t = useT(); // 同时订阅界面语言：切换时 App 重渲染（须在任何早退之前，见 saveRemark 处「login early-return」注释）
   // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
@@ -295,6 +297,7 @@ export default function App() {
     wallpaper, setWallpaper, wallpaperBlur, setWallpaperBlur, wallpaperOpen, setWallpaperOpen,
     wallpaperColorOpen, setWallpaperColorOpen, colorHSV, pickWallpaperImage, resetWallpaper, applyWallpaperColor, openWallpaperColor,
   } = useAppearanceSettings(setToast);
+  const notif = useNotifySettings(); // 通知设置簇（每设备本地，NOTIFICATIONS_DESIGN）；须在下方 useDesktopIntegration 之前
   // 系统深色偏好（仅在 theme==="system" 时决定实际明暗）：跟随 prefers-color-scheme 实时变化，供默认壁纸随主题切换。
 
   const clientRef = useRef<IMClient | null>(null);
@@ -334,7 +337,7 @@ export default function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   // 桌面端集成（角标/通知/自启）。**必须在登录早退之前**（hook 数恒定）；回调经 bindCallbacks 回写。
-  const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current });
+  const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current, notifySettings: notif.settings });
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
@@ -2717,7 +2720,7 @@ export default function App() {
     [
       { id: "general", label: t("settings.row.general"), icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
       { id: "animations", label: t("settings.row.animations"), icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("settings.row.animations")) },
-      { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => comingSoon(t("settings.row.notifications")) },
+      { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => setNotificationsOpen(true) },
       { id: "data", label: t("settings.row.data_storage"), icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
       { id: "privacy", label: t("settings.row.privacy"), icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
       { id: "folders", label: t("settings.row.folders"), icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon(t("settings.row.folders")) },
@@ -2763,7 +2766,7 @@ export default function App() {
           {/* 显示公开句柄而非 uid（10 位随机内部 ID）。没有 username 时只留连接状态。 */}
           <span className="account-meta">{myInfo?.username ? `@${myInfo.username} · ` : ""}{stateText}</span>
         </header>
-        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incomingCount}
+        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incomingCount} includeMuted={notif.settings.badge.includeMuted}
           onChats={() => setTab("chats")}
           onContacts={() => { setTab("contacts"); void refreshFriends(); }} />
         {tab === "chats" ? (
@@ -2847,7 +2850,7 @@ export default function App() {
         />
         )}
 
-        {/* 设置页体系的子面板路由：见 components/settings/SettingsPanelsHost
+        {/* 设置页体系的 12 个子面板路由：见 components/settings/SettingsPanelsHost
             （open 开关/数据仍全部由 App 拥有，那边只做「按开关渲染 + 拼胶水」，CODING_STYLE §7 决策树②）。 */}
         <SettingsPanelsHost
           showSettings={showSettings} setShowSettings={setShowSettings}
@@ -2867,6 +2870,8 @@ export default function App() {
           fontSize={fontSize} setFontSize={setFontSize} theme={theme} setTheme={setTheme}
           timeFormat={timeFormat} setTimeFormat={setTimeFormat} sendKey={sendKey} setSendKey={setSendKey}
           desktop={desktop} setWallpaperOpen={setWallpaperOpen}
+          notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} notif={notif} conversations={conversations}
+          convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl} setConvMuted={setConvMuted} openConvById={openConvById}
           languageOpen={languageOpen} setLanguageOpen={setLanguageOpen}
           wallpaperOpen={wallpaperOpen} wallpaper={wallpaper} isDark={isDark} wallpaperBlur={wallpaperBlur}
           setWallpaperBlur={setWallpaperBlur} setWallpaper={setWallpaper}

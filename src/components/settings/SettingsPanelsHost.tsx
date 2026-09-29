@@ -1,4 +1,4 @@
-// SettingsPanelsHost：设置页体系的子面板路由（从 App.tsx 抽出，CODING_STYLE §7 决策树②
+// SettingsPanelsHost：设置页体系的 12 个子面板路由（从 App.tsx 抽出，CODING_STYLE §7 决策树②
 // 「一整块 UI（面板/弹窗/查看器）→ 独立展示组件」）。App 仍是唯一状态源——每个面板的 open 开关、
 // 数据都经 props 传入；本组件只做「按开关渲染对应面板 + 把简单的 onBack/onXxx 胶水就地拼好」，
 // 不持有业务状态。经 useAppServices()/useT() 直接取 clientRef/setToast/comingSoon/askConfirm/t，
@@ -9,9 +9,10 @@ import { useAppServices } from "../../AppServicesContext";
 import { useT } from "../../i18n";
 import { clamp, type HSVColor } from "../../color";
 import { parseDownloadSettings, type DownloadSettings } from "../../download";
-import type { DeviceView, FriendEntry } from "../../sdk/protocol";
+import type { Conversation, DeviceView, FriendEntry } from "../../sdk/protocol";
 import type { WallpaperChoice } from "../../wallpaper";
 import type { DesktopIntegration } from "../../useDesktopIntegration";
+import type { UseNotifySettings } from "../../notifySettings";
 import type { Row } from "../rows";
 import { SettingsPanel } from "./SettingsPanel";
 import { DataStoragePanel } from "./DataStoragePanel";
@@ -21,6 +22,7 @@ import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
 import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { GeneralPanel } from "./GeneralPanel";
+import { NotificationsPanel } from "./NotificationsPanel";
 import { LanguageSettings } from "./LanguagePanel";
 import { WallpaperPanel } from "./WallpaperPanel";
 import { WallpaperColorPanel } from "./WallpaperColorPanel";
@@ -92,6 +94,16 @@ export interface SettingsPanelsHostProps {
   setSendKey: Dispatch<SetStateAction<"enter" | "cmd">>;
   desktop: DesktopIntegration;
   setWallpaperOpen: Dispatch<SetStateAction<boolean>>;
+
+  // 通知
+  notificationsOpen: boolean;
+  setNotificationsOpen: Dispatch<SetStateAction<boolean>>;
+  notif: UseNotifySettings;
+  conversations: readonly Conversation[];
+  convDisplayLabel: (c: Conversation) => string;
+  convAvatarUrl: (c: Conversation) => string | undefined;
+  setConvMuted: (c: Conversation, muted: boolean) => void;
+  openConvById: (cid: string) => void;
 
   // 语言
   languageOpen: boolean;
@@ -233,6 +245,18 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onFontSize={p.setFontSize} onTheme={p.setTheme} onTimeFormat={p.setTimeFormat} onSendKey={p.setSendKey}
           onOpenWallpaper={() => p.setWallpaperOpen(true)}
           onBack={() => p.setGeneralOpen(false)}
+        />
+      )}
+
+      {/* 通知设置子面板：见 components/settings/NotificationsPanel（NOTIFICATIONS_DESIGN §2.5）。 */}
+      {p.notificationsOpen && (
+        <NotificationsPanel
+          settings={p.notif.settings} isDesktop={p.desktop.isDesktop} conversations={p.conversations}
+          convDisplayLabel={p.convDisplayLabel} convAvatarUrl={p.convAvatarUrl}
+          onSetPrivate={p.notif.setPrivate} onSetGroup={p.notif.setGroup} onSetBadge={p.notif.setBadge} onSetDesktop={p.notif.setDesktop}
+          onUnmute={(c) => p.setConvMuted(c, false)} onBack={() => p.setNotificationsOpen(false)}
+          onOpenConv={(cid) => { p.setNotificationsOpen(false); p.setShowSettings(false); p.openConvById(cid); }}
+          onReset={() => void askConfirm(t("notif.reset.confirm_message"), { okText: t("common.reset"), danger: true }).then((ok) => ok && p.notif.reset())}
         />
       )}
 

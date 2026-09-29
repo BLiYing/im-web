@@ -1,0 +1,1595 @@
+{
+ "_doc": "通知判定 alertDecision 向量（三端共用，NOTIFICATIONS_DESIGN §3.1）。改规则先改这里。 ctx.platform: mobile|desktop|browser。viewingConv 由调用方判定为『用户此刻真的在看这个会话』（移动端=App 前台且在该会话页；桌面/浏览器=窗口在焦点且选中该会话）。 节流窗口 1500ms：nowMs-lastSoundAtMs<1500 视为刚响过。soundId：sound=false 时为 null；未知 id 回落 default。 移动端 sound/vibrate 读 inApp.*，且要求 appActive；桌面/浏览器 sound 读 desktop.sound，osNotify 仅 desktop 且窗口不在焦点。banner 在 P0 恒 false。",
+ "cases": [
+  {
+   "name": "移动端·前台·别的私聊新消息 → 响+振",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "非实时（历史/积压/窗口加载）→ 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": false,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "自己发的 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": true,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "系统消息 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": true,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "撤回 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": true,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "通话记录·非我未接 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": true,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "通话记录·我未接 → 提醒",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": true,
+    "missedCallForMe": true,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "正在看这个会话 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": true,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "私聊类型关 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": false,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "群聊类型关不影响私聊",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": false,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "群聊类型关 → 群消息全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "group",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": false,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "免打扰未@我 → 全不",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": true,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "免打扰但@我（含@全体）→ 穿透",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": true,
+    "mentionsMe": true,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "提示音为「无」→ 只振",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "none"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "群聊用群聊的提示音",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "group",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "drop"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "drop"
+   }
+  },
+  {
+   "name": "未知提示音 id 回落 default",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "xylophone"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "应用内提示音关 → 只振",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": false,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "应用内振动关 → 只响",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": false,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "1.5 秒内已响过 → 节流（响和振都不）",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 99000,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "刚好 1.5 秒 → 不节流",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 98500,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "通话中 → 不响不振",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": true,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "移动端 App 不在前台 → P0 不提醒（无推送）",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": null
+   }
+  },
+  {
+   "name": "P0 恒不出横幅（即使应用内预览开）",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "桌面·窗口在焦点·看别的会话 → 只响",
+   "ctx": {
+    "platform": "desktop",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "桌面·窗口不在焦点 → 响+系统通知",
+   "ctx": {
+    "platform": "desktop",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": false,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": true,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "桌面·桌面通知关 → 只响",
+   "ctx": {
+    "platform": "desktop",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": false,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": false,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "桌面·播放提示音关 → 只弹通知",
+   "ctx": {
+    "platform": "desktop",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": false,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": false,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": false,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": true,
+    "soundId": null
+   }
+  },
+  {
+   "name": "桌面·不在焦点但 viewingConv 由调用方判为 false 时照弹（选中的会话也算别的）",
+   "ctx": {
+    "platform": "desktop",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": false,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": true,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "桌面·inApp.* 不管桌面",
+   "ctx": {
+    "platform": "desktop",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": false,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": false,
+      "vibrate": false,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": true,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "浏览器·页面打开 → 只响，无系统通知",
+   "ctx": {
+    "platform": "browser",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": false,
+    "windowFocused": false,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 0,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": false,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  }
+ ]
+}

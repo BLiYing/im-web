@@ -5,8 +5,14 @@
 // `src/desktopNotify.ts` 里，本文件只负责「什么时候调」以及订阅的生命周期。
 import { useEffect, useRef, useState } from "react";
 import { platform, type GlobalShortcutState } from "./platform";
-import { badgeCountOf, notifyBodyOf, shouldNotify } from "./desktopNotify";
+import { badgeCountOf, notifyBodyOf } from "./desktopNotify";
+import { alertDecision, type AlertContext } from "./alertDecision";
+import { playAlertSound } from "./alertPlayer";
+import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
+import { getCallEngine } from "./rtc/rtcCall";
+import { t as i18nT } from "./i18n";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
+import type { NotifySettings } from "./notifySettings";
 import type { DesktopCallbacks } from "./desktopWiring";
 
 export interface DesktopIntegrationOptions {
@@ -14,9 +20,14 @@ export interface DesktopIntegrationOptions {
   selfUid: string;
   /** 当前打开的会话 id（正在看的不通知）。 */
   currentConvId: string;
+  /** 通知设置（NOTIFICATIONS_DESIGN §6）：私聊/群聊开关与预览、应用内声音、角标口径、桌面声音/音量。 */
+  notifySettings: NotifySettings;
 }
 
 export interface DesktopIntegration {
+  /** 转发 `platform().isDesktop`：调用方（NotificationsPanel 的「浏览器版占位」判断）
+   *  不用再多 import 一次 `./platform`，省一处「我是不是桌面端」的问法（§7.3 ③精神一致）。 */
+  isDesktop: boolean;
   /** 在 `onMessage` 里对每条**新追加**的入站消息调一次。 */
   notifyInbound: (m: ChatMessage) => void;
   /** 在 `convDisplayLabel`/`openChat` 声明处调一次，把两个回调递进来。
@@ -41,7 +52,8 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
 
   // ① 未读角标。只在**数字真的变了**时调：setBadge 是一次跨进程往返（异步，不阻塞渲染），
   //    但 conversations 的引用每次刷新都变，不去重就会为同一个数字反复打点。
-  const badge = badgeCountOf(opts.conversations);
+  //    includeMuted 来自通知设置 §3.4：默认 false = 现行口径，开了才把免打扰会话计进来。
+  const badge = badgeCountOf(opts.conversations, opts.notifySettings.badge.includeMuted);
   const lastBadge = useRef<number | null>(null);
   useEffect(() => {
     if (lastBadge.current === badge) return;
@@ -59,21 +71,59 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
     });
   }, [opts.selfUid]);
 
+  // 上次真的响了一声的时刻：`alertDecision` 的 1.5 秒节流要靠它（连发十条只响一声）。
+  // 只在 `sound` 判为 true 时才推进——被节流/开关关掉/免打扰拦下的那些不算「响过」。
+  const lastSoundAtRef = useRef(0);
+
   const notifyInbound = (m: ChatMessage): void => {
+    if (!m.convId) return;   // 畸形消息：点了也不知道该开哪个会话
     const o = latest.current;
     const conv = o.conversations.find((c) => c.conv_id === m.convId);
     // @我 / @全体 穿透免打扰：与微信 / Telegram 的惯例一致——设免打扰是「别为每条消息烦我」，
     // 不是「@我也别告诉我」。@全体也算，因为它通常就是「这条你必须看」。
     const mentionsMe = !!m.mentions?.includes(o.selfUid) || m.mentionAll === true;
-    if (!shouldNotify(m, {
-      selfUid: o.selfUid,
-      currentConvId: o.currentConvId,
-      // 现问，不缓存：窗口焦点随时在变，缓存下来必然有一段是错的。
-      windowFocused: typeof document !== "undefined" && document.hasFocus(),
+    const isCallRecord = m.contentType === CALL_CONTENT_TYPE;
+    const missedCallForMe = isCallRecord
+      && isMissedCall(m.content, { viewerIsSender: false, isGroup: callRecordIsGroup(m.content) });
+    // 现问，不缓存：窗口焦点随时在变，缓存下来必然有一段是错的。
+    const windowFocused = typeof document !== "undefined" && document.hasFocus();
+    // 通话中不响不振（会抢通话音频）：engine 未就绪（未登录/未配置）时当作没在通话。
+    const callEngine = getCallEngine();
+    const inCall = !!callEngine && callEngine.state.call.state !== "idle";
+    const settings = o.notifySettings;
+    const typeSettings = conv?.is_group ? settings.group : settings.private;
+    const nowMs = Date.now();
+
+    const ctx: AlertContext = {
+      platform: platform().isDesktop ? "desktop" : "browser",
+      isLive: true,   // 调用方（App onMessage）只在 live=true 时才调本函数，见那里的注释
+      isSelf: m.from === o.selfUid,
+      isSystem: m.contentType === "system",
+      isRecalled: !!m.recalledAt,
+      isCallRecord,
+      missedCallForMe: !!missedCallForMe,
+      convType: conv?.is_group ? "group" : "private",
       muted: !!conv?.muted,
       mentionsMe,
-    })) return;
-    void platform().notify({ title: cbRef.current.titleOf(m.convId), body: notifyBodyOf(m), convId: m.convId });
+      appActive: windowFocused,
+      windowFocused,
+      viewingConv: windowFocused && m.convId === o.currentConvId,
+      inCall,
+      nowMs,
+      lastSoundAtMs: lastSoundAtRef.current,
+      settings,
+    };
+    const d = alertDecision(ctx);
+
+    if (d.sound && d.soundId) {
+      lastSoundAtRef.current = nowMs;
+      playAlertSound(d.soundId, settings.desktop.volume);
+    }
+    if (d.osNotify) {
+      // 消息预览关闭时正文统一为「新消息」，标题（会话名/发送者名）不受影响（§3.3）。
+      const body = typeSettings.preview ? notifyBodyOf(m) : i18nT("notif.preview.hidden");
+      void platform().notify({ title: cbRef.current.titleOf(m.convId), body, convId: m.convId });
+    }
   };
 
   // 开机自启。**读宿主的真实状态，而且不能只读一次**：用户可能刚去系统设置里手动改过，
@@ -100,6 +150,7 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
   }, []);
 
   return {
+    isDesktop: platform().isDesktop,
     notifyInbound,
     bindCallbacks: (cb) => { cbRef.current = cb; },
     autoStart,
