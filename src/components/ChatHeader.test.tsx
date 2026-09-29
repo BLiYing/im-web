@@ -25,12 +25,37 @@ describe("ChatHeader", () => {
     fireEvent.click(getByTitle("查看资料")); expect(p.actions.openPeerDetail).toHaveBeenCalledWith("u2", true);
     expect(queryByTitle("呼叫")).toBeNull();
   });
-  it("单聊菜单：编辑联系人/免打扰/选择消息/拉黑/删除会话 接线，点后关菜单", () => {
+  it("单聊菜单：编辑联系人/选择消息/拉黑/删除会话 接线，点后关菜单", () => {
     const p = base({ chatMenu: true }); const { getByText } = mount(p);
     fireEvent.click(getByText("编辑联系人")); expect(p.actions.setContactDraft).toHaveBeenCalledWith({ peer: "u2", remark: "" });
-    fireEvent.click(getByText("免打扰")); expect(p.actions.setConvMuted).toHaveBeenCalledWith(expect.objectContaining({ conv_id: "c" }), true);
     fireEvent.click(getByText("拉黑")); expect(p.actions.doToggleBlock).toHaveBeenCalledWith("u2", true);
     fireEvent.click(getByText("删除会话")); expect(p.actions.deleteConv).toHaveBeenCalled();
+    expect(p.setChatMenu).toHaveBeenCalledWith(false);
+  });
+
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.1/§4.2）：未免打扰时点「免打扰」不立即执行，换成时长子菜单；
+  // 选一个时长才真正调 setConvMuted，且带上算出来的 mute_until；下拉不因这一下关闭（chatMenu 仍 true）。
+  it("单聊菜单「免打扰」→ 换成时长子菜单 → 选「1 小时」才调 setConvMuted(conv,true,~1h 后)", () => {
+    const p = base({ chatMenu: true }); const { getByText, queryByText } = mount(p);
+    const before = Date.now();
+    fireEvent.click(getByText("免打扰"));
+    expect(p.actions.setConvMuted).not.toHaveBeenCalled();
+    expect(p.setChatMenu).not.toHaveBeenCalledWith(false); // 换内容，不关下拉
+    expect(queryByText("编辑联系人")).toBeNull(); // 原行列表已被子菜单替换
+    fireEvent.click(getByText("1 小时"));
+    expect(p.actions.setConvMuted).toHaveBeenCalledTimes(1);
+    const [conv, muted, until] = vi.mocked(p.actions.setConvMuted).mock.calls[0];
+    expect(conv).toEqual(expect.objectContaining({ conv_id: "c" }));
+    expect(muted).toBe(true);
+    expect(until).toBeGreaterThanOrEqual(before + 3_600_000 - 2_000);
+    expect(until).toBeLessThanOrEqual(before + 3_600_000 + 5_000);
+    expect(p.setChatMenu).toHaveBeenCalledWith(false);
+  });
+
+  it("已免打扰的会话：点「⋯」菜单里的「免打扰」文案是「取消免打扰」，点了直接调 setConvMuted(conv,false)，不弹子菜单", () => {
+    const p = base({ chatMenu: true, peerConv: conv({ muted: true }) }); const { getByText } = mount(p);
+    fireEvent.click(getByText("取消免打扰"));
+    expect(p.actions.setConvMuted).toHaveBeenCalledWith(expect.objectContaining({ conv_id: "c" }), false);
     expect(p.setChatMenu).toHaveBeenCalledWith(false);
   });
   it("群聊：身份区 → openGroupPanel；菜单含群资料/邀请成员/退出群聊；仅管理员可邀请 + 我是成员 → 隐藏邀请成员", () => {

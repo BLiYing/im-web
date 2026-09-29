@@ -39,7 +39,7 @@ export abstract class IMRestApi {
   requestFriend(userId: string, hello = ""): Promise<boolean> { return contactApi.requestFriend(this.token, userId, hello); }
   removeFriend(userId: string): Promise<void> { return contactApi.removeFriend(this.token, userId); }
   setRemark(userId: string, remark: string): Promise<void> { return contactApi.setRemark(this.token, userId, remark); }
-  updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> { return contactApi.updateConvSettings(this.token, convId, s); }
+  updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; mute_until?: number; marked_unread: boolean }): Promise<void> { return contactApi.updateConvSettings(this.token, convId, s); }
   setConvRemark(convId: string, remark: string): Promise<void> { return contactApi.setConvRemark(this.token, convId, remark); }
   deleteConversation(convId: string): Promise<void> { return contactApi.deleteConversation(this.token, convId); }
   // ---- 群聊 / 入群（M3~G3）：无状态 HTTP，实现在 sdk/groupApi.ts ----

@@ -162,6 +162,15 @@ describe("buildConversationActions", () => {
     expect(visibleIds(actions, { c: conv({ muted: true }) })).not.toContain("mute");
   });
 
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.3）：互斥判据走 isMutedNow，不是裸 muted。
+  it("定时免打扰未到期：仍显示「取消免打扰」；已过期：视同未免打扰，显示「免打扰」", () => {
+    const actions = buildConversationActions(convHandlers);
+    const now = Date.now();
+    expect(visibleIds(actions, { c: conv({ muted: true, mute_until: now + 60_000 }) })).toContain("unmute");
+    expect(visibleIds(actions, { c: conv({ muted: true, mute_until: now - 1 }) })).toContain("mute");
+    expect(visibleIds(actions, { c: conv({ muted: true, mute_until: now - 1 }) })).not.toContain("unmute");
+  });
+
   it("设为已读在 有未读 或 手动标未读 时可见；标为未读在 已读态 可见", () => {
     const actions = buildConversationActions(convHandlers);
     const vis = (ctx: ConvCtx, id: string) => actions.find((a) => a.id === id)!.visible(ctx);

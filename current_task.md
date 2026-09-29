@@ -5,6 +5,51 @@
 
 ## 当前焦点
 
+> **通知与提示音 P1 · 第二批 ✅ 代码完成（2026-09-29，分支 `feature/notif-p1b`，未浏览器实测）**：
+> 设计 `../IMServer/docs/design/NOTIFICATIONS_P1_DESIGN.md` §4-7；协议 `../IMServer/docs/PROTOCOL.md` §6.10（后端已先落地）。
+> - **`src/muteState.ts`**（新文件，三端同名，SYMMETRY.md 已登记）：`isMutedNow(muted, muteUntil, nowMs)` +
+>   `muteUntilLabel`（today/tomorrow/date/forever 分类，按 `tzOffsetMinutes` 判日历日，便于测试注入时区）+
+>   `MUTE_DURATION_OPTIONS`/`muteUntilForDuration`（1h/8h/1d/7d/永久 → 绝对 `mute_until`）+
+>   `muteUntilText`/`muteUntilPhrase`（拼装展示文案，`date` 分类复用 `time.ts#monthDay` 的 Intl 本地化月份）。
+>   共用向量 `src/testing/muteState.vectors.json`（拷自 IMServer，`muteState.test.ts` 含 drift 守卫）。
+> - **类型/SDK**：`sdk/protocol.ts` 的 `Conversation`/`ConvUpdate` 加 `mute_until`；`imSdk.ts` conv_update 解析带上；
+>   `contactApi.ts#updateConvSettings`/`imSdk.rest.ts` 加可选 `mute_until` 参数（省略 = 让服务端按 §5.2 缺省规则处理，
+>   置顶/标未读/备注这类只想原样带回 `muted` 的调用方**不传**，防止把定时免打扰拉成永久）。
+> - **每个直接读 `muted` 的地方都换成 `isMutedNow`**（NOTIFICATIONS_P1_DESIGN §6.4 清单逐条核对过）：
+>   `App.tsx` 会话列表铃铛/未读置灰、`menus.ts` 会话菜单 mute/unmute 互斥、`desktopNotify.ts#badgeCountOf`
+>   （同时驱动桌面 Dock 角标与批次一的 favicon 角标）、`useDesktopIntegration.ts#notifyInbound`、
+>   `notifExceptions.ts#isExceptionPickable`、`NotificationsPanel.tsx` 例外过滤与副标题、`ChatHeader.tsx`/
+>   `DetailPanel.tsx` 的免打扰状态。**刻意不改**：`desktopNotify.ts#shouldNotify`（已废弃薄封装，无生产调用点，
+>   入参本就是调用方算好的布尔）、`alertDecision.ts` 自身（`AlertContext.muted` 是它的输入契约，由调用方转换，
+>   契约不变）、`useMuteExpiryTick.ts` 里挑「最近未来到期点」那处读（不是"是否免打扰"判断，是找定时器时刻）。
+> - **时长选择**（1 小时/8 小时/1 天/7 天/永久，不做自定义到某天，已拍板③④）：新组件 `components/MuteMenu.tsx`
+>   （只出选项，不含容器，外层按场景各自套壳——右键二级菜单/ChatHeader 下拉换内容用 `menu-card` 系，
+>   聊天信息页锚定小菜单，添加例外选完后用 `Modal`+`.mute-durations`，对齐既有 `MuteDurationModal` 的壳）。
+>   - 会话列表右键「免打扰」→ 展开二级菜单（对齐 UX 稿 04 frame E）；已免打扰时一级项直接是「取消免打扰」，
+>     不弹菜单。状态与写路径抽到新 Hook `useConvMute.ts`（CODING_STYLE §7 决策树①：自己有状态+一组操作），
+>     App.tsx 只做一次 Hook 调用，避免把 `setConvMuted`/`convMuteMenu`/`requestMute` 都堆进已逼近体量上限的 App.tsx。
+>   - `ChatHeader.tsx` 「⋯」下拉「免打扰」：未免打扰点了换成同一个下拉里的时长列表；已免打扰直接执行取消。
+>   - `DetailPanel.tsx` 免打扰行从开关变成「值 + 菜单」行（`common.off`/`muteUntilText`/`common.permanent`
+>     + `ChevronRight`），点击恒弹菜单；已免打扰时菜单顶部多一项红色「取消免打扰」（用于"把 8 小时改成永久"
+>     这类调整，对齐设计 §4.1 与 UX 稿 frame B）；卡片下方新增 `chat.detail.mute_footer` 说明文案。
+>   - 「添加例外」选择页：选完会话不再直接永久免打扰，弹 `notif.mute.sheet_title` 时长 Modal 再选；
+>     脚注换成合并 key `notif.exceptions.pick_footer_all`（批次一遗留的「拼两句」已知偏差随之解决）。
+>   - 例外列表副标题：永久显 `notif.exceptions.muted`/`_mention`；有到期时间显 `notif.exceptions.muted_until`/
+>     `_until_mention`（`{until}` = `muteUntilPhrase`，如「至今天 18:30」）。
+> - **到期刷新**（§4.4）：新 Hook `useMuteExpiryTick.ts`，挂一个定时器到本机会话里「最近的一个未来 mute_until」，
+>   到点/窗口 focus/visibilitychange 时强制重渲染一次（App 一重渲染，列表/角标/例外列表这些本就现读
+>   `Date.now()` 的地方自动翻新）——**不发任何网络请求**，与 `online_until` 同一先例。
+> - **测试**：`muteState.test.ts`（23，含向量 + drift 守卫 + 时长映射）、`useMuteExpiryTick.test.ts`（4）、
+>   `menus.test.ts`/`notifExceptions.test.ts`/`desktopNotify.test.ts`/`useDesktopIntegration.test.ts` 各补
+>   定时免打扰用例、`ChatHeader.test.tsx`/`DetailPanel.test.tsx`/`NotificationsPanel.test.tsx` 补时长子菜单/
+>   Modal 交互用例。新断言均先改坏实现看红过（`isMutedNow` 边界、`useMuteExpiryTick` 定时器阈值、
+>   `menus.ts` 互斥判据），再改回绿。`npm run build` 零错误，`npx vitest run` **1672/1672 绿**（含 desktop
+>   `npm test` 116/116），`check-file-size.sh` 通过（`App.tsx` 3578/3579——把 `setConvMuted`/时长二级菜单
+>   状态抽到 `useConvMute.ts` 才压回上限内，否则会顶到 3598）。
+> - **未做 / 未验**：浏览器手测（右键二级菜单动画、ChatHeader 下拉换内容、详情页菜单锚定位置、深色模式、
+>   英文界面「until tomorrow, HH:mm」这类较长文案的换行）一律未做；后端本批已先行上线，**本轮零改动**，
+>   不需要重启后端；未更新 `../IMServer/docs/CLIENT_PARITY.md`（三端并行，留给协调者统一收口）。
+
 > **通知与提示音 P1 · 第一批 ✅ 代码完成（2026-09-29，分支 `feature/notif-p1a`，未浏览器实测）**：
 > 设计 `../IMServer/docs/design/NOTIFICATIONS_P1_DESIGN.md` §1-3/§6.4(批次一)/§7-8；沿用 P0 的
 > `alertDecision`/`NotificationsPanel`/`ForwardPicker`/`setConvMuted`，本批不碰定时免打扰（第二批）。
@@ -179,13 +224,6 @@
 - **⏸ 拆 `useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
-- **P1 批次一「添加例外」选择页脚注是拼出来的**：Web 例外列表私聊+群聊合并成一个列表，没有对应的
-  「合并选择页脚注」i18n key（源表只给了 `pick_footer_private`/`pick_footer_group` 两句），本端把两句
-  拼在一起显示（`NotificationsPanel.tsx` 的 `pickingException` 分支）。日后要精确文案需新增
-  `notif.exceptions.pick_footer_all` 之类的 key 并回写 IMServer `docs/i18n/strings.json` 源表。
-- **`notifExceptions.ts#isExceptionPickable` 批次一直接读 `c.muted`**：没有 `mute_until`（定时免打扰是
-  第二批），第二批接入三端同名 `isMutedNow` 后要把这里从 `!c.muted` 换成
-  `!isMutedNow(c.muted, c.mute_until, Date.now())`，NOTIFICATIONS_P1_DESIGN §4.3 清单已登记这个改动点。
 - **相册上限 9 是渲染契约，不是偏好**：`albumRowPattern(n>9)` 只有 9 格、`AlbumGrid` 按行 `slice` 取数，
   第 10 件起**根本不渲染**。所以发送侧必须截断（`albumBatch.ts#ALBUM_MAX`，有自洽断言兜着），
   否则多发的消息真进对端库却两端都不显示。三端同值（iOS `selectionLimit` / Android `AlbumLayout.MAX`）。

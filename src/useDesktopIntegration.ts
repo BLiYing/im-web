@@ -8,6 +8,7 @@ import { platform, type GlobalShortcutState } from "./platform";
 import { badgeCountOf, notifyBodyOf } from "./desktopNotify";
 import { alertDecision, type AlertContext } from "./alertDecision";
 import { playAlertSound } from "./alertPlayer";
+import { isMutedNow } from "./muteState";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 import { getCallEngine } from "./rtc/rtcCall";
 import { t as i18nT } from "./i18n";
@@ -103,7 +104,9 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       isCallRecord,
       missedCallForMe: !!missedCallForMe,
       convType: conv?.is_group ? "group" : "private",
-      muted: !!conv?.muted,
+      // 定时免打扰到期后按未免打扰算（NOTIFICATIONS_P1_DESIGN §4.3）：复用上面已算好的 nowMs，
+      // 到期不需要额外请求——服务端同一时刻自然也按已过期返回。
+      muted: isMutedNow(!!conv?.muted, conv?.mute_until, nowMs),
       mentionsMe,
       appActive: windowFocused,
       windowFocused,

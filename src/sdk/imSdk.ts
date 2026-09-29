@@ -1017,7 +1017,7 @@ export class IMClient extends IMRestApi {
       case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
         this.handlers.onConvUpdate?.({
           conv_id: d.conv_id, action: d.action,
-          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, marked_unread: !!d.marked_unread,
+          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, mute_until: Number(d.mute_until) || 0, marked_unread: !!d.marked_unread,
           cleared_at: d.cleared_at ?? 0,
         });
         break;

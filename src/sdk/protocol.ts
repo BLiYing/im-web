@@ -274,7 +274,10 @@ export interface Conversation {
   peer_last_seen?: number;
   // M4.5 会话级设置（每用户私有；conv_update 帧多端同步）：
   pinned_at?: number;      // 置顶时间（0/缺省=未置顶；已置顶排在列表顶，越大越靠上）
-  muted?: boolean;         // 免打扰（弱提示不响铃）
+  muted?: boolean;         // 免打扰（弱提示不响铃）——服务端按当前时刻算好的**有效值**（已到期定时免打扰回 false）
+  /** 定时免打扰到期毫秒（0=永久或未免打扰，NOTIFICATIONS_P1_DESIGN §5）。**所有**判断"是否免打扰"的地方
+   *  都要用 `muteState.ts#isMutedNow(muted, mute_until, now)`，不要单独读 `muted`（见该文件头注登记的清单）。 */
+  mute_until?: number;
   marked_unread?: boolean; // 手动标为未读（红点，不计数）
   remark?: string;         // 会话备注（G1，仅本人可见、多端同步）：非空替代 name/群名显示
   /**
@@ -296,6 +299,7 @@ export interface ConvUpdate {
   action: "settings" | "delete";
   pinned_at: number;
   muted: boolean;
+  mute_until: number; // 定时免打扰到期毫秒（0=永久或未免打扰，§5）
   marked_unread: boolean;
   cleared_at?: number; // 仅 action=delete 带：删除位点
 }
