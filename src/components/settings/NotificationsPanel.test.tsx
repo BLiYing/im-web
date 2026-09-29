@@ -26,6 +26,7 @@ function setup(over: Partial<{ settings: NotifySettings; isDesktop: boolean; con
     onSetBadge: vi.fn(),
     onSetDesktop: vi.fn(),
     onUnmute: vi.fn(),
+    onMuteConv: vi.fn(),
     onOpenConv: vi.fn(),
     onReset: vi.fn(),
     onBack: vi.fn(),
@@ -113,9 +114,45 @@ describe("NotificationsPanel：免打扰的会话（例外列表）", () => {
     expect(screen.getByText(t("notif.row.group"), { exact: false })).toBeTruthy();
   });
 
-  it("没有免打扰会话 → 空态文案", () => {
+  it("没有免打扰会话 → 空态文案，但「添加例外」行仍常驻（已拍板②：例外组不整组隐藏）", () => {
     setup({ conversations: [] });
     fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
     expect(screen.getByText(t("notif.exceptions.empty_private"))).toBeTruthy();
+    expect(screen.getByText(t("notif.exceptions.add"))).toBeTruthy();
+  });
+});
+
+describe("NotificationsPanel：添加例外（P1 §2，复用 ForwardPicker 单选）", () => {
+  it("点「添加例外」打开选择页，只列未免打扰的会话", () => {
+    const convs = [
+      conv({ conv_id: "c1", muted: false }),
+      conv({ conv_id: "c2", muted: true }),
+    ];
+    setup({ conversations: convs });
+    fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
+    fireEvent.click(screen.getByText(t("notif.exceptions.add")));
+    // .fwd-item-label 限定在选择页列表里——c2 本就在背后的「例外」列表中渲染（它是免打扰会话），
+    // 不加选择器会命中那一份，而不是校验选择页本身有没有过滤它。
+    expect(screen.getByText("label-c1", { selector: ".fwd-item-label" })).toBeTruthy();
+    expect(screen.queryByText("label-c2", { selector: ".fwd-item-label" })).toBeNull(); // 已免打扰的不出现在选择页
+  });
+
+  it("选中一行 → 调用 onMuteConv 并关闭选择页", () => {
+    const convs = [conv({ conv_id: "c1", muted: false })];
+    const props = setup({ conversations: convs });
+    fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
+    fireEvent.click(screen.getByText(t("notif.exceptions.add")));
+    fireEvent.click(screen.getByText("label-c1"));
+    expect(props.onMuteConv).toHaveBeenCalledWith(convs[0]);
+    // 选择页关闭：不再显示选择页的空态/脚注文案入口（standalone 判断用脚注文案是否还在）
+    expect(screen.queryByText(t("notif.exceptions.pick_footer_private"), { exact: false })).toBeNull();
+  });
+
+  it("全部会话都已免打扰 → 选择页显示 pick_empty 空态", () => {
+    const convs = [conv({ conv_id: "c1", muted: true })];
+    setup({ conversations: convs });
+    fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
+    fireEvent.click(screen.getByText(t("notif.exceptions.add")));
+    expect(screen.getByText(t("notif.exceptions.pick_empty"))).toBeTruthy();
   });
 });

@@ -9,6 +9,14 @@ import {
 afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 beforeEach(() => { localStorage.clear(); });
 
+describe("默认值", () => {
+  it("应用内提示音/振动/预览默认关（2026-09-29 用户决定），分类通知默认开", () => {
+    expect(DEFAULT_NOTIFY_SETTINGS.inApp).toEqual({ sound: false, vibrate: false, preview: false });
+    expect(DEFAULT_NOTIFY_SETTINGS.private.enabled).toBe(true);
+    expect(DEFAULT_NOTIFY_SETTINGS.group.enabled).toBe(true);
+  });
+});
+
 describe("parseNotifySettings：非法值回落，per-field 不牵连", () => {
   it("空/垃圾输入 → 全默认", () => {
     expect(parseNotifySettings(undefined)).toEqual(DEFAULT_NOTIFY_SETTINGS);

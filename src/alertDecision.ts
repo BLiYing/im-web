@@ -1,6 +1,6 @@
 // 三端共用的通知判据（NOTIFICATIONS_DESIGN §3.1）。**纯函数，与 React/DOM/消息类型无关**——
 // 输入已经是拆好的布尔/字符串，产出该不该响/振/弹横幅/弹系统通知。一致性向量：
-// `IMServer/docs/conformance/alert_decision.json`（30 条，三端单测都读它；改规则先改向量）。
+// `IMServer/docs/conformance/alert_decision.json`（32 条，三端单测都读它；改规则先改向量）。
 //
 // 消息/会话到这份 ctx 的映射（isSelf/isCallRecord/mentionsMe 这些怎么从 ChatMessage 算出来）
 // 不在本文件——那是「消息域」的活，见 `desktopNotify.ts` 的 `shouldNotify`（旧契约的窄场景）
@@ -45,7 +45,7 @@ export interface AlertDecision {
   sound: boolean;
   /** 仅移动端可能为 true；桌面/浏览器恒 false（没有振动能力）。 */
   vibrate: boolean;
-  /** P0 恒 false（应用内横幅是 P1）。 */
+  /** 仅移动端可能为 true（P1 第一批已接，见 NOTIFICATIONS_P1_DESIGN §1.1）；桌面/浏览器恒 false。 */
   banner: boolean;
   /** 仅桌面（Electron）可能为 true；浏览器恒 false（没有系统通知能力）。 */
   osNotify: boolean;
@@ -77,7 +77,10 @@ export function alertDecision(ctx: AlertContext): AlertDecision {
     if (!ctx.appActive) return DENIED; // P0 没有推送：不在前台就收不到提醒
     const wantSound = ctx.settings.inApp.sound && soundId !== "none" && !throttled;
     const wantVibrate = ctx.settings.inApp.vibrate && !throttled;
-    return { sound: wantSound, vibrate: wantVibrate, banner: false, osNotify: false, soundId: wantSound ? soundId : null };
+    // 横幅（P1 §1.1）：资格同 sound/vibrate（含 appActive，已在上面短路），另要求「应用内预览」开，
+    // **不受节流影响**——连来多条时横幅原地换成最新一条，只有声音/振动才节流。
+    const banner = ctx.settings.inApp.preview;
+    return { sound: wantSound, vibrate: wantVibrate, banner, osNotify: false, soundId: wantSound ? soundId : null };
   }
 
   // 桌面 / 浏览器：声音读 `desktop.*`（不是 `inApp.*`——那两个开关只管移动端），

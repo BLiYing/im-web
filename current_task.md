@@ -5,6 +5,39 @@
 
 ## 当前焦点
 
+> **通知与提示音 P1 · 第一批 ✅ 代码完成（2026-09-29，分支 `feature/notif-p1a`，未浏览器实测）**：
+> 设计 `../IMServer/docs/design/NOTIFICATIONS_P1_DESIGN.md` §1-3/§6.4(批次一)/§7-8；沿用 P0 的
+> `alertDecision`/`NotificationsPanel`/`ForwardPicker`/`setConvMuted`，本批不碰定时免打扰（第二批）。
+> - **①横幅判据接上**：`alertDecision.ts` 的 `banner` 从恒 false 改成 `settings.inApp.preview &&`
+>   （移动端资格同 sound/vibrate，含 appActive）、**不受 1.5s 节流影响**；桌面/浏览器恒 false。
+>   共用向量 `alertDecision.vectors.json` 30→32 条（新增「预览开/关」两条 + 既有用例补 `banner` 期望），
+>   `alertDecision.test.ts` 描述串同步改「32 条」。Web 本身不渲染横幅（P1 §0：只有 iOS/Android 有），
+>   这里只是保持三端共用函数口径一致。
+> - **②添加例外**：`NotificationsPanel.tsx` 的例外子页新增常驻「添加例外」行（已拍板②：不再整组隐藏），
+>   点开复用 `ForwardPicker.tsx`（新增可选入参 `filter`/`title`/`hideMultiToggle`/`footer`/`emptyText`，
+>   单选、不显示多选切换）。过滤纯函数 `src/notifExceptions.ts#isExceptionPickable`（批次一直接读
+>   `c.muted`，无 `mute_until`；第二批接 `isMutedNow` 后要跟着换，已在文件头注释登记）。选中一行走
+>   `SettingsPanelsHost.tsx` 新增的 `onMuteConv` prop → `App.tsx` 既有的唯一写路径 `setConvMuted(c, true)`
+>   （原样带回 `pinned_at`/`marked_unread`），不新开一条 PUT。**已知偏差**：Web 本页私聊+群聊合并成一个
+>   列表，没有「合并选择页脚注」i18n key，选择页脚注拼接了 `pick_footer_private` + `pick_footer_group`
+>   两句（都列出，只是不分栏）；空态用专门给的 `pick_empty`。
+> - **③浏览器标签页角标**：新文件 `src/faviconBadge.ts`（纯状态计算 `faviconBadgeState`/`faviconBadgeLabel`/
+>   `faviconTitleOf`/`hasMarkedUnreadConv`/`faviconBadgeKey` + canvas 绘制 `drawFaviconBadge`，读
+>   `index.html` 的 `<link rel="icon">`，颜色优先读 `getComputedStyle` 的 `--danger`，取不到时退回常量
+>   `FAVICON_BADGE_FALLBACK_COLOR`="#e5484d"，与 UI_COLOR.md 浅色 `--danger` 一致）+
+>   `src/useFaviconBadge.ts`（hook，接 `badgeCountOf(conversations, includeMuted)`，`platform().isDesktop`
+>   时整个短路——桌面版已有 Dock 角标；数字不变不重画；`document.title` 只在有数字时加 `(n) ` 前缀，
+>   红点/恢复原图标时不加）。接线：`App.tsx` 在 `useDesktopIntegration` 调用后加一行
+>   `useFaviconBadge(conversations, notif.settings.badge.includeMuted)`。
+> - **测试**：新增 `notifExceptions.test.ts`(3)、`faviconBadge.test.ts`(15)、`useFaviconBadge.test.ts`(8)，
+>   `ForwardPicker.test.tsx` +5（新入参）、`NotificationsPanel.test.tsx` +4（添加例外流程）、
+>   `alertDecision.test.ts` banner 相关 3 条改写。全部新断言先改坏实现看红过（banner 恒 false / 过滤恒
+>   true / 99+ 边界去掉 / filter 不生效），再改回绿。`npm run build` 零错误，`npx vitest run`
+>   **1630/1630 绿**（含 desktop 端 `npm test` 116/116），`check-file-size.sh` 通过（App.tsx 3562/3579）。
+> - **未做 / 未验**：浏览器手测（favicon 实际画出来的样子、添加例外的真实点击流程、深色模式下角标颜色）
+>   一律未做，留给 lead 用浏览器验证；②③两项后端零改动，不需要重启后端。P1 第二批（定时免打扰、
+>   `mute_until`、`isMutedNow`）明确不在本批范围内。
+
 > **通知与提示音 P0 ✅ 代码完成（2026-09-29，浏览器 gm0100 已验证核心交互，未接后端实测收发）**：
 > 设计 `../IMServer/docs/design/NOTIFICATIONS_DESIGN.md`；30 条共用判据向量 `alert_decision.json`。
 > - **新文件**：`src/notifySettings.ts`（模型 + `im.notif.v1` localStorage 持久化，per-field 回落 + Hook）、
@@ -146,6 +179,13 @@
 - **⏸ 拆 `useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
+- **P1 批次一「添加例外」选择页脚注是拼出来的**：Web 例外列表私聊+群聊合并成一个列表，没有对应的
+  「合并选择页脚注」i18n key（源表只给了 `pick_footer_private`/`pick_footer_group` 两句），本端把两句
+  拼在一起显示（`NotificationsPanel.tsx` 的 `pickingException` 分支）。日后要精确文案需新增
+  `notif.exceptions.pick_footer_all` 之类的 key 并回写 IMServer `docs/i18n/strings.json` 源表。
+- **`notifExceptions.ts#isExceptionPickable` 批次一直接读 `c.muted`**：没有 `mute_until`（定时免打扰是
+  第二批），第二批接入三端同名 `isMutedNow` 后要把这里从 `!c.muted` 换成
+  `!isMutedNow(c.muted, c.mute_until, Date.now())`，NOTIFICATIONS_P1_DESIGN §4.3 清单已登记这个改动点。
 - **相册上限 9 是渲染契约，不是偏好**：`albumRowPattern(n>9)` 只有 9 格、`AlbumGrid` 按行 `slice` 取数，
   第 10 件起**根本不渲染**。所以发送侧必须截断（`albumBatch.ts#ALBUM_MAX`，有自洽断言兜着），
   否则多发的消息真进对端库却两端都不显示。三端同值（iOS `selectionLimit` / Android `AlbumLayout.MAX`）。

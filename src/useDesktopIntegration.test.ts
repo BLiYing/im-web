@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // 桌面集成的接线测试：`notifyInbound` 现在是 alertDecision + alertPlayer + notifySettings 的
 // 真正接线点（NOTIFICATIONS_DESIGN），这里只验证「接对了」——判据本身的正确性由
-// alertDecision.test.ts 的 30 条共用向量兜底，不在这里重复。
+// alertDecision.test.ts 的 32 条共用向量兜底，不在这里重复。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, cleanup, waitFor } from "@testing-library/react";
 import { useDesktopIntegration } from "./useDesktopIntegration";

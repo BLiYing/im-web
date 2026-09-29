@@ -12,7 +12,7 @@ interface Case {
   expect: { sound: boolean; vibrate: boolean; banner: boolean; osNotify: boolean; soundId: string | null };
 }
 
-describe("alert_decision 共用向量（31 条）", () => {
+describe("alert_decision 共用向量（32 条）", () => {
   for (const c of (vectors as { cases: Case[] }).cases) {
     it(c.name, () => {
       const r = alertDecision(c.ctx);
@@ -71,8 +71,24 @@ describe("alertDecision 边界（向量之外，补几条防回归）", () => {
     expect(d.sound).toBe(true);
   });
 
-  it("banner 在任何输入下恒 false（P0 未实现应用内横幅）", () => {
+  it("banner 仅移动端可能为 true，桌面/浏览器恒 false（即使 inApp.preview 开）", () => {
     expect(alertDecision(base).banner).toBe(false);
-    expect(alertDecision({ ...base, platform: "mobile" }).banner).toBe(false);
+    expect(alertDecision({ ...base, platform: "browser" }).banner).toBe(false);
+  });
+
+  it("banner 不受节流影响：1.5 秒内连响，横幅仍照出", () => {
+    const d = alertDecision({ ...base, platform: "mobile", windowFocused: true, lastSoundAtMs: base.nowMs - 1 });
+    expect(d.sound).toBe(false); // 声音被节流
+    expect(d.banner).toBe(true); // 横幅不受节流影响
+  });
+
+  it("banner 跟随 inApp.preview：关闭时移动端不出横幅（即使其余资格都满足）", () => {
+    const d = alertDecision({
+      ...base,
+      platform: "mobile",
+      windowFocused: true,
+      settings: { ...base.settings, inApp: { ...base.settings.inApp, preview: false } },
+    });
+    expect(d.banner).toBe(false);
   });
 });

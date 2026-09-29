@@ -102,6 +102,7 @@ import { LOG_TAG, logger, setLogContext } from "./logging/logger";
 import { SYSTEM_UID } from "./sdk/protocol";
 import { unreadBadgeText } from "./unreadBadge";
 import { useDesktopIntegration } from "./useDesktopIntegration";
+import { useFaviconBadge } from "./useFaviconBadge";
 import { makeDesktopTitleOf } from "./desktopWiring";
 import { makeMessageTextRenderers } from "./components/messageText";
 import { pauseVoicePlayback } from "./components/VoiceBubble";
@@ -338,6 +339,8 @@ export default function App() {
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   // 桌面端集成（角标/通知/自启）。**必须在登录早退之前**（hook 数恒定）；回调经 bindCallbacks 回写。
   const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current, notifySettings: notif.settings });
+  // Web 标签页 favicon 角标（NOTIFICATIONS_P1_DESIGN §3）：仅浏览器版生效，hook 内部按 platform().isDesktop 短路。
+  useFaviconBadge(conversations, notif.settings.badge.includeMuted);
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
