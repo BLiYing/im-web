@@ -1,7 +1,7 @@
 // 「设置 ▸ 最近通话」面板：只读通话历史（含群通话），点单聊行按原类型直接回拨，点群聊行跳转群会话。
 // 设计见 IMServer docs/design/CALL_HISTORY_DESIGN.md，配套 UX 稿 sketches/CALL_HISTORY_UX_SKETCH.html §02-§05。
 // 数据/分页/筛选逻辑在 useCallHistory（状态）+ callHistoryView（纯函数）；本文件只管渲染与身份解析的胶水。
-import type { UIEvent } from "react";
+import { useMemo, type UIEvent } from "react";
 import { ArrowDownLeft, ArrowUpRight, Phone, Users, Video } from "lucide-react";
 import type { CallHistoryRecord } from "im-rtc-call-engine";
 import { Modal } from "./Modal";
@@ -13,6 +13,18 @@ import { useCallHistory } from "../useCallHistory";
 import {
   callHistoryLine, callHistoryPeerUid, filterHistoryRecords, groupHistoryByDay, type CallHistoryTab,
 } from "../callHistoryView";
+
+/** 四态穷尽一个值，不用四个手写布尔各自重复算一遍三分支条件（/code-review 2026-09-29：
+ * 原先 catchingUp/showEmpty/showError/showLoading 各自取反拼一遍，容易改一处漏一处，
+ * 出现"哪个都不是"或"两个同时是真"的态，界面会静默地空着或对不上）。
+ * 优先级与原判据完全等价：有数据先显列表；否则不在加载中时，出错显错误、其余条件都不成立显空态；
+ * 剩下的情况（仍在加载 / 或"未接"tab 还在自动续页且暂无过滤后数据）统一算作 loading。 */
+function callHistoryViewStateOf(hasRows: boolean, loading: boolean, error: string, hasMore: boolean): "list" | "error" | "empty" | "loading" {
+  if (hasRows) return "list";
+  if (!loading && error) return "error";
+  if (!loading && !error && !hasMore) return "empty";
+  return "loading";
+}
 
 export interface CallHistoryPanelProps {
   myUid: string;
@@ -36,17 +48,17 @@ export function CallHistoryPanel({
 }: CallHistoryPanelProps) {
   const tr = useT();
   const { records, tab, setTab, loading, error, hasMore, loadMore, retry } = useCallHistory(myUid);
-  const filtered = filterHistoryRecords(records, tab, myUid);
-  const groups = groupHistoryByDay(filtered);
+  // 过滤 + 按日分组只在 records/tab/myUid 真的变化时才重算（/code-review 2026-09-29：原先每次
+  // 渲染都重新做一遍，父组件任何无关状态变化——包括下面提到的 App.tsx 传入的解析函数每次渲染
+  // 重建——都会顺带把这个 O(n) 计算白跑一遍）。
+  const filtered = useMemo(() => filterHistoryRecords(records, tab, myUid), [records, tab, myUid]);
+  const groups = useMemo(() => groupHistoryByDay(filtered), [filtered]);
 
-  // 三态判据（§4 见文件头设计文档链接）：
-  // - 列表非空：始终走列表 + 底部小提示（loading/error/留白）。
-  // - 列表为空：loading 或「未接 tab 还在自动续页」时显示整页 loading，避免自动续页途中的 loading↔loading 间隙闪出空状态；
-  //   否则按 error/无更多 分空态或错态。
-  const catchingUp = tab === "missed" && filtered.length === 0 && hasMore && !error;
-  const showEmpty = filtered.length === 0 && !loading && !error && !hasMore;
-  const showError = filtered.length === 0 && !loading && !!error;
-  const showLoading = filtered.length === 0 && !showEmpty && !showError;
+  // 四态判据（§4 见文件头设计文档链接）见上面 callHistoryViewStateOf 的注释。
+  const viewState = callHistoryViewStateOf(filtered.length > 0, loading, error, hasMore);
+  const showLoading = viewState === "loading";
+  const showEmpty = viewState === "empty";
+  const showError = viewState === "error";
 
   const handleRowClick = (r: CallHistoryRecord) => {
     if (r.isGroup) { onClose(); onOpenGroup(r.chatGroupId); return; }
@@ -90,7 +102,7 @@ export function CallHistoryPanel({
               ))}
             </div>
           ))}
-          {(loading || catchingUp) && <div className="callh-foot">{tr("common.loading")}</div>}
+          {loading && <div className="callh-foot">{tr("common.loading")}</div>}
           {!loading && error && <button className="callh-foot callh-foot-retry" onClick={retry}>{errorText}</button>}
         </div>
       )}

@@ -36,6 +36,10 @@ export function useCallHistory(myUid: string): UseCallHistoryResult {
   const [tab, setTab] = useState<CallHistoryTab>("all");
   /** 刷新（callEnd/首次进页）会让还在路上的旧翻页请求作废：应答回来时代数对不上就丢掉。 */
   const generation = useRef(0);
+  // cursorRef 镜像 nextCursor：`load` 用 `useCallback(..., [])` 保持引用稳定（见下），
+  // 靠这个 ref 而不是闭包捕获来读"最新游标"。`nextCursor` 目前只有一处 setter（下面 load 的
+  // .then 里），如果以后再加一个 setNextCursor 调用点，务必也让它顺带更新 cursorRef，
+  // 否则 loadMore 会读到过期游标（/code-review 2026-09-29 提醒：这里是手动同步，不是自动衍生）。
   const cursorRef = useRef<number | null>(null);
   cursorRef.current = nextCursor;
   /** 引擎实例更替时 +1，逼首次加载 / callEnd 订阅两个 effect 重新判断——engine 是模块级单例
