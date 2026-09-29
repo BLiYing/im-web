@@ -97,3 +97,36 @@ describe("ForwardPicker 单选/多选与合并模式", () => {
     expect(onToggleMulti).toHaveBeenCalled();
   });
 });
+
+// 「添加例外」（NOTIFICATIONS_P1_DESIGN §2）复用本组件的可选入参：filter/title/hideMultiToggle/footer/emptyText。
+describe("ForwardPicker 可选入参（添加例外场景收窄用）", () => {
+  it("filter 在系统通知过滤之后再收窄一次；不传则不额外过滤", () => {
+    render(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} filter={(c) => c.conv_id !== "b"} />);
+    expect(screen.queryByText("b", { selector: ".fwd-item-label" })).toBeNull();
+    expect(screen.getByText("a", { selector: ".fwd-item-label" })).toBeTruthy();
+  });
+
+  it("title 覆盖默认的「转发(N)」标题", () => {
+    render(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} title="添加例外" />);
+    expect(screen.getByText("添加例外")).toBeTruthy();
+    expect(screen.queryByText(/^转发/)).toBeNull();
+  });
+
+  it("hideMultiToggle 隐藏右上角「多选」按钮", () => {
+    render(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} hideMultiToggle />);
+    expect(screen.queryByText("多选")).toBeNull();
+  });
+
+  it("footer 在列表下方显示说明文案，不传则不渲染", () => {
+    const { rerender } = render(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} />);
+    expect(screen.queryByText("只列未免打扰的会话")).toBeNull();
+    rerender(<ForwardPicker {...base} count={1} multi={false} mode="each" targets={[]} footer="只列未免打扰的会话" />);
+    expect(screen.getByText("只列未免打扰的会话")).toBeTruthy();
+  });
+
+  it("emptyText 覆盖「列表本身为空」（非搜索）时的空态文案", () => {
+    render(<ForwardPicker {...base} conversations={[]} count={1} multi={false} mode="each" targets={[]} emptyText="没有可添加的会话" />);
+    expect(screen.getByText("没有可添加的会话")).toBeTruthy();
+    expect(screen.queryByText("暂无会话")).toBeNull();
+  });
+});

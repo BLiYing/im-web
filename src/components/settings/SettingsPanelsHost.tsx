@@ -254,7 +254,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           settings={p.notif.settings} isDesktop={p.desktop.isDesktop} conversations={p.conversations}
           convDisplayLabel={p.convDisplayLabel} convAvatarUrl={p.convAvatarUrl}
           onSetPrivate={p.notif.setPrivate} onSetGroup={p.notif.setGroup} onSetBadge={p.notif.setBadge} onSetDesktop={p.notif.setDesktop}
-          onUnmute={(c) => p.setConvMuted(c, false)} onBack={() => p.setNotificationsOpen(false)}
+          onUnmute={(c) => p.setConvMuted(c, false)} onMuteConv={(c) => p.setConvMuted(c, true)} onBack={() => p.setNotificationsOpen(false)}
           onOpenConv={(cid) => { p.setNotificationsOpen(false); p.setShowSettings(false); p.openConvById(cid); }}
           onReset={() => void askConfirm(t("notif.reset.confirm_message"), { okText: t("common.reset"), danger: true }).then((ok) => ok && p.notif.reset())}
         />

@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { SubPanel } from "./SubPanel";
 import { Avatar } from "../Avatar";
+import { renderRow } from "../rows";
+import { ForwardPicker } from "../modals/ForwardPicker";
 import { useT } from "../../i18n";
 import { previewAlertSound } from "../../alertPlayer";
+import { isExceptionPickable } from "../../notifExceptions";
 import { NOTIFY_SOUND_IDS, type NotifySettings, type NotifySoundId, type NotifyTypeSettings } from "../../notifySettings";
 import type { Conversation } from "../../sdk/protocol";
 
@@ -17,7 +21,7 @@ import type { Conversation } from "../../sdk/protocol";
 export function NotificationsPanel({
   settings, isDesktop, conversations, convDisplayLabel, convAvatarUrl,
   onSetPrivate, onSetGroup, onSetBadge, onSetDesktop,
-  onUnmute, onOpenConv, onReset, onBack,
+  onUnmute, onMuteConv, onOpenConv, onReset, onBack,
 }: {
   settings: NotifySettings;
   isDesktop: boolean;
@@ -29,6 +33,9 @@ export function NotificationsPanel({
   onSetBadge: (patch: Partial<NotifySettings["badge"]>) => void;
   onSetDesktop: (patch: Partial<NotifySettings["desktop"]>) => void;
   onUnmute: (c: Conversation) => void;
+  /** 「添加例外」选中一个会话后设免打扰（NOTIFICATIONS_P1_DESIGN §2）：批次一 = 永久，
+   *  经 App 的唯一写路径 `setConvMuted` 落地（原样带回 pinned_at/marked_unread）。 */
+  onMuteConv: (c: Conversation) => void;
   onOpenConv: (convId: string) => void;
   /** 重置确认由 App 侧 askConfirm 包好，这里只负责触发。 */
   onReset: () => void;
@@ -36,6 +43,7 @@ export function NotificationsPanel({
 }) {
   const t = useT();
   const [showExceptions, setShowExceptions] = useState(false);
+  const [pickingException, setPickingException] = useState(false);
 
   // 免打扰的会话（私聊+群聊合并，按最后消息时间倒序）——§3.5：数据取本机会话表 muted=true，
   // 本页不提供「添加例外」，只查看与取消。
@@ -45,9 +53,12 @@ export function NotificationsPanel({
     .sort((a, b) => (b.last_message?.timestamp ?? 0) - (a.last_message?.timestamp ?? 0));
 
   if (showExceptions) {
+    // 已拍板②（P1 §2）：例外组常驻「添加例外」，没有免打扰会话时这一行下面只剩空态说明，
+    // 不再像第一期那样整组隐藏。
     return (
       <SubPanel className="notif-panel" title={t("notif.section.exceptions")} onBack={() => setShowExceptions(false)}>
         <div className="settings-group">
+          {renderRow({ id: "add", label: t("notif.exceptions.add"), icon: Plus, iconTint: "green", onClick: () => setPickingException(true) }, "settings-row")}
           {muted.length === 0 ? (
             // §3.5 的空态文案是 iOS/Android 私聊/群聊分开子页各自的措辞；Web 本页合并显示，
             // 没有对应的「合并空态」key（已在交付报告里列为缺失 i18n key），暂借用 empty_private。
@@ -70,6 +81,32 @@ export function NotificationsPanel({
             </div>
           ))}
         </div>
+
+        {/* 添加例外（P1 §2）：复用转发选择页 ForwardPicker（单选、无多选切换）。
+            Web 本页私聊/群聊合并成一个列表，没有对应的「合并」选择页脚注 key，
+            这里把 pick_footer_private/_group 两句拼在一起说明——即列出私聊也列出群聊，
+            都只要未免打扰的（已在交付报告里列为已知偏差）。 */}
+        {pickingException && (
+          <ForwardPicker
+            count={1}
+            conversations={conversations as Conversation[]}
+            multi={false}
+            mode="each"
+            targets={[]}
+            convAvatarUrl={convAvatarUrl}
+            convDisplayLabel={convDisplayLabel}
+            onToggleMulti={() => {}}
+            onSetMode={() => {}}
+            onToggleTarget={() => {}}
+            filter={isExceptionPickable}
+            title={t("notif.exceptions.add")}
+            hideMultiToggle
+            footer={`${t("notif.exceptions.pick_footer_private")} ${t("notif.exceptions.pick_footer_group")}`}
+            emptyText={t("notif.exceptions.pick_empty")}
+            onForward={(picked) => { const c = picked[0]; if (c) onMuteConv(c); setPickingException(false); }}
+            onClose={() => setPickingException(false)}
+          />
+        )}
       </SubPanel>
     );
   }
