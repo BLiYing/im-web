@@ -5,74 +5,27 @@
 
 ## 当前焦点
 
-> **im-rtc 2.1.0 通话 Kit 多语言接线到「设置 ▸ 语言」（三端，2026-09-27）**：`src/rtc/RtcHost.tsx` 的
-> `<CallProvider>` 此前完全没传 `locale`，SDK 2.1.0 的多语言能力升级后一直没生效。加 `const lang = useLang()`
-> （`src/i18n`），`<CallProvider locale={lang === "zh-Hans" ? "zh-CN" : "en"}>`——直接喂已解析值，**不用**
-> uikit 自带的 `resolveLocale('auto', …)`，与 iOS/Android 同一个选择（避免两套"跟系统"判据打架）。
-> 因为 `useLang()` 是响应式 hook，语言设置变化会自动重渲染生效，不需要像 iOS/Android 那样手动挂一个
-> 变更监听。`npm run build` 零错误。三端对称改动见 `../IMServer/docs/SYMMETRY.md`。
-> **未做**：浏览器里实际切一次语言、发起一次通话看 Kit 文案是否跟着变。
-
-> **通话记录：被叫侧 `cancel` 文案「未接来电」→「对方已取消」（三端 + 设计文档，2026-09-27，与用户讨论后拍板）**：
-> `cancel`（主叫主动撤回）跟真正错过（`no_answer`/`busy`/`offline`）不是一回事，只改这一种 reason 的措辞，其余三种
-> 与推送文案不变；`tone`（红/计未读/推送）完全不变，纯文案改动。本端改动：`src/callRecord.ts` 的
-> `UNANSWERED_KEYS.cancel` 被叫键从 `call.record.missed` 改成新键 `call.record.cancelled_by_peer`
-> （`../IMServer/docs/i18n/strings.json` 新增，已 `node scripts/i18n/gen-i18n.mjs` 重新生成
-> `src/i18n/locales/*.json`）；`isMissedCall`/`tone` 判定本就结构化读 `renderCallRecord(...).tone`，
-> 不依赖文案字符串，未受影响（这点 Android 那边不同，见其 `current_task.md`）。三端共用向量
-> `../IMServer/docs/conformance/call_record.json` 改的那条用例已同步拷贝进本仓
-> `src/testing/callRecord.vectors.json`。`tsc -b` 干净、`vitest` 全量 **1476/1476 绿**、
-> `npm run build` 零错误。**未做**：浏览器实测"A 呼叫 B、A 取消"看气泡与会话列表预览。
-
-> **多语言 P1+P2+P3 ✅ 已完成（2026-09-22，中文 + 英文；P1+P2 已 commit 1ae0c52 推送，P3 未提交；浏览器未手测）**：P1 基础设施（`src/i18n` 的 `t()`/`useT()`/`setPref` + `LanguagePanel` 设置 ▸ 语言 + 桌面 IPC 同步）。**P2** 存量迁移全覆盖：设置面板、聊天侧组件、各类 modals、详情/联系人/管理侧组件、`menus.ts`/`useGroupOps.ts`/`useChatSearch.ts` 等 hooks、`sdk/errcode.ts` 错误码（对齐 iOS `err.*`）；`tsc -b` 干净、`vitest` 全量 **1434 例绿**。
-> **P3 客户端消费**（未提交，另一次会话完成）：新增 `src/sysEventRender.ts`（`buildGroupSysSegments`/`buildSysNoticeText`/`localizeReplySnapshot`，消费服务端 `sys_event`/`sys_args`/`reply_snapshot_kind`/`_args`，占位符分词——从 `format()` 抽出的 `tokenizeTemplate()` 复用——不在代码里拼句子结构）；`sdk/protocol.ts`/`parseMessage.ts`/`localStore.web.ts` 补齐四个新字段的解析/落库；`MessageList.tsx`/`convPreview.ts` 接入。**顺手修了真实 bug**：`messageContent.ts` 的 `localizeSnippet` 此前硬编码中文，不跟随 App 语言，现改用 `t()`。`tsc -b` 干净、`vitest` 全量 **1466/1466 绿**、`check-file-size.sh` 全部在预算内（`MessageList.tsx` 恰好压线 600/600，WARN 不 FAIL）。文案表现有 **1386 键**（跨三端共用，见 `../IMServer/docs/i18n/strings.json`）。
-> ⚠️ 已知缺口（详见 `../IMServer/docs/design/I18N_DESIGN.md` §6.1）：`messageContent.ts` 的 `chatRecordSnippet()`（旧版 JSON 快照就地救标题的兜底分支）仍硬编码中文；桌面若切到 SQLite 本地库后端（`desktop/src/main/sqliteRows.ts`/`sqliteStore.ts`），四个新字段未接入（当前多数场景走 IndexedDB，不受影响）。
-> **P2 范围内刻意 DEFERRED（不是漏改）**：`App.tsx` 好友申请默认招呼语（发给服务端的消息内容）、`messageContent.ts`/`callRecord.ts`（消息预览占位符）、`mention.ts` 的 `MENTION_ALL_LABEL`（@全员 token，进消息正文）——均待 P3 服务端结构化。`sdk/localStore.contract*.ts` 命中的中文是契约测试用例描述/夹具数据，不算漏改。
-> ⚠️ 待清理（非阻塞）：`net.error.avatar_upload_failed` 与 `group.create.avatar_failed` 中文相同英文不同，语义重叠，将来可考虑收口成一个 `common.*`；`menus.ts`「静音/取消静音」与 `ChatHeader.tsx`「免打扰/取消免打扰」指向同一开关但措辞历史遗留不一致（新增 `web.conv.menu.mute/unmute` 保持原样），是否统一待产品定夺。
-> ⚠️ W5 发现会话菜单「静音/取消静音」(`menus.ts`) 与详情页「免打扰/取消免打扰」(`ChatHeader.tsx`) 指向同一个开关但措辞不一致（历史遗留，非本次引入）——保持原文案不变、按规则拆了 `web.conv.menu.mute/unmute` 单独键，是否统一措辞待产品定夺。
-> ⚠️ **模块顶层不许调 `t()`**（切语言不会变）；`test-setup.ts` 固定 `im.language=zh-Hans`（jsdom 的 navigator.languages 是 en-US）；`App.tsx` 行数预算已顶到 3670/3679，新逻辑别往里塞。
-> ⚠️ P2 迁移子代理**曾因周额度限流失败一次**（batch W3，2026-09-21）——失败前的代码改动与文案片段合并均已正常完成，只是收尾报告被打断；每次继续迁移前先核实 git diff 与片段合并状态，务必重新跑一遍 `tsc -b`/`vitest`/`check-i18n.mjs` 确认，别假设失败=没做完。
->
-> **im-rtc 通话接入（调试密钥联调）✅ 代码完成、待真机联调（2026-09-19，未提交）**：`src/rtc/`（`RtcHost` 登录后起引擎 / 退出销毁、
-> `rtcEngine` 换票只走 `signToken`、`rtcCall` 出口、`RtcGroupCallPicker` 群通话选人）；单聊详情页「呼叫 / 视频」→ 1v1，
-> 群详情页新增「群通话」（成员多选 ≤8）；名字头像走 App 现成解析链（备注>昵称>@句柄），经 `ProfileProvider` 注入。
-> SDK 默认用 npm 正式版 `im-rtc-call-engine` / `im-rtc-call-uikit-react`（2026-09-20 已从本地 tgz 切过来；
-> **2.0.0 → 2.1.0 已于 2026-09-27 升级**，见「当前焦点」）。
-> **本地包集成保留、默认关闭**：验未发布的 SDK 改动时 `./scripts/sdk-source.sh local`（等价于 package.json 里两个
-> `file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz`，先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`），验完 `./scripts/sdk-source.sh npm` 切回；
-> 本地档期间别提交 package.json / package-lock.json，装完 `npx vite --force`。配置在 `.env.local`（gitignored：`VITE_RTC_WS_URL/APP_ID/KEY_ID/DEBUG_SECRET`，缺项则通话入口不可用）。
-> 单测 `src/rtc/rtc.test.ts`（变异验红）；全量 vitest 1324 + `npm run build` 绿。未做：附件面板「音视频」不接（将移除）、设置页「接口/调试」开关（等换票接口一期）。
-
-> **第三批用户报告（Web 部分）✅ 2026-09-15（用户复测通过，已提交；tsc + vitest 1312 条全绿、变异验红）**：
-> 左栏页签「会话」→「消息」（三端统一）；「消息」页签补未读蓝点——此前只有 Android 有。页签从 App.tsx 抽到
-> `src/components/SidebarTabs.tsx`（+5 例单测），判据复用 `desktopNotify.ts` 的 `badgeCountOf`（与 Dock 角标同一份，
-> 与 iOS `IMTabUnreadCount` / Android `TabUnread` 同口径，SYMMETRY 已登记）。**刻意不计「标为未读」**（三端一致）：
-> 会话行会画那颗点，但页签不亮——要改就三端一起改 badgeCountOf 那一处。Web 冷启动本就没有「先闪空态」（列表拉完才进主界面）。
-
-> **第二批用户报告 ✅ 2026-09-15（未提交；tsc + vitest 1303 条全绿、变异验红、浏览器实测）**，逐条见 IMServer `docs/CLIENT_PARITY.md` 顶部：
-> ① 角标统一蓝：`.row-badge`（新的朋友）/ `.conv-pending-badge` / `.detail-badge` 由 `--danger` 改 `--unread-badge`；
-> ② 文本 / 引用消息时间贴气泡右下角：`.bmeta` 统一 `margin-left:auto`（原先只有 caption / 链接卡 / 超长文本三条 `:has` 规则）；
-> ③ **改昵称后老消息仍显旧名、刷新也没用**：`chatNaming.ts` 的 senderLabel 原为快照优先（还有一条单测把它钉成
->    「历史消息不随成员表变」，已翻转），改「成员表 > 本窗最新快照 > 本条快照 > 资料缓存」；`useForward.ts` nameOf 同序；
->    「末条昵称对不上成员表 → 5s 节流重拉群资料」放在 `src/useGroupInfoRefresh.ts`（连同 refreshGroupInfo 逐字平移出 App.tsx——
->    App 已触体量基线 3679，写在 App 里被 pre-commit 拦下），`useGroupInfoRefresh.test.ts` 4 例、变异验红。
-> 实测（:5173，user1001）：通讯录页签与「新的朋友」角标蓝；「1002群」里改名后的 user3005 旧消息显示新名；链接 / 引用消息时间在右下角。
-
-> **D4 收尾 ✅ 2026-09-11：单实例锁 / 深链 / 拖文件进聊天列 / 全局快捷键**（设计与取舍记在
-> `../IMServer/docs/design/DESKTOP_DESIGN.md` §7.9；上一块 D4-3 本地消息库已移入 archive）。
->
-> | 件 | 入口 | 自检 |
-> |---|---|---|
-> | 单实例锁 | `desktop/src/main/singleInstance.ts` | `--shell-check` ⓪b 真起探针进程 |
-> | 深链 `imdesktop://q/u\|g/<token>`（只收邀请码） | `desktop/src/main/deepLink.ts` → preload `subscribeDeepLink` → `useQR` | `--e2e` ②b / ⑨ |
-> | 拖文件进聊天列（浏览器版同得） | `src/useFileDrop.ts` → `useMediaSend#addPastedFiles` | `--e2e` ③c |
-> | 全局快捷键（**默认关**） | `desktop/src/main/globalShortcutCap.ts` → 设置 ▸ 通用 | `--shell-check` ③b / `--e2e` ⑩ |
->
-> 每件都做过双向变异（单测 / 契约 / 接线各自转红）。自动化验不到的手测：~~真拖文件到侧栏不导航~~ ✅、
-> ~~桌面端粘贴截图~~ ✅、~~一次拖多个只留最后一个~~ ✅、~~全局快捷键 ⌃⌘W 收起 / 叫出~~ ✅
-> （2026-09-11 用户手测，手测欠账清零）。系统真正分发深链要装签名包，归 D6（暂无法验证）。
->
-> ⚠️ **自检不能与正在运行的 IM Desktop 同时跑**：单实例锁会拒掉后起的那个并 exit 11（这是故意的——两个进程同写一份 messages.db）。
+> **「设置 ▸ 最近通话」页 ✅ 代码完成（2026-09-28，worktree `im-web-wt-call-history` / 分支 `feature/call-history`，已提交未 push；浏览器未手测）**：
+> 设计见 `../IMServer/docs/design/CALL_HISTORY_DESIGN.md` + 配套 UX 稿；先例 `CALL_RECORD_DESIGN.md`（同一套身份解析/未接判色领域逻辑）。
+> - **入口**：`App.tsx` 头像卡片菜单 `accountRows` 新增「最近通话」行（复用既有翻译 key `ios.settings.row.recent_calls`、绿色 `iconTint`，紧邻「收藏消息」），点开 `CallHistoryPanel`。
+> - **数据**：`engine.fetchCallHistory` 直连 im-rtc SDK（不经 IMServer）。engine 实例此前只活在 `RtcHost` 内部——新增模块级出口
+>   `src/rtc/rtcCall.ts#registerCallEngine/getCallEngine`（与既有 `registerCallActions` 同一套模式），`RtcHost.tsx` 起停引擎时登记/反登记。
+> - **纯逻辑** `src/callHistoryView.ts`（+`callHistoryView.test.ts` 24 例）：未接判定（`caller!==我 && durationSec===0`，
+>   刻意不排除被叫侧 reject——设计文档 §0.6/§4/§6 明文的 v1 简化，与聊天气泡 `callRecord.ts` 的 tone 判据不同，二者是有意分叉，非疏漏）、
+>   日期分组（复用 `time.ts#dayHeader`）、群通话人数（对齐 im-rtc-web Demo `peerText` 公式）、「未接」tab 自动续页判据、
+>   单聊文案**复用** `callRecord.ts` 的 `buildCallRecord+renderCallRecord`（不重写 reason 判定），群聊文案自拼「群{kind}通话 · N人」（UX 稿要的是这个，不是气泡的叙述句）。
+> - **状态簇** `src/useCallHistory.ts`（+`useCallHistory.test.ts` 4 例，含红→绿验证过的 generation 计数器乱序应答测试）：
+>   首页/游标翻页、`callEnd` 重拉首页并作废在途翻页请求、401→`auth` 错态复用「未登录」文案（不单独造一套）。
+> - **UI** `src/components/CallHistoryPanel.tsx`：Modal 壳（同 `FavoritesModal` 开合模式）、全部/未接分段、滚动到底自动翻页、
+>   三态（loading/empty/error+重试）、点单聊行 `placeSingleCall`（与聊天气泡回拨同一入口）直接回拨不确认、点群聊行 `openGroupChat` 跳会话并关面板。
+> - `tsc -b` 干净、`npm run build` 零错误、`vitest` 全量 **1507/1507 绿**（新增 28 例）、`check-file-size.sh` 通过（新文件均 < 150 行；`App.tsx` 净增 ~20 行，3676/3679，已逼近体量基线，新逻辑别再往里塞）。
+> - **i18n**：新增 `call.history.*` 六键直接手改 `src/i18n/locales/{zh-Hans,en}.json`——**未**回写 `../IMServer/docs/i18n/strings.json`
+>   （该生成脚本本 worktree 未见，且改跨仓共用源有跟其他并行改动冲突的风险，故先落地在本端生成物上；下次有人跑生成流程前记得把这六键补进源表，否则会被覆盖）。
+> - **未做 / 待浏览器实测**：① 滚动到底自动翻页的真实手感；② 「未接」tab 自动续页在慢网络下的观感（连续请求会不会看起来卡顿）；
+>   ③ `callEnd` 到达时面板开着重拉首页的真实时机（自动化测试只验了 generation 语义，没验真事件时序）；④ 群通话行点击跳转到正确会话；
+>   ⑤ 深色模式下 `.callh-*` 新样式；⑥ 未在 `App.smoke.test.tsx` 之外补组件级渲染测试（时间/耦合原因，纯逻辑+状态簇已覆盖核心分支）。
+>   **v1 范围内刻意不做**（设计文档 §0.4/§0.6 已拍板，不是漏做）：删除、长按菜单、未接数量角标、群通话「进行中可加入」。
+> - 未动 `../IMServer/docs/CLIENT_PARITY.md`（三端并行，留给协调者统一收口）；未改 IMServer 后端、未改 im-rtc SDK。
 
 > 更早的已完成块已移入 [current_task.archive.md](current_task.archive.md)（只读归档）。
 
@@ -107,6 +60,8 @@
 2. 语音转文字**结果链路**未在本地验通（本轮实测停在「识别中…」，服务端识别多半没配）——排一次后端 `internal/transcribe` 配置再复测。
 3. 群内已读细化（随主线）。
 4. 消息列表虚拟化；测试债：Playwright E2E。
+5. **「设置 ▸ 最近通话」浏览器实测**（见「当前焦点」未做清单）：滚动自动翻页手感、「未接」tab 续页观感、`callEnd` 重拉时机、群聊跳转、深色模式；
+   `call.history.*` 六个 i18n 键待补进 `../IMServer/docs/i18n/strings.json` 源表（本端先手改了生成物，见「当前焦点」）。
 
 ## 技术债 / 下次
 - **`src/App.tsx` 系统性拆分 ✅ 收口（2026-08-21，6302 → 2958；半年功能后长回 ~3760，2026-09-05 两轮再抽；详情已归档）**。**剩余 ~3760 行 = 应用外壳本体**（44 个核心 state/连接/phase 路由 + enterApp 173 行 + 滚动·定位·已读核心 ~320 行·20 个互咬 ref + conversationActions 菜单表 160 行/43 依赖 + send() 编排 + 子组件组装接线）——均为 §7 点名的胶水，**不再硬抽**；新功能按决策树进新文件即可。
@@ -137,6 +92,8 @@
   唯一轮换点是改密码（`changePassword` 必须接住响应里那枚新的，不接住本地这枚当场作废、
   下次冷启动就被弹回登录页）。**WS 连着 ≠ token 有效**——服务端只在握手校验，别拿连接状态当续期依据。
 - **凭据存在 localStorage**（XSS 可读，与存密码相比仍是净改善：可吊销、不能改密码、不能登其它端）。
+- **`call.history.*` 六个 i18n 键只手改了 `src/i18n/locales/{zh-Hans,en}.json`，没回写 `../IMServer/docs/i18n/strings.json` 源表**——
+  该生成脚本本 worktree 未见；下次有人跑 i18n 生成流程前先把这六键补进源表，否则会被生成物覆盖冲掉。
   更强的做法是 httpOnly cookie，需要后端配套，未做。
 
 ## 关联工程 / 常用命令

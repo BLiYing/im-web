@@ -666,7 +666,6 @@
   "detail.tab.file_size_downloaded": "{size} · 已下载",
   "detail.tab.file_size_not_downloaded": "{size} · 未下载",
   "detail.tab.link_note": "链接由本机已加载的聊天记录扫出，往上翻得越多、这里越全。点一条在 App 内打开。",
-  "detail.tab.voice_note": "归档里暂不能播放（长按可定位回聊天、转发或删除）。",
   "device.active.days_ago": {
     "other": "{count} 天前活跃"
   },
@@ -1531,6 +1530,7 @@
   "rtc.error.id_too_long": "{kind} 超过 {max} 字节",
   "rtc.error.no_callees": "请选择要呼叫的成员",
   "rtc.error.not_started": "通话服务未启动（请重新登录）",
+  "rtc.error.token_fetch_failed": "获取通话凭证失败",
   "rtc.invite.in_call": "已在通话中",
   "rtc.kind.group_id": "群号",
   "rtc.kind.peer_id": "对方 id",

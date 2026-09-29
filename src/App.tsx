@@ -95,6 +95,7 @@ import { adminCandidates, transferCandidates } from "./groupAdmin";
 import { useUserProfiles } from "./useUserProfiles";
 import { RtcHost } from "./rtc/RtcHost";
 import { rtcNameOf } from "./rtc/rtcProfiles";
+import { CallHistoryPanel } from "./components/CallHistoryPanel";
 import { useMemberSearch } from "./useMemberSearch";
 import { AdminPickerModal } from "./components/modals/AdminPickerModal";
 import { TransferOwnerModal } from "./components/modals/TransferOwnerModal";
@@ -123,7 +124,7 @@ import { moreLocalAbove } from "./windowPlan";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Users, Megaphone,
-  Headphones, 
+  Headphones, Phone,
   Trash2, BellOff, Menu,
   Pin,
   Search, MessageCircle, X, Forward,
@@ -252,6 +253,7 @@ export default function App() {
   const [fullTextModal, setFullTextModal] = useState<{ kind: GroupTextKind; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
   const [showSettings, setShowSettings] = useState(false); // 设置面板（占据侧栏列，右侧聊天保留）
+  const [showCallHistory, setShowCallHistory] = useState(false); // 最近通话面板（CALL_HISTORY_DESIGN.md）
   const [privacyOpen, setPrivacyOpen] = useState(false); // 隐私与安全容器页（拉齐 iOS）
   const [blockedOpen, setBlockedOpen] = useState(false); // 已屏蔽的用户子面板（从隐私页进入）
   const [changePwdOpen, setChangePwdOpen] = useState(false); // 修改密码子面板（从隐私页进入）
@@ -1891,6 +1893,9 @@ export default function App() {
   // localComplete 直接问 SDK 有没有收到过该会话的 too_long——它是"本地有缺口"的权威来源，
   // 比在 UI 层再算一遍区间可靠（同一事实两处推导迟早分叉）。
   const localComplete = !clientRef.current?.hasGap(convId);
+  // RtcHost 换票用：引用必须稳定（RtcHost 的 effect 拿它当依赖），空依赖数组只建一次，
+  // 调用时刻经 clientRef.current 读到的永远是当前值（不是这里闭包住的快照）。
+  const getRtcAuthToken = useCallback(() => clientRef.current?.authToken ?? "", []);
   const search = useChatSearch({
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
     allMessages: allLocal, convId, groupConvId, uid, groupInfos, conversations,
@@ -2724,6 +2729,10 @@ export default function App() {
   const accountRows: Row[] = [
     { id: "settings", label: t("settings.title"), icon: Settings, chevron: true, onClick: () => { setAccountCard(false); setShowSettings(true); } },
     { id: "favorites", label: t("common.saved_messages"), icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
+    // 最近通话（CALL_HISTORY_DESIGN.md §0.1/§2）：iOS/Android 已有同位置绿色电话图标入口，Web 补这一行；
+    // 复用既有翻译 key，不新起。图标沿用三端已定的绿色 tint，不是本处新拍的色板。
+    { id: "recentCalls", label: t("ios.settings.row.recent_calls"), icon: Phone, iconTint: "green", chevron: true,
+      onClick: () => { setAccountCard(false); setShowCallHistory(true); } },
   ];
 
   // 设置列表（对齐 Telegram **Web** 版布局；数据驱动：加一行 = append 一条；接后端 = 换 onClick）。
@@ -3153,6 +3162,21 @@ export default function App() {
           onPickLimit={setToast}
           onClose={closeFavorites}
           fetchLinkPreview={fetchLinkPreview}
+        />
+      )}
+
+      {/* 最近通话（CALL_HISTORY_DESIGN.md）：只读通话历史，数据直连 im-rtc SDK，不经过 IMServer。
+          名字/头像走与通话界面同一条解析链（rtcNameOf + peerAvatar）；群通话行跳转 chatGroupId 对应的群会话。 */}
+      {showCallHistory && (
+        <CallHistoryPanel
+          myUid={uid}
+          timeFormat={timeFormat}
+          nameOf={(u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u))}
+          avatarOf={peerAvatar}
+          groupNameOf={(cid) => { const c = convById(cid); return c ? convDisplayLabel(c) : undefined; }}
+          onOpenGroup={(cid) => { setShowCallHistory(false); openGroupChat(cid); }}
+          onCallUnavailable={() => setToast(t("chat.message.call_unavailable"))}
+          onClose={() => setShowCallHistory(false)}
         />
       )}
 
@@ -3615,7 +3639,7 @@ export default function App() {
       {promptDlg && <PromptDialog dlg={promptDlg} set={setPromptDlg} />}
 
       {/* im-rtc 通话：登录态下挂载 = 起引擎，退出登录卸载 = 销毁；名字头像走本页的解析链。 */}
-      <RtcHost uid={uid} record={{ clientRef, appendMsg }} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
+      <RtcHost uid={uid} getAuthToken={getRtcAuthToken} record={{ clientRef, appendMsg }} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
         profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles,
           // 服务端分页 + 搜索：普通群、超级群同一条路（超级群本地成员表只有我自己）。
           groupMembers: async (cid, opts) => {
