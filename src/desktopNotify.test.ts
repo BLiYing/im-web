@@ -40,6 +40,19 @@ describe("badgeCountOf", () => {
   it("默认不传 includeMuted → 等同 false（老行为不变）", () => {
     expect(badgeCountOf([conv({ unread: 3 }), conv({ unread: 99, muted: true })])).toBe(3);
   });
+
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.3）：badgeCountOf 同时驱动 Dock 角标与 favicon 角标，
+  // 到期后要按未免打扰计，不能一直压着——这条漏改就是「铃铛已经消失、角标还是压着」。
+  it("定时免打扰未到期：仍按免打扰计（不计入未读，@我仍记 1）", () => {
+    const now = Date.now();
+    expect(badgeCountOf([conv({ unread: 3 }), conv({ unread: 99, muted: true, mute_until: now + 60_000 })])).toBe(3);
+    expect(badgeCountOf([conv({ unread: 99, muted: true, mute_until: now + 60_000, mention_unread: true })])).toBe(1);
+  });
+
+  it("定时免打扰已过期：视同未免打扰，未读全额计入角标", () => {
+    const now = Date.now();
+    expect(badgeCountOf([conv({ unread: 3 }), conv({ unread: 99, muted: true, mute_until: now - 1 })])).toBe(102);
+  });
 });
 
 describe("shouldNotify", () => {

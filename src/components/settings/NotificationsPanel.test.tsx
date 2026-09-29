@@ -123,7 +123,7 @@ describe("NotificationsPanel：免打扰的会话（例外列表）", () => {
 });
 
 describe("NotificationsPanel：添加例外（P1 §2，复用 ForwardPicker 单选）", () => {
-  it("点「添加例外」打开选择页，只列未免打扰的会话", () => {
+  it("点「添加例外」打开选择页，只列未免打扰的会话；脚注是合并 key pick_footer_all（不再拼接私聊/群聊两句）", () => {
     const convs = [
       conv({ conv_id: "c1", muted: false }),
       conv({ conv_id: "c2", muted: true }),
@@ -135,17 +135,28 @@ describe("NotificationsPanel：添加例外（P1 §2，复用 ForwardPicker 单�
     // 不加选择器会命中那一份，而不是校验选择页本身有没有过滤它。
     expect(screen.getByText("label-c1", { selector: ".fwd-item-label" })).toBeTruthy();
     expect(screen.queryByText("label-c2", { selector: ".fwd-item-label" })).toBeNull(); // 已免打扰的不出现在选择页
+    expect(screen.getByText(t("notif.exceptions.pick_footer_all"))).toBeTruthy();
   });
 
-  it("选中一行 → 调用 onMuteConv 并关闭选择页", () => {
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §2/§4.1）：选完会话不直接永久免打扰，弹时长 Modal 再选。
+  it("选中一行 → 弹时长 Modal（带会话名）；选「1 小时」→ onMuteConv(conv, ~1h 后) 并关闭 Modal", () => {
     const convs = [conv({ conv_id: "c1", muted: false })];
     const props = setup({ conversations: convs });
     fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
     fireEvent.click(screen.getByText(t("notif.exceptions.add")));
     fireEvent.click(screen.getByText("label-c1"));
-    expect(props.onMuteConv).toHaveBeenCalledWith(convs[0]);
-    // 选择页关闭：不再显示选择页的空态/脚注文案入口（standalone 判断用脚注文案是否还在）
-    expect(screen.queryByText(t("notif.exceptions.pick_footer_private"), { exact: false })).toBeNull();
+    expect(props.onMuteConv).not.toHaveBeenCalled(); // 还没选时长，不该直接免打扰
+    // 选择页已关闭（换成时长 Modal）
+    expect(screen.queryByText(t("notif.exceptions.pick_footer_all"))).toBeNull();
+    expect(screen.getByText(t("notif.mute.sheet_title", { name: "label-c1" }))).toBeTruthy();
+    const before = Date.now();
+    fireEvent.click(screen.getByText(t("mute.1h")));
+    expect(props.onMuteConv).toHaveBeenCalledTimes(1);
+    const [conv1, until] = props.onMuteConv.mock.calls[0];
+    expect(conv1).toEqual(convs[0]);
+    expect(until).toBeGreaterThanOrEqual(before + 3_600_000 - 2_000);
+    expect(until).toBeLessThanOrEqual(before + 3_600_000 + 5_000);
+    expect(screen.queryByText(t("notif.mute.sheet_title", { name: "label-c1" }))).toBeNull(); // Modal 已关
   });
 
   it("全部会话都已免打扰 → 选择页显示 pick_empty 空态", () => {
@@ -154,5 +165,29 @@ describe("NotificationsPanel：添加例外（P1 §2，复用 ForwardPicker 单�
     fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
     fireEvent.click(screen.getByText(t("notif.exceptions.add")));
     expect(screen.getByText(t("notif.exceptions.pick_empty"))).toBeTruthy();
+  });
+});
+
+// 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.3）：例外列表按 isMutedNow 过滤 + 带到期文案。
+describe("NotificationsPanel：例外列表的定时免打扰（§4.3）", () => {
+  it("未到期 → 显示 muted_until 到期文案，仍在例外列表里", () => {
+    const now = Date.now();
+    const muted = [conv({ conv_id: "c1", muted: true, mute_until: now + 60_000 })];
+    setup({ conversations: muted });
+    fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
+    expect(screen.getByText("label-c1")).toBeTruthy();
+    // 具体文案（今天/明天/日期）依赖当前时刻分类，这里只断言不是恒定的「免打扰」纯文案，
+    // 避免用例本身随运行时刻的日历日边界抖动。
+    expect(screen.queryByText(t("notif.exceptions.muted"))).toBeNull();
+  });
+
+  it("已过期 → 视同未免打扰，从例外列表消失（不在 muted 计数/行内）", () => {
+    const now = Date.now();
+    const expired = [conv({ conv_id: "c1", muted: true, mute_until: now - 1 })];
+    setup({ conversations: expired });
+    // 主页入口计数应为 0（不含已过期）
+    expect(screen.getByText("0")).toBeTruthy();
+    fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
+    expect(screen.queryByText("label-c1")).toBeNull();
   });
 });

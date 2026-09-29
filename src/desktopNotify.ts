@@ -10,6 +10,7 @@ import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord
 import { t as i18nT } from "./i18n";
 import { alertDecision, type AlertContext } from "./alertDecision";
 import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "./notifySettings";
+import { isMutedNow } from "./muteState";
 
 /**
  * Dock / 任务栏角标数。
@@ -24,9 +25,12 @@ import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "./notifySettings";
  * 打开后免打扰会话也按未读数全额计入（不再降级成「有事记 1」）。
  */
 export function badgeCountOf(convs: readonly Conversation[], includeMuted = false): number {
+  const now = Date.now();
   let n = 0;
   for (const c of convs) {
-    if (!c.muted || includeMuted) n += c.unread ?? 0;
+    // 定时免打扰到期后按未免打扰计（NOTIFICATIONS_P1_DESIGN §4.3：所有读 muted 的地方都要走 isMutedNow，
+    // 这里同时驱动桌面 Dock 角标与 favicon 角标——漏改就是「铃铛已消失、角标却还压着」）。
+    if (!isMutedNow(!!c.muted, c.mute_until, now) || includeMuted) n += c.unread ?? 0;
     else if (c.mention_unread) n += 1;   // 静音里被 @：只记 1，表示「这里有事」，不放大成条数
   }
   return n;

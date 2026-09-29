@@ -2,13 +2,24 @@ import { useEffect, useState } from "react";
 import { Plus } from "lucide-react";
 import { SubPanel } from "./SubPanel";
 import { Avatar } from "../Avatar";
+import { Modal } from "../Modal";
+import { MuteMenu } from "../MuteMenu";
 import { renderRow } from "../rows";
 import { ForwardPicker } from "../modals/ForwardPicker";
-import { useT } from "../../i18n";
+import { useT, type Args } from "../../i18n";
 import { previewAlertSound } from "../../alertPlayer";
 import { isExceptionPickable } from "../../notifExceptions";
+import { isMutedNow, muteUntilPhrase } from "../../muteState";
 import { NOTIFY_SOUND_IDS, type NotifySettings, type NotifySoundId, type NotifyTypeSettings } from "../../notifySettings";
 import type { Conversation } from "../../sdk/protocol";
+
+/** 例外行右值：永久 → 平铺 muted/muted_mention；有到期时间 → muted_until/muted_until_mention 带 `{until}`
+ *  片段（如「至今天 18:30」，见 muteState.ts#muteUntilPhrase）。 */
+function exceptionValueLabel(t: (key: string, args?: Args) => string, c: Conversation, nowMs: number): string {
+  const until = c.mute_until ?? 0;
+  if (until === 0) return t(c.mention_unread ? "notif.exceptions.muted_mention" : "notif.exceptions.muted");
+  return t(c.mention_unread ? "notif.exceptions.muted_until_mention" : "notif.exceptions.muted_until", { until: muteUntilPhrase(until, nowMs) });
+}
 
 /** 设置 ▸ 通知（NOTIFICATIONS_DESIGN §2.5）：Web / 桌面版，一页平铺不分子页（对齐 Telegram Web A）。
  *  纯展示：设置读写全经 props 注入的 setter；`previewAlertSound` 是无状态的浏览器播放工具函数，
@@ -33,9 +44,9 @@ export function NotificationsPanel({
   onSetBadge: (patch: Partial<NotifySettings["badge"]>) => void;
   onSetDesktop: (patch: Partial<NotifySettings["desktop"]>) => void;
   onUnmute: (c: Conversation) => void;
-  /** 「添加例外」选中一个会话后设免打扰（NOTIFICATIONS_P1_DESIGN §2）：批次一 = 永久，
+  /** 「添加例外」选完会话再选时长后设免打扰（NOTIFICATIONS_P1_DESIGN §2/§4.1），
    *  经 App 的唯一写路径 `setConvMuted` 落地（原样带回 pinned_at/marked_unread）。 */
-  onMuteConv: (c: Conversation) => void;
+  onMuteConv: (c: Conversation, muteUntil: number) => void;
   onOpenConv: (convId: string) => void;
   /** 重置确认由 App 侧 askConfirm 包好，这里只负责触发。 */
   onReset: () => void;
@@ -44,11 +55,14 @@ export function NotificationsPanel({
   const t = useT();
   const [showExceptions, setShowExceptions] = useState(false);
   const [pickingException, setPickingException] = useState(false);
+  // 「添加例外」选完会话后再选时长（NOTIFICATIONS_P1_DESIGN §2/§4.1）：非 null 时弹时长选择 Modal。
+  const [pendingMuteConv, setPendingMuteConv] = useState<Conversation | null>(null);
 
-  // 免打扰的会话（私聊+群聊合并，按最后消息时间倒序）——§3.5：数据取本机会话表 muted=true，
-  // 本页不提供「添加例外」，只查看与取消。
+  // 免打扰的会话（私聊+群聊合并，按最后消息时间倒序）——§3.5：数据取本机会话表，按 isMutedNow
+  // 判定（NOTIFICATIONS_P1_DESIGN §4.3：定时免打扰到期后视同未免打扰，从例外列表自动消失）。
+  const now = Date.now();
   const muted = conversations
-    .filter((c) => c.muted)
+    .filter((c) => isMutedNow(!!c.muted, c.mute_until, now))
     .slice()
     .sort((a, b) => (b.last_message?.timestamp ?? 0) - (a.last_message?.timestamp ?? 0));
 
@@ -70,7 +84,7 @@ export function NotificationsPanel({
                 {convDisplayLabel(c)}
                 <span className="row-sub"> · {c.is_group ? t("notif.row.group") : t("notif.row.private")}</span>
               </span>
-              <span className="row-value">{c.mention_unread ? t("notif.exceptions.muted_mention") : t("notif.exceptions.muted")}</span>
+              <span className="row-value">{exceptionValueLabel(t, c, now)}</span>
               <button
                 type="button"
                 className="notif-unmute-btn"
@@ -83,9 +97,7 @@ export function NotificationsPanel({
         </div>
 
         {/* 添加例外（P1 §2）：复用转发选择页 ForwardPicker（单选、无多选切换）。
-            Web 本页私聊/群聊合并成一个列表，没有对应的「合并」选择页脚注 key，
-            这里把 pick_footer_private/_group 两句拼在一起说明——即列出私聊也列出群聊，
-            都只要未免打扰的（已在交付报告里列为已知偏差）。 */}
+            选完会话不直接永久免打扰——弹时长选择 Modal（§4.1，与列表/ChatHeader/详情页同一套选项）。 */}
         {pickingException && (
           <ForwardPicker
             count={1}
@@ -101,11 +113,22 @@ export function NotificationsPanel({
             filter={isExceptionPickable}
             title={t("notif.exceptions.add")}
             hideMultiToggle
-            footer={`${t("notif.exceptions.pick_footer_private")} ${t("notif.exceptions.pick_footer_group")}`}
+            footer={t("notif.exceptions.pick_footer_all")}
             emptyText={t("notif.exceptions.pick_empty")}
-            onForward={(picked) => { const c = picked[0]; if (c) onMuteConv(c); setPickingException(false); }}
+            onForward={(picked) => { const c = picked[0]; setPickingException(false); if (c) setPendingMuteConv(c); }}
             onClose={() => setPickingException(false)}
           />
+        )}
+
+        {pendingMuteConv && (
+          <Modal onClose={() => setPendingMuteConv(null)}>
+            <div className="modal-title">{t("notif.mute.sheet_title", { name: convDisplayLabel(pendingMuteConv) })}</div>
+            <div className="mute-durations">
+              <MuteMenu itemClassName="mini-btn"
+                onPick={(until) => { const c = pendingMuteConv; setPendingMuteConv(null); onMuteConv(c, until); }} />
+            </div>
+            <button className="modal-close" onClick={() => setPendingMuteConv(null)}>{t("common.cancel")}</button>
+          </Modal>
         )}
       </SubPanel>
     );

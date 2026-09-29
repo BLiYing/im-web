@@ -56,8 +56,11 @@ export async function setRemark(token: string, userId: string, remark: string): 
 // —— 会话管理（M4.5）——
 
 /** 更新会话级设置（置顶/免打扰/标未读，整体替换）：PUT /api/v1/conversations/{id}/settings。
- *  注：remark 已从 settings 拆出走 setConvRemark；本端点服务端会保留现有 remark 不清空。 */
-export async function updateConvSettings(token: string, convId: string, s: { pinned_at: number; muted: boolean; marked_unread: boolean }): Promise<void> {
+ *  注：remark 已从 settings 拆出走 setConvRemark；本端点服务端会保留现有 remark 不清空。
+ *  `mute_until` 可选（NOTIFICATIONS_P1_DESIGN §5.2）：省略时若本次 `muted=true` 且当前正处于未到期的
+ *  定时免打扰，服务端保留原到期时间；显式传值则照写；`muted=false` 时服务端一律清 0。
+ *  **改置顶/标未读等只想原样带回 `muted` 的调用方不要传本字段**，否则会把定时免打扰意外变成永久。 */
+export async function updateConvSettings(token: string, convId: string, s: { pinned_at: number; muted: boolean; mute_until?: number; marked_unread: boolean }): Promise<void> {
   await api(token, `/api/v1/conversations/${encodeURIComponent(convId)}/settings`, { method: "PUT", body: JSON.stringify(s) });
 }
 

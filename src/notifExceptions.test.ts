@@ -24,4 +24,11 @@ describe("isExceptionPickable（添加例外选择页过滤，纯函数）", () 
   it("已免打扰的会话不可选", () => {
     expect(isExceptionPickable({ ...base, muted: true })).toBe(false);
   });
+
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.3）：过期视同未免打扰，未到期仍不可选。
+  it("定时免打扰未到期不可选；已过期视同未免打扰可选", () => {
+    const now = Date.now();
+    expect(isExceptionPickable({ ...base, muted: true, mute_until: now + 60_000 }, now)).toBe(false);
+    expect(isExceptionPickable({ ...base, muted: true, mute_until: now - 1 }, now)).toBe(true);
+  });
 });

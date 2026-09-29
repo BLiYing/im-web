@@ -104,6 +104,22 @@ describe("notifyInbound：接线", () => {
     expect(notifyMock).toHaveBeenCalledTimes(1);
   });
 
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.3）：到期后按未免打扰算，来消息照常响铃/弹通知。
+  it("定时免打扰未到期 → 不响不弹；已过期 → 视同未免打扰，照常响铃弹通知", () => {
+    setupDesktopBridge();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const now = Date.now();
+    const { result: future } = mount([conv({ muted: true, mute_until: now + 60_000 })]);
+    future.current.notifyInbound(msg({}));
+    expect(playAlertSound).not.toHaveBeenCalled();
+    expect(notifyMock).not.toHaveBeenCalled();
+
+    const { result: expired } = mount([conv({ muted: true, mute_until: now - 1 })]);
+    expired.current.notifyInbound(msg({}));
+    expect(playAlertSound).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+  });
+
   it("窗口在焦点、但在看别的会话 → 只响声音，不弹系统通知（§3.1「当前行为是完全没声音」的修复点）", () => {
     setupDesktopBridge();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);

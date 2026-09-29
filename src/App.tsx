@@ -103,6 +103,10 @@ import { SYSTEM_UID } from "./sdk/protocol";
 import { unreadBadgeText } from "./unreadBadge";
 import { useDesktopIntegration } from "./useDesktopIntegration";
 import { useFaviconBadge } from "./useFaviconBadge";
+import { useMuteExpiryTick } from "./useMuteExpiryTick";
+import { useConvMute } from "./useConvMute";
+import { isMutedNow } from "./muteState";
+import { MuteMenu } from "./components/MuteMenu";
 import { makeDesktopTitleOf } from "./desktopWiring";
 import { makeMessageTextRenderers } from "./components/messageText";
 import { pauseVoicePlayback } from "./components/VoiceBubble";
@@ -341,6 +345,9 @@ export default function App() {
   const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current, notifySettings: notif.settings });
   // Web 标签页 favicon 角标（NOTIFICATIONS_P1_DESIGN §3）：仅浏览器版生效，hook 内部按 platform().isDesktop 短路。
   useFaviconBadge(conversations, notif.settings.badge.includeMuted);
+  // 定时免打扰到期刷新（NOTIFICATIONS_P1_DESIGN §4.4）：到最近一个未来 mute_until 强制重渲染一次，
+  // 列表铃铛/未读变灰/上面两个角标/例外列表这些都现读 Date.now()，App 一重渲染就自动翻新，不发请求。
+  useMuteExpiryTick(conversations);
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
@@ -1578,16 +1585,10 @@ export default function App() {
     })();
   }, [refreshConversations]);
 
-  // 会话免打扰/取消：muted 切换（弱提示，不改红点/未读）。
-  const setConvMuted = useCallback((c: Conversation, muted: boolean) => {
-    setConvMenu(null);
-    void (async () => {
-      try {
-        await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted, marked_unread: !!c.marked_unread });
-        await refreshConversations();
-      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
-    })();
-  }, [refreshConversations]);
+  // 会话免打扰/取消 + 时长二级菜单状态：抽到 useConvMute（CODING_STYLE §7 决策树①，自己有状态+一组操作）。
+  const { setConvMuted, convMuteMenu, setConvMuteMenu, requestMute } = useConvMute({
+    clientRef, refreshConversations, setToast, closeConvMenu: () => setConvMenu(null),
+  });
 
   // 删除会话（仅本人，后端记 cleared_at 不删消息）：若删的是当前打开会话则退出，否则刷新列表。
   const deleteConv = useCallback((c: Conversation) => {
@@ -1688,11 +1689,11 @@ export default function App() {
     };
   }, [friendMenu]);
 
-  // 会话右键菜单：点空白/滚动/Esc 关闭（与消息菜单一致）。
+  // 会话右键菜单（含免打扰时长二级菜单）：点空白/滚动/Esc 关闭（与消息菜单一致）。
   useEffect(() => {
-    if (!convMenu) return;
-    const close = () => setConvMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setConvMenu(null); };
+    if (!convMenu && !convMuteMenu) return;
+    const close = () => { setConvMenu(null); setConvMuteMenu(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     window.addEventListener("click", close);
     window.addEventListener("scroll", close, true);
     window.addEventListener("keydown", onKey);
@@ -1701,7 +1702,7 @@ export default function App() {
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("keydown", onKey);
     };
-  }, [convMenu]);
+  }, [convMenu, convMuteMenu]);
 
   // 群成员 ⋯ 菜单：点空白/滚动/Esc 关闭。
   // ⚠️ 必须用**捕获阶段**监听 click：该菜单由详情面板内的 ⋯ 触发，而 `.detail-panel` 自身挂了
@@ -2793,7 +2794,10 @@ export default function App() {
           ) : (
           <>
           {conversations.length === 0 && <div className="empty">{t("conv.list.empty_find_contacts")}</div>}
-          {conversations.map((c) => (
+          {conversations.map((c) => {
+            // 定时免打扰到期后按未免打扰渲染（NOTIFICATIONS_P1_DESIGN §4.3）：铃铛消失、未读数不再置灰。
+            const mutedNow = isMutedNow(!!c.muted, c.mute_until, Date.now());
+            return (
             <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""}`}
               onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
               onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
@@ -2810,7 +2814,7 @@ export default function App() {
                         文字 pill 而非图标：标记的价值是**解释**那些消失的能力，图标不自解释；
                         与聊天页副标题、群资料页说明行、后台列表 pill 同一套语汇。 */}
                     {c.is_super ? <span className="conv-super-tag">{t("group.text.super")}</span> : null}
-                    {c.muted ? <BellOff size={12} className="conv-mute" /> : null}
+                    {mutedNow ? <BellOff size={12} className="conv-mute" /> : null}
                   </span>
                   <span className="convtime">
                     {!c.is_group && c.last_message?.from === uid && (
@@ -2837,10 +2841,11 @@ export default function App() {
                   屏蔽后与 read 往返彻底解耦，任何时序都不闪。 */}
               {c.conv_id === convId ? null
                 : c.unread > 0
-                ? <span className={`badge ${c.muted && !c.mention_unread ? "muted" : ""}`}>{unreadBadgeText(c.unread, c.unread_capped)}</span>
-                : c.marked_unread ? <span className={`badge dot ${c.muted ? "muted" : ""}`} aria-label={t("common.unread")} /> : null}
+                ? <span className={`badge ${mutedNow && !c.mention_unread ? "muted" : ""}`}>{unreadBadgeText(c.unread, c.unread_capped)}</span>
+                : c.marked_unread ? <span className={`badge dot ${mutedNow ? "muted" : ""}`} aria-label={t("common.unread")} /> : null}
             </div>
-          ))}
+            );
+          })}
           </>
           )}
         </div>
@@ -3146,9 +3151,20 @@ export default function App() {
             .filter((a) => a.visible({ c: convMenu.c }))
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
-                onClick={() => { a.run({ c: convMenu.c }); setConvMenu(null); }}>
+                onClick={() => {
+                  // 「免打扰」不直接执行：先弹时长子菜单（对齐 UX 稿 04 frame E）；需要锚点 x/y，
+                  // 走统一两档路由，与消息菜单「删除」→ requestDelete 同一套写法。
+                  if (a.id === "mute") { const cc = convMenu.c, x = convMenu.x, y = convMenu.y; setConvMenu(null); requestMute(cc, x, y); return; }
+                  a.run({ c: convMenu.c }); setConvMenu(null);
+                }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}
+        </AnchoredMenu>
+      )}
+
+      {convMuteMenu && (
+        <AnchoredMenu x={convMuteMenu.x} y={convMuteMenu.y} className="ctx-menu ctx-submenu-in">
+          <MuteMenu onPick={(until) => setConvMuted(convMuteMenu.c, true, until)} />
         </AnchoredMenu>
       )}
 

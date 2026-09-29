@@ -119,6 +119,38 @@ describe("DetailPanel · 单聊", () => {
     fireEvent.click(container.querySelectorAll(".switch")[0]);
     expect(p.setConvPinned).toHaveBeenCalledWith(expect.objectContaining({ conv_id: "u_u1_u_u2" }), true);
   });
+
+  // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.1/§4.2）：行从开关变成「值 + 菜单」。
+  it("免打扰行：未免打扰显「关」，点开菜单选「1 小时」→ setConvMuted(conv,true,~1h 后)，菜单无「取消免打扰」项", () => {
+    const p = base();
+    const { getByText, queryByText } = mount(p);
+    expect(getByText("关闭")).toBeTruthy();
+    fireEvent.click(getByText("消息免打扰"));
+    expect(queryByText("取消免打扰")).toBeNull();
+    const before = Date.now();
+    fireEvent.click(getByText("1 小时"));
+    expect(p.setConvMuted).toHaveBeenCalledTimes(1);
+    const [conv, muted, until] = vi.mocked(p.setConvMuted).mock.calls[0];
+    expect(conv).toEqual(expect.objectContaining({ conv_id: "u_u1_u_u2" }));
+    expect(muted).toBe(true);
+    expect(until).toBeGreaterThanOrEqual(before + 3_600_000 - 2_000);
+    expect(until).toBeLessThanOrEqual(before + 3_600_000 + 5_000);
+  });
+
+  it("免打扰行：已免打扰显到期文案，菜单顶部多一项红色「取消免打扰」，点它 → setConvMuted(conv,false)", () => {
+    const now = Date.now();
+    const p = base({ conversations: [peerConv({ muted: true, mute_until: now + 60_000 })] });
+    const { getByText } = mount(p);
+    fireEvent.click(getByText("消息免打扰"));
+    fireEvent.click(getByText("取消免打扰"));
+    expect(p.setConvMuted).toHaveBeenCalledWith(expect.objectContaining({ conv_id: "u_u1_u_u2" }), false);
+  });
+
+  it("免打扰行：永久免打扰（mute_until=0）显「永久」", () => {
+    const p = base({ conversations: [peerConv({ muted: true, mute_until: 0 })] });
+    const { getByText } = mount(p);
+    expect(getByText("永久")).toBeTruthy();
+  });
   it("更多菜单（detailMore=true）：清空聊天记录 → doClearHistory(convId)；拉黑 → doToggleBlock(peer, true)", () => {
     const p = base({ detailMore: true });
     const { getByText } = mount(p);

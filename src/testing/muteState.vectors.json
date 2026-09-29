@@ -1,0 +1,145 @@
+{
+ "_doc": "定时免打扰（通知第二期，NOTIFICATIONS_P1_DESIGN §4.3）三端共用向量。isMutedNow = muted && (muteUntil == 0 || nowMs < muteUntil)，now == until 已解除（与服务端 conversation.EffectiveMute 同）。untilLabel：只对有效免打扰调用；按 tzOffsetMinutes 指定的本地时区比较「日历日」：同一天 kind=today + time(HH:mm)，差 1 天 kind=tomorrow + time，更晚 kind=date + month/day，muteUntil=0 → forever。文案拼装各端按 i18n 键做（notif.mute.until_today/_tomorrow/_date、common.permanent），向量只校验分类与数字。",
+ "isMutedNow": [
+  {
+   "name": "未免打扰",
+   "muted": false,
+   "muteUntil": 0,
+   "nowMs": 1790647200000,
+   "expect": false
+  },
+  {
+   "name": "永久",
+   "muted": true,
+   "muteUntil": 0,
+   "nowMs": 1790647200000,
+   "expect": true
+  },
+  {
+   "name": "未到期",
+   "muted": true,
+   "muteUntil": 1790650800000,
+   "nowMs": 1790647200000,
+   "expect": true
+  },
+  {
+   "name": "刚好到期（now == until）→ 已解除",
+   "muted": true,
+   "muteUntil": 1790647200000,
+   "nowMs": 1790647200000,
+   "expect": false
+  },
+  {
+   "name": "已过期",
+   "muted": true,
+   "muteUntil": 1790647199999,
+   "nowMs": 1790647200000,
+   "expect": false
+  },
+  {
+   "name": "muted=false 残留 until → 未免打扰",
+   "muted": false,
+   "muteUntil": 1790650800000,
+   "nowMs": 1790647200000,
+   "expect": false
+  }
+ ],
+ "untilLabel": [
+  {
+   "name": "永久",
+   "muteUntil": 0,
+   "nowMs": 1790647200000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "forever",
+    "time": null,
+    "month": null,
+    "day": null
+   }
+  },
+  {
+   "name": "1 小时后（同一天）",
+   "muteUntil": 1790650800000,
+   "nowMs": 1790647200000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "today",
+    "time": "11:00",
+    "month": null,
+    "day": null
+   }
+  },
+  {
+   "name": "8 小时后跨过午夜 → 明天",
+   "muteUntil": 1790724600000,
+   "nowMs": 1790695800000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "tomorrow",
+    "time": "07:30",
+    "month": null,
+    "day": null
+   }
+  },
+  {
+   "name": "1 天后 → 明天",
+   "muteUntil": 1790733600000,
+   "nowMs": 1790647200000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "tomorrow",
+    "time": "10:00",
+    "month": null,
+    "day": null
+   }
+  },
+  {
+   "name": "7 天后 → 日期",
+   "muteUntil": 1791252000000,
+   "nowMs": 1790647200000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "date",
+    "time": null,
+    "month": 10,
+    "day": 6
+   }
+  },
+  {
+   "name": "后天零点 → 日期（不是明天）",
+   "muteUntil": 1790784000000,
+   "nowMs": 1790647200000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "date",
+    "time": null,
+    "month": 10,
+    "day": 1
+   }
+  },
+  {
+   "name": "今天 23:59 → 今天",
+   "muteUntil": 1790697540000,
+   "nowMs": 1790647200000,
+   "tzOffsetMinutes": 480,
+   "expect": {
+    "kind": "today",
+    "time": "23:59",
+    "month": null,
+    "day": null
+   }
+  },
+  {
+   "name": "时区决定日期：UTC-5 下同一时刻已是明天",
+   "muteUntil": 1790748000000,
+   "nowMs": 1790737200000,
+   "tzOffsetMinutes": -300,
+   "expect": {
+    "kind": "tomorrow",
+    "time": "01:00",
+    "month": null,
+    "day": null
+   }
+  }
+ ]
+}

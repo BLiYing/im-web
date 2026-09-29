@@ -16,9 +16,11 @@ import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, Group
 import type { DownloadState } from "../download";
 import { firstURLInText } from "../messageContent";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
+import { isMutedNow, muteUntilText } from "../muteState";
 import { useAppServices } from "../AppServicesContext";
 import { useChatActions } from "../ChatActionsContext";
 import { Avatar } from "./Avatar";
+import { MuteMenu } from "./MuteMenu";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { AdminListPanel } from "./AdminListPanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
@@ -113,7 +115,7 @@ export interface DetailPanelProps {
   doLeaveGroup: (cid: string) => Promise<void>;
   doDissolveGroup: (cid: string) => void;
   setConvPinned: (c: Conversation, pinned: boolean) => void;
-  setConvMuted: (c: Conversation, muted: boolean) => void;
+  setConvMuted: (c: Conversation, muted: boolean, muteUntil?: number) => void;
   openGroupText: (kind: GroupTextKind, cid: string) => void;
   openGroupCard: (cid: string, asLink?: boolean) => Promise<void>;
   doEditMyGroupNickname: (gp: GroupInfo) => Promise<void>;
@@ -141,6 +143,9 @@ export function DetailPanel(p: DetailPanelProps) {
   const tr = useT();
   // 群通话选人弹窗（通话服务不就绪时点按钮只提示，不开弹窗）。
   const [groupCallPick, setGroupCallPick] = useState(false);
+  // 免打扰时长子菜单（NOTIFICATIONS_P1_DESIGN §4.1/§4.2）：点行恒弹菜单，已免打扰时最上面多一项
+  // 红色「取消免打扰」（用于「把 8 小时改成永久」这类调整），未免打扰时只有时长列表。
+  const [muteMenuOpen, setMuteMenuOpen] = useState(false);
   const startCall = (peer: string, video: boolean) => {
     if (!placeSingleCall(peer, video)) setToast(tr("chat.message.call_unavailable"));
   };
@@ -196,7 +201,10 @@ export function DetailPanel(p: DetailPanelProps) {
       : undefined;
     const subtitle = d.isGroup ? tr(isSuperHere ? "chat.header.member_count_super" : "chat.header.member_count", { count: memberTotal }) : (peerPresenceText ?? "");
     const pinned = (conv?.pinned_at ?? 0) > 0;
-    const muted = !!conv?.muted;
+    // 定时免打扰到期后按未免打扰渲染（NOTIFICATIONS_P1_DESIGN §4.3）；右值文案见 muteUntilText
+    // （永久=common.permanent，未到期=「至今天/明天 HH:mm」「至 M月D日」，未免打扰=common.off）。
+    const muted = isMutedNow(!!conv?.muted, conv?.mute_until, Date.now());
+    const muteValue = muted ? muteUntilText(conv?.mute_until ?? 0) : tr("common.off");
     const peerBlocked = !d.isGroup && !!friends.find((f) => f.user_id === d.peer)?.blocked;
     // 好友准入（微信式，任务一 P0）：非好友不显示「消息/呼叫/视频」，改显「加好友」。
     // 拉黑的好友 status 仍 accepted（仍算好友，可发消息），故只看 status 不看 blocked。
@@ -379,8 +387,20 @@ export function DetailPanel(p: DetailPanelProps) {
               <div className="detail-card">
                 <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>{tr("chat.detail.pinned")}</span>
                   <button className={`switch ${pinned ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvPinned(conv, !pinned)} /></div>
-                <div className="detail-row"><span className="detail-row-ic"><BellOff size={18} /></span><span>{tr("chat.detail.muted")}</span>
-                  <button className={`switch ${muted ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvMuted(conv, !muted)} /></div>
+                <div className="detail-row-anchor">
+                  <button className="detail-row" disabled={!conv} onClick={() => conv && setMuteMenuOpen((v) => !v)}>
+                    <span className="detail-row-ic"><BellOff size={18} /></span><span>{tr("chat.detail.muted")}</span>
+                    <span className="detail-row-val">{muteValue}</span>
+                    <ChevronRight size={16} className="detail-row-chev" />
+                  </button>
+                  {muteMenuOpen && conv && (
+                    <div className="menu-card" onClick={(e) => e.stopPropagation()}>
+                      <MuteMenu itemClassName="menu-item"
+                        onUnmute={muted ? () => { setMuteMenuOpen(false); setConvMuted(conv, false); } : undefined}
+                        onPick={(until) => { setMuteMenuOpen(false); setConvMuted(conv, true, until); }} />
+                    </div>
+                  )}
+                </div>
                 {/* 进「群管理」时显式复位管理员二级面板：不复位的话，上次从管理员页直接退出抽屉后，
                     下次点「群管理」会一步跨进管理员列表（层级状态是两个独立布尔，不会自己归位）。 */}
                 {canManage && (
@@ -405,6 +425,7 @@ export function DetailPanel(p: DetailPanelProps) {
                   </button>
                 )}
               </div>
+              <div className="detail-foot-note">{tr("chat.detail.mute_footer")}</div>
 
               {/* ---- 群：我在本群的昵称 / 群备注（任意成员，G1） ---- */}
               {d.isGroup && gp && (

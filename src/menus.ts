@@ -4,6 +4,7 @@
 import type { ChatMessage, Conversation, Favorite } from "./sdk/protocol";
 import type { LucideIcon } from "lucide-react";
 import { CALL_CONTENT_TYPE } from "./callRecord";
+import { isMutedNow } from "./muteState";
 import { t } from "./i18n";
 import {
   Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
@@ -181,8 +182,12 @@ export function buildConversationActions(h: ConversationHandlers): MenuAction<Co
     // 免打扰/取消免打扰：web.conv.menu.mute/unmute 的中文值随 NOTIFICATIONS_DESIGN §9-5 改为「免打扰」，
     // 与 ChatHeader 下拉菜单的 conv.menu.mute（同为「免打扰」）措辞统一——本页的例外列表、脚注都在说
     // 「免打扰」，同一功能不该在同一端出现两个名字（英文 key 本就都是 Mute/Unmute，未变）。
-    { id: "mute", label: t("web.conv.menu.mute"), icon: BellOff, visible: (c) => !c.c.muted, run: (c) => h.setMuted(c.c, true) },
-    { id: "unmute", label: t("web.conv.menu.unmute"), icon: Bell, visible: (c) => !!c.c.muted, run: (c) => h.setMuted(c.c, false) },
+    // 互斥判据用 isMutedNow（NOTIFICATIONS_P1_DESIGN §4.3）而非裸 `muted`：定时免打扰到期后
+    // `unmute` 不该再显示（服务端 `muted` 已是有效值，这里是第二道保险，防本地缓存的会话列表刷新前那一小段窗口）。
+    // 渲染层（App.tsx）对 "mute" 的点击**不会**直接走 run()——会拦截先弹时长子菜单，`run` 只作为
+    // pure 单测（menus.test.ts）与类型契约的兜底路径，语义仍是「立即永久免打扰」。
+    { id: "mute", label: t("web.conv.menu.mute"), icon: BellOff, visible: (c) => !isMutedNow(!!c.c.muted, c.c.mute_until, Date.now()), run: (c) => h.setMuted(c.c, true) },
+    { id: "unmute", label: t("web.conv.menu.unmute"), icon: Bell, visible: (c) => isMutedNow(!!c.c.muted, c.c.mute_until, Date.now()), run: (c) => h.setMuted(c.c, false) },
     // 已读↔未读：有未读数或被手动标未读 → 「设为已读」；否则（已读态）→ 「标为未读」。
     { id: "markRead", label: t("conv.menu.mark_read"), icon: CheckCheck, visible: (c) => c.c.unread > 0 || !!c.c.marked_unread, run: (c) => h.markRead(c.c) },
     { id: "markUnread", label: t("conv.menu.mark_unread"), icon: Circle, visible: (c) => c.c.unread === 0 && !c.c.marked_unread, run: (c) => h.markUnread(c.c) },
