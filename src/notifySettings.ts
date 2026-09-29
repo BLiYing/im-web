@@ -31,7 +31,7 @@ export interface NotifySettings {
 export const DEFAULT_NOTIFY_SETTINGS: NotifySettings = {
   private: { enabled: true, preview: true, sound: "default" },
   group: { enabled: true, preview: true, sound: "default" },
-  inApp: { sound: true, vibrate: true, preview: true },
+  inApp: { sound: false, vibrate: false, preview: false }, // 默认全关（2026-09-29 用户决定）
   badge: { includeMuted: false },
   desktop: { enabled: true, sound: true, volume: 7 },
 };
