@@ -5,6 +5,13 @@
 
 ## 当前焦点
 
+> **最近通话验收修复（2026-09-29，浏览器 user1001 已验，未提交）**：群行改用群会话真实头像（新增
+> `groupAvatarOf` prop，App 传 `convAvatarUrl(convById(cid))`，`seed=conv_id` 同会话列表），删掉统一渐变
+> 人形图标与 `.callh-avatar-group`；按 UX 稿补行分隔线（左缩进 66）、行内边距 9、名字 15.5、分组头上边距 14。
+> `npm run build` 零错误，vitest 1510/1510。
+> 第二轮：头像卡片菜单「最近通话」去掉 `iconTint`（原来渲染成彩色方块，比「设置」「收藏消息」大一圈）；
+> 分段控制轨道改 `--subtle-fill`（原 `--page-bg` 与弹窗同色看不出轨道），未选中改主文字色，对齐 iOS/Android。
+
 > **「设置 ▸ 最近通话」页 ✅ 代码完成（2026-09-28，worktree `im-web-wt-call-history` / 分支 `feature/call-history`，已提交未 push；浏览器未手测）**：
 > 设计见 `../IMServer/docs/design/CALL_HISTORY_DESIGN.md` + 配套 UX 稿；先例 `CALL_RECORD_DESIGN.md`（同一套身份解析/未接判色领域逻辑）。
 > - **入口**：`App.tsx` 头像卡片菜单 `accountRows` 新增「最近通话」行（复用既有翻译 key `ios.settings.row.recent_calls`、绿色 `iconTint`，紧邻「收藏消息」），点开 `CallHistoryPanel`。

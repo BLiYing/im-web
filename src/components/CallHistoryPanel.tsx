@@ -2,7 +2,7 @@
 // 设计见 IMServer docs/design/CALL_HISTORY_DESIGN.md，配套 UX 稿 sketches/CALL_HISTORY_UX_SKETCH.html §02-§05。
 // 数据/分页/筛选逻辑在 useCallHistory（状态）+ callHistoryView（纯函数）；本文件只管渲染与身份解析的胶水。
 import { useMemo, type UIEvent } from "react";
-import { ArrowDownLeft, ArrowUpRight, Phone, Users, Video } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Phone, Video } from "lucide-react";
 import type { CallHistoryRecord } from "im-rtc-call-engine";
 import { Modal } from "./Modal";
 import { Avatar } from "./Avatar";
@@ -34,6 +34,8 @@ export interface CallHistoryPanelProps {
   avatarOf: (uid: string) => string | undefined;
   /** 群通话所属会话（chatGroupId = 群 conv_id）的显示名；拿不到时行内退回「群{kind}通话 · N人」。 */
   groupNameOf: (chatGroupId: string) => string | undefined;
+  /** 同上会话的群头像；拿不到时按 conv_id 取色的首字圈兜底（与会话列表同一口径）。 */
+  groupAvatarOf: (chatGroupId: string) => string | undefined;
   /** 跳转到群会话（不提供「加入」，见设计文档 §0.2）。 */
   onOpenGroup: (chatGroupId: string) => void;
   /** 回拨走不通（未就绪/忙线由 Kit 自己兜底，这里只处理「服务没起来」）时的提示，通常是 setToast(...)。 */
@@ -44,7 +46,7 @@ export interface CallHistoryPanelProps {
 const TABS: CallHistoryTab[] = ["all", "missed"];
 
 export function CallHistoryPanel({
-  myUid, timeFormat, nameOf, avatarOf, groupNameOf, onOpenGroup, onCallUnavailable, onClose,
+  myUid, timeFormat, nameOf, avatarOf, groupNameOf, groupAvatarOf, onOpenGroup, onCallUnavailable, onClose,
 }: CallHistoryPanelProps) {
   const tr = useT();
   const { records, tab, setTab, loading, error, hasMore, loadMore, retry } = useCallHistory(myUid);
@@ -98,7 +100,8 @@ export function CallHistoryPanel({
               <div className="callh-day">{g.label}</div>
               {g.records.map((r) => (
                 <CallHistoryRow key={r.callId} r={r} myUid={myUid} nameOf={nameOf} avatarOf={avatarOf}
-                  groupNameOf={groupNameOf} timeFormat={timeFormat} tr={tr} onClick={() => handleRowClick(r)} />
+                  groupNameOf={groupNameOf} groupAvatarOf={groupAvatarOf} timeFormat={timeFormat} tr={tr}
+                  onClick={() => handleRowClick(r)} />
               ))}
             </div>
           ))}
@@ -112,13 +115,14 @@ export function CallHistoryPanel({
   );
 }
 
-/** 一行：头像 + 名字(含方向箭头，未接红字) + 媒体图标与文案 + 右侧时间。群通话用统一渐变底图标，不用群头像（见设计文档 §3）。 */
-function CallHistoryRow({ r, myUid, nameOf, avatarOf, groupNameOf, timeFormat, tr, onClick }: {
+/** 一行：头像 + 名字(含方向箭头，未接红字) + 媒体图标与文案 + 右侧时间。群通话行用群会话头像（设计文档 §2）。 */
+function CallHistoryRow({ r, myUid, nameOf, avatarOf, groupNameOf, groupAvatarOf, timeFormat, tr, onClick }: {
   r: CallHistoryRecord;
   myUid: string;
   nameOf: (uid: string) => string | undefined;
   avatarOf: (uid: string) => string | undefined;
   groupNameOf: (chatGroupId: string) => string | undefined;
+  groupAvatarOf: (chatGroupId: string) => string | undefined;
   timeFormat: TimeFormat;
   tr: (key: string, args?: Record<string, string | number>) => string;
   onClick: () => void;
@@ -133,7 +137,7 @@ function CallHistoryRow({ r, myUid, nameOf, avatarOf, groupNameOf, timeFormat, t
   return (
     <div className={`callh-row${line.missed ? " missed" : ""}`} onClick={onClick} role="button">
       {r.isGroup
-        ? <div className="callh-avatar callh-avatar-group"><Users size={18} /></div>
+        ? <Avatar url={groupAvatarOf(r.chatGroupId)} label={name} seed={r.chatGroupId} cls="avatar callh-avatar" />
         : <Avatar url={avatarOf(peer)} label={name} seed={peer || name} cls="avatar callh-avatar" />}
       <div className="callh-mid">
         <div className="callh-name"><DirIcon size={13} className="callh-dir" /><span>{name}</span></div>

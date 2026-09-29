@@ -2729,9 +2729,9 @@ export default function App() {
   const accountRows: Row[] = [
     { id: "settings", label: t("settings.title"), icon: Settings, chevron: true, onClick: () => { setAccountCard(false); setShowSettings(true); } },
     { id: "favorites", label: t("common.saved_messages"), icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
-    // 最近通话（CALL_HISTORY_DESIGN.md §0.1/§2）：iOS/Android 已有同位置绿色电话图标入口，Web 补这一行；
-    // 复用既有翻译 key，不新起。图标沿用三端已定的绿色 tint，不是本处新拍的色板。
-    { id: "recentCalls", label: t("ios.settings.row.recent_calls"), icon: Phone, iconTint: "green", chevron: true,
+    // 最近通话（CALL_HISTORY_DESIGN.md §0.1/§2）：复用既有翻译 key。**不带 iconTint**——本菜单其余行都是
+    // 线条图标，带 tint 会渲染成设置页那种彩色方块，比同菜单的「设置」「收藏消息」大一圈（2026-09-29 用户报）。
+    { id: "recentCalls", label: t("ios.settings.row.recent_calls"), icon: Phone, chevron: true,
       onClick: () => { setAccountCard(false); setShowCallHistory(true); } },
   ];
 
@@ -3174,6 +3174,7 @@ export default function App() {
           nameOf={(u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u))}
           avatarOf={peerAvatar}
           groupNameOf={(cid) => { const c = convById(cid); return c ? convDisplayLabel(c) : undefined; }}
+          groupAvatarOf={(cid) => { const c = convById(cid); return c ? convAvatarUrl(c) : undefined; }}
           onOpenGroup={(cid) => { setShowCallHistory(false); openGroupChat(cid); }}
           onCallUnavailable={() => setToast(t("chat.message.call_unavailable"))}
           onClose={() => setShowCallHistory(false)}
