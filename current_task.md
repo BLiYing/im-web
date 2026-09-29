@@ -5,7 +5,36 @@
 
 ## 当前焦点
 
-> **最近通话验收修复（2026-09-29，浏览器 user1001 已验，未提交）**：群行改用群会话真实头像（新增
+> **六条用户报告第 6 项：消息列表补常驻可见滚动条 ✅（2026-09-29，浏览器截图验证）**：
+> 系统原生滚动条在 macOS「滚动时显示」偏好下是覆盖式 overlay，只在滚动瞬间一闪而过（实测
+> `.msgs` 的 `offsetWidth === clientWidth`，确认即使给 `::-webkit-scrollbar` 定制样式，Chrome
+> 仍按 overlay 处理、不占布局空间——样式管得了颜色形状，管不了这条系统级淡入淡出策略），用户
+> 报告"看不出能滚"。改用自绘常驻滑块，思路对齐 Android `chatScrollbar`（Canvas 直绘、不依赖
+> 系统滚动条）：
+> - 纯函数 `src/chatScrollbar.ts` 的 `scrollbarThumb(scrollTop, scrollHeight, clientHeight)`
+>   （Web 有真实 DOM 尺寸，比 Android Compose LazyColumn 只能估算简单，判据一致：一屏放得下
+>   不显示、内容超长滑块不低于 `SCROLLBAR_MIN_THUMB_PX=24`），4 个用例。
+> - `components/ChatScrollbarThumb.tsx` 直接操作 DOM 而不进 React state（滚动事件每帧可能触发，
+>   走 setState 会带着消息列表一起高频重渲染）；`scroll`/`ResizeObserver`/`MutationObserver` 三路
+>   触发重算（后者补"顶部插入更早历史"这类不一定触发 scroll 事件的内容变化）。
+> - **踩坑两处**：① 滑块最初用 `position:absolute` 挂在 `.msgs`（滚动容器）内部，结果跟着内容
+>   一起被滚出视口——绝对定位元素若挂在会滚动的祖先内部，仍在其滚动内容流里。改 `position:fixed`
+>   （配 `getBoundingClientRect()` 换算视口坐标）。② 改完 `fixed` 仍不对：`.msgs` 自己带
+>   `transform: translateZ(0)`（滚动性能用的 GPU 层提升，不能去掉）——CSS 规则是祖先一旦有
+>   `transform`，就成了 `position:fixed` 后代的 containing block，`fixed` 退化成相对**那个祖先**
+>   定位，坐标全偏移了 `.msgs` 自己的位置（实测复现：滑块套了两次偏移量，落到视口外）。最终用
+>   `createPortal` 把滑块挂到 `document.body` 下彻底避开这条 containing-block 坑（组件在 React
+>   树里仍是 `.msgs` 的子节点，只是 DOM 输出改道）。
+> - 隐藏原生滚动条（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），否则滚动瞬间
+>   系统 overlay 会和常驻滑块叠成两条。颜色新增令牌 `--scrollbar-thumb`（text-tertiary 转 rgba
+>   0.45/0.55，对齐 Android `c.textTertiary.copy(alpha=0.4f)`）。
+> - `npm run build` 零错误；`npm test` **1514/1514 绿**（新增 4 例）。**浏览器验证 ✅**：
+>   Chrome 截图确认滑块常驻可见（不用等滚动瞬间）、随滚动位置正确移动。
+> - **iOS 不需要动**：原生 `UITableView` 指示器实测本就在滑动时清晰可见（XCUITest 截图确认），
+>   只是**瞬态**——这是 iOS 全系统统一的滚动条行为（Apple HIG，Messages/Mail/设置等系统 App
+>   同款），做成常驻反而破坏平台一致性，不是缺口，未改代码。
+
+> **最近通话验收修复（2026-09-29，浏览器 user1001 已验，已提交 `2e15469`）**：群行改用群会话真实头像（新增
 > `groupAvatarOf` prop，App 传 `convAvatarUrl(convById(cid))`，`seed=conv_id` 同会话列表），删掉统一渐变
 > 人形图标与 `.callh-avatar-group`；按 UX 稿补行分隔线（左缩进 66）、行内边距 9、名字 15.5、分组头上边距 14。
 > `npm run build` 零错误，vitest 1510/1510。

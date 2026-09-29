@@ -71,6 +71,9 @@
   --ic-gray: #8e8e93; --ic-red: #ff3b30; --ic-orange: #ff9500; --ic-yellow: #f0a92b;
   --ic-green: #34c759; --ic-teal: #30b0c7; --ic-blue: #007aff; --ic-indigo: #5856d6;
   --ic-purple: #af52de; --ic-pink: #ff2d55;
+  /* 消息列表滚动条滑块（六条用户报告第 6 项，2026-09-29）：text-tertiary 转 rgba 取 0.45 透明度，
+     对齐 Android chatScrollbar 用的 c.textTertiary.copy(alpha = 0.4f)，三端口径一致。 */
+  --scrollbar-thumb: rgba(174, 180, 188, 0.45);
 }
 /* 深色取值：手动选 Dark 直接命中；System 由下方 media 在系统深色时命中。改一处两处同步。 */
 :root[data-theme="dark"] {
@@ -91,6 +94,7 @@
   --ic-gray: #98989d; --ic-red: #ff453a; --ic-orange: #ff9f0a; --ic-yellow: #ffb020;
   --ic-green: #30d158; --ic-teal: #40cbe0; --ic-blue: #0a84ff; --ic-indigo: #5e5ce6;
   --ic-purple: #bf5af2; --ic-pink: #ff375f;
+  --scrollbar-thumb: rgba(112, 120, 131, 0.55);
 }
 @media (prefers-color-scheme: dark) {
   :root[data-theme="system"] {
@@ -111,6 +115,7 @@
     --ic-gray: #98989d; --ic-red: #ff453a; --ic-orange: #ff9f0a; --ic-yellow: #ffb020;
     --ic-green: #30d158; --ic-teal: #40cbe0; --ic-blue: #0a84ff; --ic-indigo: #5e5ce6;
     --ic-purple: #bf5af2; --ic-pink: #ff375f;
+    --scrollbar-thumb: rgba(112, 120, 131, 0.55);
   }
 }
 
@@ -291,6 +296,22 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
   flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) 0;
   position: relative;
   transform: translateZ(0);
+  /* 系统原生滚动条不用（macOS「滚动时显示」偏好下是覆盖式、一闪而过的 overlay，实测
+     offsetWidth === clientWidth 确认样式管不了这条系统级淡入淡出策略），改用下面
+     .msgs-scrollbar-thumb 常驻显示，与原生的叠在一起会像两条滚动条，故这里隐藏原生的。 */
+  scrollbar-width: none;
+}
+.msgs::-webkit-scrollbar { display: none; }
+
+/* 常驻可见细滚动条滑块（六条用户报告第 6 项，2026-09-29）：ChatScrollbarThumb 组件直接操作
+   这个元素的 left/top/height/display，对齐 Android chatScrollbar 的持续可见效果。
+   **必须 `position: fixed`，不能 `absolute`**：它虽长在 `.msgs`（滚动容器）内部，但 fixed
+   按视口定位、不随祖先的 scrollTop 走，才能贴着视口里 `.msgs` 的右边缘不动（组件里用
+   `getBoundingClientRect()` 换算成视口坐标）；早前试过 `absolute`，滑块跟着内容一起被滚出视口。 */
+.msgs-scrollbar-thumb {
+  position: fixed; width: 4px; border-radius: 2px;
+  background: var(--scrollbar-thumb); pointer-events: none;
+  transition: background 0.15s;
 }
 .msg-item { padding: var(--space-1) var(--space-4); }
 .row { display: flex; flex-direction: column; max-width: 72%; }

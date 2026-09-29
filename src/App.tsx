@@ -62,6 +62,7 @@ import { useAppearanceSettings } from "./useAppearanceSettings";
 import { useFriendOps } from "./useFriendOps";
 import { useProfileEdit } from "./useProfileEdit";
 import { ChatBanners } from "./components/ChatBanners";
+import { ChatScrollbarThumb } from "./components/ChatScrollbarThumb";
 import { AnchoredMenu } from "./components/AnchoredMenu";
 import { type LinkPreview } from "./components/LinkCard";
 import { LoginView } from "./components/LoginView";
@@ -3034,6 +3035,7 @@ export default function App() {
                 renderMentionText={renderMentionText} renderMessageText={renderMessageText}
                 openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
               />
+            <ChatScrollbarThumb targetRef={msgsRef} />
           </div>
           {/* 底部区（跳底/拉黑提示/编辑·引用条/多选栏/粘贴条/附件/@面板/输入框）：见 components/Composer（逻辑仍在 App）。 */}
           <Composer
