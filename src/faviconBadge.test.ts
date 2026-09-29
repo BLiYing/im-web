@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { faviconBadgeLabel, faviconBadgeState, faviconTitleOf, hasMarkedUnreadConv, faviconBadgeKey } from "./faviconBadge";
+// @vitest-environment jsdom
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { faviconBadgeLabel, faviconBadgeState, faviconTitleOf, hasMarkedUnreadConv, faviconBadgeKey, drawFaviconBadge, resetFaviconBadgeForTests } from "./faviconBadge";
 import type { Conversation } from "./sdk/protocol";
 
 const conv = (over: Partial<Conversation>): Conversation => ({
@@ -73,5 +74,46 @@ describe("faviconBadgeKey（去重键，数字不变不重画）", () => {
   it("number/dot/none 三种 kind 两两不同", () => {
     const keys = [faviconBadgeKey({ kind: "number", label: "3" }), faviconBadgeKey({ kind: "dot" }), faviconBadgeKey({ kind: "none" })];
     expect(new Set(keys).size).toBe(3);
+  });
+});
+
+describe("drawFaviconBadge（异步解码乱序）", () => {
+  // jsdom 没有真 canvas / 图片解码：换成可控的假对象，手动决定哪次 onload 先回来。
+  const pending: Array<{ onload: (() => void) | null }> = [];
+  class FakeImage {
+    onload: (() => void) | null = null;
+    set src(_v: string) { pending.push(this); }
+  }
+  let drawn = "";
+  beforeEach(() => {
+    pending.length = 0;
+    resetFaviconBadgeForTests();
+    document.head.innerHTML = '<link rel="icon" href="/favicon.png">';
+    vi.stubGlobal("Image", FakeImage);
+    const realCreate = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      if (tag !== "canvas") return realCreate(tag);
+      const ctx = new Proxy({}, { get: (_t, k) => (k === "fillText" ? (text: string) => { drawn = text; } : () => undefined), set: () => true });
+      return { width: 0, height: 0, getContext: () => ctx, toDataURL: () => `data:badge-${drawn}` } as unknown as HTMLCanvasElement;
+    });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("先发起的「3」比后发起的「5」晚解码完：最终仍是 5", () => {
+    drawFaviconBadge(faviconBadgeState(3, false));
+    drawFaviconBadge(faviconBadgeState(5, false));
+    const [first, second] = pending;
+    second.onload?.();
+    first.onload?.();
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')!;
+    expect(link.href).toBe("data:badge-5");
+  });
+
+  it("画数字途中切回 none：迟到的 onload 不得把角标盖回去", () => {
+    drawFaviconBadge(faviconBadgeState(3, false));
+    drawFaviconBadge(faviconBadgeState(0, false));
+    pending[0].onload?.();
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')!;
+    expect(link.href).toMatch(/favicon\.png$/);
   });
 });

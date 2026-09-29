@@ -68,10 +68,13 @@ function faviconLinkEl(): HTMLLinkElement {
 }
 
 let originalHref: string | null = null;
+/** 每次 drawFaviconBadge 递增；图片解码完成时不是最新一次就丢弃结果（见函数内注释）。 */
+let drawGeneration = 0;
 
 /** 仅供测试：清掉「已记住的原始 favicon」缓存，避免用例之间串扰。 */
 export function resetFaviconBadgeForTests(): void {
   originalHref = null;
+  drawGeneration = 0;
 }
 
 /** 画一枚角标覆盖在原 favicon 上，把结果塞进 `<link rel="icon">` 的 href；
@@ -80,6 +83,9 @@ export function resetFaviconBadgeForTests(): void {
 export function drawFaviconBadge(state: FaviconBadgeState): void {
   const link = faviconLinkEl();
   if (originalHref === null) originalHref = link.href; // 只记第一次：originalHref 之后不再更新
+  // 解码是异步的：未读数 3→5 连着变时，若「3」那次的 onload 比「5」那次晚回来，会把旧数字盖上去
+  //（/code-review 2026-09-29）。只认最新一次调用的结果。
+  const generation = ++drawGeneration;
 
   if (state.kind === "none") {
     link.href = originalHref;
@@ -88,6 +94,7 @@ export function drawFaviconBadge(state: FaviconBadgeState): void {
 
   const img = new Image();
   img.onload = () => {
+    if (generation !== drawGeneration) return;
     const size = 64;
     const canvas = document.createElement("canvas");
     canvas.width = size;
