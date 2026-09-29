@@ -12,7 +12,7 @@ interface Case {
   expect: { sound: boolean; vibrate: boolean; banner: boolean; osNotify: boolean; soundId: string | null };
 }
 
-describe("alert_decision 共用向量（30 条）", () => {
+describe("alert_decision 共用向量（31 条）", () => {
   for (const c of (vectors as { cases: Case[] }).cases) {
     it(c.name, () => {
       const r = alertDecision(c.ctx);

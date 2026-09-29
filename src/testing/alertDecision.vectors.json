@@ -1,5 +1,5 @@
 {
- "_doc": "通知判定 alertDecision 向量（三端共用，NOTIFICATIONS_DESIGN §3.1）。改规则先改这里。 ctx.platform: mobile|desktop|browser。viewingConv 由调用方判定为『用户此刻真的在看这个会话』（移动端=App 前台且在该会话页；桌面/浏览器=窗口在焦点且选中该会话）。 节流窗口 1500ms：nowMs-lastSoundAtMs<1500 视为刚响过。soundId：sound=false 时为 null；未知 id 回落 default。 移动端 sound/vibrate 读 inApp.*，且要求 appActive；桌面/浏览器 sound 读 desktop.sound，osNotify 仅 desktop 且窗口不在焦点。banner 在 P0 恒 false。",
+ "_doc": "通知判定 alertDecision 向量（三端共用，NOTIFICATIONS_DESIGN §3.1）。改规则先改这里。 ctx.platform: mobile|desktop|browser。viewingConv 由调用方判定为『用户此刻真的在看这个会话』（移动端=App 前台且在该会话页；桌面/浏览器=窗口在焦点且选中该会话）。 节流窗口 1500ms：0<=nowMs-lastSoundAtMs<1500 视为刚响过；差值为负（系统时钟往回拨）视为没响过，否则回拨多久就静音多久。soundId：sound=false 时为 null；未知 id 回落 default。 移动端 sound/vibrate 读 inApp.*，且要求 appActive；桌面/浏览器 sound 读 desktop.sound，osNotify 仅 desktop 且窗口不在焦点。banner 在 P0 恒 false。",
  "cases": [
   {
    "name": "移动端·前台·别的私聊新消息 → 响+振",
@@ -1027,6 +1027,59 @@
     "inCall": false,
     "nowMs": 100000,
     "lastSoundAtMs": 98500,
+    "settings": {
+     "private": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "group": {
+      "enabled": true,
+      "preview": true,
+      "sound": "default"
+     },
+     "inApp": {
+      "sound": true,
+      "vibrate": true,
+      "preview": true
+     },
+     "badge": {
+      "includeMuted": false
+     },
+     "desktop": {
+      "enabled": true,
+      "sound": true,
+      "volume": 7
+     }
+    }
+   },
+   "expect": {
+    "sound": true,
+    "vibrate": true,
+    "banner": false,
+    "osNotify": false,
+    "soundId": "default"
+   }
+  },
+  {
+   "name": "时钟往回拨（lastSoundAtMs 在未来）→ 不节流",
+   "ctx": {
+    "platform": "mobile",
+    "isLive": true,
+    "isSelf": false,
+    "isSystem": false,
+    "isRecalled": false,
+    "isCallRecord": false,
+    "missedCallForMe": false,
+    "convType": "private",
+    "muted": false,
+    "mentionsMe": false,
+    "appActive": true,
+    "windowFocused": true,
+    "viewingConv": false,
+    "inCall": false,
+    "nowMs": 100000,
+    "lastSoundAtMs": 700000,
     "settings": {
      "private": {
       "enabled": true,

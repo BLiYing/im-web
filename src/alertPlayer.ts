@@ -65,7 +65,8 @@ export function playAlertSound(id: NotifySoundId, volume0to10: number): void {
   const el = elementFor(id);
   if (!el) return;
   const now = Date.now();
-  if (now - lastPlayedAtMs < 1500) return;
+  const sinceLast = now - lastPlayedAtMs;
+  if (sinceLast >= 0 && sinceLast < 1500) return; // 负值 = 时钟往回拨过，同 alertDecision
   lastPlayedAtMs = now;
   tryPlay(el, volume0to10, id, "alert_sound_play_failed");
 }

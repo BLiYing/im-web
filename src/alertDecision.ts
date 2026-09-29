@@ -68,7 +68,9 @@ export function alertDecision(ctx: AlertContext): AlertDecision {
   if (!typeSettings.enabled) return DENIED;
   if (ctx.muted && !ctx.mentionsMe) return DENIED; // 免打扰：只有 @我 才穿透
 
-  const throttled = ctx.nowMs - ctx.lastSoundAtMs < ALERT_THROTTLE_MS;
+  // 差值为负 = 系统时钟往回拨过：当没响过，否则回拨多久就静音多久（/code-review 2026-09-29，三端同改）
+  const sinceLast = ctx.nowMs - ctx.lastSoundAtMs;
+  const throttled = sinceLast >= 0 && sinceLast < ALERT_THROTTLE_MS;
   const soundId = normalizeSoundId(typeSettings.sound);
 
   if (ctx.platform === "mobile") {
