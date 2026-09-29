@@ -137,8 +137,8 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
 
 /**
  * 构建会话右键菜单项（固定顺序，M4.5 全接后端，与 iOS conversationActionsFor: 对齐）：
- * 置顶↔取消置顶 / 静音↔取消静音 / 设为已读↔标为未读 / 删除。
- * 置顶/静音/已读未读是**切换对**：每对按会话当前状态只显示其一（visible 互斥）。危险项「删除」放最后（destructive-last）。
+ * 置顶↔取消置顶 / 免打扰↔取消免打扰 / 设为已读↔标为未读 / 删除。
+ * 置顶/免打扰/已读未读是**切换对**：每对按会话当前状态只显示其一（visible 互斥）。危险项「删除」放最后（destructive-last）。
  */
 /** 收藏菜单上下文：当前收藏项。 */
 export type FavoriteCtx = { f: Favorite };
@@ -178,8 +178,9 @@ export function buildConversationActions(h: ConversationHandlers): MenuAction<Co
   return [
     { id: "pin", label: t("conv.menu.pin"), icon: Pin, visible: (c) => !c.c.pinned_at, run: (c) => h.setPinned(c.c, true) },
     { id: "unpin", label: t("conv.menu.unpin"), icon: PinOff, visible: (c) => !!c.c.pinned_at, run: (c) => h.setPinned(c.c, false) },
-    // ⚠️ 静音/取消静音文案在此用 web.conv.menu.mute（“静音”），与 ChatHeader 下拉菜单的 conv.menu.mute（“免打扰”）
-    // 措辞不同——两处指向同一个 muted 状态，但迁移前就已经这样，非本次改动引入，未强行统一措辞（见迁移报告）。
+    // 免打扰/取消免打扰：web.conv.menu.mute/unmute 的中文值随 NOTIFICATIONS_DESIGN §9-5 改为「免打扰」，
+    // 与 ChatHeader 下拉菜单的 conv.menu.mute（同为「免打扰」）措辞统一——本页的例外列表、脚注都在说
+    // 「免打扰」，同一功能不该在同一端出现两个名字（英文 key 本就都是 Mute/Unmute，未变）。
     { id: "mute", label: t("web.conv.menu.mute"), icon: BellOff, visible: (c) => !c.c.muted, run: (c) => h.setMuted(c.c, true) },
     { id: "unmute", label: t("web.conv.menu.unmute"), icon: Bell, visible: (c) => !!c.c.muted, run: (c) => h.setMuted(c.c, false) },
     // 已读↔未读：有未读数或被手动标未读 → 「设为已读」；否则（已读态）→ 「标为未读」。

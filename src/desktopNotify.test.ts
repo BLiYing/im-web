@@ -31,6 +31,15 @@ describe("badgeCountOf", () => {
     expect(badgeCountOf([])).toBe(0);
     expect(badgeCountOf([conv({ unread: undefined as unknown as number })])).toBe(0);
   });
+
+  it("includeMuted=true（NOTIFICATIONS_DESIGN §3.4）：免打扰会话按未读全额计入，不再降级成 1", () => {
+    expect(badgeCountOf([conv({ unread: 3 }), conv({ unread: 99, muted: true })], true)).toBe(102);
+    expect(badgeCountOf([conv({ unread: 99, muted: true, mention_unread: true })], true)).toBe(99); // 不再钳到 1
+  });
+
+  it("默认不传 includeMuted → 等同 false（老行为不变）", () => {
+    expect(badgeCountOf([conv({ unread: 3 }), conv({ unread: 99, muted: true })])).toBe(3);
+  });
 });
 
 describe("shouldNotify", () => {

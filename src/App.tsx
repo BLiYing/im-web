@@ -33,10 +33,6 @@ import { ChatHeader } from "./components/ChatHeader";
 import { ChatActionsProvider, type ChatActions } from "./ChatActionsContext";
 import { useEvent } from "./useEvent";
 import {
-  parseDownloadSettings,
-} from "./download";
-import { clamp } from "./color";
-import {
   replyPreviewOf,
   parseChatRecord, copyImageToClipboard,
   syntheticViewerMessage, minSeqOf, type ChatRecord,
@@ -71,19 +67,10 @@ import { useDevices } from "./useDevices";
 import { useDialogs } from "./useDialogs";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
-import { SettingsPanel } from "./components/settings/SettingsPanel";
-import { DataStoragePanel } from "./components/settings/DataStoragePanel";
-import { EditProfilePanel } from "./components/settings/EditProfilePanel";
-import { DevicesPanel } from "./components/settings/DevicesPanel";
-import { PrivacySecurityPanel } from "./components/settings/PrivacySecurityPanel";
-import { BlockedListPanel } from "./components/settings/BlockedListPanel";
-import { ChangePasswordPanel } from "./components/settings/ChangePasswordPanel";
-import { GeneralPanel } from "./components/settings/GeneralPanel";
-import { LanguageSettings } from "./components/settings/LanguagePanel";
+import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
+import { useNotifySettings } from "./notifySettings";
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
-import { WallpaperPanel } from "./components/settings/WallpaperPanel";
-import { WallpaperColorPanel } from "./components/settings/WallpaperColorPanel";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
 import { PinnedListModal } from "./components/modals/PinnedListModal";
 import { GroupsModal } from "./components/modals/GroupsModal";
@@ -259,6 +246,7 @@ export default function App() {
   const [blockedOpen, setBlockedOpen] = useState(false); // 已屏蔽的用户子面板（从隐私页进入）
   const [changePwdOpen, setChangePwdOpen] = useState(false); // 修改密码子面板（从隐私页进入）
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
+  const [notificationsOpen, setNotificationsOpen] = useState(false); // 通知设置子面板（NOTIFICATIONS_DESIGN）
   const [languageOpen, setLanguageOpen] = useState(false); // 语言选择子面板
   const t = useT(); // 同时订阅界面语言：切换时 App 重渲染（须在任何早退之前，见 saveRemark 处「login early-return」注释）
   // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
@@ -309,6 +297,7 @@ export default function App() {
     wallpaper, setWallpaper, wallpaperBlur, setWallpaperBlur, wallpaperOpen, setWallpaperOpen,
     wallpaperColorOpen, setWallpaperColorOpen, colorHSV, pickWallpaperImage, resetWallpaper, applyWallpaperColor, openWallpaperColor,
   } = useAppearanceSettings(setToast);
+  const notif = useNotifySettings(); // 通知设置簇（每设备本地，NOTIFICATIONS_DESIGN）；须在下方 useDesktopIntegration 之前
   // 系统深色偏好（仅在 theme==="system" 时决定实际明暗）：跟随 prefers-color-scheme 实时变化，供默认壁纸随主题切换。
 
   const clientRef = useRef<IMClient | null>(null);
@@ -348,7 +337,7 @@ export default function App() {
   const composerRef = useRef<HTMLTextAreaElement>(null); // 聊天输入框（自适应高度 + 发送键策略）
   const currentConvRef = useRef<string>(""); // 当前打开的会话（供消息回调判断是否标记已读）
   // 桌面端集成（角标/通知/自启）。**必须在登录早退之前**（hook 数恒定）；回调经 bindCallbacks 回写。
-  const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current });
+  const desktop = useDesktopIntegration({ conversations, selfUid: uid, currentConvId: currentConvRef.current, notifySettings: notif.settings });
   // 超级群成员分页（2 万人量级）：`GET /groups/{id}` 只回我自己，成员表得按页拉。
   // 普通群不用这套（服务端一次全量下发，改走分页只会多打请求）。
   const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
@@ -1802,17 +1791,6 @@ export default function App() {
     void loadMyInfo();
   }, [showSettings]);
 
-
-  const updateColorFromSpectrum = (event: React.PointerEvent<HTMLDivElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    applyWallpaperColor({
-      h: colorHSV.h,
-      s: clamp(((event.clientX - rect.left) / rect.width) * 100),
-      v: clamp(100 - ((event.clientY - rect.top) / rect.height) * 100),
-    });
-  };
-
   // 输入框随内容自适应高度（换行时变高，最多 ~5 行；发送清空后回到单行）。
   useEffect(() => {
     const el = composerRef.current;
@@ -2742,7 +2720,7 @@ export default function App() {
     [
       { id: "general", label: t("settings.row.general"), icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
       { id: "animations", label: t("settings.row.animations"), icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("settings.row.animations")) },
-      { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => comingSoon(t("settings.row.notifications")) },
+      { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => setNotificationsOpen(true) },
       { id: "data", label: t("settings.row.data_storage"), icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
       { id: "privacy", label: t("settings.row.privacy"), icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
       { id: "folders", label: t("settings.row.folders"), icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon(t("settings.row.folders")) },
@@ -2788,7 +2766,7 @@ export default function App() {
           {/* 显示公开句柄而非 uid（10 位随机内部 ID）。没有 username 时只留连接状态。 */}
           <span className="account-meta">{myInfo?.username ? `@${myInfo.username} · ` : ""}{stateText}</span>
         </header>
-        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incomingCount}
+        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incomingCount} includeMuted={notif.settings.badge.includeMuted}
           onChats={() => setTab("chats")}
           onContacts={() => { setTab("contacts"); void refreshFriends(); }} />
         {tab === "chats" ? (
@@ -2872,133 +2850,35 @@ export default function App() {
         />
         )}
 
-        {/* 设置面板：见 components/settings/SettingsPanel（行数据与动作在上方组装）。 */}
-        {showSettings && (
-          <SettingsPanel
-            avatarUrl={myInfo?.avatar_url}
-            name={myInfo?.nickname || (myInfo?.username ? `@${myInfo.username}` : t("common.unnamed_user"))}
-            seed={uid}
-            stateText={stateText}
-            infoRows={settingsInfoRows}
-            groups={settingsGroups}
-            onBack={() => setShowSettings(false)}
-            onEditProfile={() => void openProfile()}
-            onLogout={logout}
-          />
-        )}
-
-        {/* 数据与存储：见 components/settings/DataStoragePanel（Web 只呈现 Wi-Fi 档，注释在组件内）。 */}
-        {dataStorageOpen && (
-          <DataStoragePanel
-            settings={dlSettings}
-            cachedCount={Object.keys(dlBlobs).length + mediaOptedIn.size /* 已缓存 = 应用内 blob（文件）+ 已解门控图片/视频 */}
-            onSave={saveDownloadSettings}
-            onClearCache={clearMediaCache}
-            onReset={() => {
-              void askConfirm(t("settings.download.reset_confirm"), { okText: t("settings.download.reset_ok"), danger: true }).then((ok) => {
-                if (!ok) return;
-                const c = clientRef.current;
-                if (!c) return;
-                void c.resetDownloadSettings()
-                  .then((r) => setDlSettings(parseDownloadSettings(r?.settings)))
-                  .catch((e: Error) => setToast(t("settings.download.reset_failed", { detail: e.message })));
-              });
-            }}
-            onBack={() => setDataStorageOpen(false)}
-          />
-        )}
-
-        {/* 编辑资料面板：见 components/settings/EditProfilePanel。 */}
-        {profileDraft && (
-          <EditProfilePanel
-            draft={profileDraft}
-            uid={uid}
-            busy={profileBusy}
-            editing={profileEditing} onEnterEditing={enterProfileEditing} onCancelEditing={cancelProfileEditing}
-            onChange={setProfileDraft}
-            onSave={() => void saveProfile()}
-            onPickAvatar={onPickAvatar}
-            onBack={() => setProfileDraft(null)}
-          />
-        )}
-
-        {/* 已登录设备子面板：见 components/settings/DevicesPanel（状态与操作来自 useDevices）。 */}
-        {devicesOpen && (
-          <DevicesPanel
-            devices={devices}
-            err={devicesErr}
-            revokingSid={revokingSid}
-            onRefresh={() => void loadDevices()}
-            onRevoke={(d) => void revokeDevice(d)}
-            onRevokeOthers={() => void revokeOtherDevices()}
-            onBack={() => setDevicesOpen(false)}
-          />
-        )}
-
-        {/* 隐私与安全容器页（拉齐 iOS）：黑名单 / 修改密码 + B~E 灰置占位。 */}
-        {privacyOpen && (
-          <PrivacySecurityPanel
-            blockedCount={blockedList ? blockedList.length : null}
-            onOpenBlocked={() => setBlockedOpen(true)}
-            onOpenChangePwd={() => setChangePwdOpen(true)}
-            onComingSoon={comingSoon}
-            onBack={() => setPrivacyOpen(false)}
-          />
-        )}
-
-        {/* 已屏蔽的用户子面板（从隐私页进入；数据/解除来自 useFriendOps）。 */}
-        {blockedOpen && (
-          <BlockedListPanel
-            list={blockedList}
-            busyUser={busyUser}
-            friendLabel={friendLabel}
-            onUnblock={(id) => void unblock(id)}
-            onBack={() => setBlockedOpen(false)}
-          />
-        )}
-
-        {/* 修改密码子面板（从隐私页进入）：成功后服务端自动下线其它设备。 */}
-        {changePwdOpen && (
-          <ChangePasswordPanel
-            onSubmit={async (o, n) => { const c = clientRef.current; if (!c) throw new Error(t("conn.state.disconnected")); await c.changePassword(o, n); }}
-            onDone={() => { setChangePwdOpen(false); setToast(t("settings.password.changed_toast")); void loadDevices(); }}
-            onBack={() => setChangePwdOpen(false)}
-          />
-        )}
-
-        {/* 通用设置子面板：见 components/settings/GeneralPanel。 */}
-        {generalOpen && (
-          <GeneralPanel
-            fontSize={fontSize} theme={theme} timeFormat={timeFormat} sendKey={sendKey}
-            autoStart={desktop.autoStart} autoStartSupported={desktop.autoStartSupported} onAutoStart={desktop.setAutoStart} globalShortcut={desktop.globalShortcut} globalShortcutSupported={desktop.globalShortcutSupported} onGlobalShortcut={desktop.setGlobalShortcut}
-            onFontSize={setFontSize} onTheme={setTheme} onTimeFormat={setTimeFormat} onSendKey={setSendKey}
-            onOpenWallpaper={() => setWallpaperOpen(true)}
-            onBack={() => setGeneralOpen(false)}
-          />
-        )}
-
-        {languageOpen && <LanguageSettings onBack={() => setLanguageOpen(false)} />}{/* 语言选择：偏好存 localStorage（每设备）、切换即刻生效 */}
-        {/* 聊天壁纸 / 纯色编辑：见 components/settings/WallpaperPanel · WallpaperColorPanel。 */}
-        {wallpaperOpen && (
-          <WallpaperPanel
-            wallpaper={wallpaper} isDark={isDark} blur={wallpaperBlur}
-            onSelectPreset={(id) => setWallpaper({ kind: "preset", value: id })}
-            onPickImage={pickWallpaperImage}
-            onOpenColor={openWallpaperColor}
-            onReset={resetWallpaper}
-            onToggleBlur={() => setWallpaperBlur((value) => !value)}
-            onBack={() => setWallpaperOpen(false)}
-          />
-        )}
-
-        {wallpaperColorOpen && (
-          <WallpaperColorPanel
-            colorHSV={colorHSV}
-            onApply={applyWallpaperColor}
-            onSpectrum={updateColorFromSpectrum}
-            onBack={() => setWallpaperColorOpen(false)}
-          />
-        )}
+        {/* 设置页体系的 12 个子面板路由：见 components/settings/SettingsPanelsHost
+            （open 开关/数据仍全部由 App 拥有，那边只做「按开关渲染 + 拼胶水」，CODING_STYLE §7 决策树②）。 */}
+        <SettingsPanelsHost
+          showSettings={showSettings} setShowSettings={setShowSettings}
+          myInfo={myInfo} uid={uid} stateText={stateText} infoRows={settingsInfoRows} groups={settingsGroups}
+          openProfile={openProfile} logout={logout}
+          dataStorageOpen={dataStorageOpen} setDataStorageOpen={setDataStorageOpen}
+          dlSettings={dlSettings} setDlSettings={setDlSettings} dlBlobs={dlBlobs} mediaOptedIn={mediaOptedIn}
+          saveDownloadSettings={saveDownloadSettings} clearMediaCache={clearMediaCache}
+          profileDraft={profileDraft} setProfileDraft={setProfileDraft} profileBusy={profileBusy} profileEditing={profileEditing}
+          enterProfileEditing={enterProfileEditing} cancelProfileEditing={cancelProfileEditing} saveProfile={saveProfile} onPickAvatar={onPickAvatar}
+          devicesOpen={devicesOpen} setDevicesOpen={setDevicesOpen} devices={devices} devicesErr={devicesErr} revokingSid={revokingSid}
+          loadDevices={loadDevices} revokeDevice={revokeDevice} revokeOtherDevices={revokeOtherDevices}
+          privacyOpen={privacyOpen} setPrivacyOpen={setPrivacyOpen}
+          blockedOpen={blockedOpen} setBlockedOpen={setBlockedOpen} blockedList={blockedList} busyUser={busyUser} friendLabel={friendLabel} unblock={unblock}
+          changePwdOpen={changePwdOpen} setChangePwdOpen={setChangePwdOpen}
+          generalOpen={generalOpen} setGeneralOpen={setGeneralOpen}
+          fontSize={fontSize} setFontSize={setFontSize} theme={theme} setTheme={setTheme}
+          timeFormat={timeFormat} setTimeFormat={setTimeFormat} sendKey={sendKey} setSendKey={setSendKey}
+          desktop={desktop} setWallpaperOpen={setWallpaperOpen}
+          notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} notif={notif} conversations={conversations}
+          convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl} setConvMuted={setConvMuted} openConvById={openConvById}
+          languageOpen={languageOpen} setLanguageOpen={setLanguageOpen}
+          wallpaperOpen={wallpaperOpen} wallpaper={wallpaper} isDark={isDark} wallpaperBlur={wallpaperBlur}
+          setWallpaperBlur={setWallpaperBlur} setWallpaper={setWallpaper}
+          pickWallpaperImage={pickWallpaperImage} openWallpaperColor={openWallpaperColor} resetWallpaper={resetWallpaper}
+          wallpaperColorOpen={wallpaperColorOpen} setWallpaperColorOpen={setWallpaperColorOpen}
+          colorHSV={colorHSV} applyWallpaperColor={applyWallpaperColor}
+        />
       </aside>
 
       {/* chat 面板始终挂载（即使未选会话），让 VList 在 app 加载时就测到稳定高度；

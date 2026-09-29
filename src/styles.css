@@ -2093,3 +2093,18 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .callh-empty svg { opacity: .4; }
 .callh-retry, .callh-foot-retry { color: var(--danger); cursor: pointer; }
 .callh-foot { text-align: center; padding: 14px; font-size: 12.5px; color: var(--text-secondary); width: 100%; border: 0; background: none; font: inherit; }
+
+/* ===== 设置 ▸ 通知（NOTIFICATIONS_DESIGN §2.5，P0）===== */
+.notif-panel { z-index: 40; }
+/* 「显示通知」关掉时预览/提示音行灰置但保留（不藏，避免下方内容跳动）：对齐 .tier-row.disabled 的处理。 */
+.switch-row.dim, .settings-row.dim { opacity: .45; pointer-events: none; }
+.notif-sound-select { border: 1px solid var(--separator); border-radius: 6px; background: var(--page-bg);
+  color: var(--text); font-size: 13.5px; padding: 4px 8px; cursor: pointer; }
+/* 例外列表行：头像 + 名字（含类型标签）+ 免打扰态 + 取消免打扰按钮，整行可点进入会话，
+   按钮单独 stopPropagation（§3.5）。 */
+.notif-exceptions-row { cursor: pointer; }
+.notif-exceptions-row .row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notif-exceptions-row .row-value { flex-shrink: 0; color: var(--text-secondary); font-size: 13px; }
+.notif-unmute-btn { flex-shrink: 0; border: 0; background: none; color: var(--accent); font-size: 13px;
+  cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.notif-unmute-btn:hover { background: var(--surface-hover); text-decoration: underline; }
