@@ -5,6 +5,29 @@
 
 ## 当前焦点
 
+> **查看器打开无封面视频只剩一个 ▶ ✅（2026-09-30，未浏览器实测，未提交）**：`MediaViewer` 的「封面待点」
+> 只认 `posterUrl || thumb`，两者都空时 `<img>` 没有 src、什么都不画。气泡 / `MediaTile` / `AlbumGrid` /
+> `QuoteThumb` 都有 `<video src={videoFrameSrc()}>` 首帧兜底，唯独查看器没有——补上同一兜底（只在无封面时预拉
+> metadata）。触发数据是 Android 在 2026-09-16 修复前转发出去的视频（丢了 poster/thumb/宽高/时长，落库后补不回来，
+> 见 `../IMServer/docs/SYMMETRY.md` 转发元数据那几行），再转发仍然没有。tsc 干净，vitest 1697/1697（新增 2 例，先看红）。
+> **没修**：这些老消息的气泡仍按「像素未知」画成方块、没有时长角标（用户 2026-09-30 定：那 4 条不回填、不管）。
+
+> **例外页空态说明删掉 ✅（2026-09-30，用户拍板，未提交）**：`NotificationsPanel` 没有免打扰会话时只剩「添加例外」
+> 一行（同 iOS/Android）。原先借用的 `notif.exceptions.empty_private` 写的是「私聊」「左滑」，与本页合并列表、
+> 无左滑不符。`empty_private`/`empty_group` 两个 key 现在三端都无引用（`check-i18n.mjs` 只报 warn），文案表未动。
+
+> **通知两处修复 ✅（2026-09-30，浏览器实测，未提交）**：
+> - **「添加例外」弹窗与聊天内容叠在一起**：`NotificationsPanel` 渲染在 `.sidebar` 里，侧栏自成层叠上下文且排在
+>   `.main` 之前，弹窗遮罩的 `z-index:50` 出不了侧栏，被聊天区整层压住。选择页与时长 Modal 改经
+>   `overSidebar()`（`createPortal` 到 `.app` 根，与 App.tsx 其它弹窗同层）；`.fwd-foot` 去掉多出的左右内边距。
+> - **后台标签页第一声提示音不响**：Audio 元素原先拖到第一条消息才 `new`，Chrome 对「隐藏且没加载过媒体」的页面
+>   挂起媒体加载，`play()` 一直 pending、切回前台才迟到地响（不报错、不进日志）。新增
+>   `alertPlayer.ts#preloadAlertSounds`，`useDesktopIntegration` 挂载/换提示音时预热选中的两个。
+> - 实测：弹窗在聊天之上、点遮罩可关、时长 Modal 正常；前台收私聊 `play()` 35ms 内成功；修复前隐藏页 `play()`
+>   pending 到页面可见才 resolve（复现了症状）。**未能实测**：预热后「再切到后台」收消息（自动化控制不了标签页
+>   前后台），这一步靠 Chromium `DeferMediaLoad` 只拦加载不拦已加载元素播放的语义推断。
+> - `npm run build` 零错误，vitest 1695/1695（新增 3 例，均先改坏看红）。
+
 > **通知与提示音 P1 · 第二批 ✅ 代码完成（2026-09-29，分支 `feature/notif-p1b`，未浏览器实测）**：
 > 设计 `../IMServer/docs/design/NOTIFICATIONS_P1_DESIGN.md` §4-7；协议 `../IMServer/docs/PROTOCOL.md` §6.10（后端已先落地）。
 > - **`src/muteState.ts`**（新文件，三端同名，SYMMETRY.md 已登记）：`isMutedNow(muted, muteUntil, nowMs)` +
@@ -229,6 +252,11 @@
 - **⏸ 拆 `useChatScroll`**（聊天滚动紧耦合核心，互咬 ref + jsdom 测不到真滚动）——独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
+- **侧栏面板里开弹窗必须 portal 到 `.app`**（`NotificationsPanel.tsx#overSidebar`）：`.sidebar` 的层叠上下文排在 `.main`
+  之下，`position:fixed` + 高 z-index 也盖不住聊天区。App.tsx 里的弹窗是 `.app` 直接子节点所以没事。
+- **提示音「正看着这个会话」不响是设计**（窗口在焦点且选中该会话，`alertDecision` 的 `viewingConv`）；自测要发到
+  **另一个**会话，或把窗口切走。例外列表空态仍借用 `notif.exceptions.empty_private`（文案写的是「私聊 / 左滑」，
+  Web 实际是合并列表 + 右键），要改需在 IMServer 源表加新 key 并四端重新生成。
 - **相册上限 9 是渲染契约，不是偏好**：`albumRowPattern(n>9)` 只有 9 格、`AlbumGrid` 按行 `slice` 取数，
   第 10 件起**根本不渲染**。所以发送侧必须截断（`albumBatch.ts#ALBUM_MAX`，有自洽断言兜着），
   否则多发的消息真进对端库却两端都不显示。三端同值（iOS `selectionLimit` / Android `AlbumLayout.MAX`）。

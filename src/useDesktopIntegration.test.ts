@@ -10,10 +10,10 @@ import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "./notifySettings";
 import { t } from "./i18n";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
 
-vi.mock("./alertPlayer", () => ({ playAlertSound: vi.fn() }));
+vi.mock("./alertPlayer", () => ({ playAlertSound: vi.fn(), preloadAlertSounds: vi.fn() }));
 vi.mock("./rtc/rtcCall", () => ({ getCallEngine: vi.fn(() => null) }));
 
-import { playAlertSound } from "./alertPlayer";
+import { playAlertSound, preloadAlertSounds } from "./alertPlayer";
 import { getCallEngine } from "./rtc/rtcCall";
 
 afterEach(cleanup);
@@ -37,6 +37,7 @@ function setupDesktopBridge(): void {
 
 beforeEach(() => {
   vi.mocked(playAlertSound).mockClear();
+  vi.mocked(preloadAlertSounds).mockClear();
   vi.mocked(getCallEngine).mockReturnValue(null);
   delete (window as unknown as { imDesktop?: DesktopBridge }).imDesktop;
   resetPlatformForTests();
@@ -49,6 +50,25 @@ afterEach(() => {
 function mount(conversations: Conversation[], notifySettings: NotifySettings = DEFAULT_NOTIFY_SETTINGS, currentConvId = "") {
   return renderHook(() => useDesktopIntegration({ conversations, selfUid: "me", currentConvId, notifySettings }));
 }
+
+describe("提示音预热", () => {
+  it("挂载即预热当前选中的私聊/群聊提示音（不等第一条消息）；换了选择再预热新的", () => {
+    const settings = (priv: NotifySettings["private"]["sound"]): NotifySettings => ({
+      ...DEFAULT_NOTIFY_SETTINGS,
+      private: { ...DEFAULT_NOTIFY_SETTINGS.private, sound: priv },
+      group: { ...DEFAULT_NOTIFY_SETTINGS.group, sound: "chime" },
+    });
+    const { rerender } = renderHook(
+      ({ s }: { s: NotifySettings }) => useDesktopIntegration({ conversations: [], selfUid: "me", currentConvId: "", notifySettings: s }),
+      { initialProps: { s: settings("chord") } });
+    expect(preloadAlertSounds).toHaveBeenCalledTimes(1);
+    expect(preloadAlertSounds).toHaveBeenLastCalledWith(["chord", "chime"]);
+    rerender({ s: settings("chord") });   // 设置对象换了引用、选择没变：不重复预热
+    expect(preloadAlertSounds).toHaveBeenCalledTimes(1);
+    rerender({ s: settings("rise") });
+    expect(preloadAlertSounds).toHaveBeenLastCalledWith(["rise", "chime"]);
+  });
+});
 
 describe("notifyInbound：接线", () => {
   it("窗口不在焦点、非自己发的普通消息 → 放声音 + 弹桌面系统通知", () => {

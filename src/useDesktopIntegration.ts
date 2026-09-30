@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { platform, type GlobalShortcutState } from "./platform";
 import { badgeCountOf, notifyBodyOf } from "./desktopNotify";
 import { alertDecision, type AlertContext } from "./alertDecision";
-import { playAlertSound } from "./alertPlayer";
+import { playAlertSound, preloadAlertSounds } from "./alertPlayer";
 import { isMutedNow } from "./muteState";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 import { getCallEngine } from "./rtc/rtcCall";
@@ -71,6 +71,12 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       cbRef.current.onOpenConversation(convId);
     });
   }, [opts.selfUid]);
+
+  // 提示音预热：选中的私聊/群聊提示音在页面还可见时就加载好，换了选择（本机改或别的设备同步过来）再补。
+  // 后台标签页里临时创建的 Audio 会被 Chrome 挂起加载、第一声响不出来，理由见 alertPlayer.ts#preloadAlertSounds。
+  const privateSound = opts.notifySettings.private.sound;
+  const groupSound = opts.notifySettings.group.sound;
+  useEffect(() => { preloadAlertSounds([privateSound, groupSound]); }, [privateSound, groupSound]);
 
   // 上次真的响了一声的时刻：`alertDecision` 的 1.5 秒节流要靠它（连发十条只响一声）。
   // 只在 `sound` 判为 true 时才推进——被节流/开关关掉/免打扰拦下的那些不算「响过」。

@@ -486,8 +486,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fwd-item:hover { background: var(--surface-hover); }
 .fwd-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .fwd-empty { padding: 16px; color: var(--text-secondary); text-align: center; }
-/* 「添加例外」等场景传入的列表脚注（对齐 settings-foot 的字号/行高）。 */
-.fwd-foot { padding: 8px var(--space-4) 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+/* 「添加例外」等场景传入的列表脚注（对齐 settings-foot 的字号/行高）。左右不再另加内边距：
+   它不像 .fwd-list 那样用负 margin 撑满弹窗，本就在 .modal 的内边距之内，再加一层会比标题/搜索框/取消按钮多缩进一截。 */
+.fwd-foot { padding: 0 0 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
 /* 列表页统一搜索框（转发选择 / 邀请成员 / 建群选好友共用；@面板另有 sticky 变体 .mention-search）。
    与全站输入框同款圆角字段。 */
 .list-search {

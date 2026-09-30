@@ -1,7 +1,7 @@
 // 通知提示音的实际播放（NOTIFICATIONS_DESIGN §3.2 Web/桌面行）。**纯浏览器 API，与 React 无关**——
 // `alertDecision` 只决定「该不该响、响哪个」，这里负责「真的把声音放出来」。
 //
-// 每个音效一个预加载的 `HTMLAudioElement`（Web Audio 对这种「偶发短音」没必要，`<audio>` 更省心），
+// 每个音效一个预加载的 `HTMLAudioElement`（选中的那两个由 `preloadAlertSounds` 在启动时建好，其余用到再建）（Web Audio 对这种「偶发短音」没必要，`<audio>` 更省心），
 // ogg（Opus）优先、`canPlayType` 探测不支持时退回 mp3（Safari 桌面）。`none` 不产出任何元素。
 //
 // **两条播放入口**：`playAlertSound` 走 1.5 秒节流（防御性的第二道闸——`alertDecision` 已经按
@@ -76,6 +76,18 @@ export function previewAlertSound(id: NotifySoundId, volume0to10: number): void 
   const el = elementFor(id);
   if (!el) return;
   tryPlay(el, volume0to10, id, "alert_sound_preview_failed");
+}
+
+/** 预热：把当前选中的提示音元素提前建好（`new Audio` + `preload=auto` 即开始加载），不等第一条消息来了才建。
+ *
+ *  **不是性能优化，是为了后台标签页的第一声能响**：Chrome 对「当前隐藏、且本页还从没加载过媒体」的页面
+ *  会把媒体加载整个挂起，直到标签页被切回前台（Chromium `DeferMediaLoad`）。元素若拖到第一条消息到达时
+ *  才创建，而此刻标签页恰在后台——这正是最需要提示音的场景——`play()` 会一直 pending，既不响也不报错
+ *  （不进 `alert_sound_play_failed`），等用户切回来才迟到地响一声（2026-09-30 浏览器实测）。
+ *  页面可见时先加载过，后台再 `play()` 就不走加载、不受这条限制。页面本身在后台打开时，这里的加载同样
+ *  被浏览器挂起到首次可见，无需自己监听 visibilitychange。`none` 不建元素。 */
+export function preloadAlertSounds(ids: readonly NotifySoundId[]): void {
+  for (const id of ids) elementFor(id);
 }
 
 /** 仅供测试：清掉节流与缓存，让下次播放不受上一个用例影响。生产代码不要调。 */

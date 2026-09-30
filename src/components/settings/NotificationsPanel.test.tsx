@@ -106,7 +106,7 @@ describe("NotificationsPanel：免打扰的会话（例外列表）", () => {
     expect(props.onOpenConv).toHaveBeenCalledWith("c1");
   });
 
-  it("群聊行标 @我仍提醒；空列表显示空态文案", () => {
+  it("群聊行标 @我仍提醒", () => {
     const muted = [conv({ conv_id: "g1", muted: true, is_group: true, mention_unread: true })];
     setup({ conversations: muted });
     fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
@@ -114,11 +114,13 @@ describe("NotificationsPanel：免打扰的会话（例外列表）", () => {
     expect(screen.getByText(t("notif.row.group"), { exact: false })).toBeTruthy();
   });
 
-  it("没有免打扰会话 → 空态文案，但「添加例外」行仍常驻（已拍板②：例外组不整组隐藏）", () => {
+  it("没有免打扰会话 → 只剩常驻的「添加例外」一行，不显示空态说明（同 iOS/Android；已拍板②：例外组不整组隐藏）", () => {
     setup({ conversations: [] });
     fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
-    expect(screen.getByText(t("notif.exceptions.empty_private"))).toBeTruthy();
     expect(screen.getByText(t("notif.exceptions.add"))).toBeTruthy();
+    // 那两条空态文案是按手机端私聊/群聊分页写的（「私聊」「左滑」），本页私聊群聊合并、也没有左滑，借来用是错的。
+    expect(screen.queryByText(t("notif.exceptions.empty_private"))).toBeNull();
+    expect(document.querySelector(".settings-foot")).toBeNull();
   });
 });
 
@@ -165,6 +167,42 @@ describe("NotificationsPanel：添加例外（P1 §2，复用 ForwardPicker 单�
     fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
     fireEvent.click(screen.getByText(t("notif.exceptions.add")));
     expect(screen.getByText(t("notif.exceptions.pick_empty"))).toBeTruthy();
+  });
+});
+
+// 层叠回归（2026-09-30 用户报：选择页和聊天内容叠在一起）：面板在 .sidebar 里，弹窗留在原地会被
+// 排在后面的 .main 整层压住。jsdom 不算层叠，只能守「弹窗挂到了 .app 根下、不在 .sidebar 里」这个结构前提。
+describe("NotificationsPanel：添加例外的两个弹窗挂到 .app 根下（不留在侧栏的层叠上下文里）", () => {
+  it("选择页与时长 Modal 的遮罩都是 .app 的直接子节点", () => {
+    const app = document.createElement("div");
+    app.className = "app";
+    const sidebar = document.createElement("aside");
+    sidebar.className = "sidebar";
+    app.appendChild(sidebar);
+    document.body.appendChild(app);
+    try {
+      const { unmount } = render(
+        <NotificationsPanel
+          settings={DEFAULT_NOTIFY_SETTINGS} isDesktop conversations={[conv({ conv_id: "c1" })]}
+          convDisplayLabel={(c) => `label-${c.conv_id}`} convAvatarUrl={() => undefined}
+          onSetPrivate={vi.fn()} onSetGroup={vi.fn()} onSetBadge={vi.fn()} onSetDesktop={vi.fn()}
+          onUnmute={vi.fn()} onMuteConv={vi.fn()} onOpenConv={vi.fn()} onReset={vi.fn()} onBack={vi.fn()}
+        />, { container: sidebar });
+      fireEvent.click(screen.getByText(t("notif.exceptions.web_row")));
+      fireEvent.click(screen.getByText(t("notif.exceptions.add")));
+      const pickerMask = document.querySelector(".fwd-picker")!.parentElement!;
+      expect(pickerMask.className).toBe("modal-mask");
+      expect(pickerMask.parentElement).toBe(app);
+      expect(sidebar.querySelector(".modal-mask")).toBeNull();
+
+      fireEvent.click(screen.getByText("label-c1", { selector: ".fwd-item-label" }));
+      const durationMask = document.querySelector(".mute-durations")!.closest(".modal-mask")!;
+      expect(durationMask.parentElement).toBe(app);
+      expect(sidebar.querySelector(".modal-mask")).toBeNull();
+      unmount();
+    } finally {
+      app.remove();
+    }
   });
 });
 

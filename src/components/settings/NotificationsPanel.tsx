@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import { SubPanel } from "./SubPanel";
 import { Avatar } from "../Avatar";
@@ -19,6 +20,17 @@ function exceptionValueLabel(t: (key: string, args?: Args) => string, c: Convers
   const until = c.mute_until ?? 0;
   if (until === 0) return t(c.mention_unread ? "notif.exceptions.muted_mention" : "notif.exceptions.muted");
   return t(c.mention_unread ? "notif.exceptions.muted_until_mention" : "notif.exceptions.muted_until", { until: muteUntilPhrase(until, nowMs) });
+}
+
+/** 把弹窗挂到 `.app` 根下（与 App.tsx 里其它弹窗同一层），而不是留在本面板的 DOM 位置。
+ *
+ *  本面板渲染在 `.sidebar` 里，而 `.app > .sidebar, .app > .main { z-index: 1 }` 让侧栏自成一个层叠上下文、
+ *  且 DOM 顺序排在 `.main` 之前——弹窗的 `.modal-mask` 虽是 `position: fixed; z-index: 50`，那个 50 只在
+ *  侧栏自己的上下文里算数，整层仍被后面的 `.main` 压住：聊天气泡/系统条会直接画在弹窗之上、点击也落到
+ *  聊天区（2026-09-30 浏览器实测）。App.tsx 里的弹窗是 `.app` 的直接子节点所以没这个问题；
+ *  **今后在侧栏面板里再开弹窗，同样要走这里**。取不到 `.app`（单测只渲染面板）时退回 `document.body`。 */
+function overSidebar(node: ReactNode) {
+  return createPortal(node, document.querySelector(".app") ?? document.body);
 }
 
 /** 设置 ▸ 通知（NOTIFICATIONS_DESIGN §2.5）：Web / 桌面版，一页平铺不分子页（对齐 Telegram Web A）。
@@ -67,17 +79,14 @@ export function NotificationsPanel({
     .sort((a, b) => (b.last_message?.timestamp ?? 0) - (a.last_message?.timestamp ?? 0));
 
   if (showExceptions) {
-    // 已拍板②（P1 §2）：例外组常驻「添加例外」，没有免打扰会话时这一行下面只剩空态说明，
-    // 不再像第一期那样整组隐藏。
+    // 已拍板②（P1 §2）：例外组常驻「添加例外」，没有免打扰会话时这一组只剩这一行（同 iOS/Android），
+    // 不再像第一期那样整组隐藏。不另显空态说明：`notif.exceptions.empty_private/_group` 是按手机端
+    // 私聊/群聊分页写的（「私聊」「左滑」），本页私聊群聊合并、也没有左滑，手机端自己也没用这两条。
     return (
       <SubPanel className="notif-panel" title={t("notif.section.exceptions")} onBack={() => setShowExceptions(false)}>
         <div className="settings-group">
           {renderRow({ id: "add", label: t("notif.exceptions.add"), icon: Plus, iconTint: "green", onClick: () => setPickingException(true) }, "settings-row")}
-          {muted.length === 0 ? (
-            // §3.5 的空态文案是 iOS/Android 私聊/群聊分开子页各自的措辞；Web 本页合并显示，
-            // 没有对应的「合并空态」key（已在交付报告里列为缺失 i18n key），暂借用 empty_private。
-            <div className="settings-foot">{t("notif.exceptions.empty_private")}</div>
-          ) : muted.map((c) => (
+          {muted.map((c) => (
             <div key={c.conv_id} className="settings-row notif-exceptions-row" onClick={() => onOpenConv(c.conv_id)}>
               <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer} />
               <span className="row-label">
@@ -98,7 +107,7 @@ export function NotificationsPanel({
 
         {/* 添加例外（P1 §2）：复用转发选择页 ForwardPicker（单选、无多选切换）。
             选完会话不直接永久免打扰——弹时长选择 Modal（§4.1，与列表/ChatHeader/详情页同一套选项）。 */}
-        {pickingException && (
+        {pickingException && overSidebar(
           <ForwardPicker
             count={1}
             conversations={conversations as Conversation[]}
@@ -117,10 +126,10 @@ export function NotificationsPanel({
             emptyText={t("notif.exceptions.pick_empty")}
             onForward={(picked) => { const c = picked[0]; setPickingException(false); if (c) setPendingMuteConv(c); }}
             onClose={() => setPickingException(false)}
-          />
+          />,
         )}
 
-        {pendingMuteConv && (
+        {pendingMuteConv && overSidebar(
           <Modal onClose={() => setPendingMuteConv(null)}>
             <div className="modal-title">{t("notif.mute.sheet_title", { name: convDisplayLabel(pendingMuteConv) })}</div>
             <div className="mute-durations">
@@ -128,7 +137,7 @@ export function NotificationsPanel({
                 onPick={(until) => { const c = pendingMuteConv; setPendingMuteConv(null); onMuteConv(c, until); }} />
             </div>
             <button className="modal-close" onClick={() => setPendingMuteConv(null)}>{t("common.cancel")}</button>
-          </Modal>
+          </Modal>,
         )}
       </SubPanel>
     );

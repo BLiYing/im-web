@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { playAlertSound, previewAlertSound, resetAlertPlayerForTests } from "./alertPlayer";
+import { playAlertSound, preloadAlertSounds, previewAlertSound, resetAlertPlayerForTests } from "./alertPlayer";
 
 let playSpy: ReturnType<typeof vi.spyOn>;
 let canPlaySpy: ReturnType<typeof vi.spyOn>;
@@ -87,5 +87,32 @@ describe("previewAlertSound：面板试听，不节流", () => {
   it("none 不播放", () => {
     previewAlertSound("none", 5);
     expect(playSpy).not.toHaveBeenCalled();
+  });
+});
+
+// Chrome 对「隐藏且从没加载过媒体」的页面会挂起媒体加载：元素必须在页面可见时就建好，
+// 不能拖到第一条消息到达（那时标签页多半在后台）才 new。
+describe("preloadAlertSounds：预热", () => {
+  it("给定的 id 各建一个 preload=auto 的元素、不播放；none 跳过；之后播放复用同一个元素不再新建", () => {
+    const created: HTMLAudioElement[] = [];
+    const RealAudio = globalThis.Audio;
+    const audioSpy = vi.spyOn(globalThis, "Audio").mockImplementation(function (src?: string) {
+      const el = new RealAudio(src);
+      created.push(el);
+      return el;
+    } as unknown as typeof Audio);
+    try {
+      preloadAlertSounds(["chord", "none", "chime"]);
+      expect(created.map((el) => el.src.split("/").pop())).toEqual(["notif_chord.ogg", "notif_chime.ogg"]);
+      expect(created.every((el) => el.preload === "auto")).toBe(true);
+      expect(playSpy).not.toHaveBeenCalled();
+
+      preloadAlertSounds(["chord"]);   // 已建过：不重复建
+      playAlertSound("chord", 7);
+      expect(created).toHaveLength(2);
+      expect(playSpy.mock.contexts[0]).toBe(created[0]);
+    } finally {
+      audioSpy.mockRestore();
+    }
   });
 });
