@@ -257,7 +257,7 @@ export function Composer(p: ComposerProps) {
           <button className="sel-action" title={tr("common.favorite")} aria-label={tr("common.favorite")} disabled={selected.size === 0} onClick={favoriteSelected}><Bookmark size={22} aria-hidden="true" /></button>
           {/* 删除：点按不直接删，先在按钮**上方**弹确认气泡，点里面的档位才删。两档与单条删除的子菜单同口径：
               「仅为我删除」恒有；所选全部有权（我发的 / 我是群主·管理员）时多一档「为所有人删除」，
-              破坏性重的放最后（destructive-last）。⚠️ iOS/Android 多选目前仍只有本机删除，尚未跟进。 */}
+              破坏性重的放最后（destructive-last）。iOS / Android 多选删除同口径（2026-09-30 拉齐）。 */}
           <span className="sel-del-wrap">
             <button className="sel-action danger" title={tr("common.delete")} aria-label={tr("common.delete")} disabled={selected.size === 0} onClick={() => setDelConfirm(true)}><Trash2 size={22} aria-hidden="true" /></button>
             {delConfirm && selected.size > 0 && (

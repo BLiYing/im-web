@@ -388,7 +388,6 @@
   "chat.search.prev_month": "Previous month",
   "chat.search.today_jump_nearest": "No messages today. Jumped to {date}.",
   "chat.search.today_no_messages_jumped_latest": "No messages today — jumped to the most recent one",
-  "chat.select.delete_confirm_message": "This only deletes from this device. Other devices and the other person aren't affected.",
   "chat.select.delete_confirm_title": {
     "one": "Delete {count} message",
     "other": "Delete {count} messages"
