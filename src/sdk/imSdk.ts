@@ -16,6 +16,7 @@ import { parseIncomingMessage } from "./parseMessage";
 import * as localStore from "./localStore";
 import { loadRanges, registerRange, updateRangesHead } from "./localStore.ranges";
 import { addRange, normalizeRanges, type SeqRange } from "./ranges";
+import { pendingToMessage, type PendingSend } from "./pendingSend";
 import { LOG_TAG, logger } from "../logging/logger";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, type UploadProgressHandler } from "./http";
 // isAuthCode：「鉴权失败类错误码」判据（对齐 errcode / iOS IMIsAuthErrorCode），与续期同源，故同住一个模块。
@@ -179,7 +180,7 @@ export class IMClient extends IMRestApi {
   private pendingReceipts = new Map<string, number>(); // convId -> 待上报的最大 conv_seq
   private receiptTimer: ReturnType<typeof setTimeout> | null = null;
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
-  private pendingSends = new Map<string, { convId: string; content: string; contentType: string; timestamp: number; fileName?: string; fileSize?: number; caption?: string; mentions?: string[]; mentionAll?: boolean; mentionSpans?: MentionSpan[]; replyToConvSeq?: number; replySnapshot?: string; replyToFrom?: string; forwardFrom?: string; groupId?: string; poster?: string; mediaW?: number; mediaH?: number; duration?: number; thumb?: string; waveform?: string }>(); // client_msg_id -> 待确认发送（ack 后落库）
+  private pendingSends = new Map<string, PendingSend>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
   private sendTimers = new Map<string, number>(); // client_msg_id -> 发送超时计时器（超时未 ack → 标失败）
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
@@ -866,15 +867,12 @@ export class IMClient extends IMRestApi {
             conv_seq: d.conv_seq,
             duration_ms: Math.max(0, Date.now() - pend.timestamp),
           });
-          void localStore.saveMessage(this.uid, {
-            serverMsgId: d.server_msg_id, convId: pend.convId, from: this.uid, content: pend.content,
-            contentType: pend.contentType, convSeq: d.conv_seq, timestamp: pend.timestamp, status: "sent",
-            fileName: pend.fileName, fileSize: pend.fileSize, caption: pend.caption,
-            mentions: pend.mentions, mentionAll: pend.mentionAll, mentionSpans: pend.mentionSpans,
-            replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot, replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
-            groupId: pend.groupId, posterUrl: pend.poster,
-            mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb, waveform: pend.waveform,
-          });
+          // 自己发的这条同样"我已齐全"，登记 [seq, seq]：消息与区间同一个事务落盘（与实时 new_msg 同款），游标不推。
+          // 此前自己发的不进清单、靠 seq 连号蒙混：删掉自己刚发的某条后连号一断，渲染切段就把更早的历史整段切走。
+          const seq = Number(d.conv_seq);
+          const own = pendingToMessage(this.uid, pend, { serverMsgId: d.server_msg_id, convSeq: seq, status: "sent" });
+          this.noteRange(pend.convId, seq, seq);
+          void localStore.saveIncomingPage(this.uid, [own], 0, seq, seq, this.headSeq.get(pend.convId) ?? 0);
           this.pendingSends.delete(d.client_msg_id);
         }
         this.handlers.onAck?.(d.client_msg_id, true, d.conv_seq, d.timestamp);
@@ -1009,6 +1007,8 @@ export class IMClient extends IMRestApi {
         this.handlers.onNotifySettingsUpdate?.(Number(d.version) || 0); break; // M5 §6.13：账号级通知设置版本变更 → 本端重拉
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶/为所有人删除）：应用到本地
         this.applyMsgOp(d);
+        // 事件行自己占的 op_conv_seq 永远不成为消息：同样登记，否则它是清单里的一个洞（sync 补拉是整段登记，本就含它）。
+        if (d.conv_id && Number(d.op_conv_seq) > 0) this.registerSeq(String(d.conv_id), Number(d.op_conv_seq));
         break;
       case T.VOICE_TRANSCRIPT: // 语音转文字结果（服务端识别完成）：交给 UI 展开面板
         this.handlers.onVoiceTranscript?.(String(d.conv_id ?? ""), Number(d.conv_seq) || 0,
@@ -1061,20 +1061,8 @@ export class IMClient extends IMRestApi {
               code: d.code,
               message: note,
             });
-            // 字段集必须与 ACK 落库一致（见上面 handleAck）：此前这里把 contentType 写死 "text"
-            // 且丢掉 groupId/poster/尺寸等，导致被拒的图片/视频刷新后退化成一条显示 URL 的文本气泡，
-            // 且相册因 groupId 丢失而散成一条条独立消息（各带一个红❗）。
-            void localStore.saveRejected(this.uid, {
-              clientMsgId: cmid, convId: pend.convId, from: this.uid,
-              content: pend.content, contentType: pend.contentType,
-              convSeq: 0, timestamp: pend.timestamp, status: "failed", note,
-              fileName: pend.fileName, fileSize: pend.fileSize, caption: pend.caption,
-              mentions: pend.mentions, mentionAll: pend.mentionAll, mentionSpans: pend.mentionSpans,
-              replyToConvSeq: pend.replyToConvSeq, replySnapshot: pend.replySnapshot,
-              replyToFrom: pend.replyToFrom, forwardFrom: pend.forwardFrom,
-              groupId: pend.groupId, posterUrl: pend.poster,
-              mediaW: pend.mediaW, mediaH: pend.mediaH, duration: pend.duration, thumb: pend.thumb,
-            });
+            // 字段集与 ACK 落库同源（pendingToMessage）：各抄一份时丢过 contentType/groupId/尺寸，见该函数注释。
+            void localStore.saveRejected(this.uid, pendingToMessage(this.uid, pend, { clientMsgId: cmid, convSeq: 0, status: "failed", note }));
           }
           this.pendingSends.delete(cmid);
           this.handlers.onMsgRejected?.(cmid, note, Number(d.code) || 0);
@@ -1180,6 +1168,13 @@ export class IMClient extends IMRestApi {
     if (!before || before.length !== next.length || before.some((r, i) => r.lo !== next[i].lo || r.hi !== next[i].hi)) {
       this.handlers.onRanges?.(convId);
     }
+  }
+
+  /** 登记单个**不成为消息**的 seq（实时 msg_op 事件行）：内存镜像 + 落盘。带消息本体的走 saveIncomingPage，同事务写。 */
+  private registerSeq(convId: string, seq: number): void {
+    if (!convId || !(seq > 0)) return;
+    this.noteRange(convId, seq, seq);
+    void registerRange(this.uid, convId, seq, seq, this.headSeq.get(convId) ?? 0);
   }
 
   /** 本地已齐全的区间（内存镜像）。渲染切段用它判断"中间那几个 seq 是没下载、还是本就不是消息"。 */

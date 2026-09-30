@@ -5,7 +5,7 @@
  * ↓ 与 bump 有没有真的按判据发 / 不发 window_req。这几处错了界面照常，只是要么白跑请求、
  * 要么该取的那一页永远不来——只看纯函数单测发现不了。
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { IMClient } from "./imSdk";
 import { loadRanges } from "./localStore.ranges";
 
@@ -112,5 +112,52 @@ describe("catchUpOnBump（超级群信号到了、会话正开着）", () => {
     expect(client.catchUpOnBump(CID, 130, 100, false)).toBe(false);
     expect(windowReqs(sent)).toEqual([]);
     expect(client.headOf(CID)).toBe(130);
+  });
+});
+
+describe("自己发的消息与实时 msg_op 事件行也登记区间（2026-09-30）", () => {
+  // 场景：本地齐全 [1, 2]，自己连发三条（ack 回 seq 3/4/5），再把 3、4 为所有人删除（事件行占 6、7）。
+  // 不登记的话清单停在 [1, 2]：剩下的 2 → 5 既不连号也不在同一区间，渲染切段在这儿切一刀，
+  // seq 1、2 从屏上消失（界面只剩最后一条），直到下一条入站消息触发补拉才回来。
+  const ack = (clientMsgId: string, seq: number) =>
+    ({ type: "ack", data: { client_msg_id: clientMsgId, conv_id: CID, conv_seq: seq, server_msg_id: `s${seq}`, timestamp: 1_700_000_000_000 + seq } });
+  // 本文件跑在 node 环境；sendText 的发送超时用的是 window.setTimeout，借全局顶一下（ack 到达即清掉定时器）。
+  beforeAll(() => { vi.stubGlobal("window", globalThis); });
+  afterAll(() => { vi.unstubAllGlobals(); });
+  const opDelete = (target: number, opSeq: number) =>
+    ({ type: "msg_op", data: { op: "delete", conv_id: CID, target_conv_seq: target, op_conv_seq: opSeq, by: "o", timestamp: 1 } });
+
+  it("ack 把自己发的那条登记成 [seq, seq]，紧接尾段则并进尾段；内存与落盘都有", async () => {
+    const { client, feed } = clientWithSocket("o-c4-own-ack");
+    feed(windowResp(1, 2));
+    const a = client.sendText("a", "", CID);
+    const b = client.sendText("b", "", CID);
+    feed(ack(a, 3));
+    feed(ack(b, 4));
+    await settle();
+    expect(client.rangesOf(CID)).toEqual([{ lo: 1, hi: 4 }]);
+    expect((await loadRanges("o-c4-own-ack", CID)).ranges).toEqual([{ lo: 1, hi: 4 }]);
+  });
+
+  it("实时 msg_op 帧把事件行自己的 op_conv_seq 登记进去；删掉中间几条后整段仍是同一个区间", async () => {
+    const { client, feed } = clientWithSocket("o-c4-op-seq");
+    feed(windowResp(1, 2));
+    const ids = ["a", "b", "c"].map((t) => client.sendText(t, "", CID));
+    ids.forEach((id, i) => feed(ack(id, 3 + i)));
+    feed(opDelete(3, 6));
+    feed(opDelete(4, 7));
+    await settle();
+    expect(client.rangesOf(CID)).toEqual([{ lo: 1, hi: 7 }]);
+    expect((await loadRanges("o-c4-op-seq", CID)).ranges).toEqual([{ lo: 1, hi: 7 }]);
+  });
+
+  it("失败的 ack（无 conv_seq）与不带 op_conv_seq 的帧不登记", async () => {
+    const { client, feed } = clientWithSocket("o-c4-no-seq");
+    feed(windowResp(1, 2));
+    const a = client.sendText("a", "", CID);
+    feed(ack(a, 0));
+    feed({ type: "msg_op", data: { op: "recall", conv_id: CID, target_conv_seq: 2 } });
+    await settle();
+    expect(client.rangesOf(CID)).toEqual([{ lo: 1, hi: 2 }]);
   });
 });
