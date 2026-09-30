@@ -59,7 +59,6 @@ import { useFriendOps } from "./useFriendOps";
 import { useProfileEdit } from "./useProfileEdit";
 import { ChatBanners } from "./components/ChatBanners";
 import { ChatScrollbarThumb } from "./components/ChatScrollbarThumb";
-import { AnchoredMenu } from "./components/AnchoredMenu";
 import { type LinkPreview } from "./components/LinkCard";
 import { LoginView } from "./components/LoginView";
 import { SESSION_KEY, loadSession, saveSession } from "./session";
@@ -106,7 +105,7 @@ import { useFaviconBadge } from "./useFaviconBadge";
 import { useMuteExpiryTick } from "./useMuteExpiryTick";
 import { useConvMute } from "./useConvMute";
 import { isMutedNow } from "./muteState";
-import { MuteMenu } from "./components/MuteMenu";
+import { ContextMenusHost } from "./components/ContextMenusHost";
 import { makeDesktopTitleOf } from "./desktopWiring";
 import { makeMessageTextRenderers } from "./components/messageText";
 import { pauseVoicePlayback } from "./components/VoiceBubble";
@@ -118,9 +117,9 @@ import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Users, Megaphone,
   Headphones, Phone,
-  Trash2, BellOff, Menu,
+  BellOff, Menu,
   Pin,
-  Search, MessageCircle, X, Forward,
+  Search, X,
   UserPlus } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -3130,99 +3129,17 @@ export default function App() {
         />
       )}
 
-      {menu && (
-        <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
-          {messageActions
-            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
-            .map((a) => (
-              <button key={a.id} className={a.danger ? "danger" : undefined}
-                onClick={() => {
-                  // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
-                  if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
-                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }); setMenu(null);
-                }}>
-                {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
-            ))}
-        </AnchoredMenu>
-      )}
-
-      {convMenu && (
-        <AnchoredMenu x={convMenu.x} y={convMenu.y} className="ctx-menu">
-          {conversationActions
-            .filter((a) => a.visible({ c: convMenu.c }))
-            .map((a) => (
-              <button key={a.id} className={a.danger ? "danger" : undefined}
-                onClick={() => {
-                  // 「免打扰」不直接执行：先弹时长子菜单（对齐 UX 稿 04 frame E）；需要锚点 x/y，
-                  // 走统一两档路由，与消息菜单「删除」→ requestDelete 同一套写法。
-                  if (a.id === "mute") { const cc = convMenu.c, x = convMenu.x, y = convMenu.y; setConvMenu(null); requestMute(cc, x, y); return; }
-                  a.run({ c: convMenu.c }); setConvMenu(null);
-                }}>
-                {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
-            ))}
-        </AnchoredMenu>
-      )}
-
-      {convMuteMenu && (
-        <AnchoredMenu x={convMuteMenu.x} y={convMuteMenu.y} className="ctx-menu ctx-submenu-in">
-          <MuteMenu onPick={(until) => setConvMuted(convMuteMenu.c, true, until)} />
-        </AnchoredMenu>
-      )}
-
-      {fileMenu && (() => {
-        // 详情内容右键菜单（**文件/媒体/链接三 tab 共用**，成员除外；对齐 iOS 详情各 tab 长按）：
-        // 转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（任务2 两档）。菜单对任意 ChatMessage 通用。
-        const m = fileMenu.m;
-        const downloading = dlStates[m.content]?.phase === "downloading";
-        return (
-          <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
-            <button onClick={() => {
-              setFileMenu(null); setForwardMode("each");
-              // 资料页文件 tab 视角只显文件名，看不到源消息的 caption/mentions；若原样透传会把当年
-              // 原发件人挂在同一条文件上的「@xxx 附言」意外带到目标会话（对齐 iOS forwardFileMessage:
-              // stripCaption:YES）。主流长按/查看器/多选/收藏等看得到附言的入口不受影响，仍保留 caption。
-              setForwarding([{ ...m, caption: undefined, mentions: undefined, mentionAll: false }]);
-            }}>
-              <Forward size={16} className="menu-icon" />{t("common.forward")}</button>
-            {/* 定位=回到聊天：只关会遮聊天的宿主（媒体库 / 查看器）；详情卡是右侧列不遮聊天，按用户要求保持不消失。 */}
-            <button onClick={() => { setFileMenu(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
-              <MessageCircle size={16} className="menu-icon" />{t("chat.menu.locate")}</button>
-            {downloading && (
-              <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
-                <X size={16} className="menu-icon" />{t("file.menu.cancel_download")}</button>
-            )}
-            {/* 删除统一走两档路由：可为所有人删则展开子菜单 B，否则直接仅删自己（不再在此平铺两项）。 */}
-            <button className="danger" onClick={() => { const x = fileMenu.x, y = fileMenu.y; setFileMenu(null); requestDelete(m, x, y); }}>
-              <Trash2 size={16} className="menu-icon" />{t("common.delete")}</button>
-          </AnchoredMenu>
-        );
-      })()}
-
-      {deleteMenu && (() => {
-        // 删除两档子菜单 B（由菜单 A 的「删除」展开，对齐 iOS 原生子菜单）：为所有人删除 / 仅删除自己。
-        // ctx-submenu-in：A→B 的自然过渡动画（从锚点淡入 + 轻微缩放/上移）。
-        const m = deleteMenu.m;
-        return (
-          <AnchoredMenu x={deleteMenu.x} y={deleteMenu.y} className="ctx-menu ctx-submenu-in">
-            {/* 破坏性重的「为所有人删除」放最后（destructive-last，与消息/会话菜单约定一致，降低误触不可逆项）。 */}
-            <button className="danger" onClick={() => { setDeleteMenu(null); void hideFileForMe(m); }}>
-              <Trash2 size={16} className="menu-icon" />{t("delete_sheet.only_me")}</button>
-            <button className="danger" onClick={() => { setDeleteMenu(null); deleteFileForEveryone(m); }}>
-              <Trash2 size={16} className="menu-icon" />{t("delete_sheet.everyone")}</button>
-          </AnchoredMenu>
-        );
-      })()}
-
-      {friendMenu && (
-        <div className="ctx-menu" style={{ left: friendMenu.x, top: friendMenu.y }} onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.removeFriend(id)); }}>{t("friend.menu.delete")}</button>
-          {blockedSet.has(friendMenu.userId) ? (
-            <button onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void unblock(id); }}>{t("common.unblock")}</button>
-          ) : (
-            <button className="danger" onClick={() => { const id = friendMenu.userId; setFriendMenu(null); void doFriendAction(id, () => clientRef.current!.friendAction("block", id)); }}>{t("common.block")}</button>
-          )}
-        </div>
-      )}
+      {/* 右键 / ⋯ 菜单（消息 / 会话 + 免打扰时长 / 详情内容 + 删除两档 / 好友行）：见 components/ContextMenusHost。 */}
+      <ContextMenusHost
+        menu={menu} setMenu={setMenu} messageActions={messageActions} uid={uid} peer={peer} groupConvId={groupConvId}
+        chatIsSuper={chatIsSuper} canPinHere={canPinHere} transcripts={transcripts} requestDelete={requestDelete}
+        convMenu={convMenu} setConvMenu={setConvMenu} conversationActions={conversationActions} requestMute={requestMute}
+        convMuteMenu={convMuteMenu} setConvMuted={setConvMuted}
+        fileMenu={fileMenu} setFileMenu={setFileMenu} deleteMenu={deleteMenu} setDeleteMenu={setDeleteMenu} dlStates={dlStates}
+        setForwardMode={setForwardMode} setForwarding={setForwarding} setGalleryOpen={setGalleryOpen} setViewer={setViewer}
+        locateInChat={locateInChat} onGateTap={onGateTap} hideFileForMe={hideFileForMe} deleteFileForEveryone={deleteFileForEveryone}
+        friendMenu={friendMenu} setFriendMenu={setFriendMenu} blockedSet={blockedSet} doFriendAction={doFriendAction} unblock={unblock}
+      />
 
       {contactDraft && (
         <div className="modal-mask" onClick={() => setContactDraft(null)}>
