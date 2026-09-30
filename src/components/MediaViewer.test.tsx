@@ -37,6 +37,28 @@ describe("MediaViewer 分支与动作", () => {
     expect(onStartVideo).toHaveBeenCalled();
   });
 
+  it("视频未开始且无封面无缩略（转发丢了元数据的老消息）：退回 <video> 首帧，不留一个孤零零的 ▶", () => {
+    const onStartVideo = vi.fn();
+    const onVideoError = vi.fn();
+    const { container } = render(
+      <MediaViewer {...base} m={msg({ contentType: "video", content: "/uploads/v.mp4" })} onStartVideo={onStartVideo} onVideoError={onVideoError} />,
+    );
+    expect(container.querySelector("img.viewer-video-cover")).toBeNull(); // 没有 src 的 <img> 什么都画不出来
+    const cover = container.querySelector("video.viewer-video-cover") as HTMLVideoElement;
+    expect(cover.getAttribute("src")).toBe("/uploads/v.mp4#t=0.1");
+    expect(cover.controls).toBe(false); // 仍是封面待点，不是播放器
+    fireEvent.click(cover);
+    expect(onStartVideo).toHaveBeenCalled();
+    fireEvent.error(cover); // 首帧都解不出（HEVC / 404）→ 直接进降级卡，不必等用户点播放
+    expect(onVideoError).toHaveBeenCalled();
+  });
+
+  it("视频未开始：只有磨砂缩略也算有封面，不预拉原视频", () => {
+    const { container } = render(<MediaViewer {...base} m={msg({ contentType: "video", thumb: "data:image/jpeg;base64,AA" })} />);
+    expect(container.querySelector("img.viewer-video-cover")).toBeTruthy();
+    expect(container.querySelector("video")).toBeNull();
+  });
+
   it("视频不可播：非失效显 HEVC 提示 + 下载入口；失效显已失效文案", () => {
     render(<MediaViewer {...base} m={msg({ contentType: "video" })} videoUnplayable={true} isExpired={false} />);
     expect(screen.getByText(/HEVC/)).toBeTruthy();

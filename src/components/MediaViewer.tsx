@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Play, Download, LayoutGrid, MoreHorizontal } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
+import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
 
 /** 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（点击浮层 6 功能）。点击遮罩关闭。
@@ -56,9 +57,18 @@ export function MediaViewer({
           </div>
         ) : !videoStarted ? (
           // 封面待点：只显封面图 + 居中 ▶，点了才挂 <video>。翻页到视频＝翻到图片一样轻，无黑色控件条/无 metadata 预拉。
+          // 没有封面也没有缩略（转发时丢了 poster/thumb 的老消息，落库后补不回来）→ 退回 <video> 首帧，
+          // 与气泡 / 宫格 / 引用缩略同一兜底；否则 <img> 没有 src 什么都不画，黑底上只剩一个 ▶。
+          // 这一支才预拉 metadata，有封面的照旧不拉。首帧都解不出就直接进降级卡，不必等用户点播放。
           <>
-            <img className="image-viewer viewer-video-cover" src={m.posterUrl || m.thumb || undefined} alt={tr("chat.media.alt_video_cover")}
-                 onClick={(e) => { e.stopPropagation(); onDismissMore(); onStartVideo(); }} />
+            {m.posterUrl || m.thumb ? (
+              <img className="image-viewer viewer-video-cover" src={m.posterUrl || m.thumb} alt={tr("chat.media.alt_video_cover")}
+                   onClick={(e) => { e.stopPropagation(); onDismissMore(); onStartVideo(); }} />
+            ) : (
+              <video key={mediaKey} className="image-viewer viewer-video-cover" src={videoFrameSrc(m.content)} preload="metadata" muted
+                     onClick={(e) => { e.stopPropagation(); onDismissMore(); onStartVideo(); }}
+                     onError={onVideoError} />
+            )}
             <button className="viewer-play-btn" title={tr("common.play")} onClick={(e) => { e.stopPropagation(); onStartVideo(); }}>
               <Play size={30} fill="currentColor" />
             </button>
