@@ -65,9 +65,15 @@ export function subscribe(fn: () => void): () => void {
   return () => { listeners.delete(fn); };
 }
 
-/** 订阅当前语言：组件渲染里调用，切语言时触发重渲染。返回当前 Lang。 */
+/** 订阅用的快照：偏好与解析出的语言**任一**变了都要变。只拿 `lang` 当快照的话，「显式选的语言」↔
+ *  「跟随系统」恰好解析成同一种时快照不变、React 不重渲染——语言面板的勾选和设置页「语言」行的
+ *  右值就停在旧偏好上，看起来像点了没反应（2026-09-30）。 */
+const prefLangSnapshot = (): string => `${pref}|${lang}`;
+
+/** 订阅当前语言：组件渲染里调用，切语言（或只切偏好）时触发重渲染。返回当前 Lang。 */
 export function useLang(): Lang {
-  return useSyncExternalStore(subscribe, getLang, getLang);
+  useSyncExternalStore(subscribe, prefLangSnapshot, prefLangSnapshot);
+  return lang;
 }
 
 /** `format()`/系统消息占位符分流共用的分词结果：一段固定文案，或一个待替换的占位符名。 */

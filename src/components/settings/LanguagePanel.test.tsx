@@ -7,9 +7,9 @@
 //   · <html lang> 同步。
 import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LanguagePanel } from "./LanguagePanel";
+import { LanguagePanel, LanguageSettings } from "./LanguagePanel";
 import { GeneralPanel } from "./GeneralPanel";
-import { setPref } from "../../i18n";
+import { getLang, getPref, setPref } from "../../i18n";
 
 afterEach(() => { cleanup(); setPref("zh-Hans"); });
 
@@ -43,5 +43,21 @@ describe("LanguagePanel", () => {
     act(() => setPref("zh-Hans"));
     expect(getByText("聊天壁纸")).toBeTruthy();
     expect(document.documentElement.lang).toBe("zh-CN");
+  });
+
+  it("偏好变了但解析出的语言没变（显式语言 ↔ 跟随系统恰好同一种）：勾选仍要跟着动", () => {
+    // 先停在「跟随系统」，再显式选成系统当前解析出的那种语言——界面语言全程不变，只有偏好在变。
+    act(() => setPref("system"));
+    const same = getLang();
+    const { container } = render(<LanguageSettings onBack={vi.fn()} />);
+    const rows = () => [...container.querySelectorAll(".radio-row")];
+    const onIndex = () => rows().findIndex((r) => r.querySelector(".radio-dot.on"));
+    expect(onIndex()).toBe(0);
+    fireEvent.click(rows()[same === "zh-Hans" ? 1 : 2]);
+    expect(getPref()).toBe(same);
+    expect(onIndex()).toBe(same === "zh-Hans" ? 1 : 2);
+    fireEvent.click(rows()[0]); // 点回「跟随系统」——修复前这一下界面毫无反应
+    expect(getPref()).toBe("system");
+    expect(onIndex()).toBe(0);
   });
 });
