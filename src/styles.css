@@ -442,34 +442,41 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .select-bar .select-count { flex: 1; display: flex; align-items: center; color: var(--text-secondary); font-size: 13px; }
 /* 多选动作按钮：去掉整条工具栏背景（继承自 .chat footer），三个动作改为独立圆形 Liquid Glass（复用 --glass-menu-*）。 */
 .chat footer.select-bar { background: transparent; border: none; box-shadow: none; }
-.sel-action {
+/* ⚠️ 栏内每个 <button> 的选择器都**必须带 `.chat footer.select-bar` 前缀**：否则输给发送按钮那条
+   `.chat footer button{padding;background:var(--accent);color;border-radius}`（特异性 0,1,2 > 单类 0,1,0），
+   圆形玻璃钮会变成绿色圆角方块、图标被 padding 挤成一点，「取消」也成了绿底按钮（与上面 align-items、
+   下方 .mention-row 是同一个坑）。 */
+.chat footer.select-bar .link-inline { padding: 0; border-radius: 0; background: none; color: var(--accent); }
+.chat footer.select-bar .sel-action {
   flex: 0 0 auto; width: 46px; height: 46px; padding: 0; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
-  color: var(--text-primary); cursor: pointer;
+  color: var(--text); cursor: pointer;
   background: var(--glass-menu-bg);
   border: 1px solid var(--glass-menu-border);
-  box-shadow: var(--shadow-menu);
+  /* 投影外扩须 ≤ 栏的内边距（10px）：`.chat` 是 overflow:hidden，再大就被底边齐齐裁掉一截（--shadow-menu 外扩 20px）。 */
+  box-shadow: 0 2px 8px var(--shadow-soft);
   backdrop-filter: blur(24px) saturate(165%);
   -webkit-backdrop-filter: blur(24px) saturate(165%);
   transition: transform .12s ease, opacity .12s ease;
 }
-.sel-action:hover:not(:disabled) { transform: translateY(-1px); }
-.sel-action:active:not(:disabled) { transform: scale(.94); }
-.sel-action:disabled { opacity: .4; cursor: default; }
-.sel-action.danger { color: var(--danger); }
+.chat footer.select-bar .sel-action:hover:not(:disabled) { transform: translateY(-1px); }
+.chat footer.select-bar .sel-action:active:not(:disabled) { transform: scale(.94); }
+.chat footer.select-bar .sel-action:disabled { opacity: .4; cursor: default; }
+.chat footer.select-bar .sel-action.danger { color: var(--danger); }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .sel-action { background: var(--card-bg); }
+  .chat footer.select-bar .sel-action { background: var(--card-bg); }
 }
-/* 「仅为我删除」确认气泡：钉在删除钮正上方，复用毛玻璃气泡样式。 */
+/* 删除确认气泡（「仅为我删除」/「为所有人删除」）：钉在删除钮正上方，复用毛玻璃气泡样式。 */
 .sel-del-wrap { position: relative; flex: 0 0 auto; display: inline-flex; }
 .sel-del-backdrop { position: fixed; inset: 0; z-index: 40; }
 /* 钉在删除钮右边界、向左展开（钮在选择栏最右，居中会溢出右屏——right:0 保证不出界）。 */
 .sel-del-pop { position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 41;
+  display: flex; flex-direction: column;
   background: var(--glass-menu-bg); border: 1px solid var(--glass-menu-border); border-radius: var(--radius-menu, 12px);
   box-shadow: var(--shadow-menu); backdrop-filter: blur(24px) saturate(165%); -webkit-backdrop-filter: blur(24px) saturate(165%);
   padding: 4px; white-space: nowrap; }
-.sel-del-only { display: block; padding: 8px 16px; border-radius: 8px; color: var(--danger); font-size: 15px; font-weight: 600; cursor: pointer; }
-.sel-del-only:hover { background: var(--danger-soft); }
+.chat footer.select-bar .sel-del-only { display: block; width: 100%; padding: 8px 16px; border-radius: 8px; background: none; color: var(--danger); font-size: 15px; font-weight: 600; text-align: left; cursor: pointer; }
+.chat footer.select-bar .sel-del-only:hover { background: var(--danger-soft); }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .sel-del-pop { background: var(--card-bg); }
 }
@@ -641,6 +648,12 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .viewer-mask { background: rgba(0, 0, 0, 0.9); }
 /* 预留上（标题栏）下（工具条）各约 80px，媒体居中后不再被顶部标题栏遮挡/重叠。 */
 .image-viewer { max-width: 90vw; max-height: calc(100vh - 160px); border-radius: 8px; }
+/* 图片缩放（components/ZoomableImage）：transform 由组件内联写入，这里只管手型与过渡。
+   双击/键盘带过渡（.zoom-anim），滚轮与拖拽要跟手、不带。放大后 touch-action:none，触屏拖动才是平移而不是滚页面。 */
+.image-viewer.zoomable { cursor: zoom-in; user-select: none; -webkit-user-drag: none; }
+.image-viewer.zoomable.zoomed { cursor: grab; touch-action: none; }
+.image-viewer.zoomable.dragging { cursor: grabbing; }
+.image-viewer.zoomable.zoom-anim { transition: transform .16s ease; }
 
 /* 任务3 · 查看器左右翻页箭头（会话媒体时间线，竖直居中贴边）+ 顶部计数 */
 .viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1; }
@@ -873,7 +886,9 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* 日期分隔胶囊（居中浮于壁纸上）。 */
 .date-pill { display: flex; justify-content: center; margin: 10px 0 6px; }
 .date-pill span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); font-weight: 600; padding: 3px 12px; border-radius: 999px; }
-.chat footer { position: relative; display: flex; align-items: flex-end; gap: var(--space-2); padding: 10px var(--space-4); margin-top: var(--app-gap); border: 1px solid var(--separator); border-radius: var(--app-card-radius); background: var(--card-bg); box-shadow: 0 6px 22px var(--shadow-soft); }
+/* 不带 box-shadow：`.chat` 是 overflow:hidden，投影会被裁成贴着卡片外接矩形的一块灰底（浅色壁纸上四个圆角外
+   各露一角，看着像卡片后面多垫了一层半透明背景）。顶部会话卡片同理早已去掉投影，这里与它保持一致。 */
+.chat footer { position: relative; display: flex; align-items: flex-end; gap: var(--space-2); padding: 10px var(--space-4); margin-top: var(--app-gap); border: 1px solid var(--separator); border-radius: var(--app-card-radius); background: var(--card-bg); }
 .chat footer textarea { flex: 1; padding: 10px var(--space-3); border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--surface); color: var(--text); font: inherit; line-height: 1.4; resize: none; overflow-y: auto; max-height: 120px; }
 .chat footer button { padding: 10px 18px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); cursor: pointer; flex-shrink: 0; }
 /* 拉黑者侧：输入框换成提示横幅 */

@@ -46,6 +46,8 @@ export interface ComposerProps {
   reportableSender: string | null;
   /** 置灰原因二选一：所选里含我自己发的（true）还是跨了多个发送者（false）。只用于灰态提示文案。 */
   reportHasMine: boolean;
+  /** 多选删除是否给「为所有人删除」这一档：所选全部是我发的，或我是群主/管理员（见 selectDelete.ts）。 */
+  canDeleteEveryone?: boolean;
   pastedImages: { file: File; url: string; kind: "image" | "video" | "file" }[];
   attachPanel: boolean;
   attachItems: AttachItem[];
@@ -63,17 +65,17 @@ export function Composer(p: ComposerProps) {
   const tr = useT(); // JSX 用 tr（订阅语言）；回调里用模块级 t（调用时刻读语言）
   const {
     convId, peer, uid, isGroupChat, peerLabel, peerBlocked, input, sendKey, composerMuteReason, showJump, jumpCount, jumpCapped,
-    editingMsg, replyTo, selectMode, selected, reportableSender, reportHasMine, pastedImages, attachPanel, attachItems,
+    editingMsg, replyTo, selectMode, selected, reportableSender, reportHasMine, canDeleteEveryone, pastedImages, attachPanel, attachItems,
     mentionQuery, mentionFilter, mentionRows, mentionActive, mediaGate, senderLabel, onMentionNavKey,
   } = p;
   const {
-    setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, reportSelected, deleteSelected,
+    setInput, locateInChat, jumpToBottom, unblock, setEditingMsg, setReplyTo, exitSelectMode, forwardSelected, favoriteSelected, reportSelected, deleteSelected, deleteSelectedForEveryone,
     removePastedImage, cancelAttachClose, scheduleAttachClose, setAttachPanel, pickFile, openFavoritesPick, openContactPicker, onFilePicked,
     setMentionFilter, pickMention, setMentionActive, onInputChange, onComposerPaste, addPastedFiles, send,
     sendVoice, setToast,
     attachAnchorRef, fileInputRef, mentionPanelRef, mentionActiveRef, composerRef,
   } = useChatActions();
-  const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」）
+  const [delConfirm, setDelConfirm] = useState(false); // 多选删除二次确认气泡（「仅为我删除」/「为所有人删除」）
   // 输入栏此刻能不能用（有会话、没被禁言）。输入框 / 发送钮 / 麦克风 / 拖文件**共用这一处**——
   // 各写各的话，将来加第三个禁用条件时漏改一处，就会出现「输入框灰着、文件却拖得进去」。
   const composerUsable = !!convId && composerMuteReason === null;
@@ -253,7 +255,9 @@ export function Composer(p: ComposerProps) {
                     : reportHasMine ? tr("chat.select.report_own") : tr("chat.select.report_multi")}
                   aria-label={tr("common.report")} disabled={!reportableSender} onClick={reportSelected}><Flag size={22} aria-hidden="true" /></button>
           <button className="sel-action" title={tr("common.favorite")} aria-label={tr("common.favorite")} disabled={selected.size === 0} onClick={favoriteSelected}><Bookmark size={22} aria-hidden="true" /></button>
-          {/* 删除：点按不直接删，先在按钮**上方**弹「仅为我删除」确认气泡，点它才删（与 iOS 拉齐）。 */}
+          {/* 删除：点按不直接删，先在按钮**上方**弹确认气泡，点里面的档位才删。两档与单条删除的子菜单同口径：
+              「仅为我删除」恒有；所选全部有权（我发的 / 我是群主·管理员）时多一档「为所有人删除」，
+              破坏性重的放最后（destructive-last）。⚠️ iOS/Android 多选目前仍只有本机删除，尚未跟进。 */}
           <span className="sel-del-wrap">
             <button className="sel-action danger" title={tr("common.delete")} aria-label={tr("common.delete")} disabled={selected.size === 0} onClick={() => setDelConfirm(true)}><Trash2 size={22} aria-hidden="true" /></button>
             {delConfirm && selected.size > 0 && (
@@ -261,6 +265,9 @@ export function Composer(p: ComposerProps) {
                 <span className="sel-del-backdrop" onClick={() => setDelConfirm(false)} />
                 <span className="sel-del-pop" role="menu">
                   <button className="sel-del-only" role="menuitem" onClick={() => { setDelConfirm(false); deleteSelected(); }}>{tr("chat.select.delete_for_me")}</button>
+                  {canDeleteEveryone && (
+                    <button className="sel-del-only" role="menuitem" onClick={() => { setDelConfirm(false); deleteSelectedForEveryone(); }}>{tr("delete_sheet.everyone")}</button>
+                  )}
                 </span>
               </>
             )}

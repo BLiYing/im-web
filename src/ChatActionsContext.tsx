@@ -37,7 +37,8 @@ export interface ChatActions {
   setReplyTo: Dispatch<SetStateAction<ChatMessage | null>>;
   exitSelectMode: () => void;
   forwardSelected: () => void;
-  deleteSelected: () => void;
+  deleteSelected: () => void;            // 多选「仅为我删除」（逐条 hide，多端同步）
+  deleteSelectedForEveryone: () => void; // 多选「为所有人删除」（所选全部有权时才露出，见 selectDelete.ts）
   favoriteSelected: () => void; // 多选批量收藏（与 iOS 拉齐）
   reportSelected: () => void;   // 多选批量举报（所选须同一发送者；2026-09-06，与 iOS 拉齐）
   removePastedImage: (i: number) => void;

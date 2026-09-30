@@ -13,7 +13,7 @@ import type { ChatMessage } from "../sdk/protocol";
 function actions(over: Partial<ChatActions> = {}): ChatActions {
   return {
     setInput: vi.fn(), locateInChat: vi.fn(), jumpToBottom: vi.fn(), unblock: vi.fn(async () => {}),
-    setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), favoriteSelected: vi.fn(), reportSelected: vi.fn(), deleteSelected: vi.fn(),
+    setEditingMsg: vi.fn(), setReplyTo: vi.fn(), exitSelectMode: vi.fn(), forwardSelected: vi.fn(), favoriteSelected: vi.fn(), reportSelected: vi.fn(), deleteSelected: vi.fn(), deleteSelectedForEveryone: vi.fn(),
     removePastedImage: vi.fn(), cancelAttachClose: vi.fn(), scheduleAttachClose: vi.fn(), setAttachPanel: vi.fn(),
     pickFile: vi.fn(), openFavoritesPick: vi.fn(), onFilePicked: vi.fn(), setMentionFilter: vi.fn(), pickMention: vi.fn(),
     setMentionActive: vi.fn(), onInputChange: vi.fn(), onComposerPaste: vi.fn(), addPastedFiles: vi.fn(), send: vi.fn(),
@@ -123,6 +123,18 @@ describe("Composer", () => {
     fireEvent.click(getByText("取消")); expect(a.exitSelectMode).toHaveBeenCalled();
     rerender(<ChatActionsProvider value={a}><Composer {...base({ selectMode: true, selected: new Set() })} /></ChatActionsProvider>);
     expect((getByLabelText("转发") as HTMLButtonElement).disabled).toBe(true);
+  });
+  it("多选删除气泡：canDeleteEveryone 才露出「为所有人删除」，点它走 deleteSelectedForEveryone 而不是仅为我那条", () => {
+    const a = actions();
+    const { getByText, queryByText, getByLabelText, rerender } = mount(base({ selectMode: true, selected: new Set([1, 2]) }), a);
+    fireEvent.click(getByLabelText("删除"));
+    expect(getByText("仅为我删除")).toBeTruthy();
+    expect(queryByText("为所有人删除")).toBeNull(); // 混选了别人的消息：只有一档
+    rerender(<ChatActionsProvider value={a}><Composer {...base({ selectMode: true, selected: new Set([1, 2]), canDeleteEveryone: true })} /></ChatActionsProvider>);
+    fireEvent.click(getByText("为所有人删除"));
+    expect(a.deleteSelectedForEveryone).toHaveBeenCalled();
+    expect(a.deleteSelected).not.toHaveBeenCalled();
+    expect(queryByText("为所有人删除")).toBeNull(); // 点完气泡收起
   });
   // 举报钮（2026-09-06）：仅当所选**全是同一个对方**发的才可点，否则**置灰不隐藏**——
   // 隐藏会让栏内按钮数随勾选变化、每勾一下按钮就左右跳。

@@ -6,6 +6,7 @@ import { useMessageStore } from "./useMessageStore";
 import { useLocalPreload } from "./useLocalPreload";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
+import { planBatchDelete, runBatch } from "./selectDelete";
 import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
 import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type PinnedMessage, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
@@ -812,8 +813,9 @@ export default function App() {
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
       // 消息被物理移除（任务2）：为所有人删除（op=delete）/ 仅为我删除（msg_hidden）→ 从聊天列表 + 详情文件列表移除该条。
       // 若删掉的正好是一条置顶消息，服务端下次不再返回它——重拉一次免得横幅指向已消失的消息。
+      // 只在命中横幅里的置顶项时才拉：多选批量删除一次会来上百条移除，逐条无条件重拉就是上百个请求。
       onMessageRemoved: (cid, targetSeq) => {
-        void refreshPinned(cid);
+        if ((pinnedRef.current[cid] ?? []).some((pm) => pm.convSeq === targetSeq)) void refreshPinned(cid);
         removeSeq(cid, targetSeq); // 从聊天列表按 conv_seq 移除该条
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
         setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
@@ -1278,19 +1280,32 @@ export default function App() {
     closeContactPicker, closeContactConfirm,
   } = useContactShare({ clientRef, setToast, uid, friends, conversations, currentConvRef, appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb });
 
-  // 多选批量删除（仅本端）。
+  // 多选批量删除：两档与单条删除同源（见 selectDelete.ts）。原先这里只抹本机内存 + IndexedDB 墓碑、
+  // 根本不问服务端——按钮却写着「仅为我删除」，与单条那档（hide，多端同步）同名不同义：换台设备消息还在。
+  // 本地移除统一交给 SDK 的 onMessageRemoved（hide 成功 / msg_op delete 广播回帧），这里不再乐观抹内存，
+  // 失败的那几条因此原样留在屏上，和提示的失败条数对得上。
+  const batchDeletePlan = useMemo(
+    () => planBatchDelete(selectMode ? (msgsByConv[convId] ?? []) : [], selected, uid, groupInfos[convId]?.my_role),
+    [selectMode, msgsByConv, convId, selected, uid, groupInfos],
+  );
+  // 仅为我删除：逐条 hide（服务端暂无批量接口；上限 SELECT_MAX 条、有限并发）。
   const deleteSelected = useCallback(() => {
-    const cid = convId;
-    setMsgsByConv((prev) => {
-      const list = (prev[cid] ?? []).filter((m) => !(m.convSeq > 0 && selected.has(m.convSeq)));
-      return { ...prev, [cid]: list };
-    });
-    // 持久化删除（同 deleteMessage）：内存墓碑 + IndexedDB 墓碑，防实时/读盘两条路径复现。
-    selected.forEach((s) => {
-      if (s > 0) { (deletedByConv.current[cid] ??= new Set()).add(s); void markMessageDeleted(uid, cid, { convSeq: s }); }
-    });
+    const cid = convId, client = clientRef.current, { seqs } = batchDeletePlan;
     exitSelectMode();
-  }, [peer, uid, groupConvId, selected, exitSelectMode]);
+    if (!client || seqs.length === 0) return;
+    void runBatch(seqs, (s) => client.hideMessage(cid, s)).then((failed) => {
+      if (failed > 0) setToast(t("chat.select.delete_failed_count", { count: failed }));
+    });
+  }, [convId, batchDeletePlan, exitSelectMode]);
+  // 为所有人删除：逐条发 msg_op delete，成功由广播回帧移除，被拒走 onMsgOpFailed → toast。
+  // 未连接时 SDK 的 send 只记一条日志就丢帧——先拦住并留在多选态，别让用户以为删掉了。
+  const deleteSelectedForEveryone = useCallback(() => {
+    const cid = convId, client = clientRef.current, { seqs, canEveryone } = batchDeletePlan;
+    if (!client || !canEveryone) return;
+    if (state !== "connected") { setToast(t("conv.error.delete_failed_detail", { detail: t("conn.state.disconnected") })); return; }
+    exitSelectMode();
+    seqs.forEach((s) => client.deleteMessageForEveryone(cid, s));
+  }, [convId, batchDeletePlan, state, exitSelectMode]);
 
   // 多选批量收藏（favoriteSelected）已收进 useFavorites（收藏动作簇，见其 return）。
 
@@ -2299,6 +2314,7 @@ export default function App() {
   const exitSelectModeEv = useEvent(exitSelectMode);
   const forwardSelectedEv = useEvent(forwardSelected);
   const deleteSelectedEv = useEvent(deleteSelected);
+  const deleteSelectedForEveryoneEv = useEvent(deleteSelectedForEveryone);
   const favoriteSelectedEv = useEvent(favoriteSelected);
   const reportSelectedEv = useEvent(reportSelected);
   const removePastedImageEv = useEvent(removePastedImage);
@@ -2322,7 +2338,7 @@ export default function App() {
     retryUpload: retryUploadEv, resendMessage: resendMessageEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
     onMediaLoad: onMediaLoadEv, pendingFilesRef,
     jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
-    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, favoriteSelected: favoriteSelectedEv,
+    forwardSelected: forwardSelectedEv, deleteSelected: deleteSelectedEv, deleteSelectedForEveryone: deleteSelectedForEveryoneEv, favoriteSelected: favoriteSelectedEv,
     reportSelected: reportSelectedEv, removePastedImage: removePastedImageEv,
     cancelAttachClose: cancelAttachCloseEv, scheduleAttachClose: scheduleAttachCloseEv, setAttachPanel, pickFile: pickFileEv,
     openFavoritesPick: openFavoritesPickEv, openContactPicker: openContactPickerEv, onFilePicked: onFilePickedEv, setMentionFilter, pickMention: pickMentionEv,
@@ -2930,7 +2946,7 @@ export default function App() {
             convId={convId} peer={peer} uid={uid} isGroupChat={isGroupChat} peerLabel={peerLabel} peerBlocked={peerBlocked}
             input={input} sendKey={sendKey} composerMuteReason={composerMuteReason} showJump={showJump} jumpCount={jumpCount} jumpCapped={jumpCapped}
             editingMsg={editingMsg} replyTo={replyTo} selectMode={selectMode} selected={selected}
-            reportableSender={reportableSender} reportHasMine={reportHasMine} pastedImages={pastedImages}
+            reportableSender={reportableSender} reportHasMine={reportHasMine} canDeleteEveryone={batchDeletePlan.canEveryone} pastedImages={pastedImages}
             attachPanel={attachPanel} attachItems={attachItems} mentionQuery={mentionQuery} mentionFilter={mentionFilter}
             mentionRows={mentionRows} mentionActive={mentionActive} mediaGate={mediaGate} senderLabel={senderLabel} onMentionNavKey={onMentionNavKey}
           />

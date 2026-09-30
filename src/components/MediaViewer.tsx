@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Play, Download, LayoutGrid, MoreHorizontal }
 import type { ChatMessage } from "../sdk/protocol";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
+import { ZoomableImage } from "./ZoomableImage";
 
 /** 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（点击浮层 6 功能）。点击遮罩关闭。
  *  纯展示：所有派生态（可播/已开始/失效/不支持/翻页位点）与动作由 App 注入，逐字保持原交互。 */
@@ -88,8 +89,8 @@ export function MediaViewer({
           <a className="viewer-unplayable-btn" href={m.content} download>{tr("media.viewer.download_open_local")}</a>
         </div>
       ) : (
-        <img key={mediaKey} className="image-viewer" src={m.content} alt={tr("chat.media.alt_large")} onClick={(e) => { e.stopPropagation(); onDismissMore(); }}
-             onError={onImageError} />
+        // 图片可缩放/平移（滚轮·捏合·双击·拖拽·键盘，见 ZoomableImage）；key 随消息换 → 翻页自动回 1×。视频不缩放。
+        <ZoomableImage key={mediaKey} src={m.content} alt={tr("chat.media.alt_large")} onTap={onDismissMore} onError={onImageError} />
       )}
       {/* 任务3 · 左右翻页箭头：仅当前查看项在会话媒体时间线内（viewerIdx>=0）且有相邻项时显示。翻到头即停。 */}
       {viewerIdx > 0 && (
