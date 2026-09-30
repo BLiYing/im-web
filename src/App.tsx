@@ -2923,8 +2923,9 @@ export default function App() {
                 renderMentionText={renderMentionText} renderMessageText={renderMessageText}
                 openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
               />
-            <ChatScrollbarThumb targetRef={msgsRef} />
           </div>
+          {/* 常驻滚动条滑块：必须是 .msgs 的兄弟（不在滚动容器内、不 portal 到 body），原因见组件注释。 */}
+          <ChatScrollbarThumb targetRef={msgsRef} />
           {/* 底部区（跳底/拉黑提示/编辑·引用条/多选栏/粘贴条/附件/@面板/输入框）：见 components/Composer（逻辑仍在 App）。 */}
           <Composer
             convId={convId} peer={peer} uid={uid} isGroupChat={isGroupChat} peerLabel={peerLabel} peerBlocked={peerBlocked}

@@ -305,11 +305,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 
 /* 常驻可见细滚动条滑块（六条用户报告第 6 项，2026-09-29）：ChatScrollbarThumb 组件直接操作
    这个元素的 left/top/height/display，对齐 Android chatScrollbar 的持续可见效果。
-   **必须 `position: fixed`，不能 `absolute`**：它虽长在 `.msgs`（滚动容器）内部，但 fixed
-   按视口定位、不随祖先的 scrollTop 走，才能贴着视口里 `.msgs` 的右边缘不动（组件里用
-   `getBoundingClientRect()` 换算成视口坐标）；早前试过 `absolute`，滑块跟着内容一起被滚出视口。 */
+   它是 `.msgs` 的兄弟、相对 `.chat` 绝对定位：不在滚动容器内（否则跟内容一起滚走），也不 portal 到
+   body 用 fixed（否则开合资料页的 transform 平移不跟随、还会浮在通话界面/弹窗之上）。 */
 .msgs-scrollbar-thumb {
-  position: fixed; width: 4px; border-radius: 2px;
+  position: absolute; width: 4px; border-radius: 2px;
   background: var(--scrollbar-thumb); pointer-events: none;
   transition: background 0.15s;
 }

@@ -139,7 +139,12 @@
 >   `transform`，就成了 `position:fixed` 后代的 containing block，`fixed` 退化成相对**那个祖先**
 >   定位，坐标全偏移了 `.msgs` 自己的位置（实测复现：滑块套了两次偏移量，落到视口外）。最终用
 >   `createPortal` 把滑块挂到 `document.body` 下彻底避开这条 containing-block 坑（组件在 React
->   树里仍是 `.msgs` 的子节点，只是 DOM 输出改道）。
+>   树里仍是 `.msgs` 的子节点，只是 DOM 输出改道）。③ **2026-09-30 返工**：portal+fixed 引出两个
+>   新 bug——开/关资料页时 `.main` 走 `transform: translateX` 动画平移，`.msgs` 尺寸不变不滚动、
+>   无事件触发，滑块停在旧视口坐标；且挂在 `.app`（`isolation:isolate`）之外，整层压在通话界面
+>   /弹窗之上。最终改为 `.msgs` 的**兄弟节点**、相对 `.chat` 绝对定位（offsetTop/offsetLeft
+>   换算），随父级平移、层叠回到 `.main` 之内。浏览器验证 ✅：开合资料页动画全程滑块与 `.msgs`
+>   右缘间距恒定；通话界面下 `elementFromPoint` 确认滑块被遮住。
 > - 隐藏原生滚动条（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），否则滚动瞬间
 >   系统 overlay 会和常驻滑块叠成两条。颜色新增令牌 `--scrollbar-thumb`（text-tertiary 转 rgba
 >   0.45/0.55，对齐 Android `c.textTertiary.copy(alpha=0.4f)`）。
