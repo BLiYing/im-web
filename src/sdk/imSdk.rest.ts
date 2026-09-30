@@ -9,6 +9,8 @@
 // token 因此是 `protected`——IMClient 负责登录/重连时写它，这里只读。
 
 import { fetchDownloadSettings, putDownloadSettings, type DownloadSettingsResult } from "./downloadSettingsApi";
+import { fetchNotifySettings, putNotifySettings, type NotifySettingsResult } from "./notifySettingsApi";
+import type { NotifySettingsWire } from "../notifySettingsSync";
 import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
 import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrApi";
 import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
@@ -26,6 +28,10 @@ export abstract class IMRestApi {
   /** 账号级自动下载策略（M4-7）：读 / 整体替换。实现在 sdk/downloadSettingsApi.ts（无状态 HTTP）。 */
   downloadSettings(): Promise<DownloadSettingsResult> { return fetchDownloadSettings(this.token); }
   saveDownloadSettings(s: unknown): Promise<DownloadSettingsResult> { return putDownloadSettings(this.token, s); }
+
+  /** 账号级通知设置（M5）：读 / 整体替换（private/group/badge，PROTOCOL §6.13）。实现在 sdk/notifySettingsApi.ts。 */
+  notifySettings(): Promise<NotifySettingsResult> { return fetchNotifySettings(this.token); }
+  saveNotifySettings(s: NotifySettingsWire): Promise<NotifySettingsResult> { return putNotifySettings(this.token, s); }
 
   // ---- 已登录设备 / 多设备管理（P2）：无状态 HTTP，实现在 sdk/devicesApi.ts ----
   listDevices(): Promise<DeviceView[]> { return listDevices(this.token); }

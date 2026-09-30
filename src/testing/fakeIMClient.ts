@@ -50,6 +50,9 @@ export class FakeIMClient {
   async listFriends() { return []; }
   async fetchMyProfile() { return { nickname: "我自己", phone: "", avatar_url: "" }; }
   async downloadSettings() { return { version: 1, settings: {} }; }
+  // M5 账号级通知设置：默认 exists=false（触发一次迁移 PUT），PUT 回 exists=true。测试要断言别的分支时按需覆盖。
+  async notifySettings() { return { version: 0, exists: false, settings: {} }; }
+  async saveNotifySettings() { return { version: 1, exists: true, settings: {} }; }
   // —— 会话/消息链路 ——
   async loadLocal(...a: unknown[]): Promise<ChatMessage[]> { this.rec("loadLocal", ...a); return []; }
   async loadDeletedSeqs(): Promise<number[]> { return []; }

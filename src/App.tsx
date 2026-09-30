@@ -68,7 +68,7 @@ import { useDialogs } from "./useDialogs";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
 import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
-import { useNotifySettings } from "./notifySettings";
+import { useAccountNotifySettings } from "./useAccountNotifySettings";
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
@@ -302,12 +302,11 @@ export default function App() {
     wallpaper, setWallpaper, wallpaperBlur, setWallpaperBlur, wallpaperOpen, setWallpaperOpen,
     wallpaperColorOpen, setWallpaperColorOpen, colorHSV, pickWallpaperImage, resetWallpaper, applyWallpaperColor, openWallpaperColor,
   } = useAppearanceSettings(setToast);
-  const notif = useNotifySettings(); // 通知设置簇（每设备本地，NOTIFICATIONS_DESIGN）；须在下方 useDesktopIntegration 之前
+  const clientRef = useRef<IMClient | null>(null);
+  const notif = useAccountNotifySettings({ clientRef }); // 通知设置簇（private/group/badge 账号级+服务端同步，M5；inApp/desktop 仍每设备本地）；须在下方 useDesktopIntegration 之前
   // 系统深色偏好（仅在 theme==="system" 时决定实际明暗）：跟随 prefers-color-scheme 实时变化，供默认壁纸随主题切换。
 
-  const clientRef = useRef<IMClient | null>(null);
-  // 下载门控/缓存簇 → useMediaDownload（阶段 4）。须在 clientRef/setViewer/groupConvId/uid/setToast 之后、
-  // services useMemo（捕获 refreshDownloadSettings）与 enterApp/logout（调 restore/reset）之前。
+  // 下载门控/缓存簇 → useMediaDownload（阶段 4）。须在 clientRef/setViewer/groupConvId/uid/setToast 之后、services useMemo（捕获 refreshDownloadSettings）与 enterApp/logout（调 restore/reset）之前。
   const {
     dlSettings, setDlSettings, dlStates, dlBlobs, mediaOptedIn, expiredSet,
     refreshDownloadSettings, saveDownloadSettings, mediaGate, mediaSrc, openReadyFile, saveMessageToDisk,
@@ -830,6 +829,7 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
+      onNotifySettingsUpdate: (version) => void notif.onServerVersionBump(version), // 账号级通知设置版本变更（M5 §6.13）→ 本端按需重拉
       // 续期凭据变化（登录下发 / 改密轮换 / 已死清空）→ 记下并尽快落盘；uid 尚未定时由入场末尾那次 saveSession 兜住。
       onRefreshToken: (t) => { refreshRef.current = t; if (uidRef.current) saveSession({ uid: uidRef.current, username: name || loginName, refresh: t, token }); },
       // 鉴权失效分两类处理：
@@ -897,7 +897,7 @@ export default function App() {
     client.syncTracked(); // OPEN 前调用安全无副作用；onopen 会从各会话连续持久化位点补拉到最新
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
-    void refreshDownloadSettings(); // 拉账号级自动下载策略（M4-7，多端同步）
+    void refreshDownloadSettings(); void notif.syncAfterLogin(myUID); // 拉账号级自动下载策略 + 通知设置（M4-7/M5，多端同步）
     // 部署级能力/配额（超级群开关、群成员上限）：本次会话内不会变，登录后拉一次即可。
     // 失败不阻断登录——UI 会退回保守默认值，真超限仍由服务端兜底拒绝。
     // **取 client.authToken 而不是入参 token**：入参只有扫码登录路径才有值，

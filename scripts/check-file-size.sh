@@ -28,7 +28,8 @@ grandfather_limit() {
     src/App.tsx)      echo 3579 ;;  # 2026-09-29 3679→3579：设置页 11 个子面板路由（SettingsPanel/DataStoragePanel/EditProfilePanel/DevicesPanel/PrivacySecurityPanel/BlockedListPanel/ChangePasswordPanel/GeneralPanel/LanguageSettings/WallpaperPanel/WallpaperColorPanel）抽到 components/settings/SettingsPanelsHost.tsx——不只搬 JSX，onReset/onSubmit 等胶水回调体一并随迁，改经 useAppServices()/useT() 自取 clientRef/setToast/comingSoon/askConfirm/t，App 侧收窄成一次组件调用；留出的余量供随后同批的「设置 ▸ 通知」P0（NotificationsPanel，接进同一个 host）落地，不必再动这条基线。
                                     # 2026-09-11 3697→3679：本地库预载（preloadLocal + 会话刷新用的 preloadNew）抽到 useLocalPreload.ts  # 2026-09-08 3770→3697：文本渲染一族（@提及/URL/搜索高亮/长文本三档）抽到 components/messageText.tsx  # 2026-09-05 棘轮 4000→3800→3790→3770（语音转文字那一族抽到 useVoiceTranscript.ts 后 3756）。
                                     # 4000 那次是「触顶挡了 bug fix→用户拍板放宽」，不是设计值；现在有余量了就收回来。
-    src/sdk/imSdk.ts) echo 1356 ;;  # 2026-09-11 1386→1356：C4 删掉已无调用的分页补拉路径（syncConversation/requestPage/pagedPending）+ 同步游标两条纯函数移到 sdk/syncCursor.ts  # 2026-09-09 1416→1386：REST 转发面（下载策略/设备/好友/群/二维码/收藏）拆到 sdk/imSdk.rest.ts 的 IMRestApi 基类
+    src/sdk/imSdk.ts) echo 1359 ;;  # 2026-09-30 1356→1359：M5 账号级通知设置——notify_settings_update 帧的 handlers 字段 + switch case（PROTOCOL §6.13），REST 转发/wire 映射另落 sdk/imSdk.rest.ts+notifySettingsApi.ts+notifySettingsSync.ts，未挤占这个文件。
+                                    # 2026-09-11 1386→1356：C4 删掉已无调用的分页补拉路径（syncConversation/requestPage/pagedPending）+ 同步游标两条纯函数移到 sdk/syncCursor.ts  # 2026-09-09 1416→1386：REST 转发面（下载策略/设备/好友/群/二维码/收藏）拆到 sdk/imSdk.rest.ts 的 IMRestApi 基类
                                     # 2026-09-07 1445→1416：webDeviceId/webDeviceName 移入 src/platform/web.ts（D1 适配层，棘轮只降不升）
                                     # 2026-09-05 1465→1445：帧→ChatMessage 的解析抽到 sdk/parseMessage.ts
                                     # 已抽到 sdk/wake.ts，类里只剩 reconnectNow 这个接线口（连接活性本就是

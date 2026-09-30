@@ -94,6 +94,7 @@ export interface IMClientHandlers {
   onConvUpdate?: (u: ConvUpdate) => void;
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
+  onNotifySettingsUpdate?: (version: number) => void; // 账号级通知设置版本变更（M5 §6.13，独立版本序列，不与上面混用）：另一端改了 private/group/badge，本端应重拉
   /**
    * 超级群轻量信号：一批「某会话最新到 conv_seq 了」。**没有正文**——
    * UI 据此刷新会话列表那一行（预览+角标），真要看内容得进会话时 sync。
@@ -1004,6 +1005,8 @@ export class IMClient extends IMRestApi {
       case T.CAPS_UPDATE: // 账号级配置版本变更（M4-7）：另一端改了自动下载策略 → 本端重拉
         this.handlers.onCapabilitiesUpdate?.(Number(d.version) || 0);
         break;
+      case T.NOTIFY_SETTINGS_UPDATE:
+        this.handlers.onNotifySettingsUpdate?.(Number(d.version) || 0); break; // M5 §6.13：账号级通知设置版本变更 → 本端重拉
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶/为所有人删除）：应用到本地
         this.applyMsgOp(d);
         break;

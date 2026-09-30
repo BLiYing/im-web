@@ -22,6 +22,9 @@ export const T = {
   CONV_UPDATE: "conv_update",
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：收到即重拉 GET /download-settings。 */
   CAPS_UPDATE: "capabilities_update",
+  /** 账号级通知设置版本变更（M5，PROTOCOL §6.13）：private/group/badge 迁到服务端后的多端同步信号，
+   *  与上面的 CAPS_UPDATE 是两个独立版本序列，不要混用；收到即重拉 GET /notify-settings。 */
+  NOTIFY_SETTINGS_UPDATE: "notify_settings_update",
   /** 「仅为我删除」多设备同步（任务2）：本人另一端删了某条 → 本端物理移除该 (conv_id, conv_seq)。 */
   MSG_HIDDEN: "msg_hidden",
   /**
