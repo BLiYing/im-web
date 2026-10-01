@@ -107,7 +107,7 @@ export async function runShellCheck(
 
   // 这一步会真的弹一条系统通知。返回 true 只代表「交给系统了」——用户若在系统设置里
   // 关了本应用的通知权限，show() 不报错也不显示，Electron 查不到，这条不确定性消不掉。
-  const notifyOk = notify(win.isDestroyed() ? null : win, "IM Desktop 自检", "这是一条自检通知，可忽略", undefined);
+  const notifyOk = notify(win.isDestroyed() ? null : win, { title: "IM Desktop 自检", body: "这是一条自检通知，可忽略" });
   if (!notifyOk) fail.push("Notification 不可用或 show() 抛了");
   else say("[shell] ✓ 系统通知已交给系统（会真的弹一条，可忽略；能否显示还取决于系统权限）");
 

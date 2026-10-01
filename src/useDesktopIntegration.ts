@@ -6,6 +6,8 @@
 import { useEffect, useRef, useState } from "react";
 import { platform, type GlobalShortcutState } from "./platform";
 import { badgeCountOf, notifyBodyOf } from "./desktopNotify";
+import { notifyIconSource, withNotifyIcon } from "./notifyIcon";
+import type { NotifyClearRequest } from "./platform";
 import { alertDecision, type AlertContext } from "./alertDecision";
 import { playAlertSound, preloadAlertSounds } from "./alertPlayer";
 import { isMutedNow } from "./muteState";
@@ -31,6 +33,9 @@ export interface DesktopIntegration {
   isDesktop: boolean;
   /** 在 `onMessage` 里对每条**新追加**的入站消息调一次。 */
   notifyInbound: (m: ChatMessage) => void;
+  /** 收回已弹的系统通知：消息被撤回 / 删除（`convSeqs`）、本人在别处读到了某处（`upTo`）。
+   *  窗口回到前台的「全清」由桌面主进程自己做，不经这里。浏览器版空操作。 */
+  clearNotifications: (req: NotifyClearRequest) => void;
   /** 在 `convDisplayLabel`/`openChat` 声明处调一次，把两个回调递进来。
    *  **它们定义在登录早退之后，而 hook 必须在早退之前调**，故只能这样回写。 */
   bindCallbacks: (cb: DesktopCallbacks) => void;
@@ -131,7 +136,12 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
     if (d.osNotify) {
       // 消息预览关闭时正文统一为「新消息」，标题（会话名/发送者名）不受影响（§3.3）。
       const body = typeSettings.preview ? notifyBodyOf(m) : i18nT("notif.preview.hidden");
-      void platform().notify({ title: cbRef.current.titleOf(m.convId), body, convId: m.convId });
+      const title = cbRef.current.titleOf(m.convId);
+      const convId = m.convId;
+      // 头像：群聊=群头像、单聊=对端（notifyIcon.ts）；带上 convSeq，之后撤回 / 别处已读才收得回来。
+      withNotifyIcon(notifyIconSource(conv, convId, title), (icon) => {
+        void platform().notify({ title, body, convId, convSeq: m.convSeq, icon });
+      });
     }
   };
 
@@ -161,6 +171,7 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
   return {
     isDesktop: platform().isDesktop,
     notifyInbound,
+    clearNotifications: (req) => platform().clearNotifications(req),
     bindCallbacks: (cb) => { cbRef.current = cb; },
     autoStart,
     autoStartSupported: platform().autoStartSupported(),

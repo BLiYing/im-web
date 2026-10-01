@@ -1109,3 +1109,22 @@
 > - 未动 `../IMServer/docs/CLIENT_PARITY.md`（三端并行，留给协调者统一收口）；未改 IMServer 后端、未改 im-rtc SDK。
 
 > 更早的已完成块已移入 [current_task.archive.md](current_task.archive.md)（只读归档）。
+
+## 归档 2026-10-01（原「当前焦点」：多选删除两档 + 查看器缩放）
+
+> **多选删除两档 + 查看器缩放 + 输入栏灰底 + 删自己刚发的消息后历史消失 ✅（2026-09-30，浏览器实测，已提交并推送 `8dd7b06`；2026-10-01 又在 Chrome 复测批量请求/整批一帧/宫格逐格选）**：
+> - **多选删除**（`selectDelete.ts`）：两档都改为**一次批量请求**（SDK `hideMessages` / `deleteMessagesForEveryone`，
+>   PROTOCOL §6.7.1/§6.7.2），服务端逐条回成败 → 成功项本地移除、失败汇总一句「N 条删除失败」（`summarizeBatch`）；
+>   第二档走 REST，断线也能删。`msg_hidden` 批量帧读 `conv_seqs`（`hiddenSeqsOf`）；批量删除广播帧（一帧 `targets`，2026-10-01）走 `batchDeleteTargetsOf` + `removeMessagesLocal`（墓碑先全落库、再同步循环通知，一次渲染）。置顶横幅：`onMessageRemoved`
+>   无条件按会话 300ms 合并重拉（`keyedDebounce` → `schedulePinnedRefresh`），批量结束再触发一次。
+>   **2026-10-01 已浏览器实测**：一次 `POST /messages/delete`·`/hide`、收整批帧实时移除、九宫格逐格选。
+> - **查看器图片缩放**（`viewerZoom.ts` + `components/ZoomableImage.tsx`）：滚轮/捏合以鼠标为中心 1×–5×、双击 1×↔2×、
+>   放大后拖拽、`+` `-` `0`、翻页靠 `key` 重挂回 1×。视频不缩放。
+> - **区间清单漏登记**（`imSdk.registerSeq`）：自己发的消息（ACK）与实时 `msg_op` 事件行（`op_conv_seq`）此前不进清单，
+>   删掉自己刚发的某条后 seq 断号 → `renderWindow` 切段 → 更早的历史整段从屏上消失，直到下一条入站消息触发补拉。
+> - **样式**：`.chat footer` 去投影（被 `.chat{overflow:hidden}` 裁成一块灰底）；多选栏按钮选择器补
+>   `.chat footer.select-bar` 前缀（一直输给 `.chat footer button`，圆形玻璃钮实际渲染成绿色方块）。
+> - **没做 / 已知**：触屏双指捏合没做（只有 Safari 触控板 gesture 事件 + ctrl+wheel）；真实滚轮事件自动化工具发不出，
+>   只用合成 WheelEvent 验过；「为所有人删除」无二次确认（与单条子菜单同口径）；会话列表预览仍会显示
+>   已被我「仅为我删除」的那条（服务端末条预览不滤隐藏项，单条 hide 同样如此，未动）。
+

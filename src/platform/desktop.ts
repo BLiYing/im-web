@@ -3,7 +3,7 @@
 //
 // D1 阶段外壳还不存在，本文件的实际作用是：把契约钉死，并保证「桥缺什么就退回 web 那份」。
 // 这个逐能力回退不是过渡期的将就，是长期形状——外壳与页面各自发版，桥落后于页面是常态。
-import type { GlobalShortcutState, NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
+import type { GlobalShortcutState, NotifyClearRequest, NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
 import { webPlatform } from "./web";
 import { createDesktopLocalStore } from "../sdk/localStore.desktop";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -23,7 +23,9 @@ export interface DesktopBridge {
   openExternal?(url: string): void;
   /** 返回**是否真的发出去了**（见 types.ts 的契约）。系统拒绝通知权限 / 开了勿扰时必须回 false，
    *  否则调用方会以为已通知而跳过应用内兜底，用户什么都看不到。 */
-  notify?(title: string, body: string, convId?: string): Promise<boolean>;
+  notify?(title: string, body: string, convId?: string, extra?: { convSeq?: number; icon?: string }): Promise<boolean>;
+  /** 收回已弹的通知；返回收了几条（只给日志/自检看）。旧壳没有就退回 web 的空操作。 */
+  clearNotifications?(req: NotifyClearRequest): Promise<number>;
   /** 同上：真的设上了才回 true。 */
   setBadge?(count: number): Promise<boolean>;
   autoStartSupported?(): boolean;
@@ -110,7 +112,12 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
       if (!bridge.notify) { fellBack("notify"); return webPlatform.notify(req); }
       // 如实透传桥的结果，**不要无条件 true**（/code-review 抓到）：系统拒了权限或开着勿扰时
       // 谎报成功，调用方就会跳过应用内兜底，用户什么都看不到。
-      return bridge.notify(req.title, req.body, req.convId);
+      return bridge.notify(req.title, req.body, req.convId, { convSeq: req.convSeq, icon: req.icon });
+    },
+
+    clearNotifications(req: NotifyClearRequest): void {
+      if (!bridge.clearNotifications) { fellBack("clearNotifications"); webPlatform.clearNotifications(req); return; }
+      void bridge.clearNotifications(req).catch(() => { /* 主进程那头没了（退出中）：没什么可收的 */ });
     },
 
     async setBadge(count: number): Promise<boolean> {

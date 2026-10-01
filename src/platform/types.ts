@@ -36,11 +36,21 @@ export interface GlobalShortcutState {
   taken?: boolean;
 }
 
-/** 一条系统通知。`convId` 供宿主实现「点通知定位到会话」，web 侧目前不消费。 */
+/** 一条系统通知。`convId` 供宿主实现「点通知定位到会话」，`convSeq` 供之后撤回/已读时收回它；
+ *  `icon` 是会话头像的 data: URL（`notifyIcon.ts` 画的），没有就用应用图标。web 侧都不消费。 */
 export interface NotifyRequest {
   title: string;
   body: string;
   convId?: string;
+  convSeq?: number;
+  icon?: string;
+}
+
+/** 要收回的已弹通知：`convSeqs` = 这几条被撤回/删除；`upTo` = 本人在别处读到了这里（≤ 它的都收）。 */
+export interface NotifyClearRequest {
+  convId: string;
+  convSeqs?: number[];
+  upTo?: number;
 }
 
 /**
@@ -94,6 +104,9 @@ export interface Platform {
    * 不是「暂时坏了」。
    */
   notify(req: NotifyRequest): Promise<boolean>;
+
+  /** 收回已弹的通知（撤回 / 别处已读，对齐手机端）。fire-and-forget：没弹过、早被用户划掉都是空操作；web 无通知，恒空操作。 */
+  clearNotifications(req: NotifyClearRequest): void;
 
   /** 设置未读角标（Dock / 任务栏 / 托盘）。返回是否真的设上了；web 恒 false，理由同 `notify`。 */
   setBadge(count: number): Promise<boolean>;

@@ -36,6 +36,7 @@ function setupDesktopBridge(): void {
 }
 
 beforeEach(() => {
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);   // jsdom 无 canvas：通知头像走「画不了」那条路
   vi.mocked(playAlertSound).mockClear();
   vi.mocked(preloadAlertSounds).mockClear();
   vi.mocked(getCallEngine).mockReturnValue(null);
@@ -79,6 +80,14 @@ describe("notifyInbound：接线", () => {
     expect(playAlertSound).toHaveBeenCalledWith("default", DEFAULT_NOTIFY_SETTINGS.desktop.volume);
     expect(notifyMock).toHaveBeenCalledTimes(1);
     expect(notifyMock.mock.calls[0][2]).toBe("c1"); // convId 透传
+  });
+
+  it("带上 convSeq——之后撤回 / 别处已读要靠它把这条通知收回去", () => {
+    setupDesktopBridge();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const { result } = mount([conv({})]);
+    result.current.notifyInbound(msg({ convSeq: 42 }));
+    expect(notifyMock.mock.calls[0][3]?.convSeq).toBe(42);
   });
 
   it("自己发的消息 → 不响不弹", () => {
@@ -200,5 +209,24 @@ describe("badge：includeMuted 接线", () => {
     const settings: NotifySettings = { ...DEFAULT_NOTIFY_SETTINGS, badge: { includeMuted: true } };
     mount(convs, settings);
     await waitFor(() => expect(setBadgeMock).toHaveBeenCalledWith(102));
+  });
+});
+
+describe("clearNotifications：透传到桥", () => {
+  it("撤回 / 别处已读的收回请求原样交给桌面桥", () => {
+    const clearMock = vi.fn<NonNullable<DesktopBridge["clearNotifications"]>>().mockResolvedValue(1);
+    (window as unknown as { imDesktop?: DesktopBridge }).imDesktop =
+      { contract: 1, deviceId: "d1", deviceName: "IM Desktop", clearNotifications: clearMock };
+    resetPlatformForTests();
+    const { result } = mount([]);
+    result.current.clearNotifications({ convId: "c1", convSeqs: [7] });
+    result.current.clearNotifications({ convId: "c1", upTo: 9 });
+    expect(clearMock.mock.calls).toEqual([[{ convId: "c1", convSeqs: [7] }], [{ convId: "c1", upTo: 9 }]]);
+  });
+
+  it("旧壳没有这条桥 / 浏览器版：空操作，不抛", () => {
+    setupDesktopBridge();   // 这座假桥没有 clearNotifications
+    const { result } = mount([]);
+    expect(() => result.current.clearNotifications({ convId: "c1", upTo: 9 })).not.toThrow();
   });
 });

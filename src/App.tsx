@@ -707,8 +707,8 @@ export default function App() {
       onReceipt: (convId, from, status, upToSeq) => {
         if (status !== "read") return;
         if (from === uidRef.current) {
-          // 多端已读同步（M1）：我在另一端已读 → 本端列表未读清零（服务端已记位点，刷新即得）。
-          scheduleListRefresh();
+          // 多端已读同步（M1）：我在另一端已读 → 本端列表未读清零（服务端已记位点，刷新即得）+ 收掉读过那段的桌面通知。
+          scheduleListRefresh(); desktop.clearNotifications({ convId, upTo: upToSeq });
         } else {
           setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
           // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变绿✓✓（否则要切会话才更新）。
@@ -801,6 +801,7 @@ export default function App() {
         // 而且点进去是另一个人（服务端落库时也清了，这里是内存态与之对齐）。
         const opPatch = patch.content !== undefined ? { ...patch, mentionSpans: undefined } : patch;
         applyOp(cid, targetSeq, opPatch); // 按 conv_seq 就地打补丁（撤回→墓碑/编辑→改文本/置顶）
+        if (patch.recalledAt !== undefined) desktop.clearNotifications({ convId: cid, convSeqs: [targetSeq] }); // 撤回 → 收回它的桌面通知
         // 置顶态变化（G0）：重拉该会话置顶集合刷新顶部横幅（含别人置顶/取消置顶的实时同步）。
         // 撤回/编辑若命中横幅里的置顶项**也要重拉**：服务端置顶列表已剔除撤回消息（PinnedMessages
         // 带 recalled_at = 0）、编辑则改了文案；不刷会留一条指向墓碑/旧文案的横幅——点它只会滚到
@@ -821,7 +822,7 @@ export default function App() {
       onMessageRemoved: (cid, targetSeq) => {
         // 经 ref 取：本回调是登录时建的闭包，schedulePinnedRefresh 声明在下方，别让它依赖声明顺序与 memo 恒定。
         if (cid === currentConvRef.current || cid in pinnedRef.current) schedulePinnedRefreshRef.current?.(cid);
-        removeSeq(cid, targetSeq); // 从聊天列表按 conv_seq 移除该条
+        removeSeq(cid, targetSeq); desktop.clearNotifications({ convId: cid, convSeqs: [targetSeq] }); // 从聊天列表移除该条 + 收回它的桌面通知
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
         setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
         setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r)); // 正在全屏读的文本被删（为所有人删/仅删我）→ 关阅读器

@@ -5,21 +5,15 @@
 
 ## 当前焦点
 
-> **多选删除两档 + 查看器缩放 + 输入栏灰底 + 删自己刚发的消息后历史消失 ✅（2026-09-30，浏览器实测，已提交并推送 `8dd7b06`；2026-10-01 又在 Chrome 复测批量请求/整批一帧/宫格逐格选）**：
-> - **多选删除**（`selectDelete.ts`）：两档都改为**一次批量请求**（SDK `hideMessages` / `deleteMessagesForEveryone`，
->   PROTOCOL §6.7.1/§6.7.2），服务端逐条回成败 → 成功项本地移除、失败汇总一句「N 条删除失败」（`summarizeBatch`）；
->   第二档走 REST，断线也能删。`msg_hidden` 批量帧读 `conv_seqs`（`hiddenSeqsOf`）；批量删除广播帧（一帧 `targets`，2026-10-01）走 `batchDeleteTargetsOf` + `removeMessagesLocal`（墓碑先全落库、再同步循环通知，一次渲染）。置顶横幅：`onMessageRemoved`
->   无条件按会话 300ms 合并重拉（`keyedDebounce` → `schedulePinnedRefresh`），批量结束再触发一次。
->   **2026-10-01 已浏览器实测**：一次 `POST /messages/delete`·`/hide`、收整批帧实时移除、九宫格逐格选。
-> - **查看器图片缩放**（`viewerZoom.ts` + `components/ZoomableImage.tsx`）：滚轮/捏合以鼠标为中心 1×–5×、双击 1×↔2×、
->   放大后拖拽、`+` `-` `0`、翻页靠 `key` 重挂回 1×。视频不缩放。
-> - **区间清单漏登记**（`imSdk.registerSeq`）：自己发的消息（ACK）与实时 `msg_op` 事件行（`op_conv_seq`）此前不进清单，
->   删掉自己刚发的某条后 seq 断号 → `renderWindow` 切段 → 更早的历史整段从屏上消失，直到下一条入站消息触发补拉。
-> - **样式**：`.chat footer` 去投影（被 `.chat{overflow:hidden}` 裁成一块灰底）；多选栏按钮选择器补
->   `.chat footer.select-bar` 前缀（一直输给 `.chat footer button`，圆形玻璃钮实际渲染成绿色方块）。
-> - **没做 / 已知**：触屏双指捏合没做（只有 Safari 触控板 gesture 事件 + ctrl+wheel）；真实滚轮事件自动化工具发不出，
->   只用合成 WheelEvent 验过；「为所有人删除」无二次确认（与单条子菜单同口径）；会话列表预览仍会显示
->   已被我「仅为我删除」的那条（服务端末条预览不滤隐藏项，单条 hide 同样如此，未动）。
+> **桌面系统通知对齐手机端（2026-10-01，代码完成、已 commit，未在桌面版实机验证）**：
+> - 头像：`src/notifyIcon.ts`——群聊=群头像、单聊=对端，无则与会话列表同色同字占位，画成 data: URL 交主进程；
+>   等头像最多 1.5 秒，失败/超时退回占位（不缓存失败结果）。
+> - 收回：主进程 `desktop/src/main/notifyRegistry.ts` 登记已弹通知（conv_id+conv_seq）；页面经 `platform().clearNotifications`
+>   在撤回（`onMsgOp` recalledAt）、移除（`onMessageRemoved`）、本人别处已读（`onReceipt` from=自己，`upTo`）时收回；
+>   窗口 `focus` 主进程自己全清。新 IPC `im:clear-notifications`，`im:notify` 多带 `convSeq`/`icon`。
+> - **浏览器版不做系统通知**（用户定）：`web.ts` 的 `notify` 仍恒 false、`clearNotifications` 空操作。
+> - 没做 / 已知：Windows 上 `Notification.close()` 能否从操作中心移除未验；断线期间错过的本人已读回执不会补收通知
+>  （窗口一聚焦也会全清）。
 
 ## 下一步
 0--. **会话内搜索服务端命中翻页 ✅ 2026-09-11**（`b30bed6`）：▲ 翻过最旧命中带 `next_cursor` 取下一页，

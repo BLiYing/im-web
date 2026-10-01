@@ -7,7 +7,7 @@
 //   openExternal           ← src/useMediaDownload.ts（openReadyFile 的预览分支）
 //   subscribeWake          ← src/sdk/wake.ts（installWakeListeners，**留在原处**，本层只转发）
 //   voiceRecording         ← src/voiceRecorder.ts（voiceRecordingSupported，**留在原处**，本层只转发）
-import type { GlobalShortcutState, NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
+import type { GlobalShortcutState, NotifyClearRequest, NotifyRequest, Platform, SaveFileRequest, VoiceRecordingSupport } from "./types";
 import { installWakeListeners } from "../sdk/wake";
 import { voiceRecordingSupported } from "../voiceRecorder";
 
@@ -72,6 +72,9 @@ export const webPlatform: Platform = {
   async notify(_req: NotifyRequest): Promise<boolean> {
     return false;
   },
+
+  // 没弹过，自然没有可收的（浏览器版不做系统通知，2026-10-01 定）。
+  clearNotifications(_req: NotifyClearRequest): void { /* no-op */ },
 
   async setBadge(_count: number): Promise<boolean> {
     return false;

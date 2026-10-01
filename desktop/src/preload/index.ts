@@ -45,8 +45,11 @@ if (contract > 0 && deviceId && deviceName) {
     // （**更正**：2026-09-08 那次 --e2e 卡住其实是 dist/ 陈旧，不是死锁——见 distFreshness.ts。
     //   本改动仍然成立，但当时的归因是错的，不该留在注释里。）
     setBadge: (count: number): Promise<boolean> => ipcRenderer.invoke("im:set-badge", count) as Promise<boolean>,
-    notify: (title: string, body: string, convId?: string): Promise<boolean> =>
-      ipcRenderer.invoke("im:notify", { title, body, convId }) as Promise<boolean>,
+    notify: (title: string, body: string, convId?: string, extra?: { convSeq?: number; icon?: string }): Promise<boolean> =>
+      ipcRenderer.invoke("im:notify", { title, body, convId, convSeq: extra?.convSeq, icon: extra?.icon }) as Promise<boolean>,
+    // 收回已弹的通知：{ convId, convSeqs } 撤回/删除、{ convId, upTo } 别处已读。窗口回到前台的全清在主进程自己做。
+    clearNotifications: (scope: { convId: string; convSeqs?: number[]; upTo?: number }): Promise<number> =>
+      ipcRenderer.invoke("im:clear-notifications", scope) as Promise<number>,
     autoStartSupported: (): boolean => process.platform === "darwin" || process.platform === "win32",
     // 这两个也改 invoke。原先用 sendSync，理由写的是「设置页是用户点出来的，那时主进程没在等
     // 渲染进程」——**那个理由不成立**：getAutoStart 实际在 React 首次挂载时就被调用（/code-review

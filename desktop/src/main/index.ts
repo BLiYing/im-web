@@ -18,7 +18,8 @@ import { beginQuit, installTray, isQuitting, refreshTrayMenu, setTrayTooltip, sh
 import { createLanguageState } from "./language";
 import { exitCodeAfterLock, lockDataFor, shouldFocusOnSecondInstance } from "./singleInstance";
 import { createDeepLinkRouter, DEEP_LINK_SCHEME, IPC_DEEP_LINK_AVAILABLE, IPC_DEEP_LINK_DRAIN } from "./deepLink";
-import { getAutoStart, installWakeSignals, notify, setAutoStart, setBadge } from "./shellCaps";
+import { getAutoStart, installWakeSignals, notifications, notify, setAutoStart, setBadge } from "./shellCaps";
+import { parseNotifyScope } from "./notifyRegistry";
 import { isExternallyOpenable, openExternal, saveFile } from "./fileCaps";
 import { MIN_SIZE, restoreWindowState, saveWindowState } from "./windowState";
 import { createSqliteStore, type SqliteStore } from "./sqliteStore";
@@ -180,6 +181,8 @@ function createWindow(): BrowserWindow {
   win.on("move", scheduleSave);
   // 关闭前立刻存一次：节流的那次可能还没落地。收进托盘也算一次「用户摆完了」。
   win.on("close", () => { if (saveTimer) clearTimeout(saveTimer); saveWindowState(win); });
+  // 窗口回到前台 = 手机上的「打开 App」：已弹的通知全部收掉（iOS sceneDidBecomeActive / Android RESUMED 同口径）。
+  win.on("focus", () => { notifications.clear({}); });
   return win;
 }
 
@@ -203,8 +206,19 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle("im:set-badge", (_e, count: unknown) =>
     setBadge(typeof count === "number" ? count : 0, setTrayTooltip));
   ipcMain.handle("im:notify", (_e, p: unknown) => {
-    const q = (p ?? {}) as { title?: string; body?: string; convId?: string };
-    return notify(getWin(), String(q.title ?? ""), String(q.body ?? ""), q.convId);
+    const q = (p ?? {}) as { title?: unknown; body?: unknown; convId?: unknown; convSeq?: unknown; icon?: unknown };
+    return notify(getWin(), {
+      title: String(q.title ?? ""),
+      body: String(q.body ?? ""),
+      convId: typeof q.convId === "string" ? q.convId : undefined,
+      convSeq: typeof q.convSeq === "number" ? q.convSeq : undefined,
+      icon: typeof q.icon === "string" ? q.icon : undefined,
+    });
+  });
+  // 收回已弹的通知（撤回 / 别处已读）。参数形状不对就什么都不收（parseNotifyScope 的约定）。
+  ipcMain.handle("im:clear-notifications", (_e, p: unknown) => {
+    const scope = parseNotifyScope(p);
+    return scope ? notifications.clear(scope) : 0;
   });
   // 深链：页面订阅时先取一次、之后每收到「有新链接」再取。取走即清（deepLink.ts）。
   ipcMain.handle(IPC_DEEP_LINK_DRAIN, () => deepLinks.drain());

@@ -3,7 +3,8 @@
 // 这三件都**只能由外壳做**，也是 D1 立接口时就留好、至今在 web 侧恒返回 false 的那两个
 // （`notify` / `setBadge`）第一次真正有实现。判断逻辑不在这里——「该不该弹」「角标算几」
 // 是页面侧的纯函数（`src/desktopNotify.ts`），这里只负责「让它发生」。
-import { app, BrowserWindow, Notification, powerMonitor } from "electron";
+import { app, BrowserWindow, nativeImage, Notification, powerMonitor } from "electron";
+import { createNotifyRegistry } from "./notifyRegistry";
 
 /** 主进程 → 渲染进程的事件通道。preload 那侧同名订阅（见 preload/index.ts）。 */
 export const IPC_OPEN_CONVERSATION = "im:open-conversation";
@@ -43,17 +44,26 @@ export function setBadge(count: number, tooltip: (text: string) => void): boolea
  * `silent: true`（NOTIFICATIONS_DESIGN §3.2 桌面系统通知行）：声音统一由渲染进程按
  * 设置 ▸ 通知页的开关/音量播放（见 `src/alertPlayer.ts`），这里若不静音，系统默认通知音会跟
  * App 自己的提示音叠成两声。
+ *
+ * 弹出的通知登记进 `notifications`（`convId` + `convSeq`），撤回 / 别处已读 / 窗口回到前台时据此收回。
+ * `icon` 是页面画好的会话头像（data: URL，群聊=群头像、单聊=对端，见 `src/notifyIcon.ts`）；
+ * 解不出来就不带，系统用应用图标——不因头像失败而不弹。
  */
+export const notifications = createNotifyRegistry();
+
 export function notify(
   win: BrowserWindow | null,
-  title: string,
-  body: string,
-  convId: string | undefined,
+  req: { title: string; body: string; convId?: string; convSeq?: number; icon?: string },
 ): boolean {
   if (!Notification.isSupported()) return false;
+  const { title, body, convId } = req;
   try {
-    const n = new Notification({ title, body, silent: true });
+    const icon = req.icon?.startsWith("data:image/") ? nativeImage.createFromDataURL(req.icon) : undefined;
+    const n = new Notification({ title, body, silent: true, icon: icon && !icon.isEmpty() ? icon : undefined });
+    notifications.add(convId, req.convSeq, n);
+    n.on("close", () => notifications.forget(n));
     n.on("click", () => {
+      notifications.forget(n);
       if (!win || win.isDestroyed()) return;
       if (win.isMinimized()) win.restore();
       win.show();
