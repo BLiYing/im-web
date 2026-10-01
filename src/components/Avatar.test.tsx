@@ -79,4 +79,12 @@ describe("avatarInitial", () => {
   it("扩展C汉字识别为汉字", () => {
     expect(avatarInitial("小𪜀")).toBe("𪜀"); // U+2A700，CJK 扩展 C 第一个字
   });
+
+  // 大写不能把一个字拆成两个——String.toUpperCase() 的完整 Unicode 大小写折叠会把德语 ß 变成
+  // 两个字符 "SS"，画到头像圆里就是挤进两个字母。
+  it("大写不把一个字拆成两个", () => {
+    const result = avatarInitial("ßtraße99");
+    expect(result.length).toBe(1);
+    expect(result).toBe("ß"); // 大写后变长了就不用，原样返回，不是 "SS"
+  });
 });

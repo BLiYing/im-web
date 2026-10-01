@@ -39,7 +39,17 @@ export function avatarInitial(name: string): string {
   const g = graphemes(t);
   const last = g[g.length - 1];
   if (isHanCodePoint(last.codePointAt(0) ?? 0)) return last;
-  return g[0].toUpperCase();
+  return uppercaseInitial(g[0]);
+}
+
+/**
+ * 大写一个字，但保证还是「一个字」——`String.toUpperCase()` 走完整 Unicode 大小写折叠，极少数字符会
+ * 一拆二（德语 ß → "SS"，两个字符），破坏首字母头像「只有一个字」的前提。没有通用 API 只做「简单」
+ * 映射，退而求其次：大写后变长了（唯一会发生的情形就是这类一拆多）就不用，原样返回。
+ */
+function uppercaseInitial(grapheme: string): string {
+  const upper = grapheme.toUpperCase();
+  return upper.length > grapheme.length ? grapheme : upper;
 }
 /** 按种子（uid / 群 conv_id）稳定取底色，与 iOS 同算法：h = h*31 + UTF-16 码元、64 位无符号回绕、% 6。
  *  同一 uid 两端同色。用 BigInt 精确复刻 NSUInteger 的 2^64 回绕（短 uid 无溢出，长种子也不偏差）。 */
