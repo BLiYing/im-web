@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { planBatchDelete, runBatch } from "./selectDelete";
+import { describe, it, expect, vi } from "vitest";
+import { batchDeleteTargetsOf, hiddenSeqsOf, keyedDebounce, planBatchDelete, summarizeBatch } from "./selectDelete";
 
 const m = (convSeq: number, from: string) => ({ convSeq, from });
 
@@ -30,28 +30,61 @@ describe("planBatchDelete — 多选删除给哪几档", () => {
   });
 });
 
-describe("runBatch — 逐条执行", () => {
-  it("每条都跑一次；单条失败不打断其余，返回失败条数", async () => {
-    const done: number[] = [];
-    const failed = await runBatch([1, 2, 3, 4, 5], async (s) => {
-      if (s === 2 || s === 4) throw new Error("boom");
-      done.push(s);
-    });
-    expect(failed).toBe(2);
-    expect(done.sort()).toEqual([1, 3, 5]);
+describe("summarizeBatch — 服务端逐条结果对回请求", () => {
+  it("成功的留作本地移除，失败/缺项都计入失败条数", () => {
+    const r = summarizeBatch([1, 2, 3, 4], [
+      { conv_seq: 1, ok: true }, { conv_seq: 2, ok: false, code: 300006 }, { conv_seq: 4, ok: true },
+    ]);
+    expect(r).toEqual({ okSeqs: [1, 4], failed: 2 });
   });
 
-  it("并发不超过上限", async () => {
-    let running = 0, peak = 0;
-    await runBatch(Array.from({ length: 12 }, (_, i) => i + 1), async () => {
-      peak = Math.max(peak, ++running);
-      await new Promise((r) => setTimeout(r, 1));
-      running--;
-    }, 3);
-    expect(peak).toBe(3);
+  it("响应里没有 results（异常形状）：整批按失败算", () => {
+    expect(summarizeBatch([1, 2], undefined)).toEqual({ okSeqs: [], failed: 2 });
+  });
+});
+
+describe("hiddenSeqsOf — msg_hidden 帧", () => {
+  it("批量帧读 conv_seqs，单条帧退回 conv_seq", () => {
+    expect(hiddenSeqsOf({ conv_seq: 3, conv_seqs: [3, 5, 9] })).toEqual([3, 5, 9]);
+    expect(hiddenSeqsOf({ conv_seq: 7 })).toEqual([7]);
+    expect(hiddenSeqsOf({})).toEqual([]);
+  });
+});
+
+describe("keyedDebounce — 置顶横幅重拉合并", () => {
+  it("同一会话连续触发只跑一次，不同会话各跑一次", () => {
+    vi.useFakeTimers();
+    try {
+      const calls: string[] = [];
+      const kick = keyedDebounce(300, (k) => calls.push(k));
+      for (let i = 0; i < 100; i++) kick("g1");
+      kick("g2");
+      vi.advanceTimersByTime(299);
+      expect(calls).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(calls.sort()).toEqual(["g1", "g2"]);
+      kick("g1");
+      vi.advanceTimersByTime(300);
+      expect(calls.filter((k) => k === "g1")).toHaveLength(2);
+      // 退出登录：挂着的全部撤掉，之后不再触发。
+      kick("g1"); kick("g3");
+      kick.cancelAll();
+      vi.advanceTimersByTime(1000);
+      expect(calls).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("batchDeleteTargetsOf — 批量删除广播帧", () => {
+  it("一帧带全批：取出要删的消息与各自事件行的 op_conv_seq", () => {
+    const d = { op: "delete", conv_id: "g", targets: [{ target_conv_seq: 3, op_conv_seq: 10 }, { target_conv_seq: 5, op_conv_seq: 11 }] };
+    expect(batchDeleteTargetsOf(d)).toEqual({ seqs: [3, 5], opSeqs: [10, 11] });
   });
 
-  it("空列表：不跑、0 失败", async () => {
-    expect(await runBatch([], async () => { throw new Error("never"); })).toBe(0);
+  it("单条 msg_op（没有 targets）/ 非删除：返回 null，走单条路径", () => {
+    expect(batchDeleteTargetsOf({ op: "delete", target_conv_seq: 3 })).toBeNull();
+    expect(batchDeleteTargetsOf({ op: "pin", targets: [] })).toBeNull();
   });
 });

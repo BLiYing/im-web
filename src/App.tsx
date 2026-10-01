@@ -6,7 +6,8 @@ import { useMessageStore } from "./useMessageStore";
 import { useLocalPreload } from "./useLocalPreload";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
-import { planBatchDelete, runBatch } from "./selectDelete";
+import { planBatchDelete, type KeyedDebounced } from "./selectDelete";
+import { useBatchDelete } from "./useBatchDelete";
 import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
 import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type PinnedMessage, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
@@ -327,6 +328,7 @@ export default function App() {
   // 置顶集合镜像：WS 回调是登录那一刻建的闭包（见 enterApp），读不到后续的 state——
   // onMsgOp 要判断「被撤回/编辑的这条是不是横幅里的置顶项」，只能经 ref 取当前值（同 messagesRef 套路）。
   const pinnedRef = useRef<Record<string, PinnedMessage[]>>({});
+  const schedulePinnedRefreshRef = useRef<KeyedDebounced | null>(null); // 置顶横幅合并重拉（见 schedulePinnedRefresh）
   const [pinnedIdx, setPinnedIdx] = useState(0);          // 多条置顶时横幅显示第几条（点条轮转）
   const [pinnedListOpen, setPinnedListOpen] = useState(false);
   // 顶部横幅本地收起（✕）：按「账号 + 会话 + 内容签名」记，仅隐藏视图、不动服务端置顶/公告。
@@ -813,9 +815,11 @@ export default function App() {
       onMsgOpFailed: (_op, _cid, _seq, msg) => setToast(msg),
       // 消息被物理移除（任务2）：为所有人删除（op=delete）/ 仅为我删除（msg_hidden）→ 从聊天列表 + 详情文件列表移除该条。
       // 若删掉的正好是一条置顶消息，服务端下次不再返回它——重拉一次免得横幅指向已消失的消息。
-      // 只在命中横幅里的置顶项时才拉：多选批量删除一次会来上百条移除，逐条无条件重拉就是上百个请求。
+      // **不看是否命中横幅**（置顶列表还没加载完时会漏判、横幅晚一拍），改成按会话合并：短时间内多条移除
+      // （别人批量删、msg_hidden 批量帧）只拉一次。只管打开过的会话——没拉过置顶的会话进来时自会拉。
       onMessageRemoved: (cid, targetSeq) => {
-        if ((pinnedRef.current[cid] ?? []).some((pm) => pm.convSeq === targetSeq)) void refreshPinned(cid);
+        // 经 ref 取：本回调是登录时建的闭包，schedulePinnedRefresh 声明在下方，别让它依赖声明顺序与 memo 恒定。
+        if (cid === currentConvRef.current || cid in pinnedRef.current) schedulePinnedRefreshRef.current?.(cid);
         removeSeq(cid, targetSeq); // 从聊天列表按 conv_seq 移除该条
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
         setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
@@ -1003,6 +1007,7 @@ export default function App() {
       clearTimeout(conversationRefreshTimerRef.current);
       conversationRefreshTimerRef.current = null;
     }
+    schedulePinnedRefreshRef.current?.cancelAll(); // 挂着的置顶横幅合并重拉：别在登出后/换号后替旧会话去拉
     resetMsgStore(); // 清空消息表 + 去重/墓碑集
     currentConvRef.current = "";
     setConversations([]);
@@ -1288,24 +1293,35 @@ export default function App() {
     () => planBatchDelete(selectMode ? (msgsByConv[convId] ?? []) : [], selected, uid, groupInfos[convId]?.my_role),
     [selectMode, msgsByConv, convId, selected, uid, groupInfos],
   );
-  // 仅为我删除：逐条 hide（服务端暂无批量接口；上限 SELECT_MAX 条、有限并发）。
+  // 重新拉某会话的置顶集合（G0）。best-effort：拉不到就不显横幅，绝不打断聊天。
+  const refreshPinned = useCallback(async (cid: string) => {
+    if (!cid) return;
+    try {
+      const items = (await clientRef.current?.fetchPinned(cid)) ?? [];
+      setPinnedByConv((prev) => ({ ...prev, [cid]: items }));
+    } catch (e) {
+      logger.warn(LOG_TAG.ui, "fetch_pinned_failed", { conv_id: cid, message: (e as Error).message });
+    }
+  }, []);
+
+  // 置顶横幅合并重拉 + 批量删除执行（useBatchDelete.ts）。logout 定义在前面且依赖为 []，经 ref 取到调度器（同 pinnedRef 套路）。
+  const { schedulePinnedRefresh, runBatchDelete } = useBatchDelete(refreshPinned, setToast);
+  schedulePinnedRefreshRef.current = schedulePinnedRefresh;
+
+  // 仅为我删除：批量 hide（上限 SELECT_MAX 条，与服务端 100 同值）。
   const deleteSelected = useCallback(() => {
     const cid = convId, client = clientRef.current, { seqs } = batchDeletePlan;
     exitSelectMode();
     if (!client || seqs.length === 0) return;
-    void runBatch(seqs, (s) => client.hideMessage(cid, s)).then((failed) => {
-      if (failed > 0) setToast(t("chat.select.delete_failed_count", { count: failed }));
-    });
-  }, [convId, batchDeletePlan, exitSelectMode]);
-  // 为所有人删除：逐条发 msg_op delete，成功由广播回帧移除，被拒走 onMsgOpFailed → toast。
-  // 未连接时 SDK 的 send 只记一条日志就丢帧——先拦住并留在多选态，别让用户以为删掉了。
+    runBatchDelete(cid, seqs, (s) => client.hideMessages(cid, s));
+  }, [convId, batchDeletePlan, exitSelectMode, runBatchDelete]);
+  // 为所有人删除：批量 delete。走 REST，WS 断着也能删（成功项 SDK 直接本地移除，不等广播帧）。
   const deleteSelectedForEveryone = useCallback(() => {
     const cid = convId, client = clientRef.current, { seqs, canEveryone } = batchDeletePlan;
     if (!client || !canEveryone) return;
-    if (state !== "connected") { setToast(t("conv.error.delete_failed_detail", { detail: t("conn.state.disconnected") })); return; }
     exitSelectMode();
-    seqs.forEach((s) => client.deleteMessageForEveryone(cid, s));
-  }, [convId, batchDeletePlan, state, exitSelectMode]);
+    runBatchDelete(cid, seqs, (s) => client.deleteMessagesForEveryone(cid, s));
+  }, [convId, batchDeletePlan, exitSelectMode, runBatchDelete]);
 
   // 多选批量收藏（favoriteSelected）已收进 useFavorites（收藏动作簇，见其 return）。
 
@@ -1431,17 +1447,6 @@ export default function App() {
   // 对端消息无 clientMsgId → 退回 seq-N。若两者都无（极少）则空串。
   // 文本消息的渲染一族（@提及高亮 / URL 可点 / 搜索高亮 / 长文本三档）已整块平移到
   // components/messageText.tsx；工厂调用在下方 openPeerDetail 之后（它要用那两个回调）。
-
-  // 重新拉某会话的置顶集合（G0）。best-effort：拉不到就不显横幅，绝不打断聊天。
-  const refreshPinned = useCallback(async (cid: string) => {
-    if (!cid) return;
-    try {
-      const items = (await clientRef.current?.fetchPinned(cid)) ?? [];
-      setPinnedByConv((prev) => ({ ...prev, [cid]: items }));
-    } catch (e) {
-      logger.warn(LOG_TAG.ui, "fetch_pinned_failed", { conv_id: cid, message: (e as Error).message });
-    }
-  }, []);
 
   // 点置顶横幅/置顶列表行的跳转（G0）：先判目标是不是**已被撤回**。服务端置顶列表本就剔除撤回消息，
   // 但横幅是快照——重拉失败（best-effort）、msg_op 帧还没到、重拉在飞时点击，都可能停在旧集合上。

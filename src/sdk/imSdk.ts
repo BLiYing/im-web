@@ -7,6 +7,7 @@ import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
 import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
+import { applyBatchDeleteFrame, hiddenSeqsOf, removeBatchLocal } from "./batchRemove";
 import { planEntryWindow, planJumpToLatest, planBumpCatchUp, nextHistoryFloor, type WindowPlan } from "../windowPlan";
 import { shouldHealGap, nextSyncCursor } from "./syncCursor";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
@@ -684,6 +685,8 @@ export class IMClient extends IMRestApi {
     }
   }
 
+  protected removeMessagesLocal(convId: string, seqs: number[]): Promise<void> { return removeBatchLocal(this.uid, convId, seqs, (c, q) => this.handlers.onMessageRemoved?.(c, q)); }
+
   /** 物理移除某条消息（落墓碑防重同步复现 + 通知 UI）。为所有人删除 / 仅为我删除 / msg_hidden 共用。 */
   private async removeMessageLocal(convId: string, targetConvSeq: number, advanceCursorTo: number): Promise<void> {
     await localStore.markMessageDeleted(this.uid, convId, { convSeq: targetConvSeq });
@@ -1006,6 +1009,7 @@ export class IMClient extends IMRestApi {
       case T.NOTIFY_SETTINGS_UPDATE:
         this.handlers.onNotifySettingsUpdate?.(Number(d.version) || 0); break; // M5 §6.13：账号级通知设置版本变更 → 本端重拉
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶/为所有人删除）：应用到本地
+        if (applyBatchDeleteFrame(d, (c, q) => void this.removeMessagesLocal(c, q), (c, o) => this.registerSeq(c, o))) break;
         this.applyMsgOp(d);
         // 事件行自己占的 op_conv_seq 永远不成为消息：同样登记，否则它是清单里的一个洞（sync 补拉是整段登记，本就含它）。
         if (d.conv_id && Number(d.op_conv_seq) > 0) this.registerSeq(String(d.conv_id), Number(d.op_conv_seq));
@@ -1015,7 +1019,7 @@ export class IMClient extends IMRestApi {
           String(d.status ?? ""), String(d.text ?? ""));
         break;
       case T.MSG_HIDDEN: // 「仅为我删除」多设备同步（任务2）：本人另一端删了 → 本端物理移除
-        if (d.conv_id && d.conv_seq) void this.removeMessageLocal(d.conv_id, Number(d.conv_seq), 0);
+        if (d.conv_id) void this.removeMessagesLocal(String(d.conv_id), hiddenSeqsOf(d));
         break;
       case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
         this.handlers.onConvUpdate?.({

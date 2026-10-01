@@ -6,9 +6,11 @@
 ## 当前焦点
 
 > **多选删除两档 + 查看器缩放 + 输入栏灰底 + 删自己刚发的消息后历史消失 ✅（2026-09-30，浏览器实测，未提交）**：
-> - **多选删除**（`selectDelete.ts`）：「仅为我删除」原先只抹本机（内存 + IndexedDB 墓碑），现逐条 `hideMessage`
->   （有限并发 4，失败弹「N 条删除失败」）；所选**全部**有权时多一档「为所有人删除」（逐条 `msg_op delete`，未连接先拦）。
->   iOS / Android 已于同日拉齐成同样两档（见 `CLIENT_PARITY.md`「任务二 补」行）。
+> - **多选删除**（`selectDelete.ts`）：两档都改为**一次批量请求**（SDK `hideMessages` / `deleteMessagesForEveryone`，
+>   PROTOCOL §6.7.1/§6.7.2），服务端逐条回成败 → 成功项本地移除、失败汇总一句「N 条删除失败」（`summarizeBatch`）；
+>   第二档走 REST，断线也能删。`msg_hidden` 批量帧读 `conv_seqs`（`hiddenSeqsOf`）；批量删除广播帧（一帧 `targets`，2026-10-01）走 `batchDeleteTargetsOf` + `removeMessagesLocal`（墓碑先全落库、再同步循环通知，一次渲染）。置顶横幅：`onMessageRemoved`
+>   无条件按会话 300ms 合并重拉（`keyedDebounce` → `schedulePinnedRefresh`），批量结束再触发一次。
+>   **2026-10-01 已浏览器实测**：一次 `POST /messages/delete`·`/hide`、收整批帧实时移除、九宫格逐格选。
 > - **查看器图片缩放**（`viewerZoom.ts` + `components/ZoomableImage.tsx`）：滚轮/捏合以鼠标为中心 1×–5×、双击 1×↔2×、
 >   放大后拖拽、`+` `-` `0`、翻页靠 `key` 重挂回 1×。视频不缩放。
 > - **区间清单漏登记**（`imSdk.registerSeq`）：自己发的消息（ACK）与实时 `msg_op` 事件行（`op_conv_seq`）此前不进清单，

@@ -14,6 +14,7 @@ import type { NotifySettingsWire } from "../notifySettingsSync";
 import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
 import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrApi";
 import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
+import { hideBatch, deleteBatch } from "./batchDeleteApi";
 import * as groupApi from "./groupApi";
 import * as contactApi from "./contactApi";
 import type { UserCard, FriendEntry, GroupInfo, GroupSummary, Favorite, GroupBan, QRCard, QRResolved, JoinRequest, DeviceView } from "./protocol";
@@ -24,6 +25,23 @@ export const FAVORITES_PAGE_SIZE = 60;
 export abstract class IMRestApi {
   /** 当前 JWT。IMClient 在登录/重连/续期时写它；本类只读。 */
   protected token = "";
+
+  /** 批量物理移除（落墓碑 + 通知 UI），由 IMClient 实现。 */
+  protected abstract removeMessagesLocal(convId: string, seqs: number[]): Promise<void>;
+
+  /** 多选「仅为我删除」（批量，§6.7.1）：成功项本地移除，返回失败条数；整单失败抛错。 */
+  async hideMessages(convId: string, seqs: number[]): Promise<number> {
+    const { okSeqs, failed } = await hideBatch(this.token, convId, seqs);
+    await this.removeMessagesLocal(convId, okSeqs);
+    return failed;
+  }
+
+  /** 多选「为所有人删除」（批量，§6.7.2）：同上；服务端另广播一帧，本端再收到是幂等移除。 */
+  async deleteMessagesForEveryone(convId: string, seqs: number[]): Promise<number> {
+    const { okSeqs, failed } = await deleteBatch(this.token, convId, seqs);
+    await this.removeMessagesLocal(convId, okSeqs);
+    return failed;
+  }
 
   /** 账号级自动下载策略（M4-7）：读 / 整体替换。实现在 sdk/downloadSettingsApi.ts（无状态 HTTP）。 */
   downloadSettings(): Promise<DownloadSettingsResult> { return fetchDownloadSettings(this.token); }
