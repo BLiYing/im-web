@@ -1324,6 +1324,10 @@
   "notif.mute.until_date": "until {date}",
   "notif.mute.until_today": "until {time}",
   "notif.mute.until_tomorrow": "until tomorrow, {time}",
+  "notif.new_messages_count": {
+    "one": "{count} new message",
+    "other": "{count} new messages"
+  },
   "notif.preview.hidden": "New message",
   "notif.reset": "Reset all notifications",
   "notif.reset.confirm_message": "All switches and sounds will be restored to defaults. Muted chats stay muted.",

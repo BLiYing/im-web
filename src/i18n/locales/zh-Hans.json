@@ -1289,6 +1289,9 @@
   "notif.mute.until_date": "至 {date}",
   "notif.mute.until_today": "至今天 {time}",
   "notif.mute.until_tomorrow": "至明天 {time}",
+  "notif.new_messages_count": {
+    "other": "{count} 条新消息"
+  },
   "notif.preview.hidden": "新消息",
   "notif.reset": "重置所有通知设置",
   "notif.reset.confirm_message": "本页所有开关与提示音将恢复默认。不会取消会话的免打扰。",
