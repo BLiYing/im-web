@@ -70,6 +70,13 @@ describe.each(cases)("Platform 契约 —— %s", (_name, make) => {
     expect(typeof await p.setBadge(3)).toBe("boolean");
   });
 
+  it("clearNotifications 是 fire-and-forget：同步返回 undefined、不抛（桥没有这条时同样）", () => {
+    const p = make();
+    const ret: unknown = p.clearNotifications({ convId: "c1", convSeqs: [1] });
+    expect(ret).toBeUndefined();
+    expect(() => p.clearNotifications({ convId: "c1", upTo: 5 })).not.toThrow();
+  });
+
   it("voiceRecording 返回完整探测形状", () => {
     const p = make();
     const v = p.voiceRecording();
