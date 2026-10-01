@@ -107,3 +107,18 @@ export function notifyBodyOf(msg: ChatMessage): string {
     default: return i18nT("notify.body.default");
   }
 }
+
+/**
+ * 系统通知的正文，**与手机推送同一套拼法**（服务端 `internal/push/content.go` 的 `Build`，iOS/Android 通知都用它）：
+ * 预览关 → 「新消息」（仍保留下面的发送人前缀）；群聊 → 「发送人: 正文」（`push.group_body`）；
+ * @我 / @全体 → 再套「[有人@我] …」（`push.mention_body`）。单聊不加前缀——标题本身就是对方名字。
+ */
+export function osNotifyBodyOf(
+  msg: ChatMessage,
+  o: { isGroup: boolean; preview: boolean; senderName: string; mentionsMe: boolean },
+): string {
+  let body = o.preview ? notifyBodyOf(msg) : i18nT("notif.preview.hidden");
+  if (o.isGroup) body = i18nT("push.group_body", { sender: o.senderName, text: body });
+  if (o.mentionsMe) body = i18nT("push.mention_body", { text: body });
+  return body;
+}

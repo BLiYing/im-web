@@ -3,10 +3,12 @@
 // 单独成文件而不是写在 App 里，有两个理由：① `App.tsx` 有行数硬预算（`check-file-size.sh`，
 // D4-2 就是在这里被拦下的）；② 这两件是纯映射（会话 id → 名字 / → 打开动作），
 // 抽出来就能单测，留在 App 里只能靠肉眼。
-import type { Conversation } from "./sdk/protocol";
+import type { ChatMessage, Conversation } from "./sdk/protocol";
 
 export interface DesktopCallbacks {
   titleOf: (convId: string) => string;
+  /** 群通知正文里的发送人（与聊天气泡同一个显示名：备注 > 群昵称 > 昵称）。 */
+  senderOf: (m: ChatMessage) => string;
   onOpenConversation: (convId: string) => void;
 }
 

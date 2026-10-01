@@ -1,7 +1,8 @@
 // 角标与「要不要弹通知」的护栏。这两条判错不会崩、不会报错，只会**骚扰用户**或**漏掉消息**，
 // 属于典型的「没人会在开发时发现」，所以逐条钉住。
 import { describe, expect, it } from "vitest";
-import { badgeCountOf, notifyBodyOf, shouldNotify, type NotifyContext } from "./desktopNotify";
+import { badgeCountOf, notifyBodyOf, osNotifyBodyOf, shouldNotify, type NotifyContext } from "./desktopNotify";
+import { t } from "./i18n";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
 
 const conv = (over: Partial<Conversation>): Conversation =>
@@ -114,5 +115,30 @@ describe("notifyBodyOf", () => {
 
   it("文件显文件名", () => {
     expect(notifyBodyOf(msg({ contentType: "file", content: "/uploads/x", fileName: "报告.pdf" }))).toBe("[文件] 报告.pdf");
+  });
+});
+
+// 与手机推送同一套拼法（服务端 internal/push/content.go Build）：用户 2026-10-02 要求群通知带发送人、与手机端对齐。
+describe("osNotifyBodyOf", () => {
+  const base = { isGroup: false, preview: true, senderName: "用户1002", mentionsMe: false };
+
+  it("单聊：只有正文，不加发送人（标题已是对方名字）", () => {
+    expect(osNotifyBodyOf(msg({ content: "在吗" }), base)).toBe("在吗");
+  });
+
+  it("群聊：「发送人: 正文」", () => {
+    expect(osNotifyBodyOf(msg({ content: "Had" }), { ...base, isGroup: true }))
+      .toBe(t("push.group_body", { sender: "用户1002", text: "Had" }));
+  });
+
+  it("群聊关预览：发送人还在，只把正文换成「新消息」", () => {
+    const body = osNotifyBodyOf(msg({ content: "秘密" }), { ...base, isGroup: true, preview: false });
+    expect(body).toBe(t("push.group_body", { sender: "用户1002", text: t("notif.preview.hidden") }));
+    expect(body).not.toContain("秘密");
+  });
+
+  it("@我：在整句外再套「[有人@我]」", () => {
+    expect(osNotifyBodyOf(msg({ content: "看下" }), { ...base, isGroup: true, mentionsMe: true }))
+      .toBe(t("push.mention_body", { text: t("push.group_body", { sender: "用户1002", text: "看下" }) }));
   });
 });

@@ -5,7 +5,7 @@
 // `src/desktopNotify.ts` 里，本文件只负责「什么时候调」以及订阅的生命周期。
 import { useEffect, useRef, useState } from "react";
 import { platform, type GlobalShortcutState } from "./platform";
-import { badgeCountOf, notifyBodyOf } from "./desktopNotify";
+import { badgeCountOf, osNotifyBodyOf } from "./desktopNotify";
 import { notifyIconSource, withNotifyIcon } from "./notifyIcon";
 import type { NotifyClearRequest } from "./platform";
 import { alertDecision, type AlertContext } from "./alertDecision";
@@ -13,7 +13,6 @@ import { playAlertSound, preloadAlertSounds } from "./alertPlayer";
 import { isMutedNow } from "./muteState";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 import { getCallEngine } from "./rtc/rtcCall";
-import { t as i18nT } from "./i18n";
 import { LOG_TAG, logger } from "./logging/logger";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { NotifySettings } from "./notifySettings";
@@ -51,7 +50,7 @@ export interface DesktopIntegration {
 
 export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopIntegration {
   // 两个回调的实现要等 App 那边声明完才有（见 bindCallbacks 的说明），先占位。
-  const cbRef = useRef<DesktopCallbacks>({ titleOf: () => "新消息", onOpenConversation: () => {} });
+  const cbRef = useRef<DesktopCallbacks>({ titleOf: () => "新消息", senderOf: (m) => m.fromNickname || m.from, onOpenConversation: () => {} });
   // 用 ref 存易变值：订阅只装一次，回调里读最新的。
   // 直接把它们放进 useEffect 依赖会让「点通知打开会话」的订阅随每条消息重装一遍。
   const latest = useRef(opts);
@@ -140,8 +139,10 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       playAlertSound(d.soundId, settings.desktop.volume);
     }
     if (d.osNotify) {
-      // 消息预览关闭时正文统一为「新消息」，标题（会话名/发送者名）不受影响（§3.3）。
-      const body = typeSettings.preview ? notifyBodyOf(m) : i18nT("notif.preview.hidden");
+      // 正文与手机推送同一套拼法（osNotifyBodyOf）：预览关 →「新消息」（§3.3）、群聊带发送人、@我带前缀。
+      const body = osNotifyBodyOf(m, {
+        isGroup: !!conv?.is_group, preview: typeSettings.preview, senderName: cbRef.current.senderOf(m), mentionsMe,
+      });
       const title = cbRef.current.titleOf(m.convId);
       const convId = m.convId;
       // 头像：群聊=群头像、单聊=对端（notifyIcon.ts）；带上 convSeq，之后撤回 / 别处已读才收得回来。

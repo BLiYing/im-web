@@ -185,6 +185,17 @@ describe("notifyInbound：接线", () => {
     expect(playAlertSound).toHaveBeenCalledTimes(1);
   });
 
+  it("群消息：通知正文带上发送人（经 bindCallbacks 的 senderOf 取显示名）", () => {
+    setupDesktopBridge();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const { result } = mount([conv({ conv_id: "g1", is_group: true })]);
+    result.current.bindCallbacks({ titleOf: () => "产品组", senderOf: () => "张三", onOpenConversation: () => {} });
+    result.current.notifyInbound(msg({ convId: "g1", content: "开会" }));
+    const [title, body] = notifyMock.mock.calls[0];
+    expect(title).toBe("产品组");
+    expect(body).toBe(t("push.group_body", { sender: "张三", text: "开会" }));
+  });
+
   it("群消息使用群聊的提示音", () => {
     setupDesktopBridge();
     vi.spyOn(document, "hasFocus").mockReturnValue(false);

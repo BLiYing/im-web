@@ -2587,7 +2587,7 @@ export default function App() {
   };
 
   // 回写桌面端回调：打开会话直接复用上面的 openConvById（它比另写一份稳，会话不在列表时能还原 peer）。
-  desktop.bindCallbacks({ titleOf: makeDesktopTitleOf(conversations, convDisplayLabel), onOpenConversation: openConvById });
+  desktop.bindCallbacks({ titleOf: makeDesktopTitleOf(conversations, convDisplayLabel), senderOf: senderLabel, onOpenConversation: openConvById });
 
   // 会话列表项显示名/头像/预览（群聊 vs 单聊）——convDisplayLabel/convAvatarUrl 已上移至 convLabel 之后（见那里注释）。
   // 收藏来源显示名（副行「来自X」）：本人→我；好友→备注/昵称；群成员→群昵称/昵称；否则 uid（按 UI.md 优先级）。
