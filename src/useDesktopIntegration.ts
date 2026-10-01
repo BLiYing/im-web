@@ -14,6 +14,7 @@ import { isMutedNow } from "./muteState";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 import { getCallEngine } from "./rtc/rtcCall";
 import { t as i18nT } from "./i18n";
+import { LOG_TAG, logger } from "./logging/logger";
 import type { ChatMessage, Conversation } from "./sdk/protocol";
 import type { NotifySettings } from "./notifySettings";
 import type { DesktopCallbacks } from "./desktopWiring";
@@ -128,6 +129,11 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       settings,
     };
     const d = alertDecision(ctx);
+    // 「来了消息却没弹」只能靠这条判断现场：不弹的原因全在这几个字段里（窗口焦点 / 免打扰 / 通话中 / 设置开关）。
+    logger.info(LOG_TAG.app, "desktop_alert_decision", {
+      conv_id: m.convId, conv_seq: m.convSeq, os_notify: d.osNotify, sound: d.sound, window_focused: windowFocused,
+      muted: ctx.muted, mentions_me: mentionsMe, in_call: inCall, desktop_enabled: settings.desktop.enabled,
+    });
 
     if (d.sound && d.soundId) {
       lastSoundAtRef.current = nowMs;
@@ -140,7 +146,9 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       const convId = m.convId;
       // 头像：群聊=群头像、单聊=对端（notifyIcon.ts）；带上 convSeq，之后撤回 / 别处已读才收得回来。
       withNotifyIcon(notifyIconSource(conv, convId, title), (icon) => {
-        void platform().notify({ title, body, convId, convSeq: m.convSeq, icon });
+        void platform().notify({ title, body, convId, convSeq: m.convSeq, icon }).then((ok) => {
+          logger.info(LOG_TAG.app, "desktop_notify_sent", { conv_id: convId, conv_seq: m.convSeq, ok, has_icon: !!icon });
+        });
       });
     }
   };

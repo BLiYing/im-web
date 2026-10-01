@@ -71,8 +71,12 @@ export function notify(
       // 页面自己决定怎么打开（群/单聊入口不同），主进程只把 convId 递过去。
       if (convId) win.webContents.send(IPC_OPEN_CONVERSATION, convId);
     });
+    // 诊断：通知交给系统后系统那侧的回音（mac 上 show 事件 = 真的展示了；failed 只有 Windows 会发）。
+    n.on("show", () => process.stderr.write(`[notify] shown conv=${convId ?? "-"} seq=${req.convSeq ?? "-"}\n`));
+    n.on("failed", (_e, err) => process.stderr.write(`[notify] failed conv=${convId ?? "-"}: ${err}\n`));
     n.show();
     notifyCount += 1;
+    process.stderr.write(`[notify] handed to OS conv=${convId ?? "-"} seq=${req.convSeq ?? "-"} icon=${icon ? "yes" : "no"}\n`);
     return true;
   } catch {
     return false;
