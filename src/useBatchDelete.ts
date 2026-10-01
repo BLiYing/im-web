@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { keyedDebounce } from "./selectDelete";
+import { keyedDebounce } from "./keyedDebounce";
 import { LOG_TAG, logger } from "./logging/logger";
 import { t } from "./i18n";
 

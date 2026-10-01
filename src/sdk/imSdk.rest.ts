@@ -29,18 +29,21 @@ export abstract class IMRestApi {
   /** 批量物理移除（落墓碑 + 通知 UI），由 IMClient 实现。 */
   protected abstract removeMessagesLocal(convId: string, seqs: number[]): Promise<void>;
 
-  /** 多选「仅为我删除」（批量，§6.7.1）：成功项本地移除，返回失败条数；整单失败抛错。 */
-  async hideMessages(convId: string, seqs: number[]): Promise<number> {
-    const { okSeqs, failed } = await hideBatch(this.token, convId, seqs);
+  /** `hideMessages`/`deleteMessagesForEveryone` 共用：发请求、成功项本地移除、回失败条数。 */
+  private async runBatchDelete(fn: typeof hideBatch, convId: string, seqs: number[]): Promise<number> {
+    const { okSeqs, failed } = await fn(this.token, convId, seqs);
     await this.removeMessagesLocal(convId, okSeqs);
     return failed;
   }
 
+  /** 多选「仅为我删除」（批量，§6.7.1）：成功项本地移除，返回失败条数；整单失败抛错。 */
+  hideMessages(convId: string, seqs: number[]): Promise<number> {
+    return this.runBatchDelete(hideBatch, convId, seqs);
+  }
+
   /** 多选「为所有人删除」（批量，§6.7.2）：同上；服务端另广播一帧，本端再收到是幂等移除。 */
-  async deleteMessagesForEveryone(convId: string, seqs: number[]): Promise<number> {
-    const { okSeqs, failed } = await deleteBatch(this.token, convId, seqs);
-    await this.removeMessagesLocal(convId, okSeqs);
-    return failed;
+  deleteMessagesForEveryone(convId: string, seqs: number[]): Promise<number> {
+    return this.runBatchDelete(deleteBatch, convId, seqs);
   }
 
   /** 账号级自动下载策略（M4-7）：读 / 整体替换。实现在 sdk/downloadSettingsApi.ts（无状态 HTTP）。 */

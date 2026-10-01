@@ -4,8 +4,6 @@
 import * as localStore from "./localStore";
 import { batchDeleteTargetsOf } from "../selectDelete";
 
-export { hiddenSeqsOf } from "../selectDelete"; // msg_hidden 帧取 seq（批量帧 conv_seqs / 单条 conv_seq）
-
 /** 先把墓碑全部落库，再在**同一个同步循环**里逐条通知 UI——React 把这一串 setState 合成一次渲染，
  *  而不是每条 await 一次、渲染一次。 */
 export async function removeBatchLocal(

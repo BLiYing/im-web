@@ -10,6 +10,7 @@ import type { QRCard, QRResolved, QRUserCard, QRGroupCard, JoinRequest, QRLoginS
 import { decodeImageData, decodeAllImageFile, describeRaw, drawToImageData, userCardAction, groupCardAction, classifyUnknown, errorCode, type GroupAction, type RawKind } from "./qr";
 import { loginNew, loginPoll } from "./sdk/qrLogin";
 import { t, useT } from "./i18n";
+import { avatarInitial } from "./components/Avatar";
 
 /** 生成二维码图片 dataURL（容错级 M，中留白，端本地生成）。失败返回空串。 */
 async function toQRDataURL(text: string): Promise<string> {
@@ -21,7 +22,9 @@ async function toQRDataURL(text: string): Promise<string> {
 }
 
 function Avatar({ url, name, size = 44 }: { url?: string; name: string; size?: number }) {
-  const initial = (name || "?").trim().slice(0, 1).toUpperCase();
+  // 首字母规则同会话列表头像（components/Avatar.tsx 的 avatarInitial）：之前这里另起了一份只取首字符
+  // 的逻辑，中文名会跟别处不一致——比如"张三"这里显示"张"，别处（取末字规则）显示"三"。
+  const initial = avatarInitial(name);
   const style = { width: size, height: size, fontSize: size * 0.42 } as const;
   return url
     ? <img className="qr-avatar" src={url} alt="" style={style} />

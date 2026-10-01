@@ -7,7 +7,8 @@ import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
 import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
-import { applyBatchDeleteFrame, hiddenSeqsOf, removeBatchLocal } from "./batchRemove";
+import { applyBatchDeleteFrame, removeBatchLocal } from "./batchRemove";
+import { hiddenSeqsOf } from "../selectDelete"; // msg_hidden 帧取 seq（批量帧 conv_seqs / 单条 conv_seq）
 import { planEntryWindow, planJumpToLatest, planBumpCatchUp, nextHistoryFloor, type WindowPlan } from "../windowPlan";
 import { shouldHealGap, nextSyncCursor } from "./syncCursor";
 import type { ConvBumpItem, WindowMeta } from "./protocol";
