@@ -8,7 +8,7 @@ const fetchConvMedia = vi.fn();
 vi.mock("./sdk/convQueriesApi", () => ({ fetchConvMedia: (...a: unknown[]) => fetchConvMedia(...a) }));
 import { useMediaServerPaging } from "./useMediaServerPaging";
 afterEach(cleanup);
-beforeEach(() => fetchConvMedia.mockReset());
+beforeEach(() => { fetchConvMedia.mockReset(); }); // 别写成表达式体：返回的 mock 会被 vitest 当 teardown 回调再调用一次
 
 const item = (seq: number) => ({ conv_seq: seq, server_msg_id: `s${seq}`, sender: "u", content_type: "image", content: `/u/${seq}.jpg`, timestamp: seq });
 const local = (seq: number) => ({ convId: "g", from: "u", content: `/u/${seq}.jpg`, contentType: "image", convSeq: seq, timestamp: seq, status: "received" }) as ChatMessage;

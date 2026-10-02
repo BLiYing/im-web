@@ -5,7 +5,7 @@
 
 ## 当前焦点
 
-**C6 补齐（2026-10-02，已提交、未 push）**：查看器翻页 / 媒体库在本地有缺口且在线时改服务端分页续拉（`mediaServerPaging.ts` 纯函数 + `useMediaServerPaging.ts` + `useViewerNav.ts`；翻过最旧一张去续拉、网格滚到末尾哨兵续拉、离线说「只能翻已加载的部分」）；日历选日 / 今天 / 在有缺口无天表时只认当天、否则「需要联网」（对齐 Android）；修 SYNC_RESP 页起点 `before` 读晚（连号页不落库 / 不登记区间 / has_more 被忽略，`syncRespContiguous.test.ts`）。置顶判定 Web 原本就有。**没做/没验**：浏览器里未手测媒体续拉（只有 hook 单测 + 变异）；「@我的消息列表」入口三端仍缺。
+**C6 补齐（2026-10-02，已提交、未 push）**：查看器翻页 / 媒体库在本地有缺口且在线时改服务端分页续拉（`mediaServerPaging.ts` 纯函数 + `useMediaServerPaging.ts` + `useViewerNav.ts`；翻过最旧一张去续拉、网格滚到末尾哨兵续拉、离线说「只能翻已加载的部分」）；日历选日 / 今天 / 在有缺口无天表时只认当天、否则「需要联网」（对齐 Android）；修 SYNC_RESP 页起点 `before` 读晚（连号页不落库 / 不登记区间 / has_more 被忽略，`syncRespContiguous.test.ts`）。置顶判定 Web 原本就有。资料页「媒体/文件/语音」页签同样并入服务端分页（`useDetailServerArchive`，滚到底自动续拉；链接页签服务端无索引仍只看本地）。**已在浏览器里验过**（Chrome，10 万积压大群：媒体页签 54 → 154 → 204 张随滚动增长）。**没做**：「@我的消息列表」入口（产品暂不要）。
 
 2026-10-02 **本机清空位点 `clearedUpTo`**（IMServer `docs/design/OFFLINE_BACKLOG_DESIGN.md` §6.7，Android 先行、Web 本次对齐）代码完成，**待用户审查后提交**：
 清空聊天记录改为同事务「删消息 + 清区间 + 抬位点 + 推游标、墓碑不动」，位点以内的消息一律不落库/不上屏/不问服务端；有效可见下界 = 服务端下界 ∪ 位点（`sdk/clearFloor.ts`，各存各的、用时取大）。

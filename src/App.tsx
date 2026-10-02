@@ -48,6 +48,7 @@ import { hitSnippet } from "./searchPredicate";
 import { useChatSearch } from "./useChatSearch";
 import { useMediaServerPaging } from "./useMediaServerPaging";
 import { useViewerNav } from "./useViewerNav";
+import { useDetailServerArchive } from "./useDetailServerArchive";
 import { pickQuerySource } from "./convQuerySource";
 import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
@@ -1920,6 +1921,13 @@ export default function App() {
     clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
   });
 
+  // 资料页「媒体/文件/语音」页签：本地有缺口且在线时并入服务端分页（§4.9 第 5 项）；本地齐全时与改造前一样。
+  const detailArchive = useDetailServerArchive({
+    convId: detail?.convId ?? "",
+    enabled: !!detail && pickQuerySource(!clientRef.current?.hasGap(detail.convId), state === "connected") === "server",
+    getToken: () => clientRef.current?.authToken ?? "",
+    clearedUpTo: detail ? (clientRef.current?.clearedUpToOf(detail.convId) ?? 0) : 0,
+  });
   // 任务3 · 查看器媒体时间线 + 左右翻页（含「翻过最旧一张去服务端续拉」）：见 useViewerNav。
   const { viewerList, viewerIdx, goViewer } = useViewerNav({ viewer, setViewer, messages, mediaPaging, setViewerMore, setToast, t });
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
@@ -3236,7 +3244,7 @@ export default function App() {
           onLoadMoreMembers={() => activeSuperGroupId && void loadSuperMembers(activeSuperGroupId, superCursor.next)}
           membersLoading={superLoading}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
-          detailTab={detailTab} detailMsgs={detailMsgs} detailMore={detailMore} manageOpen={manageOpen} adminPanelOpen={adminPanelOpen} groupBans={groupBans}
+          detailTab={detailTab} detailMsgs={detailArchive.merge(detailMsgs)} archive={detailArchive} detailMore={detailMore} manageOpen={manageOpen} adminPanelOpen={adminPanelOpen} groupBans={groupBans}
           groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}

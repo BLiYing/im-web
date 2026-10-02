@@ -1,5 +1,6 @@
 import { useRef, type MouseEvent, type RefObject } from "react";
 import { useAutoLoadMore } from "../useAutoLoadMore";
+import type { ArchiveKind, DetailArchive } from "../useDetailServerArchive";
 import { UserPlus, Search, X } from "lucide-react";
 import type { ChatMessage, GroupInfo, GroupMember } from "../sdk/protocol";
 import { VirtualList } from "../VirtualList";
@@ -80,7 +81,7 @@ export function DetailTabs({
   tabs, activeTab, onSelectTab, gp, uid, media, files, voices, voiceSenderLabel, links,
   contacts, contactDisplayName, contactSourceLabel, onOpenContact,
   canInvite, onAddMember, onOpenMember, canManageMember, onMemberMenu, memberLabel,
-  members: membersOverride, hasMoreMembers, onLoadMoreMembers, membersLoading, scrollElRef, search, upgradeHint,
+  archive, members: membersOverride, hasMoreMembers, onLoadMoreMembers, membersLoading, scrollElRef, search, upgradeHint,
   mediaGate, mediaSrc, onGateTap, onOpenViewer, onFileMenu, onMediaError, onOpenFile,
   fetchLinkPreview,
 }: {
@@ -108,6 +109,7 @@ export function DetailTabs({
    */
   members?: GroupMember[];
   hasMoreMembers?: boolean;          // 还有下一页 → 渲染「加载更多」
+  archive?: DetailArchive;           // 媒体 / 文件 / 语音页签的服务端续拉（本地有缺口且在线）
   onLoadMoreMembers?: () => void;    // 点「加载更多」
   /** 下一页正在路上。用来把按钮切成「加载中…」，并避免自动续拉在在途期间空转。 */
   membersLoading?: boolean;
@@ -157,6 +159,13 @@ export function DetailTabs({
     // 浏览态翻成员分页，搜索态翻结果分页——同一个接口，两份游标。
     onLoadMore: () => { if (memberSearching) { search?.loadMore(); } else { onLoadMoreMembers?.(); } },
     signal: memberList.length,
+  });
+  // 媒体 / 文件 / 语音页签：服务端还有更旧的就滚到底续拉（同一个滚动容器，按当前页签判断，别在别的页签乱拉）
+  const archiveKind: ArchiveKind | null = activeTab === "media" ? "media" : activeTab === "files" ? "file" : activeTab === "voice" ? "voice" : null;
+  useAutoLoadMore(scrollElRef ?? fallbackScrollRef, {
+    enabled: !!archive && archiveKind !== null && archive.hasMore(archiveKind) && !archive.loading(archiveKind),
+    onLoadMore: () => { if (archive && archiveKind) archive.loadMore(archiveKind); },
+    signal: `${activeTab}:${media.length}:${files.length}:${voices.length}`,
   });
   return (
     <>

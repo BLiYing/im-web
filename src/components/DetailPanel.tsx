@@ -4,6 +4,7 @@
 // - 稳定服务走 Context：AppServicesContext（clientRef/setToast/comingSoon）+ ChatActionsContext（setViewer/onGateTap/onPassiveMediaError/openReadyFile）；
 // - 其余动作多定义在 App 的 login 早退之后（plain fn，不能进 memo 化 context）→ 按组走 props（此前登记的「~35 props」路线，用户拍板整块抽）。
 // 护栏：DetailPanel.test.tsx + DetailPanelParts.test.tsx（子件）。
+import type { DetailArchive } from "../useDetailServerArchive";
 import { useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
@@ -42,6 +43,8 @@ export interface DetailPanelProps {
   uid: string;
   detailTab: DetailTab;
   detailMsgs: ChatMessage[];
+  /** 媒体 / 文件 / 语音页签的服务端续拉（本地有缺口且在线时才有内容）。 */
+  archive?: DetailArchive;
   detailMore: boolean;
   manageOpen: boolean;
   /** 群管理 →「管理员」二级面板是否展开（与 manageOpen 同级的抽屉内层级）。 */
@@ -132,7 +135,7 @@ export function DetailPanel(p: DetailPanelProps) {
   // 不自造内层滚动区——那会变成"抽屉里再套一个滚动条"，与现在的交互不一样。
   const panelRef = useRef<HTMLElement>(null);
   const {
-    detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, detailMore, manageOpen, adminPanelOpen, groupBans,
+    detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, archive, detailMore, manageOpen, adminPanelOpen, groupBans,
     groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
     onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
@@ -465,7 +468,7 @@ export function DetailPanel(p: DetailPanelProps) {
 
               {/* ---- 页签 ---- */}
               <DetailTabs
-                tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab}
+                tabs={tabs} activeTab={activeTab} onSelectTab={setDetailTab} archive={archive}
                 gp={gp} uid={uid} memberLabel={memberLabel} media={media} files={files} voices={voices}
                 voiceSenderLabel={(m) => {
                   // 单聊：peer 备注/昵称；群聊：群成员昵称（peerNick 已封装成员表 → 昵称回退 uid）。
