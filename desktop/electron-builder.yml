@@ -24,6 +24,10 @@ extraResources:
     to: tray.png
   - from: resources/tray@2x.png
     to: tray@2x.png
+  - from: resources/trayTemplate.png     # macOS 菜单栏单色模板图（见 tray.ts trayIconPath）
+    to: trayTemplate.png
+  - from: resources/trayTemplate@2x.png
+    to: trayTemplate@2x.png
 extraMetadata:
   main: out/main/index.js
 asar: true

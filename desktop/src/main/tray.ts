@@ -20,11 +20,17 @@ let quitting = false;
 export function isQuitting(): boolean { return quitting; }
 export function beginQuit(): void { quitting = true; }
 
-/** 图标在包内的位置：未打包时 out/main → out → desktop → resources；打包后随 extraResources 走。 */
+/** 图标在包内的位置：未打包时 out/main → out → desktop → resources；打包后随 extraResources 走。
+ *
+ * **macOS 用单色模板图**（`trayTemplate.png`，文件名以 Template 结尾 Electron 即按模板图处理、自动取 @2x）：
+ * 菜单栏惯例是黑 + 透明的剪影，系统按浅色 / 深色菜单栏自己上色；原先那张彩色满版方块在菜单栏里
+ * 是一块深色方砖（2026-10-02 用户指出）。Windows / Linux 托盘仍用彩色 `tray.png`——黑色剪影放在
+ * Windows 深色任务栏上会看不见。 */
 function trayIconPath(): string {
+  const file = process.platform === "darwin" ? "trayTemplate.png" : "tray.png";
   return app.isPackaged
-    ? join(process.resourcesPath, "tray.png")
-    : join(__dirname, "../..", "resources/tray.png");
+    ? join(process.resourcesPath, file)
+    : join(__dirname, "../..", "resources", file);
 }
 
 /** 把窗口叫到前台（最小化的先还原）。托盘菜单与单实例锁的 second-instance 共用。 */
