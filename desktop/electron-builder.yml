@@ -38,5 +38,16 @@ mac:
   category: public.app-category.social-networking
   target:
     - dir            # D2 只出 .app 目录，不做 dmg——dmg 要图标/背景/布局，属 D6
-  identity: null     # 未签名：D2 的验收是「能起来」，不是「能分发」
+  # 2026-10-02 起用 Developer ID 证书签名（原 identity: null 未签名 → macOS 不登记通知、桌面通知弹不出）。
+  # 证书在打包机钥匙串里；不加「Developer ID Application:」前缀，electron-builder 自己按类型找。
+  identity: "CSC 41 PARTICIPACOES LTDA. (G247R2HSZ7)"
+  hardenedRuntime: true          # 公证的前提（默认即 true，写明是为了不被误关）
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  # 公证：不写 notarize，electron-builder 在环境变量齐了时自动做——
+  #   APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID（只放环境变量，绝不进仓库）。
+  # 没设就只签名不公证：本机自用够了，发给别人装要先公证（否则 Gatekeeper 拦「无法验证开发者」）。
+  extendInfo:
+    NSMicrophoneUsageDescription: 用于录制语音消息和语音/视频通话。
+    NSCameraUsageDescription: 用于视频通话。
 extraFiles: []
