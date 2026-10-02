@@ -162,7 +162,7 @@ export function useForward(d: ForwardDeps) {
     closeForwardPicker();
     exitSelectMode();
     setToast(targets.length === 1
-      ? `已${forwardVerb}到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || targets[0].peer)}`
+      ? `已${forwardVerb}到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || displayNameNoRemark(null))}`
       : `已${forwardVerb}到 ${targets.length} 个会话`);
   }, [sendForwardToTarget, closeForwardPicker, exitSelectMode, forwardVerb]);
   // 多选批量转发：收集选中的消息，打开选择器。

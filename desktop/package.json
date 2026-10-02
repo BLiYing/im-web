@@ -9,6 +9,7 @@
     "dev": "npm run compile && electron .",
     "smoke": "npm run compile && electron . --smoke",
     "pack": "npm run compile && electron-builder --dir --config electron-builder.yml",
+    "dist": "npm run compile && electron-builder --config electron-builder.yml",
     "e2e": "npm run compile && electron . --e2e",
     "perf": "npm run compile && electron . --perf",
     "test": "tsc -p tsconfig.test.json --noEmit && vitest run",

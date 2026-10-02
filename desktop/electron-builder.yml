@@ -41,7 +41,9 @@ mac:
   icon: resources/icon.png
   category: public.app-category.social-networking
   target:
-    - dir            # D2 只出 .app 目录，不做 dmg——dmg 要图标/背景/布局，属 D6
+    # 发给别人用 zip（公证后的 .app 压进去，票据已钉在 App 里，对方解压即可打开）；
+    # dmg 要背景图 / 布局，属 D6 剩余。只要 .app 目录自测时用 `npm run pack`（--dir 会忽略这里的 target）。
+    - zip
   # 2026-10-02 起用 Developer ID 证书签名（原 identity: null 未签名 → macOS 不登记通知、桌面通知弹不出）。
   # 证书在打包机钥匙串里；不加「Developer ID Application:」前缀，electron-builder 自己按类型找。
   identity: "CSC 41 PARTICIPACOES LTDA. (G247R2HSZ7)"

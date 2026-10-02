@@ -29,6 +29,7 @@ import { SYSTEM_UID } from "../sdk/protocol";
 import { placeGroupCall, placeSingleCall } from "../rtc/rtcCall";
 import { RtcGroupCallPicker } from "../rtc/RtcGroupCallPicker";
 import { useT } from "../i18n";
+import { displayNameNoRemark } from "../remarks";
 
 export type DetailTarget = { convId: string; isGroup: boolean; peer?: string; fromOwnChat?: boolean };
 
@@ -164,7 +165,7 @@ export function DetailPanel(p: DetailPanelProps) {
     // 「仅管理员可邀请」开启且我非管理员 → 隐藏所有邀请类入口（群二维码/群邀请链接/添加成员），对齐 iOS。
     const canInviteHere = !gp?.perm_invite || canManage;
     const title = d.isGroup ? (groupRemark(d.convId) || gp?.name || conv?.name || tr("common.group_chat"))
-      : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || d.peer || "");
+      : (conv?.peer_remark || conv?.peer_nickname || (d.peer ? peerNick(d.peer) : "") || displayNameNoRemark(null)); // 末级「未命名用户」，不露 uid
     // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
     // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
     const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url)
