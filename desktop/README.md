@@ -4,6 +4,7 @@
 本目录只提供窗口、身份，以及将来（D4）的托盘 / 通知 / 自启等宿主能力。
 
 方案与全部论证见 IMServer 的 `docs/design/DESKTOP_DESIGN.md`；分期见其 §10。
+**打包 / 签名 / 公证、开发版 Electron 要先临时签名、通知弹不出的排查**见 IMServer 的 `docs/ops/DESKTOP_RELEASE.md`。
 
 ## 三条硬规矩（DESKTOP_DESIGN §7.3）
 
