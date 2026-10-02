@@ -48,13 +48,15 @@ export interface ChatSearchDeps {
   online: boolean;
   /** 取当前 token（服务端查询用）；未登录返回空串。 */
   getToken: () => string;
+  /** 本机清空位点（§6.7，0=没清过）：服务端还留着用户本机清空掉的消息，服务端搜索/日历结果里 `conv_seq <=` 它的要滤掉。 */
+  clearedUpTo?: number;
 }
 
 export function useChatSearch(d: ChatSearchDeps) {
   const {
     searchOpen, setSearchOpen, searchQuery, setSearchQuery,
     allMessages, convId, groupConvId, uid, groupInfos, conversations,
-    locateInChat, setToast, localComplete, online, getToken,
+    locateInChat, setToast, localComplete, online, getToken, clearedUpTo,
   } = d;
 
   // 本会话的"整会话问题"该问谁（§4.9 三态）。三个功能（搜索命中 / 日历 / 跳某天）共用同一判断，
@@ -66,6 +68,8 @@ export function useChatSearch(d: ChatSearchDeps) {
   // App 级 jsdom 测试直接挂死（2026-09-03 实测）。取 token 只在发请求那一刻，用当时最新的即可。
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
+  const clearedRef = useRef(clearedUpTo ?? 0);   // 同 getToken：只在发请求那一刻读，不进 effect 依赖
+  clearedRef.current = clearedUpTo ?? 0;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchSigRef = useRef("");                       // 上次「默认跳最新」的签名（会话|词|发件人）
@@ -130,7 +134,7 @@ export function useChatSearch(d: ChatSearchDeps) {
     const key = `${convId}|${searchNeedle}|${searchFrom}`;
     let cancelled = false;
     const timer = setTimeout(() => {
-      void searchConvMessages(token, convId, searchQuery.trim(), { from: searchFrom || undefined, limit: 50 })
+      void searchConvMessages(token, convId, searchQuery.trim(), { from: searchFrom || undefined, limit: 50, clearedUpTo: clearedRef.current })
         .then((page) => {
           if (cancelled) return;
           // 服务端按 conv_seq 倒序返回；本 Hook 通篇按**升序**（0=最早）使用命中集，这里翻过来。
@@ -184,7 +188,7 @@ export function useChatSearch(d: ChatSearchDeps) {
     try {
       // 服务端可能回空页却仍 has_more（逐人隐藏过滤掉了一整页），此时接着往前翻，但有上限。
       for (let attempt = 0; attempt <= MAX_EMPTY_PAGES; attempt++) {
-        const page = await searchConvMessages(token, convId, q, { from: searchFrom || undefined, cursor: serverCursorRef.current, limit: 50 });
+        const page = await searchConvMessages(token, convId, q, { from: searchFrom || undefined, cursor: serverCursorRef.current, limit: 50, clearedUpTo: clearedRef.current });
         if (gen !== searchGenRef.current) return;   // 词 / 发件人 / 会话在途中变了：这页属于上一次搜索
         serverCursorRef.current = page.next_cursor;
         const more = !!page.has_more && page.next_cursor > 0;
@@ -305,7 +309,7 @@ export function useChatSearch(d: ChatSearchDeps) {
     const from = new Date(calendarMonth.y, calendarMonth.m - 1, 1).getTime();
     const to = new Date(calendarMonth.y, calendarMonth.m + 2, 1).getTime();
     let cancelled = false;
-    void fetchConvCalendar(token, convId, from, to, localUtcOffsetMs())
+    void fetchConvCalendar(token, convId, from, to, localUtcOffsetMs(), clearedRef.current)
       .then((res) => { if (!cancelled) setServerDays(res.days ?? []); })
       .catch(() => { if (!cancelled) setServerDays([]); });
     return () => { cancelled = true; };

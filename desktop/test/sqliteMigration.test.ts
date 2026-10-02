@@ -74,3 +74,65 @@ describe("老库加列迁移", () => {
     store.close();
   });
 });
+
+// ---- 本机清空位点 sync_cursors.cleared_up_to（OFFLINE_BACKLOG_DESIGN §6.7）----
+//
+// 回填规则（与 im-web localStore.backfill.test.ts、Android MIGRATION_15_16 同一判据）：游标>0 的会话，
+// 位点 = 游标以内最小本地消息 seq − 1；游标以内本地一条没有则 = 游标。**不清缓存**：只加列 + 一条 UPDATE。
+// 契约（localStore.contract.clear.ts）经接口造不出「老库」，所以这条由本文件守。
+
+/** 造一个「没有 cleared_up_to 列」的上一版库：sync_cursors 只有四列，并塞好各种形状的会话。 */
+function legacyCursorDb(): string {
+  const file = legacyDb();            // 复用上面的老 messages 表（带 o1|c1|1 一条）
+  const db = new DatabaseCtor(file);
+  db.exec(`
+    CREATE TABLE sync_cursors (id TEXT PRIMARY KEY, owner TEXT NOT NULL, conv_id TEXT NOT NULL, conv_seq INTEGER NOT NULL);
+    CREATE TABLE conv_ranges (id TEXT PRIMARY KEY, owner TEXT NOT NULL, conv_id TEXT NOT NULL, ranges TEXT NOT NULL, head INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE deletions (id TEXT PRIMARY KEY, owner TEXT NOT NULL, conv_id TEXT NOT NULL);
+  `);
+  const cur = db.prepare("INSERT INTO sync_cursors (id, owner, conv_id, conv_seq) VALUES (?, ?, ?, ?)");
+  const msg = db.prepare(`INSERT INTO messages (id, owner, conv_id, conv_seq, from_uid, content, content_type, timestamp)
+                          VALUES (?, ?, ?, ?, 'u', 'x', 'text', 1)`);
+  const put = (owner: string, conv: string, seq: number) => msg.run(`${owner}|${conv}|${seq}`, owner, conv, seq);
+  cur.run("o1|a", "o1", "a", 100); put("o1", "a", 41); put("o1", "a", 42); put("o1", "a", 100);   // 清到 40
+  cur.run("o1|b", "o1", "b", 50);                                                                    // 一条没有 → 游标
+  cur.run("o1|c", "o1", "c", 20); put("o1", "c", 1); put("o1", "c", 5);                              // 从 1 起 → 0
+  cur.run("o1|e", "o1", "e", 10); put("o1", "e", 3); put("o1", "e", 15);                             // 15 在游标外
+  put("o1", "f", 7);                                                                                 // 没有游标行
+  cur.run("o2|a", "o2", "a", 30); put("o2", "a", 25); put("o2", "a", 2);                             // 别的账号同名会话
+  db.close();
+  return file;
+}
+
+describe("老库加 cleared_up_to 列并回填", () => {
+  it("按规则回填；既有消息一条不丢（不清缓存）", async () => {
+    const store = createSqliteStore(legacyCursorDb(), () => {});
+    expect(await store.loadClearedUpTo("o1", "a")).toBe(40);
+    expect(await store.loadClearedUpTo("o1", "b")).toBe(50);
+    expect(await store.loadClearedUpTo("o1", "c")).toBe(0);
+    expect(await store.loadClearedUpTo("o1", "e")).toBe(2);
+    expect(await store.loadClearedUpTo("o1", "f")).toBe(0);
+    expect(await store.loadClearedUpTo("o2", "a")).toBe(1);
+    expect((await store.loadConversation("o1", "a")).map((m) => m.convSeq)).toEqual([41, 42, 100]);
+    expect(await store.loadSyncCursor("o1", "a")).toBe(100);
+    store.close();
+  });
+
+  it("只回填一次：重开库、再推游标都不会改写已有位点", async () => {
+    const file = legacyCursorDb();
+    createSqliteStore(file, () => {}).close();
+    const again = createSqliteStore(file, () => {});
+    await again.advanceSyncCursor("o1", "a", 200);
+    expect(await again.loadClearedUpTo("o1", "a")).toBe(40);
+    again.close();
+  });
+
+  it("回填出来的位点立刻生效：位点以内的补拉消息不落库，之后的照常", async () => {
+    const store = createSqliteStore(legacyCursorDb(), () => {});
+    const m = (convSeq: number) => ({ convId: "a", from: "u", content: "x", contentType: "text", convSeq, timestamp: 1 });
+    await store.saveMessage("o1", m(40));
+    await store.saveMessage("o1", m(101));
+    expect((await store.loadConversation("o1", "a")).map((r) => r.convSeq)).toEqual([41, 42, 100, 101]);
+    store.close();
+  });
+});

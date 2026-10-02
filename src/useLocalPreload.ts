@@ -37,7 +37,8 @@ export function useLocalPreload({ clientRef, seenByConv, deletedByConv, preloadM
       const continuousCursor = await client.loadSyncCursor(c.conv_id);
       // is_super 决定 max_gap=0：超级群正文只在打开会话时按需拉，连上时永不自动补
       // （SUPERGROUP_DESIGN §5 早有此规定，OFFLINE_BACKLOG_DESIGN §4.5 把它落到 sync 帧上）。
-      client.trackConversation(c.conv_id, continuousCursor, c.is_super === true);
+      const cleared = await client.loadClearedUpTo(c.conv_id);   // 本机清空位点：须早于首个 sync_req 生效，补拉回来的页要被它挡住
+      client.trackConversation(c.conv_id, continuousCursor, c.is_super === true, cleared);
       done.add(c.conv_id); // 登记完（游标已作基线）才算数：preloadNew 对「已登记」的会话传 0 当游标
       // 载入删除墓碑（须早于 syncTracked）：被删的 conv_seq 进内存墓碑，onMessage 收到服务端重推时直接丢弃。
       const del = await client.loadDeletedSeqs(c.conv_id);

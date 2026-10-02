@@ -41,10 +41,10 @@ describe("桌面代理的桥校验与降级", () => {
     expect(isStoreBridgeUsable(loopbackBridge())).toBe(true);
   });
 
-  it("方法名清单是 15 个、无重复——它是与主进程白名单对齐的那一侧", () => {
+  it("方法名清单是 16 个、无重复——它是与主进程白名单对齐的那一侧", () => {
     // 另一侧在 desktop/src/shared/storeIpc.ts，两者相等由 desktop/test/storeBridge.test.ts 断言。
-    expect(STORE_BRIDGE_METHODS).toHaveLength(15);
-    expect(new Set(STORE_BRIDGE_METHODS).size).toBe(15);
+    expect(STORE_BRIDGE_METHODS).toHaveLength(16);
+    expect(new Set(STORE_BRIDGE_METHODS).size).toBe(16);
   });
 
   it("IPC 失败一律降级成兜底值，**绝不 reject**", async () => {

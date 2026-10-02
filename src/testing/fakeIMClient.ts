@@ -57,6 +57,11 @@ export class FakeIMClient {
   async loadLocal(...a: unknown[]): Promise<ChatMessage[]> { this.rec("loadLocal", ...a); return []; }
   async loadDeletedSeqs(): Promise<number[]> { return []; }
   async loadSyncCursor(): Promise<number> { return 0; }
+  async loadClearedUpTo(): Promise<number> { return 0; }
+  // 同步取值：必须显式实现（Proxy 兜底回 Promise，参与 Math.max / 比较会得 NaN）。
+  visibleFloorOf(): number { return 0; }
+  clearedUpToOf(): number { return 0; }
+  async clearConversation(...a: unknown[]): Promise<number> { this.rec("clearConversation", ...a); return 0; }
   openConversation(...a: unknown[]) { this.rec("openConversation", ...a); }
   jumpToLatest(...a: unknown[]): boolean { this.rec("jumpToLatest", ...a); return true; }
   catchUpOnBump(...a: unknown[]): boolean { this.rec("catchUpOnBump", ...a); return false; }

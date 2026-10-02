@@ -178,7 +178,7 @@ export const LOCAL_STORE_METHODS = [
   "saveMessage", "saveIncomingMessage", "saveIncomingPage", "saveRejected",
   "applyMsgOpLocal", "markMessageDeleted", "clearMessages", "advanceSyncCursor",
   "registerRange", "updateRangesHead",
-  "loadConversation", "loadDeletedSeqs", "loadSyncCursor", "loadRanges", "searchMessages",
+  "loadConversation", "loadDeletedSeqs", "loadSyncCursor", "loadRanges", "loadClearedUpTo", "searchMessages",
 ] as const;
 
 export type LocalStoreMethod = (typeof LOCAL_STORE_METHODS)[number];
@@ -255,8 +255,23 @@ export interface LocalStore {
    */
   markMessageDeleted(owner: string, convId: string, target: DeleteTarget): Promise<void>;
 
-  /** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。不动墓碑与游标。 */
-  clearMessages(owner: string, convId: string): Promise<void>;
+  /**
+   * 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。
+   *
+   * **本机清空位点 `clearedUpTo`**（OFFLINE_BACKLOG_DESIGN §6.7）：清空后若没有别的记号，区间清单又被清掉，
+   * 进会话会看到「本地没有、服务端有」，老老实实把最近一页拉回来——刚清掉的内容就冒出来了。
+   * 位点把「用户**主动**不要这一段」与「**还没**下载这一段」分开。**同一事务内**：
+   *   1. 删本会话全部消息；
+   *   2. 区间清单清成空（head 快照保留，且**必须落一行空清单**——没有行时 `loadRanges` 会由游标反推 `[1,cursor]`）；
+   *   3. 位点 = `max(已有位点, knownLatest, 区间行的 head, 同步游标, 本地最大 conv_seq)`，**只增不减**；
+   *   4. 同步游标推到不小于位点；
+   *   5. **墓碑不动**（删掉墓碑会让重同步把单删过的消息复活）。
+   * `knownLatest`：调用方知道的会话最新位点（会话列表 latest / 内存 head / 内存游标取大），本库不知道的那部分靠它补。
+   *
+   * 清空之后：`conv_seq <= 位点` 的消息在 `saveMessage` / `saveIncomingMessage` / `saveIncomingPage` 里一律丢弃
+   * （区间登记与游标推进口径不变）；位点之后的新消息照常收。
+   */
+  clearMessages(owner: string, convId: string, knownLatest?: number): Promise<void>;
 
   /** 单调推进连续同步游标（只增不减）。写失败时下次从较低位置重拉，最多幂等重复，不会漏消息。 */
   advanceSyncCursor(owner: string, convId: string, convSeq: number): Promise<void>;
@@ -298,6 +313,14 @@ export interface LocalStore {
    * 不这么做的话老用户升级后会被判成"整个会话都是缺口"，本地搜索一夜之间全改走服务端。
    */
   loadRanges(owner: string, convId: string): Promise<RangesSnapshot>;
+
+  /**
+   * 读本机清空位点（无记录 = 0）。**纯本机状态**：服务端快照、会话列表刷新、重登都不会、也不许把它重置；
+   * 有效可见下界 = `max(服务端 has_before=false 记下的 floorSeq, 本位点)`，两者各存各的、用时取大。
+   * **老库回填**（升级前清空过的会话没有任何痕迹）：对游标>0 的会话，位点 = 游标以内最小本地消息 seq − 1；
+   * 游标以内本地一条没有则 = 游标。判据见 `clearFloor.ts#backfillClearedUpTo`。
+   */
+  loadClearedUpTo(owner: string, convId: string): Promise<number>;
 
   /**
    * 本地消息搜索（纯本地，SEARCH_DESIGN §7.2）。给 `convId` = 会话内，不给 = 全局。

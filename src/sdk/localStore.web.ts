@@ -12,6 +12,7 @@
 
 import type { ChatMessage, Conversation, MsgOpPatch } from "./protocol";
 import { addRange } from "./ranges";
+import { dropCleared, floorAtClear, seqFromRecordKey } from "./clearFloor";
 import { LOG_TAG, logger } from "../logging/logger";
 import {
   cursorKeyOf, keyOf, mergeRecords, rejectedKeyOf,
@@ -19,16 +20,69 @@ import {
 } from "./localStore.types";
 import {
   CURSOR_STORE, DELETIONS_STORE, RANGES_STORE, STORE,
-  advanceCursorInStore, advanceSyncCursor, loadSyncCursor, openDB,
-  type DeletionRecord, type MsgRow, type RangesRecord,
+  advanceCursorInStore, advanceSyncCursor, loadClearedUpTo, loadSyncCursor, openDB,
+  type DeletionRecord, type MsgRow, type RangesRecord, type SyncCursorRecord,
 } from "./localStore.web.db";
 import { loadRanges, registerRange, updateRangesHead } from "./localStore.web.ranges";
 import { searchMessages } from "./localStore.web.search";
 
-/** 保存一条已确认消息（convSeq>0）。发送中/普通失败的临时态不入库。 */
+/** 保存一条已确认消息（convSeq>0）。`conv_seq <= 本机清空位点` 的丢弃（见 `writeGuarded`）。 */
 async function saveMessage(owner: string, m: ChatMessage): Promise<void> {
   if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
-  await put(owner, messageRecord(owner, m));
+  try {
+    await writeGuarded(owner, m.convId, [messageRecord(owner, m)], {});
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "message_write_failed", { conv_id: m.convId, conv_seq: m.convSeq, content_type: m.contentType, error });
+  }
+}
+
+interface GuardedWrite {
+  /** 本页权威覆盖位点；>0 才推游标（只增不减）。 */
+  advanceTo?: number;
+  /** 本页齐全的区间（含被位点丢掉的那部分——**区间登记口径不变**）。 */
+  range?: { lo: number; hi: number; head: number };
+}
+
+/**
+ * 消息 / 游标 / 区间的**同一个事务**写入，并在事务内按本机清空位点过滤：`conv_seq <= clearedUpTo` 的不落库。
+ * 位点就存在游标行里，所以过滤、推游标、登记区间读的是同一份快照——不会出现「刚清空、旁边一页又把它写回来」。
+ * saveMessage / saveIncomingMessage / saveIncomingPage 三条落库路径**都**走这里，别在外面各写一遍过滤。
+ */
+async function writeGuarded(owner: string, convId: string, recs: MsgRow[], w: GuardedWrite): Promise<void> {
+  const db = await openDB();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(w.range ? [STORE, CURSOR_STORE, RANGES_STORE] : [STORE, CURSOR_STORE], "readwrite");
+    const messageStore = tx.objectStore(STORE);
+    const cursorStore = tx.objectStore(CURSOR_STORE);
+    const id = cursorKeyOf(owner, convId);
+    const cur = cursorStore.get(id);
+    cur.onsuccess = () => {
+      const prev = cur.result as SyncCursorRecord | undefined;
+      for (const rec of dropCleared(recs, Number(prev?.clearedUpTo) || 0)) {
+        const getReq = messageStore.get(rec.id);
+        getReq.onsuccess = () => messageStore.put(mergeRecords(getReq.result as MsgRow | undefined, rec));
+      }
+      const advanceTo = w.advanceTo ?? 0;
+      if (advanceTo > (Number(prev?.convSeq) || 0)) {
+        cursorStore.put({ ...prev, id, owner, convId, convSeq: advanceTo } satisfies SyncCursorRecord);
+      }
+    };
+    if (w.range) {
+      const { lo, hi, head } = w.range;
+      const rangeStore = tx.objectStore(RANGES_STORE);
+      const getReq = rangeStore.get(id);
+      getReq.onsuccess = () => {
+        const prev = getReq.result as RangesRecord | undefined;
+        rangeStore.put({
+          id, owner, convId,
+          ranges: addRange(prev?.ranges ?? [], lo, hi),
+          head: Math.max(Number(prev?.head) || 0, head),
+        } satisfies RangesRecord);
+      };
+    }
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 function messageRecord(owner: string, m: ChatMessage): MsgRow {
@@ -70,30 +124,9 @@ async function saveIncomingPage(
   const recs = msgs.filter((m) => m.convId && m.convSeq > 0).map((m) => messageRecord(owner, m));
   if (recs.length === 0) return true;
   try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, CURSOR_STORE, RANGES_STORE], "readwrite");
-      const messageStore = tx.objectStore(STORE);
-      for (const rec of recs) {
-        const getReq = messageStore.get(rec.id);
-        getReq.onsuccess = () => messageStore.put(mergeRecords(getReq.result as MsgRow | undefined, rec));
-      }
-      if (advanceTo > 0) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, convId, advanceTo);
-      if (rangeTo >= rangeFrom && rangeTo > 0) {
-        const rangeStore = tx.objectStore(RANGES_STORE);
-        const id = cursorKeyOf(owner, convId);
-        const getReq = rangeStore.get(id);
-        getReq.onsuccess = () => {
-          const prev = getReq.result as RangesRecord | undefined;
-          rangeStore.put({
-            id, owner, convId,
-            ranges: addRange(prev?.ranges ?? [], rangeFrom, rangeTo),
-            head: Math.max(Number(prev?.head) || 0, head),
-          } satisfies RangesRecord);
-        };
-      }
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
+    await writeGuarded(owner, convId, recs, {
+      advanceTo,
+      range: rangeTo >= rangeFrom && rangeTo > 0 ? { lo: rangeFrom, hi: rangeTo, head } : undefined,
     });
     return true;
   } catch (error) {
@@ -109,18 +142,8 @@ async function saveIncomingPage(
  */
 async function saveIncomingMessage(owner: string, m: ChatMessage, advanceCursor: boolean): Promise<void> {
   if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
-  const rec = messageRecord(owner, m);
   try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE, CURSOR_STORE], "readwrite");
-      const messageStore = tx.objectStore(STORE);
-      const getReq = messageStore.get(rec.id);
-      getReq.onsuccess = () => messageStore.put(mergeRecords(getReq.result as MsgRow | undefined, rec));
-      if (advanceCursor) advanceCursorInStore(tx.objectStore(CURSOR_STORE), owner, m.convId, m.convSeq);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await writeGuarded(owner, m.convId, [messageRecord(owner, m)], { advanceTo: advanceCursor ? m.convSeq : 0 });
   } catch (error) {
     logger.warn(LOG_TAG.store, "incoming_message_write_failed", {
       conv_id: m.convId, conv_seq: m.convSeq, content_type: m.contentType, error,
@@ -312,24 +335,42 @@ async function loadDeletedSeqs(owner: string, convId: string): Promise<number[]>
   } catch { return []; }
 }
 
-/** 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。 */
-async function clearMessages(owner: string, convId: string): Promise<void> {
+/**
+ * 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。语义见 `LocalStore.clearMessages`。
+ *
+ * 同一事务：删消息 + 区间清单清空（落一行空清单，保留 head）+ 抬位点 + 游标推到位点；**墓碑不动**。
+ * 区间清单必须一起清：它宣称的是"这几段我已齐全"，消息删了它还留着就是在宣称一段其实没有的内容，
+ * 取数分流据此判 local ⇒ 会话空白且不自愈（/code-review 2026-09-09）。但**只清清单不够**——清单空了，
+ * 进会话就会把服务端那一页拉回来，所以还要位点（§6.7，2026-10-02 Web 实测）。
+ */
+async function clearMessages(owner: string, convId: string, knownLatest = 0): Promise<void> {
   if (!owner || !convId) return;
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
-      // **区间清单必须同事务一起清**（OFFLINE_BACKLOG_DESIGN §4.2 的反方向不变量）：
-      // 清单宣称的是"这几段我已齐全"，消息删了它还留着，就是在宣称一段其实没有的内容。
-      // 后果不是报错而是**空白**——取数分流先查清单，判"本地已齐全"就一个请求都不发，
-      // 于是清空聊天记录 + 刷新后会话恒空，上滑/点↓ 都不自愈（/code-review 2026-09-09 抓出）。
       const hasRanges = db.objectStoreNames.contains(RANGES_STORE); // 陈旧连接兜底，同 loadConversation
-      const tx = db.transaction(hasRanges ? [STORE, RANGES_STORE] : [STORE], "readwrite");
+      const tx = db.transaction(hasRanges ? [STORE, CURSOR_STORE, RANGES_STORE] : [STORE, CURSOR_STORE], "readwrite");
       const store = tx.objectStore(STORE);
-      const req = store.index("ownerConv").getAllKeys(cursorKeyOf(owner, convId));
-      req.onsuccess = () => {
-        for (const key of (req.result as IDBValidKey[]) ?? []) store.delete(key);
+      const cursorStore = tx.objectStore(CURSOR_STORE);
+      const id = cursorKeyOf(owner, convId);
+      const rangesReq = hasRanges ? tx.objectStore(RANGES_STORE).get(id) : null;
+      const cursorReq = cursorStore.get(id);
+      const keysReq = store.index("ownerConv").getAllKeys(id);
+      let pending = rangesReq ? 3 : 2;
+      const settle = () => {
+        if (--pending > 0) return;
+        const keys = (keysReq.result as IDBValidKey[]) ?? [];
+        let maxLocal = 0;
+        for (const key of keys) { store.delete(key); maxLocal = Math.max(maxLocal, seqFromRecordKey(String(key))); }
+        const prevCursor = cursorReq.result as SyncCursorRecord | undefined;
+        const prevRanges = rangesReq?.result as RangesRecord | undefined;
+        const floor = floorAtClear(
+          knownLatest, Number(prevCursor?.clearedUpTo), Number(prevCursor?.convSeq), Number(prevRanges?.head), maxLocal,
+        );
+        if (floor > 0) cursorStore.put({ ...prevCursor, id, owner, convId, convSeq: Math.max(Number(prevCursor?.convSeq) || 0, floor), clearedUpTo: floor } satisfies SyncCursorRecord);
+        if (hasRanges) tx.objectStore(RANGES_STORE).put({ id, owner, convId, ranges: [], head: Number(prevRanges?.head) || 0 } satisfies RangesRecord);
       };
-      if (hasRanges) tx.objectStore(RANGES_STORE).delete(cursorKeyOf(owner, convId));
+      for (const r of [rangesReq, cursorReq, keysReq]) if (r) r.onsuccess = settle;
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
@@ -360,6 +401,7 @@ export const webLocalStore: LocalStore = {
   loadDeletedSeqs,
   loadSyncCursor,
   loadRanges,
+  loadClearedUpTo,
   searchMessages,
 };
 

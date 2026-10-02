@@ -18,6 +18,7 @@ function fakeClient(loadLocal = vi.fn(async (cid: string) => [{ convId: cid, con
   return {
     loadLocal,
     loadSyncCursor: vi.fn(async () => 42),
+    loadClearedUpTo: vi.fn(async () => 0),
     loadDeletedSeqs: vi.fn(async () => [] as number[]),
     trackConversation: vi.fn(),
   };
@@ -51,7 +52,7 @@ describe("preloadNew（会话刷新用）", () => {
     await act(async () => { fresh = await result.current.preloadNew([conv("a"), conv("c")]); });
     expect(fresh).toEqual(["c"]);
     expect(loadedIds(client)).toEqual(["a", "c"]);
-    expect(client.trackConversation).toHaveBeenCalledWith("c", 42, false);
+    expect(client.trackConversation).toHaveBeenCalledWith("c", 42, false, 0);
   });
 
   it("已登记的会话只刷新超级群标记（群刚升级），游标传 0——SDK 不拿它盖基线", async () => {
@@ -84,5 +85,15 @@ describe("preloadNew（会话刷新用）", () => {
     act(() => { second = result.current.preloadNew([conv("a")]); });
     await act(async () => { release(); await first; await second; });
     expect(client.trackConversation.mock.calls.filter((a) => a[1] === 0)).toEqual([]);
+  });
+
+  // §6.7：本机清空位点必须在**首个 sync_req 之前**交给 SDK（登记时一并带上），否则重登后第一批补拉回来的页
+  // 没有位点可挡，刚清空的会话又被塞满。读位点却不传＝清空只在本进程内有效，重启就失效。
+  it("本机清空位点随登记一起交给 SDK（trackConversation 的第 4 个参数）", async () => {
+    const client = fakeClient();
+    client.loadClearedUpTo.mockImplementation(async () => 77);
+    const { result } = setup(client);
+    await act(() => result.current.preloadLocal([conv("a")]));
+    expect(client.trackConversation).toHaveBeenCalledWith("a", 42, false, 77);
   });
 });

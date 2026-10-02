@@ -17,6 +17,8 @@ import { type MentionSpan } from "../mention";
 import { parseIncomingMessage } from "./parseMessage";
 import * as localStore from "./localStore";
 import { loadRanges, registerRange, updateRangesHead } from "./localStore.ranges";
+import { atVisibleFloor, effectiveFloor } from "./clearFloor";
+import { ReceiptBatcher } from "./receiptBatch";
 import { addRange, normalizeRanges, type SeqRange } from "./ranges";
 import { pendingToMessage, type PendingSend } from "./pendingSend";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -171,16 +173,14 @@ export class IMClient extends IMRestApi {
   // 可见下界的**位点**（未知为 0），由 window_resp 的 has_before=false 记下；此前靠 `上沿 > 1`
   // 猜，而 G2 把新成员的下界抬到入群位点，那个猜法对他们恒真。为什么是位点不是布尔：见 floorFromWindow。
   private floorSeq = new Map<string, number>();
-  // 区间清单的**内存镜像**（IndexedDB 里那份为准，这里只为让渲染层能同步读到）。
-  // 渲染切段必须知道"两条消息之间那些 conv_seq 到底是没下载、还是下载过但本就不是一条消息"——
-  // msg_op 事件行、已被「为所有人删除」的墓碑、对我不可见的行都会占掉 conv_seq 却永远不成为消息。
-  // 只看 seq 连不连号会把它们全当成缺口（2026-09-03 实测：18 条的大群里删了一张图，
-  // 尾段被切成"最后那条系统消息"一条，界面看着就是空的）。
+  // 本机清空位点（§6.7，只增不减，纯本机）：`conv_seq <= 它` 的消息不落库、不进内存、不问服务端。
+  // **与 floorSeq 各存各的**（floorSeq 重连即清、会变小；它永不回退），用时经 visibleFloorOf 取大。
+  private clearedSeq = new Map<string, number>();
+  // 区间清单的**内存镜像**（IndexedDB 里那份为准，这里只为让渲染层能同步读到）。渲染切段必须知道"两条消息之间
+  // 那些 conv_seq 是没下载、还是下载过但本就不是消息"（msg_op 事件行/墓碑/不可见行占号不成消息），只看连号会全当缺口。
   private convRanges = new Map<string, SeqRange[]>();
-  // delivered 回执合批（§4.8）：回执是**单调位点**，合批零语义损失，而逐条发在补拉 10 万条时
-  // 就是 10 万个上行帧、且服务端每帧要做一次群快照 + 成员鉴权。
-  private pendingReceipts = new Map<string, number>(); // convId -> 待上报的最大 conv_seq
-  private receiptTimer: ReturnType<typeof setTimeout> | null = null;
+  // delivered 回执合批（§4.8，实现见 sdk/receiptBatch.ts）
+  private receipts = new ReceiptBatcher((convId, upTo) => this.send({ type: T.RECEIPT, data: { conv_id: convId, status: "delivered", up_to_conv_seq: upTo } }));
   private syncPending = new Map<number, string[]>(); // request seq -> convIds；响应/错误时精确释放 in-flight
   private pendingSends = new Map<string, PendingSend>(); // client_msg_id -> 待确认发送（ack 后落库）
   private pendingOps = new Map<string, { op: string; convId: string; targetConvSeq: number }>(); // client_msg_id -> 待确认的消息操作（撤回/编辑/置顶），供失败回滚
@@ -188,8 +188,7 @@ export class IMClient extends IMRestApi {
   private readonly historyPage = 200; // 每页历史条数（与服务端 syncPageLimit 对齐）
   private readonly contextBefore = 10; // 进会话时未读分割线上方保留的已读上下文条数
   // maxGap：连上时**顺手补齐**与**留成缺口**的分水岭（两端同值，CHAT_UX §2 三端契约）。
-  // 2 页 = 400 条：正常用户离线一晚攒的量远在此之下，走的还是老路径，什么都没变；
-  // 只有"10 万条大群"这种会话才会留缺口——而那种会话本来就不该被当作本地齐全。
+  // 2 页 = 400 条：正常用户离线一晚攒的量远在此之下（老路径不变）；只有"10 万条大群"才会留缺口。
   private readonly maxGap = 400;
   private handlers: IMClientHandlers;
 
@@ -290,13 +289,13 @@ export class IMClient extends IMRestApi {
     this.syncPending.clear();
     // 离线积压相关的连接级状态：切账号/退出必须一并清，否则新账号会继承上一个账号的
     // 缺口标记与 head 快照（同一个 convId 在两个账号下可见范围不同，串了就是错的）。
-    if (this.receiptTimer !== null) { clearTimeout(this.receiptTimer); this.receiptTimer = null; }
-    this.pendingReceipts.clear();
+    this.receipts.clear();
     this.superConvs.clear();
     this.headSeq.clear();
     this.convRanges.clear();
     this.gapped.clear();
     this.floorSeq.clear();
+    this.clearedSeq.clear();
     this.pendingOps.clear();
     this.ws?.close(1000);
     this.ws = null;
@@ -422,7 +421,8 @@ export class IMClient extends IMRestApi {
     if (newlyTracked) this.sendSyncReq([convId]);
     // 预热区间镜像：刷新后内存是空的，而"本地有哪几段"只有 IndexedDB 里那份记得。
     // 不预热的话，重进会话的第一屏又会按 seq 连号去切段，老毛病原样复现。
-    void loadRanges(this.uid, convId).then(({ ranges, head }) => {
+    void Promise.all([loadRanges(this.uid, convId), localStore.loadClearedUpTo(this.uid, convId)]).then(([{ ranges, head }, cleared]) => {
+      this.raiseCleared(convId, cleared);
       if (ranges.length > 0) {
         const merged = normalizeRanges([...(this.convRanges.get(convId) ?? []), ...ranges]);
         this.convRanges.set(convId, merged);
@@ -437,7 +437,7 @@ export class IMClient extends IMRestApi {
    *  目录只有 IndexedDB 那份记得，不等它＝每次刷新后的第一次进会话都必然打一次网络。 */
   private fetchEntryWindow(convId: string, readSeq: number, latestSeq: number, unread: number, localNewest: number): void {
     const plan = planEntryWindow({
-      ranges: this.rangesOf(convId), head: this.headSeq.get(convId) ?? 0, localNewest,
+      ranges: this.rangesOf(convId), head: this.headSeq.get(convId) ?? 0, localNewest, floor: this.visibleFloorOf(convId),
       readSeq, latestSeq, unread, contextBefore: this.contextBefore, historyPage: this.historyPage,
     });
     if (plan.source === "local") {
@@ -451,7 +451,7 @@ export class IMClient extends IMRestApi {
   /** 加载 oldestSeq 之前的一页（上滚到本地这一段的头部触发；调用方先过 windowPlan.moreLocalAbove）。 */
   loadOlder(convId: string, oldestSeq: number): void {
     if (!convId || oldestSeq <= 1) return;
-    if (oldestSeq <= (this.floorSeq.get(convId) ?? 0)) { this.handlers.onHistoryPage?.(convId, 0, 0); return; } // 已在可见下界
+    if (this.atHistoryFloor(convId, oldestSeq)) { this.handlers.onHistoryPage?.(convId, 0, 0); return; } // 已在可见下界（服务端下界 ∪ 清空位点）
     this.requestWindow(convId, oldestSeq, this.historyPage, 0);
   }
 
@@ -478,7 +478,7 @@ export class IMClient extends IMRestApi {
    */
   jumpToLatest(convId: string, latestSeq: number, localNewest: number): boolean {
     return this.runWindowPlan(convId, planJumpToLatest({
-      ranges: this.rangesOf(convId), head: this.headOf(convId), latestSeq, localNewest, historyPage: this.historyPage,
+      ranges: this.rangesOf(convId), head: this.headOf(convId), latestSeq, localNewest, historyPage: this.historyPage, floor: this.visibleFloorOf(convId),
     }));
   }
 
@@ -486,7 +486,7 @@ export class IMClient extends IMRestApi {
    *  C4 之前这里是「从本地最大 seq 往后拉一页」（已删的 syncConversation）——用户停在旧岛上时拉回来的是缺口开头那一页。 */
   catchUpOnBump(convId: string, latestSeq: number, localNewest: number, following: boolean): boolean {
     return this.runWindowPlan(convId, planBumpCatchUp({
-      ranges: this.rangesOf(convId), head: this.headOf(convId), latestSeq, localNewest, historyPage: this.historyPage, following,
+      ranges: this.rangesOf(convId), head: this.headOf(convId), latestSeq, localNewest, historyPage: this.historyPage, following, floor: this.visibleFloorOf(convId),
     }));
   }
 
@@ -507,10 +507,8 @@ export class IMClient extends IMRestApi {
     return this.sendContent(url, contentType, to, convId, opts);
   }
 
-  /** 上传图片/文件（M4-6）：multipart → {url, contentType, size}。
-   *  onProgress 非空时走 XHR（fetch 拿不到上行进度），回调的 sent/total 是**请求体**字节数。 */
   /**
-   * 上传文件：≥8MB 走分片（init/chunk/status/complete，可经 chunkedTaskFor(key) 暂停/继续/取消，
+   * 上传文件（multipart → {url, contentType, size}；onProgress 非空时走 XHR，sent/total 是**请求体**字节数）：≥8MB 走分片（init/chunk/status/complete，可经 chunkedTaskFor(key) 暂停/继续/取消，
    * 断网自动退避续传、上传会话过期自动换会话重传——与 iOS 同一套语义）；小文件一次性 multipart。
    * key 建议传消息的 localId，气泡的 ⏸/↑/✕ 才能定位到任务；不传则不可暂停。
    */
@@ -871,8 +869,8 @@ export class IMClient extends IMRestApi {
             conv_seq: d.conv_seq,
             duration_ms: Math.max(0, Date.now() - pend.timestamp),
           });
-          // 自己发的这条同样"我已齐全"，登记 [seq, seq]：消息与区间同一个事务落盘（与实时 new_msg 同款），游标不推。
-          // 此前自己发的不进清单、靠 seq 连号蒙混：删掉自己刚发的某条后连号一断，渲染切段就把更早的历史整段切走。
+          // 自己发的这条同样"我已齐全"，登记 [seq, seq]：消息与区间同事务落盘（与实时 new_msg 同款），游标不推
+          // （不进清单、靠连号蒙混的话，删掉自己刚发的某条后连号一断，渲染切段会把更早的历史整段切走）。
           const seq = Number(d.conv_seq);
           const own = pendingToMessage(this.uid, pend, { serverMsgId: d.server_msg_id, convSeq: seq, status: "sent" });
           this.noteRange(pend.convId, seq, seq);
@@ -952,17 +950,9 @@ export class IMClient extends IMRestApi {
       case T.WINDOW_RESP: { // 锚点窗口到达：消息走常规落库，边界信息交给 UI 决定滚动/提示
         const pageMsgs: ChatMessage[] = [];
         for (const m of d.messages || []) this.processIncoming(m, false, (msg) => pageMsgs.push(msg));
-        // 开窗拿回来的这一段同样"我已齐全"：服务端把 [min, max] 之间对我可见的都给了。
-        // 不登记的话，下次上翻到这一段边缘还会误判成缺口，而且渲染切段会把它切开。
-        //
-        // **必须连同消息一起落盘**（2026-09-05 实测踩出来的）：此前只 `noteRange` 进内存镜像，
-        // 消息倒是按条进了 IndexedDB。于是刷新一次，这一段的"我已齐全"就没了，而消息还在——
-        // 渲染切段（renderWindow.contiguousSegments）没有清单可依就退回**按 seq 连号**判断，
-        // 被 msg_op 事件行 / 墓碑 / 对我不可见的行一刀刀切成碎岛：20000 人大群里点置顶跳过去，
-        // 本该是开窗取回的那 60 多条，实际只渲染出 seq 1..13 十三条，整屏都放得下。
-        // 上一轮 ↓N 的「区间覆盖」判据同样吃这份清单，刷新后一并失效。
-        // 走 saveIncomingPage 与 sync 那一路同款：消息 + 区间同一个事务；
-        // **advanceTo 传 0**——一窗是会话中间的任意一段，连续同步游标绝不能被它推过去。
+        // 开窗取回的 [min, max] 同样"我已齐全"：**必须连同消息一起落盘**（2026-09-05 实测：只进内存镜像，刷新后
+        // 清单没了、切段退回按 seq 连号，被事件行/墓碑切成碎岛，详见 windowRange.test.ts）。
+        // 走 saveIncomingPage（消息 + 区间同事务）；**advanceTo 传 0**——一窗是会话中间的任意一段，游标绝不能被它推过去。
         {
           const convId = String(d.conv_id ?? "");
           const seqs = (d.messages || []).map((m: { conv_seq?: number }) => Number(m.conv_seq) || 0).filter((n: number) => n > 0);
@@ -1086,6 +1076,8 @@ export class IMClient extends IMRestApi {
     const convSeq = Number(d.conv_seq) || 0;
     const prevSynced = this.syncedSeq.get(convId) ?? 0;
     const isNextContiguous = convSeq > 0 && convSeq === prevSynced + 1;
+    // 本机已清空的那一段：不应用 msg_op、不收回执、不进内存/不落库（落库侧另有同事务过滤兜底）；游标照旧推。
+    if (convSeq > 0 && convSeq <= (this.clearedSeq.get(convId) ?? 0)) { if (isNextContiguous) this.updateSynced(convId, convSeq); return; }
     // msg_op 事件行（撤回/编辑/置顶，来自 sync 补拉）：应用其效果、不作气泡渲染、不入库为消息。
     if (d.content_type === "msg_op") {
       try {
@@ -1124,7 +1116,7 @@ export class IMClient extends IMRestApi {
       this.headSeq.set(msg.convId, Math.max(this.headSeq.get(msg.convId) ?? 0, msg.convSeq));
     }
     if (isNextContiguous) this.updateSynced(msg.convId, msg.convSeq);
-    this.sendReceipt(msg.convId, msg.convSeq); // 合批：短窗口内每会话只发一帧最大位点
+    this.receipts.push(msg.convId, msg.convSeq); // 合批：短窗口内每会话只发一帧最大位点
     if (collect) {
       collect(msg); // 整页落库由调用方在本页全部处理完后一次事务提交
     } else {
@@ -1149,18 +1141,47 @@ export class IMClient extends IMRestApi {
     return localStore.loadDeletedSeqs(this.uid, convId);
   }
 
-  /** 读取当前 uid 命名空间内独立持久化的连续同步游标。 */
-  loadSyncCursor(convId: string): Promise<number> {
-    return localStore.loadSyncCursor(this.uid, convId);
-  }
+  /** 读取当前 uid 命名空间内独立持久化的连续同步游标 / 本机清空位点（预载时一并交给 trackConversation）。 */
+  loadSyncCursor(convId: string): Promise<number> { return localStore.loadSyncCursor(this.uid, convId); }
+  loadClearedUpTo(convId: string): Promise<number> { return localStore.loadClearedUpTo(this.uid, convId); }
 
   /** 登记会话用于（重）连后增量同步。基线只在首次登记时设置，不能用稍后见到的较大值越过空洞。 */
-  trackConversation(convId: string, syncedSeq: number, isSuper = false): void {
+  trackConversation(convId: string, syncedSeq: number, isSuper = false, clearedUpTo = 0): void {
     if (!convId) return;
+    this.raiseCleared(convId, clearedUpTo);   // 位点须早于首个 sync_req 生效：补拉回来的页要被它挡住
     this.tracked.add(convId);
     if (isSuper) this.superConvs.add(convId);
     else this.superConvs.delete(convId); // 群可能被降级/误标，别让一次错误标记永久粘住
-    if (!this.syncedSeq.has(convId)) this.syncedSeq.set(convId, Math.max(0, syncedSeq));
+    if (!this.syncedSeq.has(convId)) this.syncedSeq.set(convId, Math.max(0, syncedSeq, clearedUpTo));
+  }
+
+  /** 抬高内存里的清空位点（只增不减）。 */
+  private raiseCleared(convId: string, seq: number): void {
+    if (convId && seq > (this.clearedSeq.get(convId) ?? 0)) this.clearedSeq.set(convId, seq);
+  }
+
+  /** 有效可见下界（开区间口径：`conv_seq <=` 它的对本端不存在）= 服务端下界 ∪ 本机清空位点，用时取大。 */
+  visibleFloorOf(convId: string): number {
+    return effectiveFloor(this.floorSeq.get(convId), this.clearedSeq.get(convId));
+  }
+
+  /** 本机清空位点（内存镜像；0 = 没清过）。服务端搜索 / 日历 / 媒体结果据此滤掉 `conv_seq <=` 它的。 */
+  clearedUpToOf(convId: string): number {
+    return this.clearedSeq.get(convId) ?? 0;
+  }
+
+  /** 清空聊天记录（仅本机，§6.7）：存储事务里删消息 + 清区间 + 抬位点 + 推游标，再对齐内存镜像。`knownLatest` 传会话列表 latest（head/游标这里补）。 */
+  async clearConversation(convId: string, knownLatest = 0): Promise<number> {
+    const known = Math.max(knownLatest, this.headSeq.get(convId) ?? 0, this.syncedSeq.get(convId) ?? 0);
+    this.raiseCleared(convId, known);   // 先乐观抬内存位点（只增不减，无害）：存储往返期间到的 sync/window 页要被它挡住，别又冒上屏
+    await localStore.clearMessages(this.uid, convId, known);
+    const floor = await localStore.loadClearedUpTo(this.uid, convId);
+    this.raiseCleared(convId, floor);
+    this.updateSynced(convId, floor);
+    this.convRanges.delete(convId);
+    if ((this.headSeq.get(convId) ?? 0) <= floor) this.gapped.delete(convId);   // 位点追上 head：可见范围内已无缺口
+    this.handlers.onRanges?.(convId);
+    return floor;
   }
 
   /** 登记「[lo, hi] 这一段我已齐全」到内存镜像，并通知 UI 重算渲染切段。
@@ -1189,8 +1210,7 @@ export class IMClient extends IMRestApi {
 
   /** `oldestSeq` 是否已踩在服务端说过的可见下界上。UI 据此不再空跑注定回空页的上滚请求；未知下界恒 false。 */
   atHistoryFloor(convId: string, oldestSeq: number): boolean {
-    const floor = this.floorSeq.get(convId) ?? 0;
-    return floor > 0 && oldestSeq <= floor;
+    return atVisibleFloor(oldestSeq, this.floorSeq.get(convId), this.clearedSeq.get(convId));
   }
 
   /** 该会话本地是否有缺口（收到过 too_long）。上层据此决定"整会话问题"问本地还是问服务端。 */
@@ -1236,26 +1256,6 @@ export class IMClient extends IMRestApi {
     if (convId && upToSeq > 0) {
       this.send({ type: T.RECEIPT, data: { conv_id: convId, status: "read", up_to_conv_seq: upToSeq } });
     }
-  }
-
-  /** 排队一个 delivered 回执（只留最大值），短窗口内合并成一帧。 */
-  private sendReceipt(convId: string, upTo: number): void {
-    if (!convId || upTo <= 0) return;
-    if (upTo > (this.pendingReceipts.get(convId) ?? 0)) this.pendingReceipts.set(convId, upTo);
-    if (this.receiptTimer !== null) return;
-    this.receiptTimer = setTimeout(() => this.flushReceipts(), 120);
-  }
-
-  /** 把排队的 delivered 回执各发一帧（每会话只发最大位点）。 */
-  private flushReceipts(): void {
-    if (this.receiptTimer !== null) {
-      clearTimeout(this.receiptTimer);
-      this.receiptTimer = null;
-    }
-    for (const [convId, upTo] of this.pendingReceipts) {
-      this.send({ type: T.RECEIPT, data: { conv_id: convId, status: "delivered", up_to_conv_seq: upTo } });
-    }
-    this.pendingReceipts.clear();
   }
 
   private sendSyncReq(convIds: string[]): void {

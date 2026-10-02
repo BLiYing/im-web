@@ -59,6 +59,7 @@ describe("planEntryWindow —— 这一窗问本地还是问服务端", () => {
   // /code-review 2026-09-09 抓出的 P0：「清空聊天记录」当时只删消息、不删清单，
   // 于是刷新后清单仍说齐全 → 判 local → 一个请求都不发 → 会话恒空且上滑/点↓ 都不自愈。
   // 存储侧已改成同事务一起清，但**老库里已经孤立的清单追不回来**，这道闸得长期留着。
+  // （清空聊天记录本身的「重进拉回」不靠这道闸，靠清空位点 floor：见文件末尾 §6.7 那组。）
   it("清单说齐全、但本地一条消息都没有（清空过）→ 仍旧问服务端", () => {
     expect(plan({ head: 1000, ranges: [{ lo: 1, hi: 1000 }], localNewest: 0 }).source).toBe("server");
   });
@@ -239,5 +240,71 @@ describe("planBumpCatchUp —— 超级群 conv_bump 到了补不补", () => {
   it("本地一条都没有 → 取最新一页（没有尾段可接）", () => {
     expect(bump({ ranges: [], head: 50, latestSeq: 50, localNewest: 0 }))
       .toEqual({ source: "server", anchor: 0, before: page, after: 0 });
+  });
+});
+
+// ===== §6.7 本机清空位点：有效可见下界 floor 进取数分流 =====
+//
+// 现场（2026-10-02 Web 实测）：对「1001创建测试群」点「清空聊天记录」→ 切到别的会话再切回 → 历史整页重新出现。
+// 清空把区间清单清掉后，「本地没有、服务端有」与「还没下载」在清单上长得一样，进会话老老实实去拉。
+// floor = 有效可见下界（开区间口径，conv_seq <= floor 对本端不存在）：以内的号不问服务端、不要求清单覆盖。
+describe("planEntryWindow —— 有效可见下界 floor（清空位点）", () => {
+  it("会话最新位点就在下界以内（清空后切回来）→ 本地，一个请求都不发", () => {
+    expect(plan({ head: 1000, ranges: [], localNewest: 0, floor: 1000 })).toEqual({ source: "local" });
+  });
+
+  it("head 未知时退到会话列表的 latestSeq，同样判本地", () => {
+    expect(plan({ head: 0, latestSeq: 1000, ranges: [], localNewest: 0, floor: 1000 })).toEqual({ source: "local" });
+  });
+
+  it("没有下界（floor=0/缺省）时同样的输入照旧问服务端——证明上面那条是 floor 的功劳", () => {
+    expect(plan({ head: 1000, ranges: [], localNewest: 0 }).source).toBe("server");
+    expect(plan({ head: 1000, ranges: [], localNewest: 0, floor: 0 }).source).toBe("server");
+  });
+
+  it("清空之后又来了新消息：下沿夹到 floor+1，只要求清单覆盖位点之上的那几条", () => {
+    // 尾页 [tip-199, tip] 的下沿本应是 804，但位点是 1000：被清掉的 804..1000 不必（也不许）要求覆盖。
+    expect(plan({ head: 1003, ranges: [{ lo: 1001, hi: 1003 }], localNewest: 1003, floor: 1000 })).toEqual({ source: "local" });
+    expect(plan({ head: 1003, ranges: [], localNewest: 0, floor: 1000 }).source).toBe("server");           // 新消息没登记 → 问
+    expect(plan({ head: 1003, ranges: [{ lo: 1001, hi: 1002 }], localNewest: 1002, floor: 1000 }).source).toBe("server"); // 差一条也问
+  });
+
+  it("「清单说齐、手里却没有」的兜底只在 head > floor 时才生效", () => {
+    // head 在下界以内：localNewest=0 < lo 本该被兜底判 server，但那一段本就该是空的——判 server 就是把清空的拉回来。
+    expect(plan({ head: 1000, ranges: [{ lo: 1, hi: 1000 }], localNewest: 0, floor: 1000 }).source).toBe("local");
+    // head 在下界之上：兜底照旧（清单说齐、本地却一条没有 ⇒ 问）。
+    expect(plan({ head: 1001, ranges: [{ lo: 1, hi: 1001 }], localNewest: 0, floor: 1000 }).source).toBe("server");
+  });
+
+  it("读位点落在被清掉的那一段里：锚点抬到 floor+1、不再往下带上下文", () => {
+    const p = plan({ head: 1005, ranges: [], localNewest: 0, floor: 1000, readSeq: 100, latestSeq: 1005, unread: 905 });
+    expect(p).toEqual({ source: "server", anchor: 1001, before: 0, after: 200 });
+  });
+
+  it("读位点在下界之上时锚点不动", () => {
+    const p = plan({ head: 1100, ranges: [], localNewest: 0, floor: 1000, readSeq: 1050, latestSeq: 1100, unread: 50 });
+    expect(p).toEqual({ source: "server", anchor: 1050, before: 10, after: 200 });
+  });
+});
+
+describe("planJumpToLatest / planBumpCatchUp —— floor", () => {
+  const page = 200;
+  const jump = (o: Partial<Parameters<typeof planJumpToLatest>[0]>) =>
+    planJumpToLatest({ ranges: [], head: 0, latestSeq: 0, localNewest: 0, historyPage: page, ...o });
+  const bump = (o: Partial<Parameters<typeof planBumpCatchUp>[0]>) =>
+    planBumpCatchUp({ ranges: [], head: 0, latestSeq: 0, localNewest: 0, historyPage: page, following: true, ...o });
+
+  it("点 ↓：最新就在下界以内 → 本地，不问；下界之上有缺才问", () => {
+    expect(jump({ head: 1000, latestSeq: 1000, floor: 1000 })).toEqual({ source: "local" });
+    expect(jump({ head: 1000, latestSeq: 1000 }).source).toBe("server");   // 无下界照旧
+    expect(jump({ head: 1002, latestSeq: 1002, floor: 1000, ranges: [{ lo: 1001, hi: 1002 }], localNewest: 1002 })).toEqual({ source: "local" });
+    expect(jump({ head: 1002, latestSeq: 1002, floor: 1000 }).source).toBe("server");
+  });
+
+  it("超级群 conv_bump：最新在下界以内 → 不补；下界之上只补差的几条（从位点往后，不从 0 补）", () => {
+    expect(bump({ head: 1000, latestSeq: 1000, floor: 1000 })).toEqual({ source: "local" });
+    // 本地尾段在位点以下（清空前的残留）/ 根本没有：补的起点是位点，不是 0。
+    expect(bump({ head: 1005, latestSeq: 1005, floor: 1000, localNewest: 0 }))
+      .toEqual({ source: "server", anchor: 1000, before: 0, after: 5 });
   });
 });

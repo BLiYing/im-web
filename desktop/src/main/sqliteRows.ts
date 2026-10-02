@@ -89,7 +89,8 @@ export function createSchema(db: Database): void {
       id       TEXT PRIMARY KEY,
       owner    TEXT NOT NULL,
       conv_id  TEXT NOT NULL,
-      conv_seq INTEGER NOT NULL
+      conv_seq INTEGER NOT NULL,
+      cleared_up_to INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS conv_ranges (
@@ -101,6 +102,7 @@ export function createSchema(db: Database): void {
     );
   `);
   migrateColumns(db);
+  migrateClearedUpTo(db);
   db.pragma(`user_version = ${SCHEMA_VERSION}`);
 }
 
@@ -130,6 +132,30 @@ function migrateColumns(db: Database): void {
     }
     db.exec(`ALTER TABLE messages ADD COLUMN ${name} ${ddl.replace(/\s*PRIMARY KEY\s*/i, " ")}`);
   }
+}
+
+/**
+ * 老库补 `sync_cursors.cleared_up_to`（本机清空位点，OFFLINE_BACKLOG_DESIGN §6.7）并**一次性回填**：
+ * 升级前清空过的会话没有任何痕迹，按「游标以内本地没有的那一截 = 清掉的」推位点——
+ * 游标>0 的会话，位点 = 游标以内最小本地消息 seq − 1；游标以内一条没有则 = 游标。
+ * （与 im-web `clearFloor.ts#backfillClearedUpTo`、Android `MIGRATION_15_16` 同一判据。）
+ *
+ * **不清缓存**：只加一列 + 一条 UPDATE，既有消息一条不动。加列与回填同一事务，中途崩溃要么都没做、
+ * 要么都做完（列存在 ⇒ 回填已完成，下次不会重跑）。
+ */
+function migrateClearedUpTo(db: Database): void {
+  const cols = (db.pragma("table_info(sync_cursors)") as { name: string }[]).map((c) => c.name);
+  if (cols.includes("cleared_up_to")) return;
+  db.transaction(() => {
+    db.exec("ALTER TABLE sync_cursors ADD COLUMN cleared_up_to INTEGER NOT NULL DEFAULT 0");
+    db.exec(`
+      UPDATE sync_cursors SET cleared_up_to = COALESCE(
+        (SELECT MIN(m.conv_seq) FROM messages m
+          WHERE m.owner = sync_cursors.owner AND m.conv_id = sync_cursors.conv_id
+            AND m.conv_seq > 0 AND m.conv_seq <= sync_cursors.conv_seq) - 1,
+        conv_seq)
+      WHERE conv_seq > 0`);
+  })();
 }
 
 /** SQLite 只认 null，不认 undefined。写入前统一转换。 */

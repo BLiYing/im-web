@@ -180,11 +180,23 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
   const bumpCursor = db.prepare(`
     INSERT INTO sync_cursors (id, owner, conv_id, conv_seq) VALUES (?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET conv_seq = MAX(sync_cursors.conv_seq, excluded.conv_seq)`);
-  const getCursor = db.prepare("SELECT conv_seq FROM sync_cursors WHERE id = ?");
+  const getCursor = db.prepare("SELECT conv_seq, cleared_up_to FROM sync_cursors WHERE id = ?");
   const getRanges = db.prepare("SELECT ranges, head FROM conv_ranges WHERE id = ?");
   const putRanges = db.prepare(`
     INSERT INTO conv_ranges (id, owner, conv_id, ranges, head) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET ranges = excluded.ranges, head = excluded.head`);
+
+  /** 本机清空位点（只增不减，纯本机，存在游标行的 cleared_up_to 里；无记录 = 0）。 */
+  const clearedFloorOf = (owner: string, convId: string): number => {
+    const row = getCursor.get(cursorKeyOf(owner, convId)) as { cleared_up_to: number } | undefined;
+    return Math.max(0, Number(row?.cleared_up_to) || 0);
+  };
+  /** 落库过滤：丢掉 `conv_seq <= 位点` 的消息（与 im-web `clearFloor.ts#dropCleared` 平行；`convSeq<=0` 的被拒消息不受影响）。
+   *  **必须在写事务内调用**，位点与写入读的是同一份快照。 */
+  const dropClearedRecs = (owner: string, convId: string, recs: MsgRecord[]): MsgRecord[] => {
+    const floor = clearedFloorOf(owner, convId);
+    return floor <= 0 ? recs : recs.filter((r) => r.convSeq <= 0 || r.convSeq > floor);
+  };
 
   /** 读区间行（不含老库回退，那是 loadRanges 的事）。 */
   const readRanges = (owner: string, convId: string): { ranges: SeqRange[]; head: number } | null => {
@@ -231,7 +243,9 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
     async saveMessage(owner: string, m: ChatMessageLike): Promise<void> {
       if (!owner || !m.convId || !m.convSeq || m.convSeq <= 0) return;
       guard("message_write_failed", { conv_id: m.convId, conv_seq: m.convSeq }, undefined,
-        () => putMerged(messageRecord(owner, m)));
+        () => db.transaction(() => {
+          for (const rec of dropClearedRecs(owner, m.convId, [messageRecord(owner, m)])) putMerged(rec);
+        })());
     },
 
     async saveIncomingMessage(owner: string, m: ChatMessageLike, advanceCursor: boolean): Promise<void> {
@@ -240,7 +254,7 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
         // 消息与游标同一个事务：崩溃时要么都成，要么游标停在旧位置下次幂等重拉，
         // 绝不会出现「游标已过、消息没落库」。
         db.transaction(() => {
-          putMerged(messageRecord(owner, m));
+          for (const rec of dropClearedRecs(owner, m.convId, [messageRecord(owner, m)])) putMerged(rec);
           if (advanceCursor) bumpCursor.run(cursorKeyOf(owner, m.convId), owner, m.convId, m.convSeq);
         })();
       });
@@ -256,7 +270,8 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       // 整页原子：一页消息 + 游标 + 区间同一个事务。页内任一条失败则整页回滚、整页重拉。
       return guard("incoming_page_write_failed", { conv_id: convId, count: recs.length }, false, () => {
         db.transaction(() => {
-          for (const rec of recs) putMerged(rec);
+          // 位点以内的丢弃；**游标与区间照旧推/登记**（区间登记口径不变，服务端断言的覆盖范围不因本机清空而变）。
+          for (const rec of dropClearedRecs(owner, convId, recs)) putMerged(rec);
           if (advanceTo > 0) bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, advanceTo);
           if (rangeTo >= rangeFrom && rangeTo > 0) {
             const prev = readRanges(owner, convId);
@@ -322,17 +337,28 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       });
     },
 
-    async clearMessages(owner: string, convId: string): Promise<void> {
+    async clearMessages(owner: string, convId: string, knownLatest = 0): Promise<void> {
       if (!owner || !convId) return;
-      // **只删消息与区间清单**：墓碑与游标一概不动（删掉墓碑会让重同步把删过的消息复活）。
-      // 清单必须跟着删——它宣称的是"这几段我已齐全"，消息没了还留着就是在宣称一段其实没有的
-      // 内容；取数分流据此判"本地已齐全"就一个请求都不发，表现是清空后会话恒空且不自愈。
+      // 同一事务：删消息 + 区间清单清空（落一行空清单、保留 head，否则 loadRanges 会由游标反推 [1,cursor]）
+      // + 抬本机清空位点（OFFLINE_BACKLOG_DESIGN §6.7，只增不减）+ 游标推到位点。**墓碑一概不动**
+      // （删掉墓碑会让重同步把删过的消息复活）。位点 = max(已有位点, knownLatest, 区间行 head, 游标, 本地最大 seq)，
+      // 与 im-web `clearFloor.ts#floorAtClear` 平行。清空而不抬位点的话，进会话会把服务端那一页整页拉回来。
       guard("conversation_clear_failed", { conv_id: convId }, undefined, () => {
-        const tx = db.transaction(() => {
+        db.transaction(() => {
+          const maxLocal = (db.prepare("SELECT MAX(conv_seq) AS m FROM messages WHERE owner = ? AND conv_id = ?")
+            .get(owner, convId) as { m: number | null }).m ?? 0;
+          const cursor = (getCursor.get(cursorKeyOf(owner, convId)) as { conv_seq: number } | undefined)?.conv_seq ?? 0;
+          const prev = readRanges(owner, convId);
+          const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
+          const floor = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId), num(cursor), num(prev?.head), num(maxLocal));
           db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ?").run(owner, convId);
-          db.prepare("DELETE FROM conv_ranges WHERE owner = ? AND conv_id = ?").run(owner, convId);
-        });
-        tx();
+          writeRanges(owner, convId, [], prev?.head ?? 0);
+          if (floor > 0) {
+            bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, floor);
+            db.prepare("UPDATE sync_cursors SET cleared_up_to = MAX(cleared_up_to, ?) WHERE id = ?")
+              .run(floor, cursorKeyOf(owner, convId));
+          }
+        })();
       });
     },
 
@@ -413,6 +439,11 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
         const cursor = Math.max(0, Number(row?.conv_seq) || 0);
         return { ranges: cursor > 0 ? [{ lo: 1, hi: cursor }] : [], head: 0 };
       });
+    },
+
+    async loadClearedUpTo(owner: string, convId: string): Promise<number> {
+      if (!owner || !convId) return 0;
+      return guard("cleared_floor_read_failed", { conv_id: convId }, 0, () => clearedFloorOf(owner, convId));
     },
 
     async searchMessages(

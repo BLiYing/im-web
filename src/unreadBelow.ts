@@ -34,6 +34,11 @@ export interface UnreadBelowInput {
    *  覆盖住就说明**下面一件不缺**，`loadedBelow` 是精确值——此时连 `hasGap` 都不必看：
    *  缺口若存在也在已滚入位点**之上**，与"下面还有多少"无关。 */
   coveredBelowFrontier: boolean;
+  /** 有效可见下界（`effectiveFloor(服务端下界, 本机清空位点)`，§6.7）；无下界传 0。
+   *  `conv_seq <= floor` 的消息对本端不存在，不能算进 ↓N：清空聊天记录后读位点仍在被清掉的那段里，
+   *  `head − pendingRead` 会把用户刚清掉的几千条算成「未读」。**刻意必填**，理由同 `localNewest`。
+   *  调用方算 `coveredBelowFrontier` 时下沿同样要用 `max(pendingRead, floor) + 1`。 */
+  floor: number;
 }
 
 /**
@@ -48,7 +53,9 @@ export interface UnreadBelowInput {
  * head 未知（=0，老服务端或还没收到过带 head 的响应）时退回数本地：宁可偏小，
  * 也不能拿一个没有依据的数字糊弄。
  */
-export function unreadBelowCount({ hasGap, head, pendingRead, loadedBelow, localNewest, coveredBelowFrontier }: UnreadBelowInput): number {
+export function unreadBelowCount({ hasGap, head, pendingRead: rawPendingRead, loadedBelow, localNewest, coveredBelowFrontier, floor }: UnreadBelowInput): number {
+  if (head > 0 && head <= floor) return 0;       // 可见范围内一条都没有（清空后切回来）：没有「下面还有」
+  const pendingRead = Math.max(rawPendingRead, floor);   // 读位点落在下界以内 ⇒ 从下界数起
   // 先看**正面证据**：已滚入位点到 head 之间服务端给过的都在本地 → 下面一件不缺，数本地就是精确值。
   // 这条优先于下面两条"本地不全"的间接证据——它们都是拿 seq 连不连号在猜，而 conv_seq 里混着
   // msg_op 事件行/墓碑/对我不可见的行，猜出来会凭空多几条（见 coveredBelowFrontier 注释）。

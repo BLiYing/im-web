@@ -67,8 +67,11 @@ export const applyMsgOpLocal = (
 export const markMessageDeleted = (owner: string, convId: string, target: DeleteTarget): Promise<void> =>
   activeLocalStore().markMessageDeleted(owner, convId, target);
 
-export const clearMessages = (owner: string, convId: string): Promise<void> =>
-  activeLocalStore().clearMessages(owner, convId);
+export const clearMessages = (owner: string, convId: string, knownLatest = 0): Promise<void> =>
+  activeLocalStore().clearMessages(owner, convId, knownLatest);
+
+export const loadClearedUpTo = (owner: string, convId: string): Promise<number> =>
+  activeLocalStore().loadClearedUpTo(owner, convId);
 
 export const advanceSyncCursor = (owner: string, convId: string, convSeq: number): Promise<void> =>
   activeLocalStore().advanceSyncCursor(owner, convId, convSeq);

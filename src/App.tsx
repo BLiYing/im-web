@@ -5,7 +5,7 @@ import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
 import { useLocalPreload } from "./useLocalPreload";
 import { MemberMenu } from "./components/MemberMenu";
-import { loadConversation, clearMessages, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
+import { loadConversation, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { planBatchDelete } from "./selectDelete";
 import type { KeyedDebounced } from "./keyedDebounce";
 import { useBatchDelete } from "./useBatchDelete";
@@ -1891,11 +1891,9 @@ export default function App() {
   // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
   // searchOpen/searchQuery 受控注入（见上）；副作用依赖（locateInChat/setToast/客户端）注入进去。
   // **传 allLocal 而不是 messages**：搜索/日历/发件人候选问的是"整个会话"，不是"现在渲染的那一窗"。
-  // W2 引入渲染窗口后一度传了切片，实测「会话内搜索」在 3 万条的群里只命中 98 条（= 窗口条数）——
-  // 功能还在、界面照常，结果悄悄错了，这类静默降级最难发现。=====
+  // W2 引入渲染窗口后一度传了切片，实测「会话内搜索」在 3 万条的群里只命中 98 条（= 窗口条数）。=====
   // localComplete / online / getToken：决定"整会话问题"问本地还是问服务端（§4.9 三态）。
-  // localComplete 直接问 SDK 有没有收到过该会话的 too_long——它是"本地有缺口"的权威来源，
-  // 比在 UI 层再算一遍区间可靠（同一事实两处推导迟早分叉）。
+  // localComplete 直接问 SDK 有没有收到过 too_long——"本地有缺口"的权威来源（同一事实两处推导迟早分叉）。
   const localComplete = !clientRef.current?.hasGap(convId);
   // RtcHost 换票用：引用必须稳定（RtcHost 的 effect 拿它当依赖），空依赖数组只建一次，
   // 调用时刻经 clientRef.current 读到的永远是当前值（不是这里闭包住的快照）。
@@ -1906,6 +1904,7 @@ export default function App() {
     locateInChat, setToast,
     localComplete, online: state === "connected",
     getToken: () => clientRef.current?.authToken ?? "",
+    clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
   });
 
   // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
@@ -2152,8 +2151,9 @@ export default function App() {
     const head = client?.headOf(cid) ?? 0;
     // 「已滚入位点到 head 之间，服务端给过的本地都有吗」——区间清单里**含** msg_op 事件行/墓碑等
     // "占了 conv_seq 却不是消息"的行，所以这才是「下面还缺不缺东西」的正确判据（见 unreadBelow.ts）。
+    const floor = client?.visibleFloorOf(cid) ?? 0;   // 有效可见下界（服务端下界 ∪ 清空位点）：以内的号不算「下面还缺」
     const coveredBelowFrontier = head > 0
-      && coversSpan(client?.rangesOf(cid) ?? [], pendingReadRef.current + 1, head);
+      && coversSpan(client?.rangesOf(cid) ?? [], Math.max(pendingReadRef.current, floor) + 1, head);
     setJumpCount(unreadBelowCount({
       hasGap: !!client?.hasGap(cid),
       head,
@@ -2161,6 +2161,7 @@ export default function App() {
       loadedBelow,
       localNewest,
       coveredBelowFrontier,
+      floor,
     }));
     setJumpCapped(false); // 这里算的是真实差值/真实条数，不是被服务端计数上限截断的值
   }, [refreshConversations]);
@@ -2182,7 +2183,7 @@ export default function App() {
     const newest = maxSeqOf(list);
     // 刻意**不再**取 minSeqOf(list) 当"历史边界"：本地全量的最小 seq 在有缺口时
     // 指向缺口另一侧的旧岛，不是用户正看到的那一段（见下方上滚分支）。
-    const moreBelow = newest < latestSeqRef.current; // 下方还有未加载的更新历史
+    const moreBelow = Math.max(newest, clientRef.current?.visibleFloorOf(cid) ?? 0) < latestSeqRef.current; // 下方还有未加载的更新历史（清空位点以内的不算）
     // 按钮显示只看「视觉贴底」（与 iOS updateJumpButton 对齐）——若 moreBelow=true 亦一并纳入
     // 判定，会出现「用户视觉已在最底部，但按钮仍显」的伪 bug（未读多/大群/进会话瞬间 push 到达时高发）：
     // 视觉贴底后 L1792 会自动 loadNewer 追齐，此时不必弹按钮打扰。
@@ -2653,7 +2654,6 @@ export default function App() {
   };
   openPeerDetailRef.current = openPeerDetail; // 供 useQR（早退前调用）在点击时取到早退后定义的函数
 
-  // 清空聊天记录（仅本机，对齐 iOS）：清 IndexedDB → 通知聊天区刷新 → 关面板。
   // 文本渲染一族（原本是本文件里六个互相调用的闭包，见 components/messageText.tsx 顶部）。
   // 放在这里是因为它要 memberNick 与 openPeerDetail，两者都到上面才声明完。
   const { renderMentionText, renderMessageText } = makeMessageTextRenderers({
@@ -2662,10 +2662,11 @@ export default function App() {
     onOpenPeer: (uid) => { setTextReader(null); openPeerDetail(uid); },
   });
 
+  // 清空聊天记录（仅本机，对齐 iOS）：存储事务清消息 + 区间并抬「清空位点」（§6.7，否则切走再切回会把服务端那一页拉回来）→ 清内存。
   const doClearHistory = (cid: string) => {
     void (async () => {
       if (!(await askConfirm(t("chat.clear.confirm"), { okText: t("chat.clear.ok"), danger: true }))) return;
-      await clearMessages(uid, cid);
+      if ((await clientRef.current?.clearConversation(cid, conversations.find((c) => c.conv_id === cid)?.latest_conv_seq ?? 0)) === undefined) return;   // 登出过渡态（无 client）：没清成就别报「已清空」
       clearConv(cid); // 内存同步清空（当前会话/缓存）
       setDetailMsgs([]);
       setToast(t("chat.clear.done"));

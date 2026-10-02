@@ -78,7 +78,7 @@ if (contract > 0 && deviceId && deviceName) {
     /**
      * 本地消息库（D4-3b）。**这里一个方法名都不写**——只有一个通用转发口。
      *
-     * 为什么不在这里把 15 个方法一一列出来：preload 不能 import 共享模块（见上面 sandbox 那段），
+     * 为什么不在这里把 16 个方法一一列出来：preload 不能 import 共享模块（见上面 sandbox 那段），
      * 逐个列举就意味着**第三份**方法名字面量（主进程一份、im-web 代理一份、这里再一份），
      * 而漏抄一个的表现是「那一个方法静默不工作」。少一份就少一处会漂移的地方。
      * 方法白名单的校验在主进程（`shared/storeIpc.ts` 的 `isStoreMethod`），

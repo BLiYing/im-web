@@ -1,4 +1,4 @@
-// 本地消息库的**桌面代理**（D4-3b）：把 15 个方法转发给 preload 注入的桥，
+// 本地消息库的**桌面代理**（D4-3b）：把 16 个方法转发给 preload 注入的桥，
 // 桥那头是主进程的 SQLite 实现（`desktop/src/main/sqliteStore.ts`）。
 //
 // 本文件**不 import 任何 electron、也不读 window**——桥由调用方（`platform/desktop.ts`）
@@ -29,7 +29,7 @@ import type {
 /**
  * 桥暴露的本地库面：**只有一个通用转发口**。
  *
- * 为什么不是 15 个方法各一个：preload 跑在 sandbox 里、引不了共享模块（相对 require 会
+ * 为什么不是 16 个方法各一个：preload 跑在 sandbox 里、引不了共享模块（相对 require 会
  * module not found → 桥没挂上 → 页面白屏，2026-09-09 被 e2e 实测抓到），逐个列举就意味着
  * 第三份方法名字面量。现在只剩两份——主进程的白名单与下面这份，
  * 由 `desktop/test/storeBridge.test.ts` 断言相等，漂移会红不会静默。
@@ -88,8 +88,8 @@ export function createDesktopLocalStore(bridge: unknown): LocalStore | null {
     markMessageDeleted: (owner: string, convId: string, target: DeleteTarget) =>
       call("markMessageDeleted", undefined, () => b.call("markMessageDeleted", [owner, convId, target])),
 
-    clearMessages: (owner: string, convId: string) =>
-      call("clearMessages", undefined, () => b.call("clearMessages", [owner, convId])),
+    clearMessages: (owner: string, convId: string, knownLatest = 0) =>
+      call("clearMessages", undefined, () => b.call("clearMessages", [owner, convId, knownLatest])),
 
     advanceSyncCursor: (owner: string, convId: string, convSeq: number) =>
       call("advanceSyncCursor", undefined, () => b.call("advanceSyncCursor", [owner, convId, convSeq])),
@@ -111,6 +111,9 @@ export function createDesktopLocalStore(bridge: unknown): LocalStore | null {
 
     loadRanges: (owner: string, convId: string) =>
       call<RangesSnapshot>("loadRanges", { ranges: [], head: 0 }, () => b.call("loadRanges", [owner, convId])),
+
+    loadClearedUpTo: (owner: string, convId: string) =>
+      call("loadClearedUpTo", 0, () => b.call("loadClearedUpTo", [owner, convId])),
 
     searchMessages: (owner: string, opts: SearchOptions) =>
       call<MsgRecord[]>("searchMessages", [], () => b.call("searchMessages", [owner, opts])),

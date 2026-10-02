@@ -9,6 +9,7 @@
 // **本文件只服务 web 实现**，SQLite 那侧没有对应物；跨实现的契约在 localStore.types.ts。
 
 import { cursorKeyOf, type MsgRecord } from "./localStore.types";
+import { backfillClearedUpTo, seqFromRecordKey } from "./clearFloor";
 import type { SeqRange } from "./ranges";
 import { LOG_TAG, logger } from "../logging/logger";
 
@@ -16,7 +17,9 @@ const DB_NAME = "im-web";
 // v4：修「曾中途升到 v3 但 deletions store 没建成」的坏库（HMR 半态/失败升级）——版本不变时 onupgradeneeded 不再触发，
 // 缺的 store 永远补不上；bump 一版强制走一次 onupgradeneeded（`if(!contains)` 幂等，只补缺的、不动已有数据）。
 // v5：新增 ranges store（离线积压的「本地有哪几段」目录，见 OFFLINE_BACKLOG_DESIGN §4.2）。
-const DB_VERSION = 5;
+// v6：游标行新增 `clearedUpTo`（本机清空位点，§6.7）——**不新增 store**（那正是「事务 NotFoundError → 列表空」的老坑），
+//     只在升级事务里给既有游标行回填一次位点（`backfillClearedUpTo`）。升级需要旧连接让路：见 `db.onversionchange`。
+const DB_VERSION = 6;
 export const STORE = "messages";
 export const CURSOR_STORE = "sync_cursors";
 export const DELETIONS_STORE = "deletions"; // 本地删除墓碑：本人删过的消息 id，刷新/重同步后仍不复现（无服务端删消息接口，本地兜底）
@@ -68,11 +71,13 @@ export interface RangesRecord {
   head?: number;  // 服务端最新位点的最近一次快照（sync_resp 的 head_conv_seq），用于判"齐不齐"
 }
 
-interface SyncCursorRecord {
+export interface SyncCursorRecord {
   id: string;       // owner|convId
   owner: string;
   convId: string;
   convSeq: number;  // 已经连续持久化完成的最大 conv_seq；不是本地消息最大值
+  /** 本机清空位点（只增不减，纯本机）。与游标同行存放：落库过滤要在**同一事务**里读它，游标 store 本来就在那些事务里。 */
+  clearedUpTo?: number;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -84,7 +89,7 @@ export function openDB(attempt = 0): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (ev) => {
       const db = req.result;
       // 从 STORE_DEFS 派生建表：`if(!contains)` 幂等，只补缺的、不动已有数据。新增 store 改 STORE_DEFS 即可。
       for (const def of STORE_DEFS) {
@@ -92,6 +97,8 @@ export function openDB(attempt = 0): Promise<IDBDatabase> {
         const os = db.createObjectStore(def.name, { keyPath: def.keyPath });
         for (const idx of def.indexes ?? []) os.createIndex(idx.name, idx.keyPath, { unique: idx.unique ?? false });
       }
+      // 老库回填本机清空位点（只对「v1~v5 升上来」的库跑一次；全新库没有游标行，无事可做）。
+      if (ev.oldVersion > 0 && ev.oldVersion < 6 && req.transaction) backfillClearedFloors(req.transaction);
     };
     // 另一标签页/连接占着旧版本 → 本次升级被阻塞（多标签页测号常见）。留痕，靠对方收到 versionchange 关闭后放行。
     req.onblocked = () => logger.warn(LOG_TAG.store, "indexeddb_open_blocked", { db: DB_NAME, version: DB_VERSION });
@@ -117,15 +124,63 @@ export function openDB(attempt = 0): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/**
+ * 升级事务里给每条既有游标行回填 `clearedUpTo`：游标以内最小的本地消息 seq − 1，一条没有则 = 游标。
+ * 只读消息键（`openKeyCursor`，conv_seq 就在主键里），不把正文读进内存。
+ */
+function backfillClearedFloors(tx: IDBTransaction): void {
+  if (!tx.objectStoreNames.contains(CURSOR_STORE) || !tx.objectStoreNames.contains(STORE)) return;
+  const cursors = tx.objectStore(CURSOR_STORE);
+  const byConv = tx.objectStore(STORE).index("ownerConv");
+  const walk = cursors.openCursor();
+  walk.onsuccess = () => {
+    const cur = walk.result;
+    if (!cur) return;
+    const rec = cur.value as SyncCursorRecord;
+    if (!(rec.convSeq > 0) || rec.clearedUpTo !== undefined) { cur.continue(); return; }
+    let min = 0;
+    const keys = byConv.openKeyCursor(IDBKeyRange.only(rec.id));
+    keys.onsuccess = () => {
+      const k = keys.result;
+      if (k) {
+        const seq = seqFromRecordKey(String(k.primaryKey));
+        if (seq > 0 && seq <= rec.convSeq && (min === 0 || seq < min)) min = seq;
+        k.continue();
+        return;
+      }
+      cur.update({ ...rec, clearedUpTo: backfillClearedUpTo(rec.convSeq, min) } satisfies SyncCursorRecord);
+      cur.continue();
+    };
+  };
+}
+
 /** 在给定事务里单调推进游标（只增不减）。调用方负责把 CURSOR_STORE 放进事务的 store 列表。 */
 export function advanceCursorInStore(store: IDBObjectStore, owner: string, convId: string, convSeq: number): void {
   if (convSeq <= 0) return;
   const id = cursorKeyOf(owner, convId);
   const req = store.get(id);
   req.onsuccess = () => {
-    const previous = Number((req.result as SyncCursorRecord | undefined)?.convSeq) || 0;
-    if (convSeq > previous) store.put({ id, owner, convId, convSeq } satisfies SyncCursorRecord);
+    const prev = req.result as SyncCursorRecord | undefined;
+    // `...prev`：游标行还带着 clearedUpTo，推游标不许把它抹掉（契约「游标/区间的后续写入不重置位点」）。
+    if (convSeq > (Number(prev?.convSeq) || 0)) store.put({ ...prev, id, owner, convId, convSeq } satisfies SyncCursorRecord);
   };
+}
+
+/** 读本机清空位点（无记录 = 0）。 */
+export async function loadClearedUpTo(owner: string, convId: string): Promise<number> {
+  if (!owner || !convId) return 0;
+  try {
+    const db = await openDB();
+    return await new Promise<number>((resolve, reject) => {
+      const tx = db.transaction(CURSOR_STORE, "readonly");
+      const req = tx.objectStore(CURSOR_STORE).get(cursorKeyOf(owner, convId));
+      req.onsuccess = () => resolve(Math.max(0, Number((req.result as SyncCursorRecord | undefined)?.clearedUpTo) || 0));
+      req.onerror = () => reject(req.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "cleared_floor_read_failed", { conv_id: convId, error });
+    return 0;
+  }
 }
 
 /** 读取按账号+会话隔离的连续同步游标。无记录表示从 0 开始，不从消息最大值推断。 */

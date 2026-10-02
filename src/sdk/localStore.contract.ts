@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "./protocol";
 import type { LocalStore } from "./localStore.types";
 import { runSearchContract } from "./localStore.contract.search";
+import { runClearFloorContract } from "./localStore.contract.clear";
 
 /** 拆出去的那部分断言要用的共享件：实现 + 每用例一个新 owner + 消息工厂。 */
 export interface ContractCtx {
@@ -305,6 +306,9 @@ export function runLocalStoreContract(store: LocalStore): void {
       // 而取数分流（windowPlan.planEntryWindow）先查清单，判"本地已齐全"就一个请求都不发。
       // 表现不是报错而是**空白**：清空聊天记录 + 刷新后会话恒空，上滑与点↓ 都不自愈
       // （/code-review 2026-09-09 抓出，当时 web 与 SQLite 两侧都只删了消息）。
+      // ⚠️ 这条只解决「空白不自愈」，**没有**解决「清空后重进把历史拉回来」——那由下面的
+      // 本机清空位点（localStore.contract.clear.ts，§6.7）解决：清单清空后「本地没有」与「还没下载」
+      // 在清单上长得一样，必须靠位点把「用户主动不要」单独记下来。
       const o = newOwner("clear-ranges");
       await store.saveMessage(o, msg("c1", 1));
       await store.registerRange(o, "c1", 1, 500, 500);
@@ -313,21 +317,26 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect((await store.loadRanges(o, "c1")).ranges).toEqual([]);
     });
 
-    it("清空聊天记录**不动墓碑、不动游标**", async () => {
+    it("清空聊天记录**不动墓碑、游标不被拉低**", async () => {
       // 归档里那条「删了又冒出来」的另一种走法：先删第 1 条、再清空整个会话，
       // 若实现顺手把墓碑一起清了，下一次后台重同步第 1 条就复活了。
+      // （游标现在会被推到清空位点，见 clear.ts；这里只钉「不低于清空前」。位点以内的重同步一律不落库，
+      //  所以不再有「没删过的那条该回来」——旧版这里断言的是那个，已随位点语义作废。）
       const o = newOwner("clear2");
       await store.saveMessage(o, msg("c1", 1));
       await store.saveMessage(o, msg("c1", 2));
       await store.markMessageDeleted(o, "c1", { convSeq: 1 });
       await store.advanceSyncCursor(o, "c1", 5);
       await store.clearMessages(o, "c1");
-      expect(await store.loadSyncCursor(o, "c1")).toBe(5); // 游标是"同步到哪了"，与本地留不留正文无关
-      await store.saveMessage(o, msg("c1", 1)); // 重同步把删掉的那条又推来
-      await store.saveMessage(o, msg("c1", 2)); // 没删过的这条该回来
-      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([2]);
+      expect(await store.loadSyncCursor(o, "c1")).toBeGreaterThanOrEqual(5);
+      await store.saveMessage(o, msg("c1", 6)); // 位点（=5）之后的新消息
+      await store.saveMessage(o, msg("c1", 1)); // 重同步把删掉的那条又推来：位点 + 墓碑双重挡住
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([6]);
       expect(await store.loadDeletedSeqs(o, "c1")).toEqual([1]);
     });
+
+    // ---- 本机清空位点：拆到 localStore.contract.clear.ts ----
+    runClearFloorContract({ store, newOwner, msg });
 
     // ---- 连续同步游标 ----
 
@@ -487,6 +496,7 @@ export function runLocalStoreContract(store: LocalStore): void {
       await expect(store.loadDeletedSeqs("", "c1")).resolves.toEqual([]);
       await expect(store.loadSyncCursor("", "c1")).resolves.toBe(0);
       await expect(store.loadRanges("", "c1")).resolves.toEqual({ ranges: [], head: 0 });
+      await expect(store.loadClearedUpTo("", "c1")).resolves.toBe(0);
       await expect(store.searchMessages("", { q: "x", limit: 5 })).resolves.toEqual([]);
     });
   });

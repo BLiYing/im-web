@@ -26,6 +26,12 @@ export interface EntryWindowInput {
   contextBefore: number;
   /** 单页条数。 */
   historyPage: number;
+  /**
+   * **有效可见下界** = `effectiveFloor(服务端 has_before=false 记下的 floorSeq, 本机清空位点 clearedUpTo)`（§6.7）。
+   * `conv_seq <= floor` 的消息对本端「不存在」：不下载、不算缺口、不问服务端。缺省 0 = 无下界。
+   * **刻意与服务端下界分开存、用时才取大**——前者永不回退，后者会随群设置变小、重连时清掉。
+   */
+  floor?: number;
 }
 
 /**
@@ -68,22 +74,34 @@ export function entryWindowAnchor({ readSeq, unread, contextBefore, historyPage 
 export function planEntryWindow(
   input: EntryWindowInput & { ranges: SeqRange[]; head: number; localNewest: number },
 ): WindowPlan {
-  const { anchor, before, after } = entryWindowAnchor(input);
+  const { anchor: rawAnchor, before: rawBefore, after } = entryWindowAnchor(input);
+  const floor = Math.max(0, input.floor ?? 0);
   const tip = input.head > 0 ? input.head : input.latestSeq;
+  // 锚点落在下界以内（读位点在被清掉的那一段里）：那一段对本端不存在，把锚点抬到下界之上、不再往下带上下文，
+  // 否则 window_req 会把用户刚清掉的整页又要回来（落库时虽会丢掉，但白花一次往返还多渲染一次空窗）。
+  const underFloor = rawAnchor > 0 && rawAnchor <= floor;
+  const anchor = underFloor ? floor + 1 : rawAnchor;
+  const before = underFloor ? 0 : rawBefore;
   const server: WindowPlan = { source: "server", anchor, before, after };
+  // 会话最新位点就在下界以内 ⇒ 可见范围内一条都没有，没有东西可问，也**不许**问
+  // （清空后切走再切回把整页拉回来，就是少了这一句；2026-10-02 Web 实测）。
+  if (tip > 0 && tip <= floor) return { source: "local" };
   if (tip <= 0) return server;                       // 连"最新到哪"都不知道 → 问服务端
   // 取最新（anchor=0）拿回的是**以 tip 结尾的 before 条**：`[tip-before+1, tip]`（IMServer `internal/gateway/window.go`
   // 的 `got[len(got)-before:]`）。按 `tip-before` 算会多要一条——刚取回最新一页后，这一窗永远判不齐，
   // 于是每次点 ↓、每次进无未读的会话都白问服务端一次（2026-09-11 C4 的出站帧测试抓到）。
   // 锚点开窗（anchor>0）是「前 before 条 + 锚点本身 + 后 after 条」，下沿就是 anchor-before。
-  const lo = Math.max(1, anchor > 0 ? anchor - before : tip - before + 1);
+  // 下沿一律夹到 floor+1：下界以内的号本端不要，也就不必要求清单覆盖它们。
+  const lo = Math.max(1, floor + 1, anchor > 0 ? anchor - before : tip - before + 1);
   const hi = anchor > 0 ? Math.min(tip, anchor + after) : tip;
   if (hi < lo) return server;
   // **清单说齐全还不够，手里得真有东西**（/code-review 2026-09-09）。
   // 清单与消息表是两处存储，任何一处让它们失配，判 local 的后果就是**空白且不自愈**：
-  // 一个请求都不发，上滑与点 ↓ 都走同一条判定。已知的失配来源是「清空聊天记录」只删了消息
-  // （web 与 SQLite 两侧都已改成同事务连清单一起清），但**老库里已经孤立的清单追不回来**，
-  // 所以这道闸得长期留着。代价只是偶尔多问一次服务端——往这个方向倒才是对的。
+  // 一个请求都不发，上滑与点 ↓ 都走同一条判定。已知的失配来源是老库里孤立的清单（旧版「清空聊天记录」
+  // 只删了消息）。**清空之后**这一条与位点配合：位点以内的区间被夹掉，位点以上的新消息才要求「手里真有」；
+  // `tip <= floor` 已在上面直接判 local，所以这道兜底只在 `head > floor` 时才可能触发——
+  // 否则「清空后 localNewest=0 < lo」会把每次进会话都判成问服务端。
+  // 代价只是偶尔多问一次服务端——往这个方向倒才是对的。
   if (input.localNewest < lo) return server;
   return coversSpan(input.ranges, lo, hi) ? { source: "local" } : server;
 }
@@ -154,6 +172,8 @@ export function floorFromWindow(keptSeqs: number[], anchor: number): number {
 // ===== C4：↓ 跳到底 / 超级群 conv_bump 补不补（OFFLINE_BACKLOG_DESIGN §4.8）=====
 
 export interface LatestWindowInput {
+  /** 有效可见下界（见 `EntryWindowInput.floor`）；缺省 0。 */
+  floor?: number;
   ranges: SeqRange[];
   /** 服务端最新位点快照（0=未知）。 */
   head: number;
@@ -193,10 +213,12 @@ export interface BumpCatchUpInput extends LatestWindowInput {
  */
 export function planBumpCatchUp(input: BumpCatchUpInput): WindowPlan {
   const tip = Math.max(input.head, input.latestSeq);
-  if (!input.following || tip <= 0) return { source: "local" };
+  const floor = Math.max(0, input.floor ?? 0);
+  if (!input.following || tip <= 0 || tip <= floor) return { source: "local" };   // 最新就在下界以内：没有东西可补
   if (coversSpan(input.ranges, tip, tip)) return { source: "local" };   // 最新那条本地已有
   const seg = rangeContaining(input.ranges, input.localNewest);
-  const tailHi = seg ? seg.hi : input.localNewest;
+  // 尾段上沿不低于下界：清空之后本地尾段在位点以下（或根本没有），从位点往后补，不是从 0 补。
+  const tailHi = Math.max(seg ? seg.hi : input.localNewest, floor);
   const gap = tip - tailHi;
   if (gap <= 0) return { source: "local" };
   if (tailHi > 0 && gap <= input.historyPage) return { source: "server", anchor: tailHi, before: 0, after: gap };

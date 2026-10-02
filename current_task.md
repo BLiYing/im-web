@@ -5,12 +5,14 @@
 
 ## 当前焦点
 
-无进行中的任务。最近收口（细节见 archive 顶部与 `git log`）：
-2026-10-02 资料卡标题 / 转发提示的末级回退改「未命名用户」不露 uid（`DetailPanel.tsx`、`useForward.ts`）；
-2026-10-01 桌面系统通知对齐手机端（头像 `src/notifyIcon.ts`、收回 `desktop/src/main/notifyRegistry.ts` + `platform().clearNotifications`、窗口聚焦全清；**浏览器版不做系统通知**，用户定）。
+2026-10-02 **本机清空位点 `clearedUpTo`**（IMServer `docs/design/OFFLINE_BACKLOG_DESIGN.md` §6.7，Android 先行、Web 本次对齐）代码完成，**待用户审查后提交**：
+清空聊天记录改为同事务「删消息 + 清区间 + 抬位点 + 推游标、墓碑不动」，位点以内的消息一律不落库/不上屏/不问服务端；有效可见下界 = 服务端下界 ∪ 位点（`sdk/clearFloor.ts`，各存各的、用时取大）。
+web(IndexedDB v6，位点存游标行、升级事务回填)与桌面(SQLite `sync_cursors.cleared_up_to`，加列+回填、不清缓存)两套都过契约；真浏览器验过「清空→切走切回/刷新不拉回」。
+未做：`docs/ROADMAP.md`/`CLIENT_PARITY.md`/`SYMMETRY.md` 状态（IMServer 仓，用户来改）。最近另有：桌面系统通知对齐（2026-10-01）。
 
 ## 下一步
 
+0. **桌面版实机验清空位点**（只跑过单测/契约，未开 IM Desktop）：清空→切走切回不拉回；老 SQLite 库升级后回填（升级前清空过的会话不再被拉回）。
 1. **桌面系统通知实机验证**（代码完成、已提交，未在桌面版实机验过）：头像（群=群头像/单聊=对端/无则同色占位）、撤回/移除/本人别处已读时收回、窗口聚焦全清；Windows 上 `Notification.close()` 能否从操作中心移除未验；断线期间错过的本人已读回执不会补收通知。
 2. **桌面版手测本地库**（D4-3b 已过 e2e，三件要眼睛看）：① 发一条语音→重启应用→波形还在不在；② 换号后不串库（SQLite 按 owner 隔离，没在真机验过两个账号来回切）；③ **首次升级会清空本地缓存**（既有 IndexedDB 不迁移是刻意取舍，§7.6.3）——「离线冷启动可浏览」断一次、消息从服务端重新同步。
 3. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。语音转文字**结果链路**未在本地验通（实测停在「识别中…」，服务端识别多半没配）——排一次后端 `internal/transcribe` 配置再复测。
@@ -25,6 +27,9 @@
 - **⏸ 拆 `useChatScroll`**：独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
+- **清空位点**：新增 `sdk/clearFloor.ts`（纯逻辑）；`localStore.clearMessages(owner,conv,knownLatest)` + `loadClearedUpTo`；桌面主进程有平行实现（`sqliteStore.ts`/`sqliteRows.ts`），改语义两边一起改。位点存在 IndexedDB **游标行**里（`advanceCursorInStore` 必须 `...prev` 保留它）。回填误伤面：history_visible 下界/不落库事件行会被当位点，无害。
+- **既有问题（未动）**：`SYNC_RESP` 里 `before` 在页内消息逐条 `updateSynced` 之后才读，页首贴着游标的连续 sync 页 `next > before` 恒假，**整页不落库、区间不登记**（只在内存）；靠开窗/重拉自愈所以没被发现。要修需先读 `before` 再处理页。
+- `imSdk.ts` 卡在 1359 行基线：新增逻辑靠把回执合批拆到 `sdk/receiptBatch.ts` + 压缩注释腾出。
 - **侧栏面板里开弹窗必须 portal 到 `.app`**（`NotificationsPanel.tsx#overSidebar`）：`.sidebar` 层叠上下文排在 `.main` 之下，`position:fixed` + 高 z-index 也盖不住聊天区。
 - **提示音「正看着这个会话」不响是设计**（窗口在焦点且选中该会话，`alertDecision` 的 `viewingConv`）；自测要发到另一个会话或把窗口切走。例外列表空态仍借用 `notif.exceptions.empty_private`（文案写「私聊 / 左滑」，Web 实际是合并列表 + 右键），要改需在 IMServer 源表加新 key 并四端重新生成。
 - **相册上限 9 是渲染契约**：`albumRowPattern(n>9)` 只有 9 格、`AlbumGrid` 按行 `slice`，第 10 件起根本不渲染，所以发送侧必须截断（`albumBatch.ts#ALBUM_MAX`，三端同值）。⚠️ 收端不设防：别的客户端硬塞 >9 个同 `group_id`，本端仍只显示前 9 个。

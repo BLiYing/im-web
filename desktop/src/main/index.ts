@@ -248,7 +248,7 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
 }
 
 /**
- * 本地消息库通道（D4-3b）：渲染进程的 15 个方法都从这一发 invoke 进来。
+ * 本地消息库通道（D4-3b）：渲染进程的 16 个方法都从这一发 invoke 进来。
  *
  * **必须走白名单**（`isStoreMethod`），不能直接 `store[method]`——那等于把渲染进程的任意
  * 属性访问转发给主进程对象，`close` 之类不该暴露的东西也就跟着能调了。

@@ -33,6 +33,7 @@ export const STORE_METHODS = [
   "loadDeletedSeqs",
   "loadSyncCursor",
   "loadRanges",
+  "loadClearedUpTo",
   "searchMessages",
 ] as const;
 
