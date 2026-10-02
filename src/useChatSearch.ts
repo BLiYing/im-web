@@ -350,7 +350,9 @@ export function useChatSearch(d: ChatSearchDeps) {
     const hit = list.find((m) => m.timestamp >= dayStart);
     // 有缺口又没有服务端天表（离线 / 拉取失败）：「当天或之后第一条」会跳过缺口落到别的日子，而「没有消息」也可能就在缺口里——
     // 只认当天；找不到如实说需要联网，不谎称「已跳到最近的 X」/「没有消息」（对齐 Android，§4.9 第 4 项）。
-    if (querySource !== "local" && (!hit || !isSameDay(hit.timestamp, dayStart))) { setToast(t("conv.query.need_network")); return; }
+    // 但**天表在手**（在线且已拉到）时「这天没有」是真的，走下面原提示，不能误报需要联网。
+    const noServerTable = querySource === "local-degraded" || (querySource === "server" && serverDays.length === 0);
+    if (noServerTable && (!hit || !isSameDay(hit.timestamp, dayStart))) { setToast(t("conv.query.need_network")); return; }
     if (!hit) { setToast(t("chat.search.day_no_messages", { label })); return; }
     setCalendarOpen(false);
     if (!isSameDay(hit.timestamp, dayStart)) {

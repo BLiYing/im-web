@@ -43,7 +43,7 @@ describe("useMediaServerPaging", () => {
     await act(async () => { added = await result.current.loadOlder(); });
     expect(added).toEqual([]);
     expect(fetchConvMedia).toHaveBeenCalledTimes(6);   // 1 + MAX_EMPTY_MEDIA_PAGES
-    expect(result.current.hasMore).toBe(false);
+    expect(result.current.hasMore).toBe(true);        // 只结束这一次，不永久置假
   });
 
   it("失败（离线）回 null 且不再宣称有更多——调用方说一句降级提示", async () => {
@@ -80,5 +80,44 @@ describe("useMediaServerPaging", () => {
     rerender({ ...base, convId: "other" });
     await act(async () => { resolve({ conv_id: "g", items: [item(150)], next_cursor: 150, has_more: true }); await pending; });
     expect(result.current.merge([local(200)]).map((m) => m.convSeq)).toEqual([200]);
+  });
+
+  it("本地窗口后来上翻得比服务端游标还旧：游标取最小，不从更新处重复翻、也不把 hasMore 永久置假", async () => {
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(150)], next_cursor: 150, has_more: true });
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(40)], next_cursor: 40, has_more: true });
+    const { result, rerender } = renderHook((p) => useMediaServerPaging(p), { initialProps: base });
+    await act(async () => { await result.current.loadOlder(); });
+    rerender({ ...base, oldestLocalSeq: 100 });   // 用户把本地窗口上翻到 100（比服务端游标 150 更旧）
+    await act(async () => { await result.current.loadOlder(); });
+    expect(fetchConvMedia.mock.calls[1][3]).toMatchObject({ cursor: 100 });
+  });
+
+  it("连翻 6 页全是空页：只结束这一次，hasMore 不被永久置假（下次还能要）", async () => {
+    fetchConvMedia.mockResolvedValue({ conv_id: "g", items: [], next_cursor: 50, has_more: true });
+    const { result } = renderHook(() => useMediaServerPaging(base));
+    await act(async () => { await result.current.loadOlder(); });
+    expect(result.current.hasMore).toBe(true);
+  });
+
+  it("enabled 翻转（掉线）：已续拉来的留着，查看器停在续拉来的那一张不会消失", async () => {
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(150)], next_cursor: 150, has_more: true });
+    const { result, rerender } = renderHook((p) => useMediaServerPaging(p), { initialProps: base });
+    await act(async () => { await result.current.loadOlder(); });
+    rerender({ ...base, enabled: false });
+    expect(result.current.merge([local(200)]).map((m) => m.convSeq)).toEqual([150, 200]);
+    expect(result.current.hasMore).toBe(false);
+  });
+
+  it("换会话那一帧：上个会话续拉来的不闪进新会话", async () => {
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(150)], next_cursor: 150, has_more: true });
+    const frames: { conv: string; seqs: number[] }[] = [];   // 每一次渲染（含 effect 重置之前那一帧）的合并结果
+    const { result, rerender } = renderHook((p) => {
+      const h = useMediaServerPaging(p);
+      frames.push({ conv: p.convId, seqs: h.merge([local(200)]).map((m) => m.convSeq) });
+      return h;
+    }, { initialProps: base });
+    await act(async () => { await result.current.loadOlder(); });
+    rerender({ ...base, convId: "other" });
+    expect(frames.filter((f) => f.conv === "other").every((f) => f.seqs.join() === "200")).toBe(true);
   });
 });

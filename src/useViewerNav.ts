@@ -31,10 +31,12 @@ export function useViewerNav(o: {
     const ni = viewerIdx + delta;
     if (ni < 0 && viewerIdx === 0 && mediaPaging.hasMore) {
       // 翻过本地已有的最旧一张：服务端还有更旧的就去要一页，落到紧挨着的那一张；失败 = 离线降级，说一句别装「到头了」
+      const fromKey = msgKey(viewer!.m);
       void mediaPaging.loadOlder().then((added) => {
         if (added === null) { setToast(t("media.viewer.offline_partial_notice")); return; }
         const target = added[added.length - 1];
-        if (target) setViewer((v) => (v ? { m: target, fromGallery: v.fromGallery } : v));
+        // 等待期间用户可能已翻走 / 关了：只在仍停在发起时那一张才落到新增的那批里（否则会把人拽回去）
+        if (target) setViewer((v) => (v && msgKey(v.m) === fromKey ? { m: target, fromGallery: v.fromGallery } : v));
       });
       return;
     }
@@ -53,6 +55,6 @@ export function useViewerNav(o: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, viewerIdx, viewerList.length]);
+  }, [viewer, viewerIdx, viewerList.length, mediaPaging.hasMore]);
   return { viewerList, viewerIdx, goViewer };
 }

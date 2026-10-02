@@ -28,7 +28,9 @@ export function useMediaServerPaging(o: {
   getToken: () => string;
   clearedUpTo: number;
 }): MediaServerPaging {
-  const [older, setOlder] = useState<ChatMessage[]>([]);
+  const [olderState, setOlder] = useState<{ convId: string; list: ChatMessage[] }>({ convId: o.convId, list: [] });
+  // 换会话那一帧 effect 还没来得及重置：按 convId 过滤，别让上个会话的续拉结果闪进新会话
+  const older = olderState.convId === o.convId ? olderState.list : [];
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const cursorRef = useRef(0);
@@ -39,13 +41,19 @@ export function useMediaServerPaging(o: {
   const oRef = useRef(o);
   oRef.current = o;
 
+  // 换会话才整份重置；enabled 翻转（掉线 / 重连 / 缺口补齐）只重置「还有没有更多」——已续拉来的留着，
+  // 否则查看器正停在续拉来的那一张时它会凭空消失（viewerIdx 变 -1，箭头没了）。
   useEffect(() => {
     genRef.current += 1;
     loadingRef.current = false;
     cursorRef.current = 0;
-    setOlder([]); setLoading(false);
+    setOlder({ convId: o.convId, list: [] }); setLoading(false);
+  }, [o.convId]);
+  useEffect(() => {
+    genRef.current += 1;   // enabled 变了：在途的页属于上一种状态，丢掉
+    loadingRef.current = false; setLoading(false);
     setHasMore(o.enabled);
-  }, [o.convId, o.enabled]);
+  }, [o.enabled]);
 
   const loadOlder = useCallback(async (): Promise<ChatMessage[] | null> => {
     const cur = oRef.current;
@@ -56,18 +64,19 @@ export function useMediaServerPaging(o: {
     const gen = genRef.current;
     try {
       for (let attempt = 0; attempt <= MAX_EMPTY_MEDIA_PAGES; attempt++) {
-        const cursor = cursorRef.current || cur.oldestLocalSeq;
+        // 游标取已知三者的最小：服务端上一页游标 / 已续拉的最旧 / 本地最旧（本地窗口后来上翻得更旧时，别从更新处重复翻一遍）
+        const known = [cursorRef.current, olderRef.current[0]?.convSeq ?? 0, cur.oldestLocalSeq].filter((n) => n > 0);
+        const cursor = known.length > 0 ? Math.min(...known) : 0;
         const page = await fetchConvMedia(token, cur.convId, "media", { cursor, limit: 60, clearedUpTo: cur.clearedUpTo });
         if (gen !== genRef.current) return [];   // 会话 / 开关在途中变了：这页属于上一次
         cursorRef.current = page.next_cursor;
         const more = !!page.has_more && page.next_cursor > 0;
         const { older: next, added } = prependOlderMedia(cur.oldestLocalSeq, olderRef.current, page.items.map((i) => mediaItemToMessage(cur.convId, i)));
         if (added.length === 0 && more) continue;   // 空页却仍 has_more（逐人隐藏过滤）：接着往前翻，有上限
-        olderRef.current = next; setOlder(next); setHasMore(more);
+        olderRef.current = next; setOlder({ convId: cur.convId, list: next }); setHasMore(more);
         return added;
       }
-      setHasMore(false);
-      return [];
+      return [];   // 连翻 6 页全是空页：只结束这一次，下一次（再翻 / 再滚）还能接着要，不永久置假
     } catch {
       if (gen === genRef.current) setHasMore(false);   // 离线 / 失败：停在已有的那段，由调用方说一句
       return null;
@@ -76,7 +85,7 @@ export function useMediaServerPaging(o: {
     }
   }, []);
 
-  const merge = useCallback((localAsc: ChatMessage[]) => (o.enabled ? mergeServerOlder(older, localAsc) : localAsc), [o.enabled, older]);
+  const merge = useCallback((localAsc: ChatMessage[]) => mergeServerOlder(older, localAsc), [older]);
 
   return { merge, hasMore: o.enabled && hasMore, loading, loadOlder };
 }

@@ -33,7 +33,7 @@ export function GalleryModal({ items, hasMore, loadingMore, onLoadMore, gateOf, 
     const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) loadRef.current?.(); });
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, items.length]);
+  }, [hasMore, items.length, loadingMore]); // loadingMore 进依赖：一页回来哨兵若仍可见，重新观察会立刻再触发一次，不停滞
   return (
     <Modal className="gallery-panel" onClose={onClose}>
         <div className="modal-title">{tr("gallery.title")}</div>

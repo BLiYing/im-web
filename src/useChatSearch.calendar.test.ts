@@ -10,7 +10,9 @@ import { renderHook, cleanup, act } from "@testing-library/react";
 import { useChatSearch, type ChatSearchDeps } from "./useChatSearch";
 import type { ChatMessage } from "./sdk/protocol";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+const fetchConvCalendar = vi.fn();
+vi.mock("./sdk/convQueriesApi", async (orig) => ({ ...(await orig<typeof import("./sdk/convQueriesApi")>()), fetchConvCalendar: (...a: unknown[]) => fetchConvCalendar(...a) }));
+afterEach(() => { cleanup(); vi.restoreAllMocks(); fetchConvCalendar.mockReset(); });
 
 const CONV = "u_conv";
 const msg = (seq: number): ChatMessage =>
@@ -96,5 +98,15 @@ describe("有缺口且离线：选日 / 今天", () => {
     const { result } = mount({ localComplete: true, online: true, allMessages: [at(1, 1_600_000_000_000)], locateInChat });
     act(() => result.current.jumpToToday());
     expect(locateInChat).toHaveBeenCalledWith(CONV, 1);
+  });
+
+  it("在线、天表已拉到但这天确实没有 → 不误报需要联网（天表在手，「没有」是真的）", async () => {
+    const setToast = vi.fn();
+    fetchConvCalendar.mockResolvedValue({ conv_id: CONV, days: [{ day_start_ms: day0 + 3 * DAY, count: 1, first_conv_seq: 50 }] });
+    const { result } = mount({ localComplete: false, online: true, allMessages: [at(1, day0 - 5 * DAY), at(50, day0 + 3 * DAY)], setToast, getToken: () => "tok" });
+    act(() => result.current.toggleCalendar());
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    act(() => result.current.jumpToDay(day0, "6/10"));
+    for (const c of setToast.mock.calls) expect(String(c[0])).not.toContain("联网");
   });
 });
