@@ -4,7 +4,7 @@
 // alertDecision.test.ts 的 32 条共用向量兜底，不在这里重复。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, cleanup, waitFor } from "@testing-library/react";
-import { useDesktopIntegration } from "./useDesktopIntegration";
+import { PENDING_CONV_WAIT_MS, useDesktopIntegration } from "./useDesktopIntegration";
 import { resetPlatformForTests, type DesktopBridge } from "./platform";
 import { DEFAULT_NOTIFY_SETTINGS, type NotifySettings } from "./notifySettings";
 import { t } from "./i18n";
@@ -239,5 +239,41 @@ describe("clearNotifications：透传到桥", () => {
     setupDesktopBridge();   // 这座假桥没有 clearNotifications
     const { result } = mount([]);
     expect(() => result.current.clearNotifications({ convId: "c1", upTo: 9 })).not.toThrow();
+  });
+});
+
+// 2026-10-02 用户实测：新加好友后对方发的第一条，桌面通知标题是「新消息」——那一刻会话列表里还没有这一行。
+describe("新会话的第一条消息：等会话列表带回这一行再提醒", () => {
+  const props = (conversations: Conversation[]) =>
+    ({ conversations, selfUid: "me", currentConvId: "", notifySettings: DEFAULT_NOTIFY_SETTINGS });
+
+  it("会话还没到 → 先不弹；列表刷新带回它 → 用会话名弹", () => {
+    setupDesktopBridge();
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const { result, rerender } = renderHook((p: ReturnType<typeof props>) => useDesktopIntegration(p), { initialProps: props([]) });
+    result.current.bindCallbacks({ titleOf: () => "用户4984", senderOf: () => "发送人兜底", onOpenConversation: () => {} });
+    result.current.notifyInbound(msg({ convId: "c9", from: "u4984", convSeq: 1 }));
+    expect(notifyMock).not.toHaveBeenCalled();
+    rerender(props([conv({ conv_id: "c9", peer: "u4984" })]));
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock.mock.calls[0][0]).toBe("用户4984");
+  });
+
+  it("一直等不到（拉列表失败）→ 到点按发送人兜底，仍然只弹一次", () => {
+    vi.useFakeTimers();
+    try {
+      setupDesktopBridge();
+      vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      const { result } = mount([]);
+      result.current.bindCallbacks({ titleOf: () => "新消息", senderOf: () => "用户4984", onOpenConversation: () => {} });
+      result.current.notifyInbound(msg({ convId: "c9", from: "u4984", convSeq: 1 }));
+      vi.advanceTimersByTime(PENDING_CONV_WAIT_MS);
+      expect(notifyMock).toHaveBeenCalledTimes(1);
+      expect(notifyMock.mock.calls[0][0]).toBe("用户4984");
+      vi.advanceTimersByTime(PENDING_CONV_WAIT_MS);
+      expect(notifyMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

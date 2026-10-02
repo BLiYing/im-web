@@ -48,6 +48,9 @@ export interface DesktopIntegration {
   setGlobalShortcut: (on: boolean) => void;
 }
 
+/** 新会话第一条消息最多等会话列表多久（见 notifyInbound）。列表刷新一般一两百毫秒。 */
+export const PENDING_CONV_WAIT_MS = 2000;
+
 export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopIntegration {
   // 两个回调的实现要等 App 那边声明完才有（见 bindCallbacks 的说明），先占位。
   const cbRef = useRef<DesktopCallbacks>({ titleOf: () => "新消息", senderOf: (m) => m.fromNickname || m.from, onOpenConversation: () => {} });
@@ -87,8 +90,33 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
   // 只在 `sound` 判为 true 时才推进——被节流/开关关掉/免打扰拦下的那些不算「响过」。
   const lastSoundAtRef = useRef(0);
 
+  // 新会话的第一条消息：此刻本地会话列表里还没有这一行（App 收到消息后才去拉列表），拿不到会话名、
+  // 头像、是群还是单聊、免打扰——直接弹会是标题「新消息」+ 占位头像（2026-10-02 用户实测）。
+  // 于是**先挂起，等列表刷新带回这个会话再提醒**（通常一两百毫秒）；等不到（拉列表失败）就到点按发送人兜底。
+  // 手机端的应用内提醒遇到这种情况是直接不提醒；系统通知由服务端拼，本来就对。
+  const pendingRef = useRef(new Map<string, ChatMessage[]>());
   const notifyInbound = (m: ChatMessage): void => {
     if (!m.convId) return;   // 畸形消息：点了也不知道该开哪个会话
+    if (latest.current.conversations.some((c) => c.conv_id === m.convId)) { alertNow(m); return; }
+    const waiting = pendingRef.current.get(m.convId);
+    if (waiting) { waiting.push(m); return; }
+    pendingRef.current.set(m.convId, [m]);
+    setTimeout(() => releasePending(m.convId), PENDING_CONV_WAIT_MS);
+  };
+  const releasePending = (convId: string): void => {
+    const ms = pendingRef.current.get(convId);
+    if (!ms) return;
+    pendingRef.current.delete(convId);
+    ms.forEach(alertNow);
+  };
+  // 会话列表刷新后：等着的会话已经到了的，立刻放行。
+  useEffect(() => {
+    for (const convId of [...pendingRef.current.keys()]) {
+      if (opts.conversations.some((c) => c.conv_id === convId)) releasePending(convId);
+    }
+  });
+
+  const alertNow = (m: ChatMessage): void => {
     const o = latest.current;
     const conv = o.conversations.find((c) => c.conv_id === m.convId);
     // @我 / @全体 穿透免打扰：与微信 / Telegram 的惯例一致——设免打扰是「别为每条消息烦我」，
@@ -143,10 +171,11 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       const body = osNotifyBodyOf(m, {
         isGroup: !!conv?.is_group, preview: typeSettings.preview, senderName: cbRef.current.senderOf(m), mentionsMe,
       });
-      const title = cbRef.current.titleOf(m.convId);
+      // 等过了仍没有会话行（见 notifyInbound）：标题与头像按发送人兜底，不出「新消息」+ 会话 id 占位。
+      const title = conv ? cbRef.current.titleOf(m.convId) : cbRef.current.senderOf(m);
       const convId = m.convId;
       // 头像：群聊=群头像、单聊=对端（notifyIcon.ts）；带上 convSeq，之后撤回 / 别处已读才收得回来。
-      withNotifyIcon(notifyIconSource(conv, convId, title), (icon) => {
+      withNotifyIcon(notifyIconSource(conv, convId, title, m.from), (icon) => {
         void platform().notify({ title, body, convId, convSeq: m.convSeq, icon }).then((ok) => {
           logger.info(LOG_TAG.app, "desktop_notify_sent", { conv_id: convId, conv_seq: m.convSeq, ok, has_icon: !!icon });
         });

@@ -16,9 +16,12 @@ export interface NotifyIconSource {
   seed: string;
 }
 
-/** 这条通知该用谁的头像。系统通知会话返回 null：用应用图标即可（它的头像本来就是应用 logo）。 */
-export function notifyIconSource(conv: Conversation | undefined, convId: string, label: string): NotifyIconSource | null {
-  if (!conv) return { label, seed: convId };
+/** 这条通知该用谁的头像。系统通知会话返回 null：用应用图标即可（它的头像本来就是应用 logo）。
+ *  会话还不在列表里时按 `fallbackSeed`（发送人 uid）出占位，与会话列表里那人的圈同色。 */
+export function notifyIconSource(
+  conv: Conversation | undefined, convId: string, label: string, fallbackSeed?: string,
+): NotifyIconSource | null {
+  if (!conv) return { label, seed: fallbackSeed || convId };
   if (conv.is_group) return { url: conv.avatar_url || undefined, label, seed: conv.conv_id };
   if (conv.peer === SYSTEM_UID) return null;
   return { url: conv.peer_avatar_url || undefined, label, seed: conv.peer };
