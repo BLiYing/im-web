@@ -59,6 +59,32 @@ export function prependOlderMedia(
 }
 
 /**
+ * 把更新的一页并到升序序列**后面**（向更新方向续拉，服务端 `after=`）。只收比当前最新还新的、去重的、有内容的项；
+ * 返回新增的（升序）。追加在末尾，当前下标不需要挪。
+ */
+export function appendNewerMedia(
+  newestLocalSeq: number,
+  newerSoFar: readonly ChatMessage[],
+  page: readonly ChatMessage[],
+): { newer: ChatMessage[]; added: ChatMessage[] } {
+  const newest = Math.max(newestLocalSeq, newerSoFar.length > 0 ? newerSoFar[newerSoFar.length - 1].convSeq : 0);
+  const bySeq = new Map<number, ChatMessage>();
+  for (const m of page) {
+    if (m.convSeq > newest && !m.recalledAt && m.content) bySeq.set(m.convSeq, m);
+  }
+  const added = [...bySeq.values()].sort((a, b) => a.convSeq - b.convSeq);
+  return { newer: [...newerSoFar, ...added], added };
+}
+
+/** 把服务端续拉来的「更新」并到本地可视媒体后面，去掉与本地重叠的（本地后来又往下翻出了同样的几张时别重复）。 */
+export function mergeServerNewer(newer: readonly ChatMessage[], local: readonly ChatMessage[]): ChatMessage[] {
+  if (newer.length === 0) return local as ChatMessage[];
+  const localNewest = local.reduce((mx, m) => (m.convSeq > mx ? m.convSeq : mx), 0);
+  const keep = newer.filter((m) => m.convSeq > localNewest);
+  return keep.length === 0 ? (local as ChatMessage[]) : [...local, ...keep];
+}
+
+/**
  * 把服务端续拉来的「更旧」并到本地可视媒体前面，去掉与本地重叠的（本地后来又往上翻出了同样的几张时别重复）。
  * @param local 本地可视媒体（升序）
  */

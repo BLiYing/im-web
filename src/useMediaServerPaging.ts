@@ -8,16 +8,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "./sdk/protocol";
 import { fetchConvMedia } from "./sdk/convQueriesApi";
-import { MAX_EMPTY_MEDIA_PAGES, mediaItemToMessage, mergeServerOlder, prependOlderMedia } from "./mediaServerPaging";
+import { MAX_EMPTY_MEDIA_PAGES, appendNewerMedia, mediaItemToMessage, mergeServerNewer, mergeServerOlder, prependOlderMedia } from "./mediaServerPaging";
 
 export interface MediaServerPaging {
   /** 把服务端续拉来的更旧项并到本地可视媒体（升序）前面。 */
   merge: (localAsc: ChatMessage[]) => ChatMessage[];
   /** 服务端是否还有更旧的页（只在 enabled 时可能为真）。 */
   hasMore: boolean;
+  /** 本地那一段的上沿之外服务端还有更新的（`after=` 方向；只在 enabled 时可能为真）。 */
+  hasMoreNewer: boolean;
   loading: boolean;
   /** 续拉一页；回新增的（升序），调用方把落点放在最后一条（紧挨着原来最旧的）。失败回 null（离线降级，别说「没有更多」）。 */
   loadOlder: () => Promise<ChatMessage[] | null>;
+  /** 向更新方向续拉一页；回新增的（升序），调用方把落点放在第一条（紧挨着原来最新的）。失败回 null。 */
+  loadNewer: () => Promise<ChatMessage[] | null>;
 }
 
 export function useMediaServerPaging(o: {
@@ -25,6 +29,8 @@ export function useMediaServerPaging(o: {
   enabled: boolean;
   /** 本地消息（任意类型）里最旧的 conv_seq（>0）；续拉从它往更旧取。未知传 0。 */
   oldestLocalSeq: number;
+  /** 本地消息里最新的 conv_seq（>0）；向更新方向续拉从它往后取。未知传 0。 */
+  newestLocalSeq: number;
   getToken: () => string;
   clearedUpTo: number;
 }): MediaServerPaging {
@@ -32,6 +38,11 @@ export function useMediaServerPaging(o: {
   // 换会话那一帧 effect 还没来得及重置：按 convId 过滤，别让上个会话的续拉结果闪进新会话
   const older = olderState.convId === o.convId ? olderState.list : [];
   const [hasMore, setHasMore] = useState(false);
+  const [newerState, setNewer] = useState<{ convId: string; list: ChatMessage[] }>({ convId: o.convId, list: [] });
+  const [hasMoreNewer, setHasMoreNewer] = useState(false);
+  const newerRef = useRef<ChatMessage[]>([]);
+  const loadingNewerRef = useRef(false);
+  const newer = newerState.convId === o.convId ? newerState.list : [];
   const [loading, setLoading] = useState(false);
   const cursorRef = useRef(0);
   const genRef = useRef(0);
@@ -48,11 +59,15 @@ export function useMediaServerPaging(o: {
     loadingRef.current = false;
     cursorRef.current = 0;
     setOlder({ convId: o.convId, list: [] }); setLoading(false);
+    newerRef.current = []; loadingNewerRef.current = false;
+    setNewer({ convId: o.convId, list: [] });
   }, [o.convId]);
   useEffect(() => {
     genRef.current += 1;   // enabled 变了：在途的页属于上一种状态，丢掉
     loadingRef.current = false; setLoading(false);
     setHasMore(o.enabled);
+    loadingNewerRef.current = false;
+    setHasMoreNewer(o.enabled);
   }, [o.enabled]);
 
   const loadOlder = useCallback(async (): Promise<ChatMessage[] | null> => {
@@ -85,7 +100,30 @@ export function useMediaServerPaging(o: {
     }
   }, []);
 
-  const merge = useCallback((localAsc: ChatMessage[]) => mergeServerOlder(older, localAsc), [older]);
+  const loadNewer = useCallback(async (): Promise<ChatMessage[] | null> => {
+    const cur = oRef.current;
+    if (!cur.enabled || loadingNewerRef.current) return [];
+    const token = cur.getToken();
+    if (!token) return null;
+    loadingNewerRef.current = true;
+    const gen = genRef.current;
+    try {
+      const after = Math.max(cur.newestLocalSeq, newerRef.current[newerRef.current.length - 1]?.convSeq ?? 0);
+      const page = await fetchConvMedia(token, cur.convId, "media", { after, limit: 60, clearedUpTo: cur.clearedUpTo });
+      if (gen !== genRef.current) return [];
+      const { newer: next, added } = appendNewerMedia(cur.newestLocalSeq, newerRef.current, page.items.map((i) => mediaItemToMessage(cur.convId, i)));
+      newerRef.current = next; setNewer({ convId: cur.convId, list: next });
+      setHasMoreNewer(!!page.has_more && added.length > 0);   // 到头 / 一条没并进来 → 停，别空转
+      return added;
+    } catch {
+      if (gen === genRef.current) setHasMoreNewer(false);   // 离线 / 失败：停在已有的那段，由调用方说一句
+      return null;
+    } finally {
+      if (gen === genRef.current) loadingNewerRef.current = false;
+    }
+  }, []);
 
-  return { merge, hasMore: o.enabled && hasMore, loading, loadOlder };
+  const merge = useCallback((localAsc: ChatMessage[]) => mergeServerNewer(newer, mergeServerOlder(older, localAsc)), [older, newer]);
+
+  return { merge, hasMore: o.enabled && hasMore, hasMoreNewer: o.enabled && hasMoreNewer, loading, loadOlder, loadNewer };
 }

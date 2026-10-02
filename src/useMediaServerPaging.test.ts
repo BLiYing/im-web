@@ -12,7 +12,7 @@ beforeEach(() => { fetchConvMedia.mockReset(); }); // 别写成表达式体：�
 
 const item = (seq: number) => ({ conv_seq: seq, server_msg_id: `s${seq}`, sender: "u", content_type: "image", content: `/u/${seq}.jpg`, timestamp: seq });
 const local = (seq: number) => ({ convId: "g", from: "u", content: `/u/${seq}.jpg`, contentType: "image", convSeq: seq, timestamp: seq, status: "received" }) as ChatMessage;
-const base = { convId: "g", enabled: true, oldestLocalSeq: 200, getToken: () => "tok", clearedUpTo: 0 };
+const base = { convId: "g", enabled: true, oldestLocalSeq: 200, newestLocalSeq: 300, getToken: () => "tok", clearedUpTo: 0 };
 
 describe("useMediaServerPaging", () => {
   it("续拉一页：从本地最旧往更旧取，回新增，并并到本地前面", async () => {
@@ -119,5 +119,43 @@ describe("useMediaServerPaging", () => {
     await act(async () => { await result.current.loadOlder(); });
     rerender({ ...base, convId: "other" });
     expect(frames.filter((f) => f.conv === "other").every((f) => f.seqs.join() === "200")).toBe(true);
+  });
+
+  it("向更新续拉：用 after=本地最新，升序拼到后面，游标接着用上一页最末", async () => {
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(320), item(310)], next_cursor: 320, has_more: true });
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(400)], next_cursor: 0, has_more: false });
+    const { result } = renderHook(() => useMediaServerPaging(base));
+    let added: ChatMessage[] | null = null;
+    await act(async () => { added = await result.current.loadNewer(); });
+    expect(fetchConvMedia.mock.calls[0][3]).toMatchObject({ after: 300, limit: 60 });
+    expect(added!.map((m) => m.convSeq)).toEqual([310, 320]);
+    expect(result.current.hasMoreNewer).toBe(true);
+    await act(async () => { await result.current.loadNewer(); });
+    expect(fetchConvMedia.mock.calls[1][3]).toMatchObject({ after: 320 });
+    expect(result.current.hasMoreNewer).toBe(false);
+    expect(result.current.merge([local(200), local(300)]).map((m) => m.convSeq)).toEqual([200, 300, 310, 320, 400]);
+  });
+
+  it("向更新失败（离线）回 null 且不再宣称有更新的", async () => {
+    fetchConvMedia.mockImplementation(() => Promise.reject(new Error("offline")));
+    const { result } = renderHook(() => useMediaServerPaging(base));
+    let added: ChatMessage[] | null = [];
+    await act(async () => { added = await result.current.loadNewer(); });
+    expect(added).toBeNull();
+    expect(result.current.hasMoreNewer).toBe(false);
+  });
+
+  it("本地齐全（enabled=false）：向更新也不发请求", async () => {
+    const { result } = renderHook(() => useMediaServerPaging({ ...base, enabled: false }));
+    await act(async () => { await result.current.loadNewer(); });
+    expect(fetchConvMedia).not.toHaveBeenCalled();
+    expect(result.current.hasMoreNewer).toBe(false);
+  });
+
+  it("向更新：服务端说 has_more 却一条都没并进来（重复页 / 全被过滤）→ 停，别空转", async () => {
+    fetchConvMedia.mockResolvedValue({ conv_id: "g", items: [item(250)], next_cursor: 250, has_more: true });   // 250 不比本地最新 300 更新
+    const { result } = renderHook(() => useMediaServerPaging(base));
+    await act(async () => { await result.current.loadNewer(); });
+    expect(result.current.hasMoreNewer).toBe(false);
   });
 });

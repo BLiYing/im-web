@@ -40,6 +40,16 @@ export function useViewerNav(o: {
       });
       return;
     }
+    if (ni >= viewerList.length && viewerIdx === viewerList.length - 1 && mediaPaging.hasMoreNewer) {
+      // 翻过本地段上沿最新的一张：服务端还有更新的就去要一页，落到紧挨着的那一张；失败 = 离线降级，说一句
+      const fromKey = msgKey(viewer!.m);
+      void mediaPaging.loadNewer().then((added) => {
+        if (added === null) { setToast(t("media.viewer.offline_partial_notice")); return; }
+        const target = added[0];
+        if (target) setViewer((v) => (v && msgKey(v.m) === fromKey ? { m: target, fromGallery: v.fromGallery } : v));
+      });
+      return;
+    }
     if (ni < 0 || ni >= viewerList.length) return;
     setViewerMore(false); // 翻页收起「更多」浮层，避免停留在上一张的菜单上
     setViewer((v) => (v ? { m: viewerList[ni], fromGallery: v.fromGallery } : v));
@@ -55,6 +65,6 @@ export function useViewerNav(o: {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, viewerIdx, viewerList.length, mediaPaging.hasMore]);
+  }, [viewer, viewerIdx, viewerList.length, mediaPaging.hasMore, mediaPaging.hasMoreNewer]);
   return { viewerList, viewerIdx, goViewer };
 }

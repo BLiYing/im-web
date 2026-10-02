@@ -8,7 +8,7 @@ import { ZoomableImage } from "./ZoomableImage";
  *  纯展示：所有派生态（可播/已开始/失效/不支持/翻页位点）与动作由 App 注入，逐字保持原交互。 */
 export function MediaViewer({
   m, fromGallery, videoUnplayable, videoStarted, isExpired, unsupported, mediaKey,
-  viewerIdx, viewerCount, hasOlder, chatTitle, more,
+  viewerIdx, viewerCount, hasOlder, hasNewer, chatTitle, more,
   onClose, onDismissMore, onStartVideo, onVideoError, onImageError,
   onNav, onToggleMore, onOpenGallery, onLocate, onFavorite, onCopy, onForward, onDelete,
 }: {
@@ -23,6 +23,8 @@ export function MediaViewer({
   viewerCount: number;
   /** 服务端还有更旧的媒体（本地有缺口时续拉）：第一张上也要给左箭头。 */
   hasOlder?: boolean;
+  /** 服务端还有更新的媒体（本地段上沿之外）：最后一张上也要给右箭头。 */
+  hasNewer?: boolean;
   chatTitle: string;
   more: boolean;
   onClose: () => void;
@@ -99,7 +101,7 @@ export function MediaViewer({
         <button className="viewer-nav prev" title={tr("media.viewer.prev")}
                 onClick={(e) => { e.stopPropagation(); onNav(-1); }}><ChevronLeft size={28} /></button>
       )}
-      {viewerIdx >= 0 && viewerIdx < viewerCount - 1 && (
+      {viewerIdx >= 0 && (viewerIdx < viewerCount - 1 || (viewerIdx === viewerCount - 1 && hasNewer)) && (
         <button className="viewer-nav next" title={tr("media.viewer.next")}
                 onClick={(e) => { e.stopPropagation(); onNav(1); }}><ChevronRight size={28} /></button>
       )}

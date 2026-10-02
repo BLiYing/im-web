@@ -109,14 +109,17 @@ export type MediaKind = "image" | "video" | "media" | "file" | "voice";
 
 /** 会话媒体分页（按类型，conv_seq 倒序）。媒体查看器左右翻页与媒体库都用它。 */
 export async function fetchConvMedia(
-  token: string, convId: string, kind: MediaKind, opts: { cursor?: number; limit?: number; clearedUpTo?: number } = {},
+  token: string, convId: string, kind: MediaKind, opts: { cursor?: number; limit?: number; clearedUpTo?: number; after?: number } = {},
 ): Promise<{ conv_id: string; items: ConvMediaItem[]; next_cursor: number; has_more: boolean }> {
   const p = new URLSearchParams({ kind });
-  if (opts.cursor) p.set("cursor", String(opts.cursor));
+  // after = 向更新方向（升序，紧挨 after 的最近 limit 条），与 cursor（向更旧）互斥
+  if (opts.after) p.set("after", String(opts.after)); else if (opts.cursor) p.set("cursor", String(opts.cursor));
   if (opts.limit) p.set("limit", String(opts.limit));
   const page = await get<{ conv_id: string; items: ConvMediaItem[]; next_cursor: number; has_more: boolean }>(
     token, `/api/v1/conversations/${encodeURIComponent(convId)}/media?${p}`);
   const floor = opts.clearedUpTo ?? 0;
+  // 向更新的一页：只丢位点以内的项；has_more / 游标不动（向新翻碰不到位点之下）
+  if (opts.after) return { ...page, items: dropClearedItems(page.items ?? [], floor) };
   return { ...page, items: dropClearedItems(page.items ?? [], floor), has_more: floor > 0 ? hasMoreAboveFloor(page.has_more, page.next_cursor, floor) : page.has_more };
 }
 

@@ -45,3 +45,30 @@ describe("mediaItemToMessage", () => {
     expect(m.thumb).toBeUndefined();
   });
 });
+
+import { appendNewerMedia, mergeServerNewer } from "./mediaServerPaging";
+
+describe("appendNewerMedia", () => {
+  it("更新的一页拼到后面且升序，只收比本地最新还新的", () => {
+    const r = appendNewerMedia(100, [], [M(150), M(120), M(100), M(90)]);
+    expect(seqs(r.added)).toEqual([120, 150]);
+    expect(seqs(r.newer)).toEqual([120, 150]);
+  });
+  it("已续拉过的再来一页：接在更后面，重复页不再塞", () => {
+    const first = appendNewerMedia(100, [], [M(120), M(150)]);
+    const second = appendNewerMedia(100, first.newer, [M(150), M(180), M(200)]);
+    expect(seqs(second.added)).toEqual([180, 200]);
+    expect(seqs(second.newer)).toEqual([120, 150, 180, 200]);
+  });
+  it("撤回 / 空内容 / 非正 seq 不进", () => {
+    const r = appendNewerMedia(10, [], [M(20, { recalledAt: 1 }), M(30, { content: "" }), M(0), M(40)]);
+    expect(seqs(r.added)).toEqual([40]);
+  });
+});
+
+describe("mergeServerNewer", () => {
+  it("本地后来又往下翻出的同样几张不重复", () => {
+    expect(seqs(mergeServerNewer([M(120), M(150), M(180)], [M(100), M(130)]))).toEqual([100, 130, 150, 180]);
+  });
+  it("没有续拉内容原样返回本地", () => { const l = [M(5)]; expect(mergeServerNewer([], l)).toBe(l); });
+});

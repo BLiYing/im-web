@@ -1917,6 +1917,7 @@ export default function App() {
     convId,
     enabled: pickQuerySource(localComplete, state === "connected") === "server",
     oldestLocalSeq: messages.find((mm) => mm.convSeq > 0)?.convSeq ?? 0,
+    newestLocalSeq: messages.reduce((mx, mm) => (mm.convSeq > mx ? mm.convSeq : mx), 0),
     getToken: () => clientRef.current?.authToken ?? "",
     clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
   });
@@ -2975,6 +2976,7 @@ export default function App() {
           viewerIdx={viewerIdx}
           viewerCount={viewerList.length}
           hasOlder={mediaPaging.hasMore}
+          hasNewer={mediaPaging.hasMoreNewer}
           chatTitle={chatTitle}
           more={viewerMore}
           onClose={() => { setViewer(null); setViewerMore(false); }}
