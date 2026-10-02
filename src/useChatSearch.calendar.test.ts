@@ -61,3 +61,40 @@ describe("toggleCalendar：开的那一刻复位当月", () => {
     expect(result.current.searchFromPickerOpen).toBe(false);
   });
 });
+
+// 有缺口又没有服务端天表时：选日只认当天，不静默落到别的日子，也不谎称「没有消息」（§4.9 第 4 项，对齐 Android）。
+describe("有缺口且离线：选日 / 今天", () => {
+  const DAY = 86_400_000;
+  const day0 = new Date(2026, 5, 10).getTime();
+  const at = (seq: number, ts: number): ChatMessage => ({ ...msg(seq), timestamp: ts });
+
+  it("选的那天本地没有、之后某天有 → 说需要联网，不跳（不再「已跳到最近的 X」）", () => {
+    const setToast = vi.fn(), locateInChat = vi.fn();
+    const { result } = mount({ localComplete: false, online: false, allMessages: [at(1, day0 - 5 * DAY), at(50, day0 + 3 * DAY)], setToast, locateInChat });
+    act(() => result.current.jumpToDay(day0, "6/10"));
+    expect(locateInChat).not.toHaveBeenCalled();
+    expect(setToast).toHaveBeenCalledWith(expect.stringContaining("联网"));
+  });
+
+  it("选的那天本地就有 → 照常跳", () => {
+    const locateInChat = vi.fn();
+    const { result } = mount({ localComplete: false, online: false, allMessages: [at(1, day0 - 5 * DAY), at(20, day0 + 1000)], locateInChat });
+    act(() => result.current.jumpToDay(day0, "6/10"));
+    expect(locateInChat).toHaveBeenCalledWith(CONV, 20);
+  });
+
+  it("今天本地没有且没拿到天表 → 说需要联网，不宣布「今天没有消息」也不跳最新", () => {
+    const setToast = vi.fn(), locateInChat = vi.fn();
+    const { result } = mount({ localComplete: false, online: false, allMessages: [at(1, 1_600_000_000_000)], setToast, locateInChat });
+    act(() => result.current.jumpToToday());
+    expect(locateInChat).not.toHaveBeenCalled();
+    expect(setToast).toHaveBeenCalledWith(expect.stringContaining("联网"));
+  });
+
+  it("本地齐全：行为不变（今天没有 → 跳最近一条并说明）", () => {
+    const locateInChat = vi.fn();
+    const { result } = mount({ localComplete: true, online: true, allMessages: [at(1, 1_600_000_000_000)], locateInChat });
+    act(() => result.current.jumpToToday());
+    expect(locateInChat).toHaveBeenCalledWith(CONV, 1);
+  });
+});

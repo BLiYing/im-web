@@ -890,8 +890,9 @@ export class IMClient extends IMRestApi {
         requestedConvs.forEach((convId) => this.syncingConvs.delete(convId));
         for (const conv of d.conversations || []) {
           const pageMsgs: ChatMessage[] = [];
-          for (const m of conv.messages || []) this.processIncoming(m, false, (msg) => pageMsgs.push(msg));
           const convId = typeof conv.conv_id === "string" ? conv.conv_id : "";
+          const before = this.syncedSeq.get(convId) ?? 0; // 必须在逐条处理前读：processIncoming 会逐条推游标（syncRespContiguous.test.ts）
+          for (const m of conv.messages || []) this.processIncoming(m, false, (msg) => pageMsgs.push(msg));
           if (!convId) continue;
           // head 快照：服务端会话真实最新位点（仅在带了 max_gap 时下发）。↓N 计数与"还差多少"都用它。
           const head = Number(conv.head_conv_seq) || 0;
@@ -913,7 +914,6 @@ export class IMClient extends IMRestApi {
           // （G2 history_visible 抬入群下界、「仅为我删除」隐藏项）。据此把游标直接推过这些永远拿不到的
           // 可见性空洞——不能用 latest_conv_seq（只记实际下发的最大序号，会漏跳过的空洞导致游标永久卡死）。
           const covered = Number(conv.covered_conv_seq) || 0;
-          const before = this.syncedSeq.get(convId) ?? 0;
           const next = nextSyncCursor(before, covered);
           if (next > before) {
             this.updateSynced(convId, next);

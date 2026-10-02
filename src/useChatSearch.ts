@@ -348,6 +348,9 @@ export function useChatSearch(d: ChatSearchDeps) {
       return;
     }
     const hit = list.find((m) => m.timestamp >= dayStart);
+    // 有缺口又没有服务端天表（离线 / 拉取失败）：「当天或之后第一条」会跳过缺口落到别的日子，而「没有消息」也可能就在缺口里——
+    // 只认当天；找不到如实说需要联网，不谎称「已跳到最近的 X」/「没有消息」（对齐 Android，§4.9 第 4 项）。
+    if (querySource !== "local" && (!hit || !isSameDay(hit.timestamp, dayStart))) { setToast(t("conv.query.need_network")); return; }
     if (!hit) { setToast(t("chat.search.day_no_messages", { label })); return; }
     setCalendarOpen(false);
     if (!isSameDay(hit.timestamp, dayStart)) {
@@ -361,6 +364,12 @@ export function useChatSearch(d: ChatSearchDeps) {
     const list = searchableMsgs();
     const hit = list.find((m) => m.timestamp >= now.getTime());
     if (hit) { setCalendarOpen(false); locateInChat(convId, hit.convSeq); return; }
+    if (querySource !== "local") {
+      // 有缺口时「今天有没有消息」本地答不了：服务端天表里有今天就按它跳；天表没拿到（离线 / 失败）就不能宣布「今天没有」
+      const sd = serverFirstSeqOfDay(now.getTime());
+      if (sd > 0) { setCalendarOpen(false); locateInChat(convId, sd); return; }
+      if (serverDays.length === 0) { setToast(t("conv.query.need_network")); return; }
+    }
     const last = list[list.length - 1]; // 今天无消息 → 跳最近一条（更早）
     if (!last) { setToast(t("chat.search.no_messages")); return; }
     setCalendarOpen(false);

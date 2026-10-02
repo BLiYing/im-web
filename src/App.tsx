@@ -46,6 +46,9 @@ import { HomeSearchResults } from "./components/HomeSearchResults";
 import { highlightText } from "./searchHighlight";
 import { hitSnippet } from "./searchPredicate";
 import { useChatSearch } from "./useChatSearch";
+import { useMediaServerPaging } from "./useMediaServerPaging";
+import { useViewerNav } from "./useViewerNav";
+import { pickQuerySource } from "./convQuerySource";
 import { useMediaDownload } from "./useMediaDownload";
 import { useMediaSend } from "./useMediaSend";
 import { useVoiceSend } from "./useVoiceSend";
@@ -1907,37 +1910,18 @@ export default function App() {
     clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
   });
 
-  // 任务3 · 查看器媒体时间线：当前会话全部图/视频按时序混排，供查看器左右翻页（Telegram 式）。
-  // 口径与媒体库一致（image|video && 未撤回 && content 非空）；仅覆盖**内存中已加载**的消息——翻到头即停，
-  // 不自动拉更早（第一版约定）。合成消息（收藏/记录预览：convSeq=0 且不在会话流内）mediaId 找不到 → 不显箭头、不翻页。
-  //
-  // 稳定标识 mediaId：**必须用 convSeq**（会话内唯一，收到/同步的消息都有）。绝不能用 clientMsgId——
-  // 入站消息（别人发的 + 自己刷新后重新同步的）在 imSdk.processIncoming 里根本不写 clientMsgId（全为 undefined），
-  // 一旦拿它 findIndex，会一律命中"第一条 undefined"的媒体，导致点最后一张却定位到最前、翻页错乱/卡死。
-  // 仅本地待发件（convSeq=0）无 convSeq，回退用其本地生成的 clientMsgId。见 album.ts msgKey。
-  const viewerList = viewer
-    ? messages.filter((mm) => isViewableMedia(mm) && !!mm.content)
-    : [];
-  const viewerIdx = viewer ? viewerList.findIndex((mm) => msgKey(mm) === msgKey(viewer.m)) : -1;
-  const goViewer = (delta: number) => {
-    if (viewerIdx < 0) return;
-    const ni = viewerIdx + delta;
-    if (ni < 0 || ni >= viewerList.length) return;
-    setViewerMore(false); // 翻页收起「更多」浮层，避免停留在上一张的菜单上
-    setViewer((v) => (v ? { m: viewerList[ni], fromGallery: v.fromGallery } : v));
-  };
-  useEffect(() => {
-    if (!viewer) return;
-    const onKey = (e: KeyboardEvent) => {
-      // 视频获焦时把 ←/→ 让给原生播放器做 ±5s 跳转，不劫持为翻页（点箭头仍可翻页）。
-      if (document.activeElement instanceof HTMLVideoElement) return;
-      if (e.key === "ArrowLeft") { e.preventDefault(); goViewer(-1); }
-      else if (e.key === "ArrowRight") { e.preventDefault(); goViewer(1); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, viewerIdx, viewerList.length]);
+  // 会话媒体的服务端续拉（§4.9 第 5 项）：本地有缺口且在线时，查看器翻页 / 媒体库在本地那一段之上往更旧续拉；
+  // 本地齐全时 enabled=false，与改造前完全一样。
+  const mediaPaging = useMediaServerPaging({
+    convId,
+    enabled: pickQuerySource(localComplete, state === "connected") === "server",
+    oldestLocalSeq: messages.find((mm) => mm.convSeq > 0)?.convSeq ?? 0,
+    getToken: () => clientRef.current?.authToken ?? "",
+    clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
+  });
+
+  // 任务3 · 查看器媒体时间线 + 左右翻页（含「翻过最旧一张去服务端续拉」）：见 useViewerNav。
+  const { viewerList, viewerIdx, goViewer } = useViewerNav({ viewer, setViewer, messages, mediaPaging, setViewerMore, setToast, t });
   // 首条未读下标：conv_seq > read_seq 的第一条对端消息（精确，CHAT_UX §4）。
   // **必须与服务端未读口径一致**（M4-8）：服务端 unreadCount 排除 msg_op 事件行与 system 系统消息，
   // 这里若只按 from !== uid 找，分割线会落到不计未读的系统行上——
@@ -2982,6 +2966,7 @@ export default function App() {
           mediaKey={msgKey(viewer.m)}
           viewerIdx={viewerIdx}
           viewerCount={viewerList.length}
+          hasOlder={mediaPaging.hasMore}
           chatTitle={chatTitle}
           more={viewerMore}
           onClose={() => { setViewer(null); setViewerMore(false); }}
@@ -3042,7 +3027,10 @@ export default function App() {
       {/* 会话媒体库：见 components/modals/GalleryModal（items 为倒序可视媒体，最新在前）。 */}
       {galleryOpen && (
         <GalleryModal
-          items={[...messages].filter(isViewableMedia).reverse()}
+          items={[...mediaPaging.merge(messages.filter(isViewableMedia))].reverse()}
+          hasMore={mediaPaging.hasMore}
+          loadingMore={mediaPaging.loading}
+          onLoadMore={() => { void mediaPaging.loadOlder().then((added) => { if (added === null) setToast(t("media.viewer.offline_partial_notice")); }); }}
           gateOf={mediaGate}
           onGate={onGateTap}
           onOpen={(mm) => { setGalleryOpen(false); setViewer({ m: mm, fromGallery: true }); }}

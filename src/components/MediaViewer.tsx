@@ -8,7 +8,7 @@ import { ZoomableImage } from "./ZoomableImage";
  *  纯展示：所有派生态（可播/已开始/失效/不支持/翻页位点）与动作由 App 注入，逐字保持原交互。 */
 export function MediaViewer({
   m, fromGallery, videoUnplayable, videoStarted, isExpired, unsupported, mediaKey,
-  viewerIdx, viewerCount, chatTitle, more,
+  viewerIdx, viewerCount, hasOlder, chatTitle, more,
   onClose, onDismissMore, onStartVideo, onVideoError, onImageError,
   onNav, onToggleMore, onOpenGallery, onLocate, onFavorite, onCopy, onForward, onDelete,
 }: {
@@ -21,6 +21,8 @@ export function MediaViewer({
   mediaKey: string; // msgKey(m)：翻页换元素时重挂
   viewerIdx: number; // <0 表示不在会话媒体时间线内（如收藏/记录进入）
   viewerCount: number;
+  /** 服务端还有更旧的媒体（本地有缺口时续拉）：第一张上也要给左箭头。 */
+  hasOlder?: boolean;
   chatTitle: string;
   more: boolean;
   onClose: () => void;
@@ -93,7 +95,7 @@ export function MediaViewer({
         <ZoomableImage key={mediaKey} src={m.content} alt={tr("chat.media.alt_large")} onTap={onDismissMore} onError={onImageError} />
       )}
       {/* 任务3 · 左右翻页箭头：仅当前查看项在会话媒体时间线内（viewerIdx>=0）且有相邻项时显示。翻到头即停。 */}
-      {viewerIdx > 0 && (
+      {(viewerIdx > 0 || (viewerIdx === 0 && hasOlder)) && (
         <button className="viewer-nav prev" title={tr("media.viewer.prev")}
                 onClick={(e) => { e.stopPropagation(); onNav(-1); }}><ChevronLeft size={28} /></button>
       )}
