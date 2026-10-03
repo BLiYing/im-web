@@ -49,6 +49,7 @@ export function useDetailServerArchive(o: {
   const genRef = useRef(0);
   const busyRef = useRef<Record<ArchiveKind, boolean>>({ media: false, file: false, voice: false });
   const listRef = useRef<ChatMessage[]>([]);
+  const loadedRef = useRef<Record<ArchiveKind, boolean>>({ media: false, file: false, voice: false });  // 该类要到过第一页没有
   const oRef = useRef(o);
   oRef.current = o;
 
@@ -64,6 +65,7 @@ export function useDetailServerArchive(o: {
       .then((page) => {
         if (gen !== genRef.current) return;   // 会话 / 开关在途中变了：这页属于上一次
         cursorRef.current[k] = page.next_cursor;
+        loadedRef.current[k] = true;
         const more = !!page.has_more && page.next_cursor > 0;
         const items = page.items.map((i) => mediaItemToMessage(cur.convId, i));
         listRef.current = unionByConvSeq(listRef.current, items);
@@ -77,16 +79,30 @@ export function useDetailServerArchive(o: {
       .finally(() => { if (gen === genRef.current) busyRef.current[k] = false; });
   }, []);
 
-  // 换会话 / 开关翻转：整份重置；开着就把三类的第一页都要一遍（页签要靠它决定出不出现）
+  // 换会话：整份重置（列表、游标、busy、状态）。开着就把三类的第一页都要一遍（页签要靠它决定出不出现）。
   useEffect(() => {
     genRef.current += 1;
     cursorRef.current = { media: 0, file: 0, voice: 0 };
     busyRef.current = { media: false, file: false, voice: false };
+    loadedRef.current = { media: false, file: false, voice: false };
     listRef.current = [];
     setServer({ convId: o.convId, list: [] });
     setState(fresh());
-    if (o.enabled) for (const k of ARCHIVE_KINDS) loadMore(k);
-  }, [o.convId, o.enabled, loadMore]);
+    if (oRef.current.enabled) for (const k of ARCHIVE_KINDS) loadMore(k);
+  }, [o.convId, loadMore]);
+  // enabled 翻转（掉线 / 重连 / 缺口补齐）**不清**已拉到的——它们是事实（对齐 useMediaServerPaging 的策略）：
+  // 清掉的话页签闪一下、滚动位置和已翻的页数全丢。只丢在途的页、复位各类「还有没有更多」，变 true 时只补**从没要过**的类。
+  const firstEnabledRun = useRef(true);
+  useEffect(() => {
+    if (firstEnabledRun.current) { firstEnabledRun.current = false; return; }
+    genRef.current += 1;
+    busyRef.current = { media: false, file: false, voice: false };
+    setState((s) => ({ media: { ...s.media, loading: false }, file: { ...s.file, loading: false }, voice: { ...s.voice, loading: false } }));
+    if (o.enabled) {
+      setState((s) => ({ media: { ...s.media, hasMore: true }, file: { ...s.file, hasMore: true }, voice: { ...s.voice, hasMore: true } }));
+      for (const k of ARCHIVE_KINDS) if (!loadedRef.current[k]) loadMore(k);
+    }
+  }, [o.enabled, loadMore]);
 
   const merge = useCallback(
     (local: ChatMessage[]) => (server.convId === o.convId ? unionByConvSeq(local, server.list) : local),

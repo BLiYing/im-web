@@ -59,8 +59,10 @@ export function useMediaServerPaging(o: {
     loadingRef.current = false;
     cursorRef.current = 0;
     setOlder({ convId: o.convId, list: [] }); setLoading(false);
-    newerRef.current = []; loadingNewerRef.current = false;
+    newerRef.current = []; loadingNewerRef.current = false; newerCursorRef.current = 0;
     setNewer({ convId: o.convId, list: [] });
+    // 同 enabled 下换会话：上个会话翻到头 / 失败置的 false 不能带进来（[o.enabled] effect 此时不会跑）
+    setHasMore(oRef.current.enabled); setHasMoreNewer(oRef.current.enabled);
   }, [o.convId]);
   useEffect(() => {
     genRef.current += 1;   // enabled 变了：在途的页属于上一种状态，丢掉
@@ -100,6 +102,7 @@ export function useMediaServerPaging(o: {
     }
   }, []);
 
+  const newerCursorRef = useRef(0);   // 服务端上一页给的游标（has_more 时 = 本页最大 conv_seq，即使该页被过滤成空也会前进）
   const loadNewer = useCallback(async (): Promise<ChatMessage[] | null> => {
     const cur = oRef.current;
     if (!cur.enabled || loadingNewerRef.current) return [];
@@ -108,13 +111,20 @@ export function useMediaServerPaging(o: {
     loadingNewerRef.current = true;
     const gen = genRef.current;
     try {
-      const after = Math.max(cur.newestLocalSeq, newerRef.current[newerRef.current.length - 1]?.convSeq ?? 0);
-      const page = await fetchConvMedia(token, cur.convId, "media", { after, limit: 60, clearedUpTo: cur.clearedUpTo });
-      if (gen !== genRef.current) return [];
-      const { newer: next, added } = appendNewerMedia(cur.newestLocalSeq, newerRef.current, page.items.map((i) => mediaItemToMessage(cur.convId, i)));
-      newerRef.current = next; setNewer({ convId: cur.convId, list: next });
-      setHasMoreNewer(!!page.has_more && added.length > 0);   // 到头 / 一条没并进来 → 停，别空转
-      return added;
+      // 服务端空页却仍 has_more（逐人隐藏过滤掉一整页）：接着往后翻，最多再翻 MAX_EMPTY_MEDIA_PAGES 页（同 loadOlder）
+      for (let attempt = 0; attempt <= MAX_EMPTY_MEDIA_PAGES; attempt++) {
+        const after = Math.max(cur.newestLocalSeq, newerRef.current[newerRef.current.length - 1]?.convSeq ?? 0, newerCursorRef.current);
+        if (after <= 0) return [];   // 没有起点就别问：after=0 在服务端是「从下界起」，不是「最新」
+        const page = await fetchConvMedia(token, cur.convId, "media", { after, limit: 60, clearedUpTo: cur.clearedUpTo });
+        if (gen !== genRef.current) return [];
+        if (page.has_more && page.next_cursor > 0) newerCursorRef.current = page.next_cursor;
+        const { newer: next, added } = appendNewerMedia(cur.newestLocalSeq, newerRef.current, page.items.map((i) => mediaItemToMessage(cur.convId, i)));
+        if (added.length === 0 && page.has_more) continue;
+        newerRef.current = next; setNewer({ convId: cur.convId, list: next });
+        setHasMoreNewer(!!page.has_more && added.length > 0);   // 到头 / 一条没并进来 → 停，别空转
+        return added;
+      }
+      return [];   // 连翻 6 页全是空页：只结束这一次，下一次还能接着要
     } catch {
       if (gen === genRef.current) setHasMoreNewer(false);   // 离线 / 失败：停在已有的那段，由调用方说一句
       return null;

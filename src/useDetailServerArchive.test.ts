@@ -84,4 +84,30 @@ describe("useDetailServerArchive", () => {
     expect(result.current.merge([local(1)]).map((m) => m.convSeq)).toEqual([1]);
     expect(result.current.hasMore("media")).toBe(false);   // 旧页的 has_more=true 不能污染新会话的状态
   });
+
+  it("enabled 翻转（掉线→重连）：已拉到的留着，不重发已要过的类", async () => {
+    fetchConvMedia.mockResolvedValue({ conv_id: "g", items: [item(30)], next_cursor: 0, has_more: false });
+    const { result, rerender } = renderHook((p) => useDetailServerArchive(p), { initialProps: base });
+    await flush();
+    expect(fetchConvMedia).toHaveBeenCalledTimes(3);
+    rerender({ ...base, enabled: false });   // 掉线
+    await flush();
+    expect(result.current.merge([local(10)]).map((m) => m.convSeq).sort((a, b) => a - b)).toEqual([10, 30]);   // 事实别丢
+    rerender({ ...base, enabled: true });    // 重连
+    await flush();
+    expect(fetchConvMedia).toHaveBeenCalledTimes(3);   // 三类都要过第一页：不重发
+    expect(result.current.merge([local(10)]).map((m) => m.convSeq).sort((a, b) => a - b)).toEqual([10, 30]);
+  });
+
+  it("enabled 翻转时从没要成功过的类，重连后补要", async () => {
+    fetchConvMedia.mockImplementation(() => Promise.reject(new Error("offline")));
+    const { rerender } = renderHook((p) => useDetailServerArchive(p), { initialProps: base });
+    await flush();
+    fetchConvMedia.mockReset();
+    fetchConvMedia.mockResolvedValue({ conv_id: "g", items: [], next_cursor: 0, has_more: false });
+    rerender({ ...base, enabled: false });
+    rerender({ ...base, enabled: true });
+    await flush();
+    expect(fetchConvMedia).toHaveBeenCalledTimes(3);   // 三类第一页都没成功过：重连后各补一次
+  });
 });

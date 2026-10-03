@@ -35,6 +35,7 @@ export function useViewerNav(o: {
       void mediaPaging.loadOlder().then((added) => {
         if (added === null) { setToast(t("media.viewer.offline_partial_notice")); return; }
         const target = added[added.length - 1];
+        setViewerMore(false);
         // 等待期间用户可能已翻走 / 关了：只在仍停在发起时那一张才落到新增的那批里（否则会把人拽回去）
         if (target) setViewer((v) => (v && msgKey(v.m) === fromKey ? { m: target, fromGallery: v.fromGallery } : v));
       });
@@ -46,6 +47,7 @@ export function useViewerNav(o: {
       void mediaPaging.loadNewer().then((added) => {
         if (added === null) { setToast(t("media.viewer.offline_partial_notice")); return; }
         const target = added[0];
+        setViewerMore(false);
         if (target) setViewer((v) => (v && msgKey(v.m) === fromKey ? { m: target, fromGallery: v.fromGallery } : v));
       });
       return;

@@ -152,10 +152,41 @@ describe("useMediaServerPaging", () => {
     expect(result.current.hasMoreNewer).toBe(false);
   });
 
-  it("向更新：服务端说 has_more 却一条都没并进来（重复页 / 全被过滤）→ 停，别空转", async () => {
+  it("向更新：服务端说 has_more 却一直没有可并进来的（重复页 / 全被过滤）→ 只翻到上限就停下这一次，不无界空转", async () => {
     fetchConvMedia.mockResolvedValue({ conv_id: "g", items: [item(250)], next_cursor: 250, has_more: true });   // 250 不比本地最新 300 更新
     const { result } = renderHook(() => useMediaServerPaging(base));
-    await act(async () => { await result.current.loadNewer(); });
+    let added: ChatMessage[] | null = null;
+    await act(async () => { added = await result.current.loadNewer(); });
+    expect(added).toEqual([]);
+    expect(fetchConvMedia).toHaveBeenCalledTimes(6);   // 1 + MAX_EMPTY_MEDIA_PAGES
+  });
+
+  it("同 enabled 下换会话：上个会话置假的 hasMore / hasMoreNewer 回到 true", async () => {
+    fetchConvMedia.mockImplementation(() => Promise.reject(new Error("offline")));
+    const { result, rerender } = renderHook((p) => useMediaServerPaging(p), { initialProps: base });
+    await act(async () => { await result.current.loadOlder(); await result.current.loadNewer(); });
+    expect(result.current.hasMore).toBe(false);
     expect(result.current.hasMoreNewer).toBe(false);
+    rerender({ ...base, convId: "other" });   // enabled 没变
+    expect(result.current.hasMore).toBe(true);
+    expect(result.current.hasMoreNewer).toBe(true);
+  });
+
+  it("向更新：空页却仍 has_more（逐人隐藏）→ 用服务端游标接着往后翻，有上限", async () => {
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [], next_cursor: 350, has_more: true });
+    fetchConvMedia.mockResolvedValueOnce({ conv_id: "g", items: [item(360)], next_cursor: 0, has_more: false });
+    const { result } = renderHook(() => useMediaServerPaging(base));
+    let added: ChatMessage[] | null = null;
+    await act(async () => { added = await result.current.loadNewer(); });
+    expect(fetchConvMedia.mock.calls[1][3]).toMatchObject({ after: 350 });   // 第二次用的是服务端游标，不是原地重复
+    expect(added!.map((m) => m.convSeq)).toEqual([360]);
+  });
+
+  it("向更新：没有起点（newestLocalSeq=0）不发请求——after=0 在服务端是「从下界起」", async () => {
+    const { result } = renderHook(() => useMediaServerPaging({ ...base, newestLocalSeq: 0 }));
+    let added: ChatMessage[] | null = null;
+    await act(async () => { added = await result.current.loadNewer(); });
+    expect(added).toEqual([]);
+    expect(fetchConvMedia).not.toHaveBeenCalled();
   });
 });
