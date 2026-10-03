@@ -3166,10 +3166,12 @@ export default function App() {
       {contactDraft && (
         <div className="modal-mask" onClick={() => setContactDraft(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>{t("contact.edit.title")}</h3>
-            <label>{t("contact.edit.remark_label")}<input value={contactDraft.remark} maxLength={32} placeholder={t("contact.edit.remark_placeholder")}
-              onChange={(e) => setContactDraft({ ...contactDraft, remark: e.target.value })} /></label>
-            <div className="modal-hint">{t("contact.edit.remark_hint")}</div>
+            {/* 文案与 iOS editRemark 对齐：标题=「设置备注名」，正文说明在标题下，输入框无标签、占位=对方昵称 */}
+            <h3>{t("contact.edit.remark_placeholder")}</h3>
+            <div className="modal-hint">{t("chat.detail.remark_alert_message")}</div>
+            <input value={contactDraft.remark} maxLength={32}
+              placeholder={conversations.find((c) => !c.is_group && c.peer === contactDraft.peer)?.peer_nickname || ""}
+              onChange={(e) => setContactDraft({ ...contactDraft, remark: e.target.value })} />
             <div className="modal-actions">
               <button className="link" onClick={() => setContactDraft(null)}>{t("common.cancel")}</button>
               <button className="mini-btn" onClick={() => void saveRemark()}>{t("common.save")}</button>

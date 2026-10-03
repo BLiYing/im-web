@@ -333,6 +333,10 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
    或跟在短正文后面悬在气泡中间（2026-09-15 用户报）。同行时的最小间距改由 padding-left 给（auto 的最小值是 0）。 */
 .bmeta { font-size: 11px; color: var(--meta-time); margin-left: auto; padding-left: var(--space-2); align-self: flex-end; white-space: nowrap; }
 .bmeta .ck { color: var(--meta-time); }
+/* 文本气泡（对齐 Android：正文在上、时间/勾在其下靠右，间距 2、字号 10）。竖排后 bmeta 不再与正文同行抢宽，
+   气泡宽只由正文/引用/链接卡决定；短文本时时间落在气泡右下，不再挤在字后。仅 text，其它气泡版式不变。 */
+.bubble.text-stack { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.bubble.text-stack > .bmeta { align-self: flex-end; margin: 2px 0 0; padding-left: 0; font-size: 10px; }
 .bmeta .ck.read { color: var(--check-read); }
 .bmeta .failed { color: var(--danger); }
 /* 通话记录气泡（CALL_RECORD_UX_SKETCH §03）：普通气泡壳，竖内边距 10（文本气泡 6，多 4 撑出 ≥40 的触控高）；
@@ -1368,6 +1372,9 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .detail-row-val.muted { color: var(--text-secondary); }
 .detail-row .switch { margin-left: auto; }
 .detail-row-chev { color: var(--text-secondary); flex-shrink: 0; }
+/* lucide ChevronRight 在 24 视口里笔画只到 x=15，16px 渲染下右侧有 ~5px 内边空白；
+   抵掉它，箭头视觉右缘才与无箭头行（用户名）的值右缘对齐（2026-10-03 用户报「微调对齐」）。 */
+.detail-row > .detail-row-chev { margin-right: -5px; }
 /* 无 detail-row-val 的行（如「群二维码」）箭头右对齐；有 val 的行不能加，否则两个
    margin-left:auto 会平分空白把 val 挤到中间。故仅给这类行的箭头单独标记。 */
 .detail-row-chev.end { margin-left: auto; }

@@ -4,6 +4,7 @@
 // - **reactive 值与 App 内闭包**（messages/selectMode/mediaGate/senderLabel/renderMessageText/...）走 props；
 // - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
+import { bubbleLayoutClass } from "../bubbleLayout";
 import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { useT, useLang, type Args, type Lang } from "../i18n";
 import type { ChatMessage } from "../sdk/protocol";
@@ -314,7 +315,7 @@ export function MessageList(p: MessageListProps) {
                         title={m.note || (canResend ? tr("chat.message.send_failed_resend") : tr("common.send_failed"))}
                         onClick={() => resendMessage(m)}>!</button>
               )}
-              <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${callView ? " call-bubble" : ""}${menuActive ? " ctx-active" : ""}`}
+              <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${callView ? " call-bubble" : ""}${callView ? "" : bubbleLayoutClass(m.contentType)}${menuActive ? " ctx-active" : ""}`}
                 onClick={callView && !selectMode ? () => { if (!placeSingleCall(peer, callView.icon === "video")) setToast(tr("chat.message.call_unavailable")); } : undefined}
                 onContextMenu={(e) => { if (selectMode) return; e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, m }); }}>
                 {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
@@ -578,7 +579,6 @@ export function MessageList(p: MessageListProps) {
     </>
   );
 }
-
 /** 系统消息一行：有分段就逐段渲染（名字换本地显示名、染色可点），没有就回退整句。P3 起 sysEvent
  *  认识时先用 buildGroupSysSegments 按 App 语言重建分段（喂给同一套渲染），不认识/为空回退 m.sysSegments。 */
 function renderSysLine(
