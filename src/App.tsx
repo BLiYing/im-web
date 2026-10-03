@@ -3195,7 +3195,7 @@ export default function App() {
         <FriendRequestModal
           name={friendReqDraft.name}
           // 预填「我是<我的昵称>」：这是**发出去**的内容，故取公开昵称而不是任何本地显示名。
-          defaultHello={myInfo?.nickname ? `我是${myInfo.nickname}` : ""}
+          defaultHello={myInfo?.nickname ? t("friend.request.hello_prefill", { name: myInfo.nickname }) : ""}
           busy={busyUser === friendReqDraft.userId}
           onSend={(hello) => {
             const { userId } = friendReqDraft;
