@@ -787,9 +787,9 @@ export default function App() {
           setToast(t("group.event.join_request_new"));
           return;
         }
-        // 被移出（remove 且 target=自己）或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
-        if ((event === "remove" && target === uidRef.current) || event === "dissolve") {
-          setToast(t(event === "dissolve" ? "group.event.dissolved" : "group.event.removed"));
+        // 被移出/别端退群（leave，服务端连退群者本人也推）且 target=自己，或群被解散（dissolve，管理端处置，对全体生效）→ 提示并退出该会话。
+        if (((event === "remove" || event === "leave") && target === uidRef.current) || event === "dissolve") {
+          setToast(t(event === "dissolve" ? "group.event.dissolved" : event === "leave" ? "group.event.left" : "group.event.removed"));
           setDetail((d) => (d?.convId === cid ? null : d));
           if (currentConvRef.current === cid) {
             currentConvRef.current = "";
