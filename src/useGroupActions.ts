@@ -66,7 +66,7 @@ export function useGroupActions(services: AppServices) {
 
   // 我在本群的昵称（G1，任意成员）：群内可见，留空恢复默认。
   const doEditMyGroupNickname = useCallback(async (gp: GroupInfo) => {
-    const nick = await askPrompt(t("chat.detail.my_group_nickname"), gp.my_nickname ?? "", { placeholder: t("group.ops.my_nickname_placeholder"), okText: t("common.save"), maxLength: 20 });
+    const nick = await askPrompt(t("chat.detail.my_group_nickname"), gp.my_nickname ?? "", { hint: t("group.info.my_nickname_hint"), okText: t("common.save"), maxLength: 20 });
     if (nick === null || nick.trim() === (gp.my_nickname ?? "")) return;
     await doGroupAction(gp.conv_id, () => clientRef.current!.setGroupMyNickname(gp.conv_id, nick.trim()));
   }, [askPrompt, clientRef, doGroupAction]);

@@ -29,6 +29,7 @@ export function PromptDialog({ dlg, set }: { dlg: PromptDlg; set: (v: PromptDlg 
   return (
     <Modal onClose={() => { dlg.resolve(null); set(null); }}>
         <h3>{dlg.title}</h3>
+        {dlg.hint && <div className="modal-hint">{dlg.hint}</div>}
         {dlg.multiline ? (
           <textarea autoFocus className="modal-textarea" value={dlg.value} placeholder={dlg.placeholder} maxLength={dlg.maxLength}
                     onChange={(e) => set({ ...dlg, value: e.target.value })}

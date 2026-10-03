@@ -5,7 +5,7 @@
 // - 其余动作多定义在 App 的 login 早退之后（plain fn，不能进 memo 化 context）→ 按组走 props（此前登记的「~35 props」路线，用户拍板整块抽）。
 // 护栏：DetailPanel.test.tsx + DetailPanelParts.test.tsx（子件）。
 import type { DetailArchive } from "../useDetailServerArchive";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
@@ -21,6 +21,7 @@ import { isMutedNow, muteUntilText } from "../muteState";
 import { useAppServices } from "../AppServicesContext";
 import { useChatActions } from "../ChatActionsContext";
 import { Avatar } from "./Avatar";
+import { AnchoredMenu } from "./AnchoredMenu";
 import { MuteMenu } from "./MuteMenu";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { AdminListPanel } from "./AdminListPanel";
@@ -149,7 +150,18 @@ export function DetailPanel(p: DetailPanelProps) {
   const [groupCallPick, setGroupCallPick] = useState(false);
   // 免打扰时长子菜单（NOTIFICATIONS_P1_DESIGN §4.1/§4.2）：点行恒弹菜单，已免打扰时最上面多一项
   // 红色「取消免打扰」（用于「把 8 小时改成永久」这类调整），未免打扰时只有时长列表。
-  const [muteMenuOpen, setMuteMenuOpen] = useState(false);
+  const [muteMenuAt, setMuteMenuAt] = useState<{ x: number; y: number } | null>(null);
+  // 菜单位置只在打开时算一次：Esc / 缩放窗口 / 程序性切会话（detail 换了而组件不卸载）都直接收起，
+  // 别让它残留在旧坐标上、或对新会话生效。与 detailMore / memberMenu 的 Esc 收起同口径。
+  useEffect(() => {
+    if (!muteMenuAt) return;
+    const close = () => setMuteMenuAt(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", close); };
+  }, [muteMenuAt]);
+  useEffect(() => { setMuteMenuAt(null); }, [p.detail.convId]);
   const startCall = (peer: string, video: boolean) => {
     if (!placeSingleCall(peer, video)) setToast(tr("chat.message.call_unavailable"));
   };
@@ -392,30 +404,29 @@ export function DetailPanel(p: DetailPanelProps) {
                 <div className="detail-row"><span className="detail-row-ic"><Pin size={18} /></span><span>{tr("chat.detail.pinned")}</span>
                   <button className={`switch ${pinned ? "on" : ""}`} disabled={!conv} onClick={() => conv && setConvPinned(conv, !pinned)} /></div>
                 <div className="detail-row-anchor">
-                  <button className="detail-row" disabled={!conv} onClick={() => conv && setMuteMenuOpen((v) => !v)}>
+                  <button className="detail-row" disabled={!conv} onClick={(e) => {
+                    if (!conv) return;
+                    // 菜单用 fixed 定位挂在视口坐标上：`.detail-card` 是 overflow:hidden，absolute 子菜单会被卡片裁掉
+                    // （最下面的「永久」看不见）。锚点取这一行的右下角（菜单右对齐），放不下 AnchoredMenu 会自己上翻。
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setMuteMenuAt((v) => (v ? null : { x: Math.max(8, r.right - 220), y: r.bottom + 6 }));
+                  }}>
                     <span className="detail-row-ic"><BellOff size={18} /></span><span>{tr("chat.detail.muted")}</span>
                     <span className="detail-row-val">{muteValue}</span>
                     <ChevronRight size={16} className="detail-row-chev" />
                   </button>
-                  {muteMenuOpen && conv && (
-                    <div className="menu-card" onClick={(e) => e.stopPropagation()}>
-                      <MuteMenu itemClassName="menu-item"
-                        onUnmute={muted ? () => { setMuteMenuOpen(false); setConvMuted(conv, false); } : undefined}
-                        onPick={(until) => { setMuteMenuOpen(false); setConvMuted(conv, true, until); }} />
-                    </div>
+                  {muteMenuAt && conv && (
+                    <>
+                      {/* 透明遮罩：点菜单外任意位置收起（此前点空白不会关，菜单一直挂着） */}
+                      <div className="menu-backdrop" onWheel={() => setMuteMenuAt(null)} onClick={() => setMuteMenuAt(null)} onContextMenu={(e) => { e.preventDefault(); setMuteMenuAt(null); }} />
+                      <AnchoredMenu x={muteMenuAt.x} y={muteMenuAt.y} className="menu-card menu-card-fixed">
+                        <MuteMenu itemClassName="menu-item"
+                          onUnmute={muted ? () => { setMuteMenuAt(null); setConvMuted(conv, false); } : undefined}
+                          onPick={(until) => { setMuteMenuAt(null); setConvMuted(conv, true, until); }} />
+                      </AnchoredMenu>
+                    </>
                   )}
                 </div>
-                {/* 进「群管理」时显式复位管理员二级面板：不复位的话，上次从管理员页直接退出抽屉后，
-                    下次点「群管理」会一步跨进管理员列表（层级状态是两个独立布尔，不会自己归位）。 */}
-                {canManage && (
-                  <button className="detail-row" onClick={() => { setAdminPanelOpen(false); setManageOpen(true); }}>
-                    <span className="detail-row-ic"><Settings2 size={18} /></span><span>{tr("group.manage.title")}</span>
-                    {(gp?.pending_count ?? 0) > 0
-                      ? <span className="detail-badge">{gp!.pending_count}</span>
-                      : <span className="detail-row-val muted">{tr("chat.detail.manage_hint")}</span>}
-                    <ChevronRight size={16} className="detail-row-chev" />
-                  </button>
-                )}
                 {d.isGroup && canInviteHere && (
                   <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
                     <span className="detail-row-ic"><QrCode size={18} /></span><span>{tr("qr.card.group_title_code")}</span>
@@ -426,6 +437,18 @@ export function DetailPanel(p: DetailPanelProps) {
                   <button className="detail-row" onClick={() => void openGroupCard(d.convId, true)}>
                     <span className="detail-row-ic"><Link2 size={18} /></span><span>{tr("qr.card.group_title_link")}</span>
                     <ChevronRight size={16} className="detail-row-chev end" />
+                  </button>
+                )}
+                {/* 群管理入口排在二维码 / 邀请链接**下面**，对齐 iOS（IMDetailSettingsRowManage 在行序最末）。 */}
+                {/* 进「群管理」时显式复位管理员二级面板：不复位的话，上次从管理员页直接退出抽屉后，
+                    下次点「群管理」会一步跨进管理员列表（层级状态是两个独立布尔，不会自己归位）。 */}
+                {canManage && (
+                  <button className="detail-row" onClick={() => { setAdminPanelOpen(false); setManageOpen(true); }}>
+                    <span className="detail-row-ic"><Settings2 size={18} /></span><span>{tr("group.manage.title")}</span>
+                    {(gp?.pending_count ?? 0) > 0
+                      ? <span className="detail-badge">{gp!.pending_count}</span>
+                      : <span className="detail-row-val muted">{tr("chat.detail.manage_hint")}</span>}
+                    <ChevronRight size={16} className="detail-row-chev" />
                   </button>
                 )}
               </div>

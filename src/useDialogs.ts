@@ -7,6 +7,8 @@ import { useCallback, useState } from "react";
 export type ConfirmDlg = { message: string; okText: string; cancelText: string; danger: boolean; resolve: (ok: boolean) => void };
 export type PromptDlg = {
   title: string; value: string; placeholder: string; okText: string; maxLength?: number;
+  /** 标题下面单独一行的说明（对齐 iOS/Android 弹窗：群备注「仅你自己可见…」）。 */
+  hint?: string;
   multiline?: boolean; extraAction?: { label: string; value: string; danger?: boolean };
   resolve: (v: string | null) => void;
 };
@@ -30,7 +32,7 @@ export function useDialogs() {
   // 应用内输入框：返回 Promise<string | null>（取消为 null），替代 window.prompt。
   const askPrompt = useCallback(
     (title: string, defaultValue = "", opts?: {
-      placeholder?: string; okText?: string; maxLength?: number;
+      placeholder?: string; okText?: string; maxLength?: number; hint?: string;
       multiline?: boolean; extraAction?: { label: string; value: string; danger?: boolean };
     }) =>
       new Promise<string | null>((resolve) => setPromptDlg({
@@ -39,6 +41,7 @@ export function useDialogs() {
         placeholder: opts?.placeholder ?? "",
         okText: opts?.okText ?? "确定",
         maxLength: opts?.maxLength,
+        hint: opts?.hint,
         multiline: opts?.multiline,
         extraAction: opts?.extraAction,
         resolve,

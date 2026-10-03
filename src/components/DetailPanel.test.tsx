@@ -137,6 +137,19 @@ describe("DetailPanel · 单聊", () => {
     expect(until).toBeLessThanOrEqual(before + 3_600_000 + 5_000);
   });
 
+  // 菜单曾是 absolute 子元素，被 overflow:hidden 的卡片裁掉最后一项，且点空白不关。
+  it("免打扰菜单：永久项在 DOM 里；点空白遮罩 → 菜单收起且不触发 setConvMuted", () => {
+    const p = base();
+    const { getByText, queryByText, container } = mount(p);
+    fireEvent.click(getByText("消息免打扰"));
+    expect(getByText("永久")).toBeTruthy();
+    // 用 fixed 定位（视口坐标）：absolute 子菜单会被 .detail-card 的 overflow:hidden 裁掉最后一项
+    expect(getByText("永久").closest(".menu-card")!.classList.contains("menu-card-fixed")).toBe(true);
+    fireEvent.click(container.ownerDocument.querySelector(".menu-backdrop")!);
+    expect(queryByText("永久")).toBeNull();
+    expect(p.setConvMuted).not.toHaveBeenCalled();
+  });
+
   it("免打扰行：已免打扰显到期文案，菜单顶部多一项红色「取消免打扰」，点它 → setConvMuted(conv,false)", () => {
     const now = Date.now();
     const p = base({ conversations: [peerConv({ muted: true, mute_until: now + 60_000 })] });
@@ -191,6 +204,14 @@ describe("DetailPanel · 群聊", () => {
     expect(getByText("群二维码")).toBeTruthy(); expect(getByText("群邀请链接")).toBeTruthy(); expect(getByText("我在本群的昵称")).toBeTruthy();
     fireEvent.click(getByText("群管理").closest("button")!);
     expect(p.setManageOpen).toHaveBeenCalledWith(true);
+  });
+  // 对齐 iOS 行序（IMDetailSettingsRowManage 在最末）：群管理排在二维码 / 邀请链接**下面**。
+  it("群管理行排在 群二维码 / 群邀请链接 之后（DOM 顺序）", () => {
+    const { getByText } = mount(groupProps());
+    const order = (el: HTMLElement) => el.closest("button")!;
+    const qr = order(getByText("群二维码")), link = order(getByText("群邀请链接")), manage = order(getByText("群管理"));
+    expect(qr.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(link.compareDocumentPosition(manage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
   it("仅管理员可邀请 + 我是普通成员 → 隐藏 群二维码/群邀请链接/群管理", () => {
     const { queryByText } = mount(groupProps({ groupInfos: { g1: gp({ my_role: "member", perm_invite: true }) } }));

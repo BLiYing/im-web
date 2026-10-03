@@ -173,7 +173,7 @@ export function useGroupOps(d: GroupOpsDeps) {
   // 成功后重拉会话列表；conv_update 也会把变更同步到本人其它端与本机列表/标题。
   const doEditGroupRemark = async (gp: GroupInfo) => {
     const cur = (conversations.find((c) => c.conv_id === gp.conv_id)?.remark || "").trim();
-    const v = await askPrompt(t("chat.detail.group_remark"), cur, { placeholder: t("group.ops.remark_placeholder", { name: gp.name }), okText: t("common.save"), maxLength: 30 });
+    const v = await askPrompt(t("chat.detail.group_remark"), cur, { placeholder: gp.name, hint: t("group.info.remark_hint"), okText: t("common.save"), maxLength: 30 });
     if (v === null || v.trim() === cur) return;
     try {
       await clientRef.current?.setConvRemark(gp.conv_id, v.trim());

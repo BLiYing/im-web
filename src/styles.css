@@ -958,6 +958,9 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 
 /* 账号气泡卡片 / 通用卡片菜单（比 ctx-menu 宽）。 */
 .menu-card { position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; width: 220px; padding: 4px; }
+/* 挂在视口坐标上的 menu-card（AnchoredMenu 给 left/top）+ 透明点击遮罩：用于被 overflow:hidden 卡片裁掉的场景（聊天信息页免打扰）。 */
+.menu-card.menu-card-fixed { position: fixed; top: auto; z-index: 61; }
+.menu-backdrop { position: fixed; inset: 0; z-index: 60; background: transparent; }
 .chat-head-right { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
 .chat-anchor { position: relative; }
 .chat-menu { left: auto; right: 0; }
