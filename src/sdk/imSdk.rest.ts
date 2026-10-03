@@ -83,7 +83,7 @@ export abstract class IMRestApi {
   removeGroupMemberWithBan(convId: string, userId: string, ban: "none" | "cooldown" | "forever"): Promise<void> { return groupApi.removeGroupMemberWithBan(this.token, convId, userId, ban); }
   fetchGroupBans(convId: string): Promise<GroupBan[]> { return groupApi.fetchGroupBans(this.token, convId); }
   unbanGroupMember(convId: string, userId: string): Promise<void> { return groupApi.unbanGroupMember(this.token, convId, userId); }
-  inviteToGroup(convId: string, memberIds: string[]): Promise<string[]> { return groupApi.inviteToGroup(this.token, convId, memberIds); }
+  inviteToGroup(convId: string, memberIds: string[]): Promise<{ added: string[]; pending: string[] }> { return groupApi.inviteToGroup(this.token, convId, memberIds); }
   leaveGroup(convId: string): Promise<void> { return groupApi.leaveGroup(this.token, convId); }
   dissolveGroup(convId: string): Promise<void> { return groupApi.dissolveGroup(this.token, convId); }
   removeGroupMember(convId: string, userId: string): Promise<void> { return groupApi.removeGroupMember(this.token, convId, userId); }

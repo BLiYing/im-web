@@ -484,6 +484,8 @@ export interface JoinRequest {
   created_at: number;
   decided_by?: string;
   decided_at?: number;
+  /** 成员邀请转待审时的邀请人昵称（后端 inviter_nickname；解析处映射）；非空时该行用「由 X 邀请」替代附言。 */
+  inviterNickname?: string;
 }
 
 /** 群黑名单一项（G2）。 */

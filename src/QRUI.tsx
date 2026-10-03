@@ -581,7 +581,7 @@ export function JoinRequestsModal(props: {
               <Avatar url={r.avatar_url} name={r.nickname} size={40} />
               <div className="join-req-info">
                 <div className="join-req-name">{r.nickname || tr("common.unnamed_user")}</div>
-                {r.hello && <div className="join-req-hello">{r.hello}</div>}
+                {(r.inviterNickname ? tr("group.join_request.invited_by", { name: r.inviterNickname }) : r.hello) && <div className="join-req-hello">{r.inviterNickname ? tr("group.join_request.invited_by", { name: r.inviterNickname }) : r.hello}</div>}
               </div>
               {tab === "pending" ? (
                 <div className="join-req-btns">

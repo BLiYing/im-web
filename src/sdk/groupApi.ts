@@ -113,18 +113,18 @@ export async function unbanGroupMember(token: string, convId: string, userId: st
   await api(token, `/api/v1/groups/${encodeURIComponent(convId)}/bans/${encodeURIComponent(userId)}`, { method: "DELETE" });
 }
 
-/** 邀请入群（任意成员可邀）。 */
 /**
- * 邀请入群。**返回实际加入的 uid**（服务端 `{added}`）——不是传进去的那批：
+ * 邀请入群。**返回实际加入的 uid `added`，及转待审的 uid `pending`**（服务端 `{added,pending}`）——不是传进去的那批：
+ * 群开了「进群确认」时普通成员邀请的人进 pending（等群主/管理员审批），不是「已在群里」。
  * 已在群里的人会被服务端跳过，且这属于**幂等成功**而非错误。
  * 超级群下这事是常态：`GET /groups/{id}` 对超级群只回我自己，端上算不出完整的"已在群里"
  * 排除集，老成员照样会出现在候选里。调用方须按 added 与所选数量的差给反馈。
  */
-export async function inviteToGroup(token: string, convId: string, memberIds: string[]): Promise<string[]> {
+export async function inviteToGroup(token: string, convId: string, memberIds: string[]): Promise<{ added: string[]; pending: string[] }> {
   const d = await api(token, `/api/v1/groups/${encodeURIComponent(convId)}/members`, {
     method: "POST", body: JSON.stringify({ member_ids: memberIds }),
-  }) as { added?: string[] } | undefined;
-  return d?.added ?? [];
+  }) as { added?: string[]; pending?: string[] } | undefined;
+  return { added: d?.added ?? [], pending: d?.pending ?? [] };
 }
 
 /** 退群（群主须先转让）。 */
@@ -170,7 +170,8 @@ export async function joinGroupByCode(token: string, code: string, hello = ""): 
 export async function fetchJoinRequests(token: string, convId: string, status = "pending"): Promise<JoinRequest[]> {
   const q = status ? `?status=${encodeURIComponent(status)}` : "";
   const data = await api(token, `/api/v1/groups/${encodeURIComponent(convId)}/join-requests${q}`);
-  return (data?.requests ?? []) as JoinRequest[];
+  return ((data?.requests ?? []) as (JoinRequest & { inviter_nickname?: string })[]).map(({ inviter_nickname, ...r }) =>
+    inviter_nickname ? { ...r, inviterNickname: inviter_nickname } : r);
 }
 
 /** 审批一条入群申请（群主/管理员）：accept=true→approve，false→reject。 */

@@ -15,6 +15,7 @@
 import { useState } from "react";
 import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
+import { inviteFeedback } from "./inviteFeedback";
 import type { Conversation, GroupBan, GroupInfo, GroupSummary, JoinRequest } from "./sdk/protocol";
 import { errorCode } from "./qr";
 import { t } from "./i18n";
@@ -238,18 +239,16 @@ export function useGroupOps(d: GroupOpsDeps) {
     if (!inviteDraft || inviteDraft.selected.length === 0) { setToast(t("group.ops.invite_select_required")); return; }
     const { convId: cid, selected } = inviteDraft;
     try {
-      const added = await clientRef.current!.inviteToGroup(cid, selected);
+      const res = await clientRef.current!.inviteToGroup(cid, selected);
       setInviteDraft(null);
       void refreshGroupInfo(cid);
       void refreshConversations();
       // **超级群的成员列表是另一份 state**（superMembers），它只在切群时才重拉。
       // 不在这里补一发，界面会自相矛盾：副标题刷成「2001 位成员」，列表还是原来那 2000 行。
       if (groupInfos[cid]?.is_super) void loadSuperMembers(cid, "");
-      // 按**实际加入数**给反馈，而不是按勾选数：已在群里的人会被服务端跳过（幂等，不是错误）。
-      // 超级群下这是常态——端上算不出完整的"已在群里"集合（gp.members 只有我自己）。
-      const skipped = selected.length - added.length;
-      if (added.length === 0) setToast(t("group.info.invite_all_in"));
-      else if (skipped > 0) setToast(t("group.info.invite_partial", { invited: added.length, skipped }));
+      // 按**实际加入数**给反馈（已在群里的人被服务端跳过=幂等；转待审的在 pending，见 inviteFeedback）。
+      const fb = inviteFeedback(selected.length, res);
+      if (fb) setToast(t(fb.key, fb.args));
     } catch (e) {
       // 按业务码分支（勿直接透传服务端 message，i18n）：300207 = 被邀请者已被移出/冷却期，
       // 用邀请场景的第三人称文案，区别于自加群映射表里的第二人称「你已被移出」。
