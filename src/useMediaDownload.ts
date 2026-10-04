@@ -7,6 +7,7 @@
 // resetDownloadState（退登清空）/ optInMedia（打开查看器=解门控）。
 // 副作用依赖全部注入（clientRef/setToast/setViewer/uid/groupConvId），Hook 不摸全局。函数体逐字平移，行为不变。
 import { useCallback, useRef, useState } from "react";
+import { usePowerEffective } from "./usePowerSaving";
 import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
 import type { ChatMessage } from "./sdk/protocol";
@@ -28,6 +29,7 @@ export interface MediaDownloadDeps {
 
 export function useMediaDownload(deps: MediaDownloadDeps) {
   const { uid, groupConvId, clientRef, setToast, setViewer } = deps;
+  const localAutoDownload = usePowerEffective("autoDownload"); // 本机自动下载总开关（省电生效时为 false；不写账号级设置）
 
   const [dlSettings, setDlSettings] = useState<DownloadSettings | null>(null);
   const [dlStates, setDlStates] = useState<Record<string, DownloadState>>({}); // content → 下载态（**仅文件**用状态机）
@@ -120,7 +122,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     // 持久失效标记优先（草图 §06）：已知服务端已清理 → 直接失效态、不回源（掐 404 风暴）。三类消息统一。
     if (expiredSet.has(m.content)) return { phase: "expired", received: 0, total: m.fileSize ?? 0 };
     // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
-    const passesPolicy = shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId);
+    const passesPolicy = shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId, localAutoDownload);
     if (kind === "image" || kind === "video") {
       // 方案 B：图片/视频不落 blob，只判「要不要拉原件」。已解门控 / 策略放行 → 直显远端；否则显模糊占位 + ↓。
       if (mediaOptedIn.has(m.content) || passesPolicy) return undefined;
@@ -132,7 +134,7 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     if (st) return st.phase === "done" ? undefined : st;            // 进行中 / 失败 / 已失效
     if (passesPolicy) return undefined;                             // 策略放行=浏览器直取
     return { phase: "notStarted", received: 0, total: m.fileSize ?? 0 };
-  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn, expiredSet, unsupportedSet]);
+  }, [uid, dlBlobs, dlStates, dlSettings, groupConvId, mediaOptedIn, expiredSet, unsupportedSet, localAutoDownload]);
 
   /** 该消息应当渲染的地址：已手动下载过用应用内 blob，否则用远端 URL。 */
   const mediaSrc = useCallback((m: ChatMessage) => dlBlobs[m.content] || m.content, [dlBlobs]);

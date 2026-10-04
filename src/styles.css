@@ -470,6 +470,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .chat footer.select-bar .sel-action { background: var(--card-bg); }
 }
+:root.no-blur .chat footer.select-bar .sel-action { background: var(--card-bg); }
 /* 删除确认气泡（「仅为我删除」/「为所有人删除」）：钉在删除钮正上方，复用毛玻璃气泡样式。 */
 .sel-del-wrap { position: relative; flex: 0 0 auto; display: inline-flex; }
 .sel-del-backdrop { position: fixed; inset: 0; z-index: 40; }
@@ -484,6 +485,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .sel-del-pop { background: var(--card-bg); }
 }
+:root.no-blur .sel-del-pop { background: var(--card-bg); }
 /* 转发会话选择器。 */
 .fwd-picker { max-height: 70vh; }
 .fwd-list { overflow-y: auto; max-height: 46vh; display: flex; flex-direction: column; margin: 0 calc(-1 * var(--space-4)); }
@@ -643,6 +645,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
     background: var(--surface-elevated);
     border-color: var(--separator);
   }
+}
+:root.no-blur :is(.attach-popover, .ctx-menu, .menu-card, .viewer-more-pop, .mention-panel) {
+  background: var(--surface-elevated);
+  border-color: var(--separator);
 }
 .chat footer .attach-item { position: relative; z-index: 1; width: 100%; min-height: 58px; display: flex; align-items: center; gap: 22px; padding: 0 22px; border: 0; border-radius: 16px; background: transparent; color: var(--text); font-size: 17px; font-weight: 500; text-align: left; cursor: pointer; }
 .chat footer .attach-item svg { flex: 0 0 auto; color: var(--text-secondary); }
@@ -2129,7 +2135,7 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 /* ===== 设置 ▸ 通知（NOTIFICATIONS_DESIGN §2.5，P0）===== */
 .notif-panel { z-index: 40; }
 /* 「显示通知」关掉时预览/提示音行灰置但保留（不藏，避免下方内容跳动）：对齐 .tier-row.disabled 的处理。 */
-.switch-row.dim, .settings-row.dim { opacity: .45; pointer-events: none; }
+.switch-row.dim, .settings-row.dim, .radio-row.dim { opacity: .45; pointer-events: none; }
 /* 下拉箭头自己画：原生箭头紧贴右边框、不吃 padding。关掉原生外观，用背景图在距右 9px 处画一个
    （中灰，明暗主题下都看得清），右内边距给箭头留位置。本仓目前只有这一处 <select>。 */
 .notif-sound-select { border: 1px solid var(--separator); border-radius: 6px; background-color: var(--page-bg);
@@ -2145,3 +2151,17 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .notif-unmute-btn { flex-shrink: 0; border: 0; background: none; color: var(--accent); font-size: 13px;
   cursor: pointer; padding: 4px 6px; border-radius: 6px; }
 .notif-unmute-btn:hover { background: var(--surface-hover); text-decoration: underline; }
+
+/* ===== 设置 ▸ 动画与性能（省电模式，POWER_SAVING_DESIGN B3）===== */
+.perf-panel { z-index: 40; }
+/* 耗电项被省电锁住：整行仍可点（弹 Toast 说明），不用 .dim（它 pointer-events:none）；复选框 disabled、标题次要色。 */
+.switch-row.locked .row-label { color: var(--text-tertiary); }
+/* 根节点 no-anim（§4.1）：一条规则把 transition / animation 归零；.keep-anim（加载转圈、录音指示）豁免。 */
+:root.no-anim *:not(.keep-anim), :root.no-anim *:not(.keep-anim)::before, :root.no-anim *:not(.keep-anim)::after {
+  transition: none !important; animation: none !important;
+}
+/* 根节点 no-blur（§4.5）：上面各 @supports not 兜底规则已并上 :root.no-blur 的纯色底；
+   这里再把 backdrop-filter 本身摘掉（浏览器支持时不摘就仍在模糊，省不到电）。 */
+:root.no-blur *, :root.no-blur *::before, :root.no-blur *::after {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+}

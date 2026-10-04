@@ -29,7 +29,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
   useEffect(() => { if (!authBusy) setBusyAction(null); }, [authBusy]);
   const spinning = (action: "login" | "register" | "dev") => authBusy && busyAction === action;
   const label = (action: "login" | "register" | "dev", idle: string, busy: string) =>
-    spinning(action) ? <><span className="btn-spinner" aria-hidden="true" />{busy}</> : <>{idle}</>;
+    spinning(action) ? <><span className="btn-spinner keep-anim" aria-hidden="true" />{busy}</> : <>{idle}</>;
 
   if (restoring) {
     // 恢复登录过渡态（Web #4）：有已存会话时不闪登录表单，静默重登成功直达主界面。

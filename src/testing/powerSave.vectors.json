@@ -1,0 +1,161 @@
+{
+ "_doc": "省电模式判定 powerSaveActive 向量（三端共用，POWER_SAVING_DESIGN §3）。改规则先改这里。active = mode==always || (mode==auto && level!=null && charging==false && level<=clamp(threshold,5,50)) || (followSystem && systemSaver==true)。level 为 0..100 整数或 null（读不到）；charging/systemSaver 为 null 表示未知。Web 恒传 followSystem=false、systemSaver=null。",
+ "cases": [
+  {
+   "name": "off 不管电量多低都不开",
+   "ctx": {
+    "mode": "off",
+    "threshold": 15,
+    "level": 5,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "always 插着电也开",
+   "ctx": {
+    "mode": "always",
+    "threshold": 15,
+    "level": 90,
+    "charging": true,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": true
+  },
+  {
+   "name": "auto 电量等于阈值算触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 15,
+    "level": 15,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": true
+  },
+  {
+   "name": "auto 电量高于阈值 1 不触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 15,
+    "level": 16,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "auto 正在充电不触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 15,
+    "level": 5,
+    "charging": true,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "auto 充电状态未知不触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 15,
+    "level": 5,
+    "charging": null,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "auto 读不到电量不触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 15,
+    "level": null,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "跟随系统且系统省电已开 → 开（mode=off 也开）",
+   "ctx": {
+    "mode": "off",
+    "threshold": 15,
+    "level": 80,
+    "charging": false,
+    "followSystem": true,
+    "systemSaver": true
+   },
+   "active": true
+  },
+  {
+   "name": "不跟随系统时系统省电不影响",
+   "ctx": {
+    "mode": "off",
+    "threshold": 15,
+    "level": 80,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": true
+   },
+   "active": false
+  },
+  {
+   "name": "阈值上限 50 等于时触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 50,
+    "level": 50,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": true
+  },
+  {
+   "name": "跟随系统但系统状态未知 → 不开",
+   "ctx": {
+    "mode": "off",
+    "threshold": 15,
+    "level": 80,
+    "charging": false,
+    "followSystem": true,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "阈值越界 60 夹到 50：电量 55 不触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 60,
+    "level": 55,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": false
+  },
+  {
+   "name": "阈值越界 0 夹到 5：电量 5 触发",
+   "ctx": {
+    "mode": "auto",
+    "threshold": 0,
+    "level": 5,
+    "charging": false,
+    "followSystem": false,
+    "systemSaver": null
+   },
+   "active": true
+  }
+ ]
+}

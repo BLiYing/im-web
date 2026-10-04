@@ -5,6 +5,7 @@ import { formatMediaDuration } from "../media";
 import { formatFileSize } from "../fileMetadata";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
+import { VideoFrame } from "./VideoFrame";
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
@@ -53,7 +54,7 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
                 {gated
                   ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt={tr("fav.file.not_downloaded")} /> : <span className="gate-empty" />)
                   : m.contentType === "video"
-                    ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError?.(m)} /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => onMediaError?.(m)} />)
+                    ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError?.(m)} /> : <VideoFrame src={videoFrameSrc(m.content)} thumb={m.thumb} onError={() => onMediaError?.(m)} />)
                     : <img src={m.content} alt="" onError={() => onMediaError?.(m)} />}
                 {gated
                   ? (expiredFor?.(m) ? null : <span className="album-dl">↓</span>) // 失效格不给 ↓（无从重下），只留磨砂 dim
@@ -65,7 +66,7 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
                 {m.status === "sending" && m.convSeq === 0 && (
                   <span className="album-tile-dim">
                     {/* 分片任务：中心 ⏸/↑（点格子暂停/继续）；小文件（不可暂停）保留转圈。 */}
-                    {up && task ? <span className="album-pause">{task.paused ? "↑" : "⏸"}</span> : <span className="album-spinner" />}
+                    {up && task ? <span className="album-pause">{task.paused ? "↑" : "⏸"}</span> : <span className="album-spinner keep-anim" />}
                   </span>
                 )}
                 {/* 格内 ❗ 只表达「这一格上传/发送失败」。**被服务端拒收（有 note）时不显示**——

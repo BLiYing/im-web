@@ -19,8 +19,7 @@ import { sysSegmentName } from "../sysSegments";
 import { formatMediaDuration, formatUploadProgress } from "../media";
 import { downloadGlyph, downloadText, type DownloadState, type MediaKind } from "../download";
 import {
-  isUrlText, selectableInMultiSelect, parseChatRecord, recordItemPreview,
-  fileNameFromContent, mediaBoxProps, isPreviewableFile, videoFrameSrc, firstURLInText,
+  isUrlText, selectableInMultiSelect, parseChatRecord, recordItemPreview, fileNameFromContent, mediaBoxProps, isPreviewableFile, videoFrameSrc, firstURLInText,
 } from "../messageContent";
 import { IdCard } from "lucide-react";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
@@ -35,6 +34,7 @@ import { LinkCard } from "./LinkCard";
 import { VoiceBubble, setVoiceRelayResolver, voicePlayedSet } from "./VoiceBubble";
 import { useChatActions } from "../ChatActionsContext";
 import { resendPolicyFor } from "../resendPolicy";
+import { VideoFrame } from "./VideoFrame";
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -350,7 +350,7 @@ export function MessageList(p: MessageListProps) {
                       : m.contentType === "video"
                         ? (m.posterUrl
                             ? <img className="msg-image" src={m.posterUrl} alt={tr("common.video")} onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />
-                            : <video className="msg-image" src={videoFrameSrc(mediaSrc(m))} preload="metadata" muted onLoadedData={onMediaLoad} onError={() => void onPassiveMediaError(m)} />)
+                            : <VideoFrame className="msg-image" src={videoFrameSrc(mediaSrc(m))} thumb={m.thumb} thumbClass="msg-image msg-image-blur" emptyClass="msg-image msg-image-empty" onLoadedData={onMediaLoad} onError={() => void onPassiveMediaError(m)} />)
                         : <img className="msg-image" src={mediaSrc(m)} alt={tr("common.image")} onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />}
                     {gate
                       ? (gate.phase === "expired"

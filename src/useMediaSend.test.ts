@@ -15,6 +15,10 @@ vi.mock("./media", async (importOriginal) => ({
   makeTinyThumbFromImage: vi.fn(async () => "data:image/jpeg;base64,t"),
 }));
 
+vi.mock("./videoPoster", () => ({ captureVideoPoster: vi.fn(async () => new File(["p"], "poster.jpg", { type: "image/jpeg" })) }));
+import { captureVideoPoster } from "./videoPoster";
+import { setPowerPref } from "./powerSaveStore";
+
 afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 
 beforeEach(() => {
@@ -154,5 +158,21 @@ describe("useMediaSend", () => {
     for (const c of (client.sendMedia as ReturnType<typeof vi.fn>).mock.calls) {
       expect((c[4] as { groupId?: string }).groupId).toBeUndefined();
     }
+  });
+
+  it("发送端封面恒派生：省电生效 / 视频预加载关闭时也照常 captureVideoPoster 并上传封面（收端靠它）", async () => {
+    const uploadFile = vi.fn(async (f: File) => ({ url: `https://cdn/${f.name}`, contentType: "video", size: f.size }));
+    for (const setup of [() => setPowerPref("mode", "always"), () => { setPowerPref("mode", "off"); setPowerPref("videoPreload", false); }]) {
+      localStorage.clear(); setPowerPref("mode", "off"); setPowerPref("videoPreload", true);
+      setup();
+      vi.mocked(captureVideoPoster).mockClear();
+      const { result, client } = mount({ uploadFile });
+      await act(async () => { await result.current.uploadAndSend(new File(["v"], "v.mp4", { type: "video/mp4" }), "media"); });
+      expect(captureVideoPoster).toHaveBeenCalledTimes(1);
+      expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ name: "poster.jpg" }));
+      expect(client.sendMedia).toHaveBeenCalled();
+      cleanup();
+    }
+    setPowerPref("mode", "off"); setPowerPref("videoPreload", true);
   });
 });

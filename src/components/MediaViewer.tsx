@@ -3,6 +3,7 @@ import type { ChatMessage } from "../sdk/protocol";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
 import { ZoomableImage } from "./ZoomableImage";
+import { VideoFrame } from "./VideoFrame";
 
 /** 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（点击浮层 6 功能）。点击遮罩关闭。
  *  纯展示：所有派生态（可播/已开始/失效/不支持/翻页位点）与动作由 App 注入，逐字保持原交互。 */
@@ -70,7 +71,7 @@ export function MediaViewer({
               <img className="image-viewer viewer-video-cover" src={m.posterUrl || m.thumb} alt={tr("chat.media.alt_video_cover")}
                    onClick={(e) => { e.stopPropagation(); onDismissMore(); onStartVideo(); }} />
             ) : (
-              <video key={mediaKey} className="image-viewer viewer-video-cover" src={videoFrameSrc(m.content)} preload="metadata" muted
+              <VideoFrame key={mediaKey} className="image-viewer viewer-video-cover" src={videoFrameSrc(m.content)}
                      onClick={(e) => { e.stopPropagation(); onDismissMore(); onStartVideo(); }}
                      onError={onVideoError} />
             )}

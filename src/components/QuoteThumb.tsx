@@ -4,6 +4,7 @@ import { passivePreviewSource } from "../download";
 import { FileTypeIcon } from "../FileTypeIcon";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
+import { VideoFrame } from "./VideoFrame";
 
 /**
  * 引用条内的媒体小缩略图（**档 B·被动预览**，对齐 iOS `previewForURL:`）：
@@ -21,7 +22,7 @@ export function QuoteThumb({ m, gated }: { m?: ChatMessage; gated?: boolean }) {
     if (src === "icon") return <span className="quote-thumb quote-thumb-ph">{m.contentType === "video" ? <Video size={18} aria-label={tr("common.video")} /> : <ImageIcon size={18} aria-label={tr("common.image")} />}</span>;
     // original：已解门控才联网取真帧。
     if (m.contentType === "image") return <img className="quote-thumb" src={m.content} alt="" />;
-    return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <video className="quote-thumb" src={videoFrameSrc(m.content)} muted preload="metadata" />;
+    return m.posterUrl ? <img className="quote-thumb" src={m.posterUrl} alt="" /> : <VideoFrame className="quote-thumb" src={videoFrameSrc(m.content)} thumb={m.thumb} thumbClass="quote-thumb gate-blur" />;
   }
   if (m.contentType === "file") return <FileTypeIcon name={m.fileName || m.content} size={32} className="quote-thumb" />;
   return null;

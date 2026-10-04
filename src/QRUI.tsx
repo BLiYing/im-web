@@ -491,7 +491,7 @@ export function QRLoginTab(props: { onLogin: (uid: string, token: string, refres
           : <div className="qr-login-img qr-img-loading" />}
 
         {phase === "loading" && (
-          <div className="qr-login-cover"><div className="qr-login-spin" /><div className="qr-login-cover-t">{tr("qr.login.generating")}</div></div>
+          <div className="qr-login-cover"><div className="qr-login-spin keep-anim" /><div className="qr-login-cover-t">{tr("qr.login.generating")}</div></div>
         )}
         {phase === "error" && (
           <div className="qr-login-cover">

@@ -4,6 +4,7 @@ import { formatFileSize } from "../fileMetadata";
 import { formatMediaDuration } from "../media";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
+import { VideoFrame } from "./VideoFrame";
 
 // 门控媒体格子（图片/视频缩略）：会话媒体库与资料页「媒体」页签共用。
 // 两处此前 ~15 行重复，差异仅在 5 处，收进 variant：
@@ -39,7 +40,7 @@ export function MediaTile({ variant, m, gate, onClick, onMenu, onMediaError }: {
       {gate
         ? (m.thumb ? <img className="gate-blur" src={m.thumb} alt={tr("fav.file.not_downloaded")} /> : <span className="gate-empty" />)
         : (m.contentType === "video"
-            ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError(m)} /> : <video src={videoFrameSrc(m.content)} muted preload="metadata" onError={() => onMediaError(m)} />)
+            ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError(m)} /> : <VideoFrame src={videoFrameSrc(m.content)} thumb={m.thumb} onError={() => onMediaError(m)} />)
             : <img src={m.content} alt="" onError={() => onMediaError(m)} />)}
       {gate
         ? (gate.phase === "expired" ? (s.expiredBadge ? <span className="play-badge expired" title={tr("media.placeholder.expired")}>⊘</span> : null) : <span className="detail-media-dl">↓</span>)

@@ -26,6 +26,9 @@ import { NotificationsPanel } from "./NotificationsPanel";
 import { LanguageSettings } from "./LanguagePanel";
 import { WallpaperPanel } from "./WallpaperPanel";
 import { WallpaperColorPanel } from "./WallpaperColorPanel";
+import { PerformancePanel } from "./PerformancePanel";
+import { usePowerSave, usePowerSaveToast } from "../../usePowerSaving";
+import { setPowerPref } from "../../powerSaveStore";
 
 export interface SettingsPanelsHostProps {
   // 设置主页
@@ -105,6 +108,10 @@ export interface SettingsPanelsHostProps {
   setConvMuted: (c: Conversation, muted: boolean, muteUntil?: number) => void;
   openConvById: (cid: string) => void;
 
+  // 动画与性能（省电模式）
+  performanceOpen: boolean;
+  setPerformanceOpen: Dispatch<SetStateAction<boolean>>;
+
   // 语言
   languageOpen: boolean;
   setLanguageOpen: Dispatch<SetStateAction<boolean>>;
@@ -128,6 +135,10 @@ export interface SettingsPanelsHostProps {
 export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const t = useT();
   const { clientRef, setToast, comingSoon, askConfirm } = useAppServices();
+  const powerSave = usePowerSave();
+  usePowerSaveToast(setToast); // §5 自动开启提示（电量监听 / 根 class 在 main.tsx 的 installPowerSaving，登录页也生效）
+  // 设置入口行「动画与性能」：生效时右值「省电中」（稿：Row.value），否则不给。
+  const groups = p.groups.map((g) => g.map((r) => (r.id === "animations" && powerSave.active ? { ...r, value: t("power_saving.row.web_on") } : r)));
 
   // 取色板拖拽 → HSV（原 App.tsx#updateColorFromSpectrum 逐字平移，只是依赖改走 props）。
   const onSpectrum = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -150,7 +161,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           seed={p.uid}
           stateText={p.stateText}
           infoRows={p.infoRows}
-          groups={p.groups}
+          groups={groups}
           onBack={() => p.setShowSettings(false)}
           onEditProfile={() => void p.openProfile()}
           onLogout={p.logout}
@@ -257,6 +268,18 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onUnmute={(c) => p.setConvMuted(c, false)} onMuteConv={(c, muteUntil) => p.setConvMuted(c, true, muteUntil)} onBack={() => p.setNotificationsOpen(false)}
           onOpenConv={(cid) => { p.setNotificationsOpen(false); p.setShowSettings(false); p.openConvById(cid); }}
           onReset={() => void askConfirm(t("notif.reset.confirm_message"), { okText: t("common.reset"), danger: true }).then((ok) => ok && p.notif.reset())}
+        />
+      )}
+
+      {/* 动画与性能（省电模式）：见 components/settings/PerformancePanel（POWER_SAVING_DESIGN B3）。 */}
+      {p.performanceOpen && (
+        <PerformancePanel
+          ps={powerSave}
+          onSetMode={(m) => setPowerPref("mode", m)}
+          onSetThreshold={(v) => setPowerPref("threshold", v)}
+          onToggleItem={(k, v) => setPowerPref(k, v)}
+          onLocked={() => setToast(t("power_saving.item.locked_toast"))}
+          onBack={() => p.setPerformanceOpen(false)}
         />
       )}
 

@@ -114,6 +114,8 @@ export function shouldAutoDownload(
   kind: string,
   sizeBytes: number,
   isGroup: boolean,
+  /** 本机自动下载总开关（省电模式 im.autoDownload，已含「省电生效」）；false → 一律手动。不写账号级设置。 */
+  localEnabled = true,
 ): boolean {
   const s = settings ?? defaultDownloadSettings();
   const policy = s.wifi;
@@ -123,6 +125,7 @@ export function shouldAutoDownload(
   else if (kind === "video") rule = policy.video;
   else if (kind === "file") rule = policy.file;
   else return true; // 语音/贴纸等体积极小的类型不进阈值体系，恒自动（草图 §08-07）
+  if (!localEnabled) return false;
   if (!(isGroup ? rule.group : rule.single)) return false;
   if (kind === "image") return true;
   if (rule.max_bytes <= 0) return false;

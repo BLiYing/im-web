@@ -170,7 +170,7 @@ export function useMediaSend(d: MediaSendDeps) {
       l.meta = await probeMediaMetadata(l.f);
       if (l.meta.width > 0) { patchMsg(cid, l.localId, { mediaW: l.meta.width, mediaH: l.meta.height, duration: l.meta.durationMs, fileSize: l.f.size }); }
       if (!l.isVideo) return;
-      const pf = await captureVideoPoster(l.f);
+      const pf = await captureVideoPoster(l.f); // 发送端封面恒派生：收端靠它；「视频预加载」只管收端预览 <video>（POWER_SAVING §4.3）
       if (pf) { l.posterFile = pf; l.posterBlobUrl = URL.createObjectURL(pf); patchMsg(cid, l.localId, { posterUrl: l.posterBlobUrl }); }
     }));
     for (let i = 0; i < locals.length; i++) {

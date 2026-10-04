@@ -259,6 +259,7 @@ export default function App() {
   const [generalOpen, setGeneralOpen] = useState(false); // 通用设置子面板
   const [notificationsOpen, setNotificationsOpen] = useState(false); // 通知设置子面板（NOTIFICATIONS_DESIGN）
   const [languageOpen, setLanguageOpen] = useState(false); // 语言选择子面板
+  const [performanceOpen, setPerformanceOpen] = useState(false); // 动画与性能（省电模式）子面板
   const t = useT(); // 同时订阅界面语言：切换时 App 重渲染（须在任何早退之前，见 saveRemark 处「login early-return」注释）
   // ---- 已登录设备 / 多设备管理（P2）：状态与操作抽到 useDevices（组件体后段调用，依赖 clientRef/askConfirm/setToast）----
   // ---- 自动下载策略 + 下载门控（M4-7，草图 §09 Web 映射）----
@@ -1164,7 +1165,6 @@ export default function App() {
   }, []);
 
   // 上传并发送图片/文件（M4-6）：上传 → 发 content_type=image|video|file 消息（content=URL）+ 乐观上屏。
-
 
 
   // 应用级稳定服务（见 AppServicesContext）。**必须在所有 early return 之前调用**（Rules of Hooks）。
@@ -2739,7 +2739,7 @@ export default function App() {
   const settingsGroups: Row[][] = [
     [
       { id: "general", label: t("settings.row.general"), icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
-      { id: "animations", label: t("settings.row.animations"), icon: Gauge, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("settings.row.animations")) },
+      { id: "animations", label: t("settings.row.animations"), icon: Gauge, iconTint: "orange", chevron: true, onClick: () => setPerformanceOpen(true) },
       { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => setNotificationsOpen(true) },
       { id: "data", label: t("settings.row.data_storage"), icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
       { id: "privacy", label: t("settings.row.privacy"), icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
@@ -2896,7 +2896,7 @@ export default function App() {
           desktop={desktop} setWallpaperOpen={setWallpaperOpen}
           notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} notif={notif} conversations={conversations}
           convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl} setConvMuted={setConvMuted} openConvById={openConvById}
-          languageOpen={languageOpen} setLanguageOpen={setLanguageOpen}
+          languageOpen={languageOpen} setLanguageOpen={setLanguageOpen} performanceOpen={performanceOpen} setPerformanceOpen={setPerformanceOpen}
           wallpaperOpen={wallpaperOpen} wallpaper={wallpaper} isDark={isDark} wallpaperBlur={wallpaperBlur}
           setWallpaperBlur={setWallpaperBlur} setWallpaper={setWallpaper}
           pickWallpaperImage={pickWallpaperImage} openWallpaperColor={openWallpaperColor} resetWallpaper={resetWallpaper}

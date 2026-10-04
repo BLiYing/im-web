@@ -203,3 +203,14 @@ describe("档 B 被动预览取图（引用条 / 会话媒体库；对齐 iOS pr
     expect(passivePreviewSource(false, false)).toBe("icon");
   });
 });
+
+describe("shouldAutoDownload 本机总开关（省电模式 localEnabled）", () => {
+  const s = defaultDownloadSettings();
+  it("关闭时图片/视频/文件一律手动；语音等小类型不受影响；默认 true 行为不变", () => {
+    expect(shouldAutoDownload(s, "image", 1, false, false)).toBe(false);
+    expect(shouldAutoDownload(s, "video", 1, true, false)).toBe(false);
+    expect(shouldAutoDownload(s, "file", 1, false, false)).toBe(false);
+    expect(shouldAutoDownload(s, "voice", 1, false, false)).toBe(true);
+    expect(shouldAutoDownload(s, "image", 1, false)).toBe(true);
+  });
+});

@@ -401,7 +401,7 @@ export function Composer(p: ComposerProps) {
           {/* 录音条只挂在**录音所属的那个会话**上：切走时录音已暂停留底，回来才重新露出。 */}
           {recordingHere && (
             <div className="voice-recorder-bar" role="dialog" aria-label={tr("chat.voice.recording")}>
-              <span className="rd" />
+              <span className="rd keep-anim" />
               {/* §12 倒数：4:50 起 timer 变红 + 显"还剩 Ns"，到 5:00 自动送出（onMaxReached）。 */}
               <span className={`rec-timer${recordElapsed >= VOICE_COUNTDOWN_START_MS ? " over" : ""}`}>
                 {Math.floor(recordElapsed / 60000)}:{String(Math.floor(recordElapsed / 1000) % 60).padStart(2, "0")}
