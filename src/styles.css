@@ -911,6 +911,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* 列表「我发的最后一条」已读双勾：对端已读→蓝双勾，否则→灰单勾（SVG 图标，见 ReadTick.tsx）。 */
 /* 已读勾图标：高 0.95em、基线对齐，与时间文字间距 3px（READ_TICK_DESIGN §1）。 */
 .rtick { display: inline-block; margin-left: 3px; line-height: 0; vertical-align: baseline; }
+/* 会话列表：勾在预览文字前，间距落右侧 */
+.convlast .rtick { margin-left: 0; margin-right: 4px; }
 .rtick svg { height: 0.95em; width: auto; display: inline-block; vertical-align: baseline; overflow: visible; }
 .convck { color: var(--text-secondary); }
 .convck.read { color: var(--check-read); }

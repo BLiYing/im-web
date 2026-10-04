@@ -2834,9 +2834,6 @@ export default function App() {
                     {mutedNow ? <BellOff size={12} className="conv-mute" /> : null}
                   </span>
                   <span className="convtime">
-                    {!c.is_group && c.last_message?.from === uid && (
-                      <ReadTick read={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0)} className="convck" />
-                    )}
                     {c.last_message ? conversationTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>
                 </div>
@@ -2847,6 +2844,10 @@ export default function App() {
                   {c.is_group && (c.pending_count ?? 0) > 0
                     ? <span className="conv-pending-badge">{t("conv.list.pending_badge", { count: unreadBadgeText(c.pending_count!) })}</span>
                     : null}
+                  {/* 我发的最后一条的已读/未读勾：放在预览文字前（对齐 Android / Telegram 列表），不挤时间 */}
+                  {!c.is_group && c.last_message?.from === uid && (
+                    <ReadTick read={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0)} className="convck" />
+                  )}
                   {convPreview(c)}
                 </div>
               </div>
