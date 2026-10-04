@@ -34,7 +34,7 @@ import { LinkCard } from "./LinkCard";
 import { VoiceBubble, setVoiceRelayResolver, voicePlayedSet } from "./VoiceBubble";
 import { useChatActions } from "../ChatActionsContext";
 import { resendPolicyFor } from "../resendPolicy";
-import { VideoFrame } from "./VideoFrame";
+import { VideoFrame } from "./VideoFrame"; import { ReadTick } from "./ReadTick";
 
 export interface MessageListProps {
   messages: ChatMessage[];
@@ -45,7 +45,7 @@ export interface MessageListProps {
   selected: Set<number>;
   menu: { m: ChatMessage } | null;
   readSeq: number;
-  /** 大群（超级群）：已读语义整套关闭，气泡尾巴不画 ✓/✓✓（SUPERGROUP_DESIGN §4）。 */
+  /** 大群（超级群）：已读语义整套关闭，气泡尾巴不画已读勾（SUPERGROUP_DESIGN §4）。 */
   isSuperGroup?: boolean;
   firstUnreadIdx: number;
   timeFormat: TimeFormat;
@@ -139,7 +139,7 @@ export function MessageList(p: MessageListProps) {
       {messages.map((m, i) => {
         const mine = m.from === uid;
         const readByPeer = mine && m.convSeq > 0 && m.convSeq <= readSeq;
-        // 大群里 ✓ 恒为"已送达"、永远变不成 ✓✓（群回执本就不向成员扇出），且超级群已明说关闭已读状态——
+        // 大群里单勾恒为"已送达"、永远变不成双勾（群回执本就不向成员扇出），且超级群已明说关闭已读状态——
         // 挂一个永不变化的钩子只会让人以为消息没被读到。整条隐藏，与 iOS 同口径。
         const showTick = mine && m.convSeq > 0 && !isSuperGroup;
         const showDate = m.timestamp > 0 && (i === 0 || !isSameDay(m.timestamp, messages[i - 1].timestamp));
@@ -270,7 +270,7 @@ export function MessageList(p: MessageListProps) {
         }
         // 媒体气泡：时间/已读压在图上（右下角），故不再渲染气泡下方的 .bmeta 行。
         const isMediaBubble = m.contentType === "image" || m.contentType === "video";
-        // voice 内部 VoiceBubble 自带 meta（时长·HH:mm·✓/✓✓），外层 bmeta 再画一遍就会双时间叠印
+        // voice 内部 VoiceBubble 自带 meta（时长·HH:mm·已读勾），外层 bmeta 再画一遍就会双时间叠印
         // （2026-08-27 修）。不并入 isMediaBubble（那会带来 .bubble.media 的 padding:0/overflow:hidden，
         // 语音气泡内部另有自己的 padding，会挤成一坨）——只让外层 bmeta 跳过 voice。
         const isVoiceBubble = m.contentType === "voice";
@@ -290,7 +290,7 @@ export function MessageList(p: MessageListProps) {
             {m.editedAt ? <span className="edited-tag">{tr("chat.message.edited")} </span> : null}
             {mine ? (
               m.status === "sending" ? tr("common.sending") : m.status === "failed" ? (m.note ? null : <span className="failed">{tr("chat.message.send_failed_mark")}</span>)
-                  : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span> : null}</>
+                  : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <ReadTick read={readByPeer} className="ck" /> : null}</>
             ) : (
               formatTime(m.timestamp, timeFormat)
             )}
@@ -375,7 +375,7 @@ export function MessageList(p: MessageListProps) {
                         ? (m.status === "sending" ? (uploadPaused ? formatTime(m.timestamp, timeFormat) : tr("common.sending"))
                           // 被拒收（有 note）时失败已由红❗+下方系统行表达，角标只显时间，不重复报错（与 iOS 一致）。
                           : m.status === "failed" ? (m.note ? formatTime(m.timestamp, timeFormat) : tr("chat.message.not_sent_mark"))
-                          : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <span className={readByPeer ? "ck read" : "ck"}>{readByPeer ? " ✓✓" : " ✓"}</span> : null}</>)
+                          : <>{formatTime(m.timestamp, timeFormat)}{showTick ? <ReadTick read={readByPeer} className="ck" /> : null}</>)
                         : formatTime(m.timestamp, timeFormat)}
                     </span>
                   </span>

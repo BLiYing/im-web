@@ -19,7 +19,7 @@
   --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（文本/链接图标块，§8.1b；与 iOS IMTheme.accentSoft 同源 12%） */
   --online: #1aab5b;
   --link: #2477d4;
-  --check-read: #4ca64c;        /* 已读双勾绿 */
+  --check-read: #2477d4;        /* 已读双勾蓝（同 --link；READ_TICK_DESIGN） */
   --meta-time: #6b8a5e;         /* 气泡内时间小字（浅绿气泡上的次要色） */
   --wall-top: #d6e8c4;          /* 聊天壁纸渐变上端 */
   --wall-bottom: #b4d89b;       /* 聊天壁纸渐变下端 */
@@ -28,12 +28,12 @@
      也不用白，那与胶囊正文同色。浅琥珀在浅色绿胶囊与深色黑胶囊上都够跳，故深浅两色不另设值。
      iOS 对应 IMTheme.datePillNameText，改一处两端要一起改。 */
   --sys-name: #ffd98a;
-  --unread-badge: #3e91ff;      /* 未读胶囊蓝（区别于绿在线点/绿勾，对齐 iOS） */
+  --unread-badge: #3e91ff;      /* 未读胶囊蓝（区别于绿在线点，对齐 iOS） */
   --on-accent: #ffffff;
   --on-media: #ffffff;
   --on-media-muted: rgba(255, 255, 255, 0.35);
-  /* 压在媒体上的已读双勾：底恒为暗色遮罩，故用亮绿（不随明暗主题变化，与 iOS mediaBadgeCheckRead 同值）。 */
-  --check-read-on-media: #7ddc7d;
+  /* 压在媒体上的已读双勾：底恒为暗色遮罩，故用亮蓝（不随明暗主题变化，与 iOS mediaBadgeCheckRead 同值）。 */
+  --check-read-on-media: #66a9ff;
   --subtle-fill: rgba(29, 33, 41, 0.05);
   --accent-flash: rgba(76, 166, 76, 0.35);
   --overlay: rgba(0, 0, 0, 0.4);
@@ -85,7 +85,7 @@
   --danger: #ff696e; --online: #42c77a; --link: #66a9ff;
   --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（§8.1b）：accent 深浅一致，故与浅色同值 */
   --subtle-fill: rgba(255, 255, 255, 0.07);
-  --check-read: #7ddc7d; --meta-time: #9fb89a;
+  --check-read: #66a9ff; --meta-time: #9fb89a;
   --wall-top: #0e1a12; --wall-bottom: #16261a;
   --date-pill-bg: rgba(0, 0, 0, 0.45);
   --avatar-ring: rgba(255, 255, 255, 0.32);
@@ -106,7 +106,7 @@
     --danger: #ff696e; --online: #42c77a; --link: #66a9ff;
     --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（§8.1b）：accent 深浅一致，故与浅色同值 */
     --subtle-fill: rgba(255, 255, 255, 0.07);
-    --check-read: #7ddc7d; --meta-time: #9fb89a;
+    --check-read: #66a9ff; --meta-time: #9fb89a;
     --wall-top: #0e1a12; --wall-bottom: #16261a;
     --date-pill-bg: rgba(0, 0, 0, 0.45);
     --avatar-ring: rgba(255, 255, 255, 0.32);
@@ -908,7 +908,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .convitem { position: relative; }
 /* 时间在右上、红点在右下，避免重叠（对齐 Telegram/微信）。 */
 .convtime { flex-shrink: 0; padding-left: var(--space-2); }
-/* 列表「我发的最后一条」已读双勾：对端已读→绿 ✓✓，否则→灰 ✓。 */
+/* 列表「我发的最后一条」已读双勾：对端已读→蓝双勾，否则→灰单勾（SVG 图标，见 ReadTick.tsx）。 */
+/* 已读勾图标：高 0.95em、基线对齐，与时间文字间距 3px（READ_TICK_DESIGN §1）。 */
+.rtick { display: inline-block; margin-left: 3px; line-height: 0; vertical-align: baseline; }
+.rtick svg { height: 0.95em; width: auto; display: inline-block; vertical-align: baseline; overflow: visible; }
 .convck { color: var(--text-secondary); }
 .convck.read { color: var(--check-read); }
 /* 未读徽标高 20（UI_SPEC §2，与 iOS _badge.heightAnchor 同值；2026-09-07 从 18 拉齐）。
@@ -1997,8 +2000,8 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .voice-meta-text { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-variant-numeric: tabular-nums;
   font-size: 11px; color: var(--text-secondary); }
 .bubble.me .voice-meta-text { color: rgba(6, 44, 12, 0.6); }
-.voice-tick { font-weight: 600; color: var(--text-secondary); margin-left: 2px; }
-.voice-tick.read { color: var(--accent); }
+.voice-tick { color: var(--text-secondary); }
+.voice-tick.read { color: var(--check-read); }
 .voice-play { flex: none; width: 34px; height: 34px; border-radius: 50%; border: 0;
   background: linear-gradient(155deg, #4EA9FF, #0A6BE0); color: #fff;
   display: grid; place-items: center; font-size: 12px; font-weight: 700; cursor: pointer;

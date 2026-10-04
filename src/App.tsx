@@ -120,6 +120,7 @@ import { unreadBelowCount } from "./unreadBelow";
 import { coversSpan } from "./sdk/ranges";
 import { visibleSlice } from "./renderWindow";
 import { moreLocalAbove } from "./windowPlan";
+import { ReadTick } from "./components/ReadTick";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
   MonitorSmartphone, Languages, Smile, Users, Megaphone,
@@ -644,8 +645,8 @@ export default function App() {
   }, [conversations, refreshConversations, refreshGroupInfo]);
 
   // 群聊已读双勾「非实时」刷新：会话列表刷新（进会话/sync 后）时，把当前打开群的「全员已读位点」
-  // 喂进 peerReadSeq，使「全员都读过→绿✓✓」无需退出会话即可更新——后端刻意不推群 receipt
-  // （避免 O(N²) 扇出），会话列表快照是这个绿勾唯一的更新时机。单调只增，不覆盖单聊的实时位点。
+  // 喂进 peerReadSeq，使「全员都读过→蓝双勾」无需退出会话即可更新——后端刻意不推群 receipt
+  // （避免 O(N²) 扇出），会话列表快照是这个蓝勾唯一的更新时机。单调只增，不覆盖单聊的实时位点。
   useEffect(() => {
     if (!groupConvId) return;
     const gseq = conversations.find((c) => c.conv_id === groupConvId)?.group_read_seq ?? 0;
@@ -716,7 +717,7 @@ export default function App() {
           scheduleListRefresh(); desktop.clearNotifications({ convId, upTo: upToSeq });
         } else {
           setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
-          // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变绿✓✓（否则要切会话才更新）。
+          // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变蓝双勾（否则要切会话才更新）。
           scheduleListRefresh();
         }
       },
@@ -984,7 +985,7 @@ export default function App() {
     const readSeq = conv?.read_seq ?? 0;
     const latestSeq = conv?.latest_conv_seq ?? 0;
     // 进会话即用服务端已知的对端已读位点给聊天详情播种（否则只靠实时回执：对方早前已读、本标签页没在场时，
-    // 列表显✓✓而详情仍显✓）。取较大值，避免覆盖刚到的更新回执。
+    // 列表显双勾而详情仍显单勾）。取较大值，避免覆盖刚到的更新回执。
     setPeerReadSeq((prev) => ({ ...prev, [cid]: Math.max(prev[cid] ?? 0, conv?.peer_read_seq ?? 0) }));
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
@@ -2834,9 +2835,7 @@ export default function App() {
                   </span>
                   <span className="convtime">
                     {!c.is_group && c.last_message?.from === uid && (
-                      <span className={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "convck read" : "convck"}>
-                        {c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0) ? "✓✓ " : "✓ "}
-                      </span>
+                      <ReadTick read={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0)} className="convck" />
                     )}
                     {c.last_message ? conversationTime(c.last_message.timestamp, timeFormat) : ""}
                   </span>

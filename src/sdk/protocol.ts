@@ -264,10 +264,10 @@ export interface Conversation {
   /** 服务端未读计数撞到上限（真实值 ≥ unread）→ 角标补 "+"（OFFLINE_BACKLOG_DESIGN §6.1）。 */
   unread_capped?: boolean;
   read_seq: number; // 本人已读位点（首条未读 = convSeq > read_seq 的第一条）
-  peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表绿✓✓/灰✓）
+  peer_read_seq: number; // 单聊对端已读位点（判断"我发的最后一条"是否已读 → 列表蓝双勾/灰单勾）
   /**
    * 群聊「全员已读位点」= min(其他成员已读位点)；单聊恒 0（走 peer_read_seq）。
-   * 群聊据此判断「我发的、conv_seq ≤ 该位点」是否**全员已读** → 绿✓✓，否则灰✓。
+   * 群聊据此判断「我发的、conv_seq ≤ 该位点」是否**全员已读** → 蓝双勾，否则灰单勾。
    * 非实时：仅随会话列表/sync 刷新（后端刻意不推群 receipt，避免 O(N²) 扇出）。
    */
   group_read_seq?: number;

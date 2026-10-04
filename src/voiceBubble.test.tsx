@@ -3,8 +3,8 @@
  * VoiceBubble 的「时间 / 已读勾」契约。
  *
  * 背景：这一行曾在组件内自己算一套（peerReadSeq + 一个额外的 !isGroup），和 MessageList 给
- * 文本/媒体气泡用的 .bmeta 判定成了两份拷贝——群聊里 .bmeta 按 group_read_seq「全员已读」显 ✓✓，
- * 语音却被 !isGroup 压成 ✓。现在判定只有一个所有者（MessageList），气泡只负责显示传进来的结果。
+ * 文本/媒体气泡用的 .bmeta 判定成了两份拷贝——群聊里 .bmeta 按 group_read_seq「全员已读」显双勾，
+ * 语音却被 !isGroup 压成单勾。现在判定只有一个所有者（MessageList），气泡只负责显示传进来的结果。
  * 时分同理：必须走 time.ts 的 formatTime，跟随用户的 12/24 小时制设置。
  */
 import { describe, it, expect, afterEach, beforeAll } from "vitest";
@@ -28,9 +28,10 @@ const voice = (over: Partial<ChatMessage> = {}): ChatMessage => ({
 } as ChatMessage);
 
 describe("VoiceBubble 已读勾：只认传入的 readByPeer", () => {
-  it("readByPeer=true → ✓✓（.voice-tick.read）", () => {
+  it("readByPeer=true → 双勾（.voice-tick.read）", () => {
     render(<VoiceBubble m={voice()} mine uid="me" audioSrc="/uploads/a.m4a" readByPeer />);
     expect(document.querySelector(".voice-tick.read")).toBeInTheDocument();
+    expect(document.querySelectorAll(".voice-tick.read svg path")).toHaveLength(2);
   });
 
   it("readByPeer=false → 单勾（.voice-tick 无 .read）", () => {

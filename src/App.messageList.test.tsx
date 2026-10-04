@@ -143,15 +143,15 @@ describe("消息列表：引用 / 转发 / 图说", () => {
 });
 
 describe("消息列表：状态标记", () => {
-  it("本人消息被对端读过 → 双勾 .ck.read（✓✓）", async () => {
+  it("本人消息被对端读过 → 双勾 .ck.read（SVG 双勾）", async () => {
     await enterChat({ peer_read_seq: 5 });
     await push(recv({ from: UID, contentType: "text", content: "在的", convSeq: 1 }));
     await waitFor(() => expect(msgs().querySelector(".ck.read")).toBeInTheDocument());
   });
 
   // 语音气泡的时间/勾曾在组件内另算一套（多带一个 !isGroup），把 .bmeta 的判定复制成了第二份，
-  // 结果单聊也好群聊也好都只显 ✓。现在由 MessageList 算好 readByPeer 一并传下去，两者恒同口径。
-  it("本人语音被对端读过 → 语音气泡也显 ✓✓（与文本气泡同口径）", async () => {
+  // 结果单聊也好群聊也好都只显单勾。现在由 MessageList 算好 readByPeer 一并传下去，两者恒同口径。
+  it("本人语音被对端读过 → 语音气泡也显双勾（与文本气泡同口径）", async () => {
     await enterChat({ peer_read_seq: 5 });
     await push(recv({ from: UID, contentType: "voice", content: "/uploads/a.m4a", duration: 3000, convSeq: 1 }));
     await waitFor(() => expect(msgs().querySelector(".voice-tick.read")).toBeInTheDocument());

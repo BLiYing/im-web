@@ -9,6 +9,7 @@ import type { ChatMessage } from "../sdk/protocol";
 import { voiceRelayMid } from "../voiceRelay";
 import { formatTime, type TimeFormat } from "../time";
 import { useT } from "../i18n";
+import { ReadTick } from "./ReadTick";
 
 /// 波形柱数：按可绘制宽度动态定；这里按 ~5.5px pitch 估算，实际下采见组件内。
 const WAVE_MIN_BARS = 20;
@@ -124,11 +125,11 @@ interface VoiceBubbleProps {
   audioSrc: string;
   /** 迷你形态（资料页/收藏行）：关气泡背景，仅留 ▶+波形+时长横排（sketch §10/§11）。 */
   variant?: "bubble" | "mini";
-  /** 对端是否已读（波形下方显 ✓/✓✓，2026-08-27 拍板）。**由 MessageList 算好传入**——
+  /** 对端是否已读（波形下方显单/双勾图标，2026-08-27 拍板）。**由 MessageList 算好传入**——
    *  与 .bmeta 共用同一判定（群聊用 group_read_seq「全员已读」播种，见 App.openConversation），
-   *  别在气泡里另算一套：曾多带一个 !isGroup 条件，把群里的全员已读 ✓✓ 压成 ✓。 */
+   *  别在气泡里另算一套：曾多带一个 !isGroup 条件，把群里的全员已读双勾压成单勾。 */
   readByPeer?: boolean;
-  /** 是否画 ✓/✓✓。大群关闭已读语义 → false（见 MessageList 的 showTick）。 */
+  /** 是否画已读勾。大群关闭已读语义 → false（见 MessageList 的 showTick）。 */
   showTick?: boolean;
   /** 12/24 小时制（通用设置）；与其它气泡共用 time.ts 的 formatTime，勿手写时分。 */
   timeFormat?: TimeFormat;
@@ -330,7 +331,7 @@ export function VoiceBubble({ m, mine, uid, audioSrc, variant = "bubble", readBy
               : mine && m.status === "failed" ? tr("chat.message.not_sent_mark")
               : timeStr}
             {showsTicks && (
-              <span className={readByPeer ? "voice-tick read" : "voice-tick"}>{" "}{readByPeer ? "✓✓" : "✓"}</span>
+              <ReadTick read={readByPeer} className="voice-tick" />
             )}
           </span>
         </div>
