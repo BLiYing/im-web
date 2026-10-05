@@ -110,6 +110,7 @@ import { unreadBadgeText } from "./unreadBadge";
 import { useDesktopIntegration } from "./useDesktopIntegration";
 import { useFaviconBadge } from "./useFaviconBadge";
 import { useMuteExpiryTick } from "./useMuteExpiryTick";
+import { usePageVisibleAgain } from "./usePageVisibleAgain";
 import { useConvMute } from "./useConvMute";
 import { isMutedNow } from "./muteState";
 import { ContextMenusHost } from "./components/ContextMenusHost";
@@ -2087,16 +2088,15 @@ export default function App() {
     setShowJump(true);
   }, [phase, convId, renderView.anchor, windowSig, messages, msgsByConv]);
 
-  // 图片/视频是异步加载的：贴底 useLayoutEffect 触发时元素高度≈0，加载完成后气泡才撑高，
-  // 而依赖数组里没有值随之改变 → effect 不重跑 → 媒体被挤出视口下方（发图/发视频不贴底，问题2）。
+  // 图片/视频异步加载：贴底 useLayoutEffect 时高度≈0、加载完才撑高，依赖不变 effect 不重跑 → 媒体被挤出视口下方（问题2）。
   // 故媒体加载完成后，若此前处于贴底状态则再贴一次底。图片(onLoad)/视频(onLoadedData)共用此回调。
   const onMediaLoad = useCallback(() => {
     const box = msgsRef.current;
     if (box && wasNearBottomRef.current) box.scrollTop = box.scrollHeight;
   }, []);
 
-  // 可见即读（CHAT_UX §6 完整语义）：扫描在视口内的消息，取最大 conv_seq；超过已滚入位点则节流上报。
-  // 同时把"↓N"更新为视口下方仍未读的对端消息数（随滚动递减，滚到底为 0）。
+  // 可见即读（CHAT_UX §6）：视口内最大 conv_seq 超过已滚入位点则节流上报；**页面 hidden 时不算读**（切走标签页/最小化
+  // 对方会误见已读，2026-10-05 联调实测），回到前台由 usePageVisibleAgain 补扫。同时更新视口下方未读数 ↓N。
   const markVisibleRead = useCallback(() => {
     const box = msgsRef.current;
     if (!box) return;
@@ -2109,7 +2109,7 @@ export default function App() {
       // 元素顶部已进入容器可见底边 → 视为已滚入（被看到过）；其中最大 seq = 当前看到的最深位置。
       if (seq > 0 && el.getBoundingClientRect().top < boxBottom) maxSeq = Math.max(maxSeq, seq);
     });
-    if (maxSeq > pendingReadRef.current) {
+    if (maxSeq > pendingReadRef.current && !document.hidden) {
       pendingReadRef.current = maxSeq;
       if (readTimerRef.current) clearTimeout(readTimerRef.current);
       readTimerRef.current = window.setTimeout(() => {
@@ -2161,11 +2161,11 @@ export default function App() {
   }, [refreshConversations]);
 
   // 进会话/新消息渲染后扫一遍可见消息（覆盖"整屏放得下、不触发滚动"的短会话；滚动另由 onMsgsScroll 处理）。
-  // 依赖里的 `allLocal.length` 不能换成 `messages.length`：锚点模式的窗口不含尾部，
-  // 新消息只进本地全量、不进这一窗，只看窗口条数就永远不重算角标。
+  // 依赖里的 `allLocal.length` 不能换成 `messages.length`：锚点窗不含尾部，新消息只进本地全量，只看窗口条数永不重算角标。
   useEffect(() => {
     if (phase === "app" && convId) markVisibleRead();
   }, [phase, convId, messages.length, allLocal.length, markVisibleRead]);
+  usePageVisibleAgain(() => { if (phase === "app" && currentConvRef.current) markVisibleRead(); });
 
   const onMsgsScroll = useCallback(() => {
     const box = msgsRef.current;
