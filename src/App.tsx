@@ -111,6 +111,7 @@ import { useDesktopIntegration } from "./useDesktopIntegration";
 import { useFaviconBadge } from "./useFaviconBadge";
 import { useMuteExpiryTick } from "./useMuteExpiryTick";
 import { usePageVisibleAgain } from "./usePageVisibleAgain";
+import { keepHigherGroupRead } from "./groupReadMerge";
 import { useConvMute } from "./useConvMute";
 import { isMutedNow } from "./muteState";
 import { ContextMenusHost } from "./components/ContextMenusHost";
@@ -519,7 +520,7 @@ export default function App() {
     try {
       const convs = await clientRef.current?.fetchConversations();
       if (convs) {
-        setConversations(convs);
+        setConversations((prev) => keepHigherGroupRead(prev, convs)); // 群全员已读位点取大：别让迟到的旧快照盖掉 group_read 推来的值
         seedPresenceFromConversations(convs); // 在线态**初始值**：presence 帧只报变化，不播种就只能靠碰巧撞上对方上线
         clientRef.current?.cacheConversations(convs); // 缓存：刷新/离线先秒显
         return convs;
@@ -622,8 +623,7 @@ export default function App() {
     const conv = conversations.find((c) => c.conv_id === cid);
     const readSeq = conv?.read_seq ?? 0;
     const latestSeq = conv?.latest_conv_seq ?? 0;
-    // 群聊已读双勾：用「全员已读位点」播种 peerReadSeq —— 群里没有单一对端，只有**人人都读过**
-    // 才算已读（读得最慢的成员决定位点）。非实时：进会话/刷新列表时取快照值（后端不推群 receipt）。
+    // 群聊已读双勾：用「全员已读位点」（读得最慢的成员决定）播种 peerReadSeq；之后随列表刷新与 group_read 帧取大（见下方 effect）。
     setPeerReadSeq((prev) => ({ ...prev, [cid]: Math.max(prev[cid] ?? 0, conv?.group_read_seq ?? 0) }));
     setEntryUnread(conv?.unread ?? 0);
     entryUnreadRef.current = conv?.unread ?? 0;
@@ -645,9 +645,8 @@ export default function App() {
     void refreshConversations();
   }, [conversations, refreshConversations, refreshGroupInfo]);
 
-  // 群聊已读双勾「非实时」刷新：会话列表刷新（进会话/sync 后）时，把当前打开群的「全员已读位点」
-  // 喂进 peerReadSeq，使「全员都读过→蓝双勾」无需退出会话即可更新——后端刻意不推群 receipt
-  // （避免 O(N²) 扇出），会话列表快照是这个蓝勾唯一的更新时机。单调只增，不覆盖单聊的实时位点。
+  // 群聊已读双勾：会话行 group_read_seq 变了（列表刷新 / group_read 帧）就把当前打开群的「全员已读位点」喂进 peerReadSeq，
+  // 不必退出会话。单调只增，不覆盖单聊的实时位点。
   useEffect(() => {
     if (!groupConvId) return;
     const gseq = conversations.find((c) => c.conv_id === groupConvId)?.group_read_seq ?? 0;
@@ -718,10 +717,11 @@ export default function App() {
           scheduleListRefresh(); desktop.clearNotifications({ convId, upTo: upToSeq });
         } else {
           setPeerReadSeq((prev) => ({ ...prev, [convId]: Math.max(prev[convId] ?? 0, upToSeq) }));
-          // 对端已读 → 刷新左侧列表，让"我发的最后一条"在列表里也即时变蓝双勾（否则要切会话才更新）。
-          scheduleListRefresh();
+          scheduleListRefresh(); // 对端已读 → 刷新左侧列表，"我发的最后一条"在列表里也即时变蓝双勾
         }
       },
+      // 群「全员已读」变大（GROUP_READ_REALTIME_DESIGN）：只改本地会话行；打开着的群由下方 group_read_seq effect 喂进 peerReadSeq。
+      onGroupRead: (convId, seq) => setConversations((prev) => prev.map((c) => (c.conv_id === convId && (c.group_read_seq ?? 0) < seq ? { ...c, group_read_seq: seq } : c))),
       // 超级群轻量信号（2 万人量级）：服务端不推全文，只说「某会话最新到 seq 了」。
       //   · 会话列表：走既有的节流刷新，从服务端拿到权威的预览/未读（比自己拼更不容易错）。
       //   · **正开着的那个会话**：贴底跟随时补上新的那段（不补就停在旧消息上，最像"消息丢了"）；

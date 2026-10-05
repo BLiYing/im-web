@@ -33,6 +33,7 @@ export const T = {
    * 正文在**打开该会话时**经 sync_req 拉。见 IMServer/docs/design/SUPERGROUP_DESIGN.md §5。
    */
   CONV_BUMP: "conv_bump",
+  GROUP_READ: "group_read", // 群「全员已读」位点变大（只推变大，PROTOCOL §5.3，IMServer docs/design/GROUP_READ_REALTIME_DESIGN.md）
   /**
    * 消息窗口：**以某条消息为锚点**取一段上下文（IMServer/docs/design/MESSAGE_WINDOW_DESIGN.md）。
    * 与 SYNC_REQ 的分工：sync 是"按游标推进、可推进本地已同步位点"；window 是"一次性快照，
@@ -268,7 +269,7 @@ export interface Conversation {
   /**
    * 群聊「全员已读位点」= min(其他成员已读位点)；单聊恒 0（走 peer_read_seq）。
    * 群聊据此判断「我发的、conv_seq ≤ 该位点」是否**全员已读** → 蓝双勾，否则灰单勾。
-   * 非实时：仅随会话列表/sync 刷新（后端刻意不推群 receipt，避免 O(N²) 扇出）。
+   * 随会话列表刷新，另由 group_read 帧实时推变大的值（GROUP_READ_REALTIME_DESIGN）。
    */
   group_read_seq?: number;
   // 在线态快照（仅单聊）：presence 帧只报"变化"，进页面时的初始值取自这里。语义见 presence.ts。

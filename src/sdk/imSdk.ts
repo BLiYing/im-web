@@ -100,11 +100,9 @@ export interface IMClientHandlers {
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
   onNotifySettingsUpdate?: (version: number) => void; // 账号级通知设置版本变更（M5 §6.13，独立版本序列，不与上面混用）：另一端改了 private/group/badge，本端应重拉
-  /**
-   * 超级群轻量信号：一批「某会话最新到 conv_seq 了」。**没有正文**——
-   * UI 据此刷新会话列表那一行（预览+角标），真要看内容得进会话时 sync。
-   */
+  /** 超级群轻量信号：一批「某会话最新到 conv_seq 了」。**没有正文**——UI 据此刷新列表那一行，看内容得进会话时 sync。 */
   onConvBump?: (items: ConvBumpItem[]) => void;
+  onGroupRead?: (convId: string, groupReadSeq: number) => void; // 群「全员已读」位点变大（PROTOCOL §5.3），调用方取较大值
   /**
    * 窗口到达：消息本身已走常规落库，这里只回传**边界信息**。
    * 调用方据 anchorFound 决定是滚动高亮还是提示"原消息已被删除"。
@@ -117,10 +115,7 @@ export interface IMClientHandlers {
    * count=本页实际下发条数（被拒时为 0）。
    */
   onHistoryPage?: (convId: string, since: number, count: number) => void;
-  /**
-   * 该会话的「本地有哪几段」变了（预热/整页落库/开窗）。UI 据此重算渲染切段——
-   * 切段要判断"两条消息之间是没下载、还是本就不成为消息"，只能问区间清单。
-   */
+  /** 「本地有哪几段」变了（预热/整页落库/开窗）→ UI 重算渲染切段（"没下载"还是"本就不成为消息"只能问区间清单）。 */
   onRanges?: (convId: string) => void;
   /** 语音转文字结果到达（服务端识别完成，见 IMServer docs/design/VOICE_TRANSCRIBE_DESIGN.md §3.2）。 */
   onVoiceTranscript?: (convId: string, convSeq: number, status: string, text: string) => void;
@@ -932,6 +927,9 @@ export class IMClient extends IMRestApi {
       }
       case T.RECEIPT:
         this.handlers.onReceipt?.(d.conv_id, d.from, d.status, d.up_to_conv_seq);
+        break;
+      case T.GROUP_READ:
+        this.handlers.onGroupRead?.(d.conv_id, d.group_read_seq);
         break;
       case T.PRESENCE:
         // 诊断：在线态链路的「收到」书挡，与本端 watch_sent、服务端 presence_online_broadcast 对账。
