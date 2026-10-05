@@ -74,6 +74,7 @@ import { useDialogs } from "./useDialogs";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
 import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
+import { useOpenSettingsHit } from "./useOpenSettingsHit";
 import { useAccountNotifySettings } from "./useAccountNotifySettings";
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
@@ -2704,7 +2705,6 @@ export default function App() {
 
   // ---- 入群审批（G3）----
 
-  // 我在本群的昵称（G1，任意成员）：走后端 → 刷新群资料（气泡回退名随之更新）。
   // 成员行是否显示 ⋯ 管理菜单：不能管自己；owner 管所有人，admin 只管普通成员。
   const canManageMember = (gp: GroupInfo, m: GroupMember): boolean =>
     m.user_id !== uid && (gp.my_role === "owner" || (gp.my_role === "admin" && m.role === "member"));
@@ -2724,8 +2724,7 @@ export default function App() {
   };
   const openFriendChat = (id: string) => { setTab("chats"); openChat(id); };
 
-  // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动：加一项 = append 一条）。
-  // 「我的资料」不再单列——资料在设置页顶部展示、经铅笔进入编辑；退出登录移到设置页底部。
+  // 左上角头像卡片的行（≈ Telegram Web 汉堡菜单；数据驱动）。「我的资料」不再单列——资料在设置页顶部、经铅笔编辑；退出登录在设置页底部。
   const accountRows: Row[] = [
     { id: "settings", label: t("settings.title"), icon: Settings, chevron: true, onClick: () => { setAccountCard(false); setShowSettings(true); } },
     { id: "favorites", label: t("common.saved_messages"), icon: Bookmark, chevron: true, onClick: () => { setAccountCard(false); openFavorites(); } },
@@ -2735,8 +2734,7 @@ export default function App() {
       onClick: () => { setAccountCard(false); setShowCallHistory(true); } },
   ];
 
-  // 设置列表（对齐 Telegram **Web** 版布局；数据驱动：加一行 = append 一条；接后端 = 换 onClick）。
-  // Web 版条目与 iOS 版不同——各自镜像对应平台的 Telegram 客户端。
+  // 设置列表（对齐 Telegram **Web** 版布局，条目与 iOS 版不同；数据驱动：加一行 = append 一条；接后端 = 换 onClick）。
   const settingsGroups: Row[][] = [
     [
       { id: "general", label: t("settings.row.general"), icon: Settings2, iconTint: "gray", chevron: true, onClick: () => setGeneralOpen(true) },
@@ -2751,6 +2749,7 @@ export default function App() {
     ],
   ];
 
+  const openSettingsHit = useOpenSettingsHit({ rows: settingsGroups[0], clearSearch: () => search.setHomeSearch(""), showSettings: () => setShowSettings(true), setWallpaperOpen, setBlockedOpen, setChangePwdOpen });
   // 设置页顶部名片下的资料卡（手机号/用户名）。
   const settingsInfoRows = buildSettingsInfoRows({ t, myInfo, uid, openProfile, openMyCard, shareContactCard });
 
@@ -2807,6 +2806,7 @@ export default function App() {
             highlight={(t, k) => highlightText(t, homeQ, k)}
             openConvById={openConvById} openPeerDetail={openPeerDetail}
             onRecordClick={(cid, seq) => { search.setHomeSearch(""); locateInChat(cid, seq); }}
+            homeQ={homeQ} onOpenSettings={openSettingsHit}
           />
           ) : (
           <>

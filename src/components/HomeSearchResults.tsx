@@ -5,6 +5,7 @@ import { Avatar } from "./Avatar";
 import type { Conversation, FriendEntry } from "../sdk/protocol";
 import type { MsgRecord } from "../sdk/localStore";
 import { useT } from "../i18n";
+import { filterSettingsEntries, settingsSearchEntries, settingsSubtitle, type SettingsSearchEntry } from "../settingsSearch";
 
 export function HomeSearchResults(p: {
   homeConvHits: Conversation[];
@@ -21,8 +22,13 @@ export function HomeSearchResults(p: {
   openPeerDetail: (uid: string) => void;
   /** 点聊天记录行：直接打开会话并定位到最近命中那条（不开会话内搜索模式），seq=最近命中 convSeq。 */
   onRecordClick: (convId: string, seq: number) => void;
+  /** 当前（已小写）搜索词：设置项命中在本组件内按当前语言现算，不占 App 状态。 */
+  homeQ: string;
+  /** 点设置项：关搜索、逐级打开目标页（接线在 App）。 */
+  onOpenSettings: (e: SettingsSearchEntry) => void;
 }) {
   const tr = useT();
+  const settingsHits = filterSettingsEntries(settingsSearchEntries(tr), p.homeQ);
   return (
     <div className="home-results">
       {p.homeConvHits.length > 0 && <div className="section-label">{tr("search.section.conversations")}</div>}
@@ -62,7 +68,18 @@ export function HomeSearchResults(p: {
           </div>
         );
       })}
-      {p.homeConvHits.length === 0 && p.homeFriendHits.length === 0 && p.homeRecordHits.length === 0 && (
+      {settingsHits.length > 0 && <div className="section-label">{tr("search.section.settings")}</div>}
+      {settingsHits.map((e) => (
+        <div key={`hs-${e.id}`} className="convitem settings-hit" role="button" tabIndex={0} onClick={() => p.onOpenSettings(e)}
+          onKeyDown={(ev) => { if (ev.key === "Enter") p.onOpenSettings(e); }}>
+          <span className={`row-icon-tile ${e.tint}`}><e.icon size={17} /></span>
+          <div className="convbody">
+            <div className="convpeer">{p.highlight(e.title, `hsn-${e.id}`)}</div>
+            <div className="convlast">{settingsSubtitle(e, tr("settings.title"))}</div>
+          </div>
+        </div>
+      ))}
+      {p.homeConvHits.length === 0 && p.homeFriendHits.length === 0 && p.homeRecordHits.length === 0 && settingsHits.length === 0 && (
         <div className="empty">{tr("home.search.empty")}</div>
       )}
     </div>
