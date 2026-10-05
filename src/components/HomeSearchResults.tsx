@@ -71,7 +71,7 @@ export function HomeSearchResults(p: {
       {settingsHits.length > 0 && <div className="section-label">{tr("search.section.settings")}</div>}
       {settingsHits.map((e) => (
         <div key={`hs-${e.id}`} className="convitem settings-hit" role="button" tabIndex={0} onClick={() => p.onOpenSettings(e)}
-          onKeyDown={(ev) => { if (ev.key === "Enter") p.onOpenSettings(e); }}>
+          onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); p.onOpenSettings(e); } }}>
           <span className={`row-icon-tile ${e.tint}`}><e.icon size={17} /></span>
           <div className="convbody">
             <div className="convpeer">{p.highlight(e.title, `hsn-${e.id}`)}</div>
