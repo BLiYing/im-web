@@ -13,14 +13,8 @@ web(IndexedDB v6，位点存游标行、升级事务回填)与桌面(SQLite `syn
 
 ## 下一步
 
-0. **桌面版实机验清空位点**（只跑过单测/契约，未开 IM Desktop）：清空→切走切回不拉回；老 SQLite 库升级后回填（升级前清空过的会话不再被拉回）。
-1. **桌面系统通知实机验证**（代码完成、已提交，未在桌面版实机验过）：头像（群=群头像/单聊=对端/无则同色占位）、撤回/移除/本人别处已读时收回、窗口聚焦全清；Windows 上 `Notification.close()` 能否从操作中心移除未验；断线期间错过的本人已读回执不会补收通知。
-2. **桌面版手测本地库**（D4-3b 已过 e2e，三件要眼睛看）：① 发一条语音→重启应用→波形还在不在；② 换号后不串库（SQLite 按 owner 隔离，没在真机验过两个账号来回切）；③ **首次升级会清空本地缓存**（既有 IndexedDB 不迁移是刻意取舍，§7.6.3）——「离线冷启动可浏览」断一次、消息从服务端重新同步。
-3. **浏览器手测语音**（重启后端后）：Safari 录制（Chrome 无 audio/mp4 支持入口置灰属预期）→ 发送立即显示气泡；收发波形/scrub/倍速；详情语音 tab；收藏语音播放 + 从收藏发送。语音转文字**结果链路**未在本地验通（实测停在「识别中…」，服务端识别多半没配）——排一次后端 `internal/transcribe` 配置再复测。
-4. **「设置 ▸ 最近通话」浏览器实测**：滚动自动翻页手感、「未接」tab 续页观感、`callEnd` 重拉时机、群聊跳转、深色模式。
-5. **`call.history.*` 六个 i18n 键补进 `../IMServer/docs/i18n/strings.json` 源表**（本端只手改了 `src/i18n/locales/{zh-Hans,en}.json` 生成物，生成脚本本 worktree 未见）——下次有人跑 i18n 生成流程前先补，否则会被生成物覆盖冲掉。
-6. **资料页断网兜底未核**：iOS/Android 已做「我」页本人资料本机副本，Web 设置页头部是否同样断网退回「未命名用户」+ 首字母圈，需核实（对称兄弟，见 `../IMServer/docs/CLIENT_PARITY.md`「陌生人首条消息的会话壳…」行）。
-7. 群内已读细化（随主线）；消息列表虚拟化（暂回退普通滚动列表）；测试债：Playwright E2E。
+1. **资料页断网兜底**：iOS / Android 已做「我」页本人资料本机副本；Web 设置页头部（`SettingsPanelsHost`）仍是 `myInfo?.nickname → @username → common.unnamed_user`，**无本机副本**，断网会退回「未命名用户」。补一份本人资料本机副本（对称兄弟，见 `../IMServer/docs/CLIENT_PARITY.md`「陌生人首条消息的会话壳…」行）。
+2. 消息列表虚拟化（暂回退普通滚动列表；`VirtualList` 目前只用于通讯录）；测试债：Playwright E2E。
 
 ## 技术债 / 下次
 - **`src/App.tsx` 拆分已收口**（6302 → 2958，后长回 ~3760）：剩余是应用外壳本体（核心 state/连接/phase 路由、enterApp、滚动·定位·已读核心、conversationActions 菜单表、send() 编排、子组件接线），**不再硬抽**，新功能按决策树进新文件。再拆必守三条：① Hook 调用须在 `if (phase==='login') return` 之前且注入依赖已定义；② `searchOpen/searchQuery` 留 App；③ 行为保持型（逐字平移，靠 `App.smoke.test.tsx` + tsc + build + 回归兜底），services 的 `useMemo` 放在所有 early return 之前。
