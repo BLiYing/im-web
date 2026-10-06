@@ -127,6 +127,30 @@ describe("AdminPickerModal（多选 ≤5）", () => {
     expect(onToggle).toHaveBeenCalledWith("4820571600");
   });
 
+  it("标题「添加管理员」+ 副标题「已勾选x/max人」；已有 2 位管理员（maxPick=3）勾满 3 个即置灰", () => {
+    const onToggle = vi.fn();
+    const selected = many.slice(0, 3).map((m) => m.user_id);
+    const { getByText, queryByText, container } = render(
+      <AdminPickerModal candidates={many} selected={selected} maxPick={3} memberLabel={label}
+        onToggle={onToggle} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(getByText("添加管理员")).toBeTruthy();
+    expect(getByText("已勾选3/3人")).toBeTruthy();
+    expect(getByText("一次最多添加 3 位管理员。")).toBeTruthy();
+    expect(queryByText("一次最多添加 5 位管理员。")).toBeNull();
+    fireEvent.click(container.querySelectorAll(".check-row")[3]);
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+
+  it("未勾满时副标题随勾选数变化，未达上限的行可点", () => {
+    const onToggle = vi.fn();
+    const { getByText, container } = render(
+      <AdminPickerModal candidates={many} selected={[many[0].user_id]} maxPick={3} memberLabel={label}
+        onToggle={onToggle} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+    expect(getByText("已勾选1/3人")).toBeTruthy();
+    fireEvent.click(container.querySelectorAll(".check-row")[1]);
+    expect(onToggle).toHaveBeenCalledWith("4820571601");
+  });
+
   it("空候选 → 空态「群里还没有其他成员」，确认按钮不可点", () => {
     const { getByText } = render(
       <AdminPickerModal candidates={[]} selected={[]} memberLabel={label}

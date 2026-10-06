@@ -11,7 +11,7 @@ import type { ChatMessage } from "../sdk/protocol";
 import { buildGroupSysSegments, buildSysNoticeText, localizeReplySnapshot } from "../sysEventRender";
 import { pickNextVoiceRelay, voiceRelayMid } from "../voiceRelay";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
-import { albumMembers, isAlbumLeader, isAlbumMember, msgKey } from "../album";
+import { albumMembers, albumTickState, isAlbumLeader, isAlbumMember, msgKey } from "../album";
 import { formatTime, isSameDay, dayHeader, type TimeFormat } from "../time";
 import { FileTypeIcon } from "../FileTypeIcon";
 import { formatFileSize } from "../fileMetadata";
@@ -214,7 +214,7 @@ export function MessageList(p: MessageListProps) {
                         onClick={() => resendMessage(m, messages)}>!</button>
               )}
               <AlbumGrid members={members}
-                timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""}
+                timeLabel={last?.timestamp ? formatTime(last.timestamp, timeFormat) : ""} tick={albumTickState(members, mine, readSeq, isSuperGroup)}
                 progress={uploadProgress}
                 gateFor={(mm) => !!mediaGate(mm)}
                 expiredFor={(mm) => mediaGate(mm)?.phase === "expired"}

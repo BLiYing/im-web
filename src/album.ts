@@ -86,3 +86,18 @@ export function albumRowPattern(n: number): number[] {
     default: return [3, 3, 3];
   }
 }
+
+/** 相册胶囊状态（READ_TICK_DESIGN §4，与 iOS IMAlbumTickStateForMembers 同规则）。 */
+export type AlbumTick = "none" | "sending" | "sent" | "read";
+
+/** 任一失败 → none（由宫格左侧红❗表达）；任一非 sent → sending（「…」）；全部 sent → 看**末条**成员
+ *  convSeq 与对方已读位点（与单条图片同判据）。`hidden`=超级群不画勾。 */
+export function albumTickState(members: ChatMessage[], mine: boolean, readSeq: number, hidden = false): AlbumTick {
+  if (!mine || members.length === 0) return "none";
+  if (members.some((m) => m.status === "failed")) return "none";
+  // 「已发出」以 convSeq>0 为准：重载/他端同步回来的自己的消息 status 是 "received"，不能按 status==="sent" 判。
+  if (members.some((m) => m.status === "sending" || m.convSeq <= 0)) return "sending";
+  if (hidden) return "none";
+  const lastSeq = members[members.length - 1].convSeq;
+  return lastSeq > 0 && lastSeq <= readSeq ? "read" : "sent";
+}

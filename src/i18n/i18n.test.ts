@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { format, getLang, getPref, resolveLanguage, setPref, subscribe, t, tokenizeTemplate, translate } from "./index";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { format, getLang, getPref, refreshSystemLang, resolveLanguage, setPref, subscribe, t, tokenizeTemplate, translate } from "./index";
 
 afterEach(() => setPref("zh-Hans"));
 
@@ -75,5 +76,32 @@ describe("translate / t", () => {
     expect(hits).toBe(2);
     setPref("zh-Hans");
     expect(t("settings.title")).toBe("设置");
+  });
+});
+
+describe("英文 → 跟随系统 回到系统语言（中文）", () => {
+  it("显式 en 后 setPref('system')：按 navigator.languages 重新解析回中文，并清掉存储", () => {
+    const spy = vi.spyOn(navigator, "languages", "get").mockReturnValue(["zh-CN", "en"]);
+    try {
+      setPref("en");
+      expect(getLang()).toBe("en");
+      setPref("system");
+      expect(getLang()).toBe("zh-Hans");
+      expect(t("settings.title")).toBe("设置");
+      expect(localStorage.getItem("im.language")).toBeNull();
+    } finally { spy.mockRestore(); }
+  });
+  it("系统语言运行中变化（languagechange）：仅「跟随系统」时跟着变，显式选择不动", () => {
+    const spy = vi.spyOn(navigator, "languages", "get").mockReturnValue(["zh-CN"]);
+    try {
+      setPref("system");
+      expect(getLang()).toBe("zh-Hans");
+      spy.mockReturnValue(["en-US"]);
+      refreshSystemLang();
+      expect(getLang()).toBe("en");
+      setPref("zh-Hans");
+      refreshSystemLang();
+      expect(getLang()).toBe("zh-Hans");
+    } finally { spy.mockRestore(); }
   });
 });

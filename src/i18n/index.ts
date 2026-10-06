@@ -60,6 +60,17 @@ export function setPref(next: LangPref): void {
   listeners.forEach((fn) => fn());
 }
 
+/** 系统语言在运行中变了：只有「跟随系统」时重新解析（显式选了语言则不动）。 */
+export function refreshSystemLang(): void {
+  if (pref !== "system") return;
+  const next = resolveLanguage("system", systemLangs());
+  if (next === lang) return;
+  lang = next;
+  applyHtmlLang();
+  listeners.forEach((fn) => fn());
+}
+if (typeof window !== "undefined") window.addEventListener("languagechange", refreshSystemLang);
+
 export function subscribe(fn: () => void): () => void {
   listeners.add(fn);
   return () => { listeners.delete(fn); };

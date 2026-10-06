@@ -1,6 +1,6 @@
 // 相册聚簇纯函数单测（M4+）。
 import { describe, expect, it } from "vitest";
-import { albumMembers, albumRowPattern, isAlbumLeader, isAlbumMember, isViewableMedia, msgKey, resolveJumpTarget } from "./album";
+import { albumMembers, albumRowPattern, albumTickState, isAlbumLeader, isAlbumMember, isViewableMedia, msgKey, resolveJumpTarget } from "./album";
 import type { ChatMessage } from "./sdk/protocol";
 
 const msg = (over: Partial<ChatMessage>): ChatMessage => ({
@@ -125,5 +125,34 @@ describe("album clustering", () => {
       const total = albumRowPattern(n).reduce((a, b) => a + b, 0);
       expect(total).toBe(n);
     }
+  });
+});
+
+describe("albumTickState（READ_TICK_DESIGN §4）", () => {
+  const mk = (seqs: number[], over: Partial<ChatMessage> = {}) =>
+    seqs.map((s) => msg({ groupId: "g", convSeq: s, from: "me", status: "sent", ...over }));
+  it("对方的相册 / 空组 → none", () => {
+    expect(albumTickState(mk([1, 2]), false, 9)).toBe("none");
+    expect(albumTickState([], true, 9)).toBe("none");
+  });
+  it("任一失败 → none（优先于发送中）", () => {
+    const ms = [...mk([1]), msg({ groupId: "g", convSeq: 0, status: "failed" }), msg({ groupId: "g", convSeq: 0, status: "sending" })];
+    expect(albumTickState(ms, true, 9)).toBe("none");
+  });
+  it("仍有未发出成员 → sending", () => {
+    expect(albumTickState([...mk([1]), msg({ groupId: "g", convSeq: 0, status: "sending" })], true, 9)).toBe("sending");
+    expect(albumTickState(mk([0]), true, 9)).toBe("sending");
+  });
+  it("全部发出：看末条 convSeq 与已读位点（首条已读但末条未读 → 仍单勾）", () => {
+    expect(albumTickState(mk([5, 6, 7]), true, 6)).toBe("sent");
+    expect(albumTickState(mk([5, 6, 7]), true, 7)).toBe("read");
+    expect(albumTickState(mk([5, 6, 7]), true, 0)).toBe("sent");
+  });
+  it("重载同步回来的自己的消息（status=received，convSeq>0）按已发出处理", () => {
+    expect(albumTickState(mk([5, 6], { status: "received" }), true, 6)).toBe("read");
+  });
+  it("hidden（超级群）已发出 → none，但发送中仍显「…」", () => {
+    expect(albumTickState(mk([5, 6]), true, 9, true)).toBe("none");
+    expect(albumTickState(mk([0]), true, 9, true)).toBe("sending");
   });
 });

@@ -279,6 +279,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .modal-mask { position: fixed; inset: 0; z-index: 50; background: var(--overlay); display: flex; align-items: center; justify-content: center; }
 .modal { width: 320px; max-width: calc(100vw - 32px); background: var(--surface-elevated); border-radius: var(--radius-card); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); box-shadow: 0 8px 32px var(--shadow-strong); }
 .modal h3 { margin: 0; font-size: 16px; }
+.modal .picker-subtitle { margin: 2px 0 8px; font-size: 12px; color: var(--text-secondary); }
 .modal label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); }
 .modal input { padding: var(--space-2) var(--space-3); border: 1px solid var(--separator); border-radius: var(--radius-card); background: var(--page-bg); color: var(--text); font-size: 15px; }
 .modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
@@ -731,8 +732,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
   font-variant-numeric: tabular-nums; }
 .media-badge-tl { left: 6px; top: 6px; }
 .media-badge-br { right: 6px; bottom: 6px; }
-.media-badge .ck { color: var(--on-media); }
-.media-badge .ck.read { color: var(--check-read-on-media); }
+.media-badge .ck, .album-meta .ck { color: var(--on-media); }
+.media-badge .ck.read, .album-meta .ck.read { color: var(--check-read-on-media); }
 
 .msg-video-wrap { position: relative; display: inline-block; cursor: pointer; }
 /* ▶ 角标是 position:absolute，**外层 wrap 必须自己定位**：否则它会一路找到最近的定位祖先
@@ -787,7 +788,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .album-spinner { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--on-media-muted); border-top-color: var(--on-media); animation: album-spin 0.9s linear infinite; }
 @keyframes album-spin { to { transform: rotate(360deg); } }
 .album-fail { width: 26px; height: 26px; border-radius: 50%; background: var(--danger); color: var(--on-accent); font-weight: 700; display: flex; align-items: center; justify-content: center; }
-.album-meta { position: absolute; right: 6px; bottom: 6px; padding: 1px 7px; border-radius: 9px; background: var(--overlay); color: var(--on-media); font-size: 11px; pointer-events: none; }
+.album-meta { white-space: nowrap; position: absolute; right: 6px; bottom: 6px; padding: 1px 7px; border-radius: 9px; background: var(--overlay); color: var(--on-media); font-size: 11px; pointer-events: none; }
 
 /* 链接富预览卡片（OG） */
 .link-card { display: flex; flex-direction: column; width: 260px; border: 1px solid var(--separator); border-radius: 10px; overflow: hidden; text-decoration: none; color: inherit; background: var(--card-bg); }
@@ -1045,6 +1046,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .radio-dot.on { border-color: var(--accent); }
 .radio-dot.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
 .radio-text { display: flex; flex-direction: column; gap: 2px; }
+/* 语言面板：「跟随系统」与解析出的语言自称同一行（对齐 iOS/Android 单行），不竖排两行 */
+.language-panel .radio-text { flex-direction: row; align-items: baseline; gap: 8px; }
 .row-sub { font-size: 12px; color: var(--text-secondary); }
 .settings-row.info { cursor: default; }
 .settings-row.info .row-label { color: var(--text); }

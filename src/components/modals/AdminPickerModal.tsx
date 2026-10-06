@@ -8,13 +8,15 @@ import { CheckRow } from "../rows";
 import { useT } from "../../i18n";
 
 /**
- * 添加管理员弹窗：**群成员**多选（≤5），骨架与 FriendPickerModal 同族（Modal + ListSearchInput + CheckRow）。
+ * 添加管理员弹窗：**群成员**多选（现有+新增 ≤5），骨架与 FriendPickerModal 同族（Modal + ListSearchInput + CheckRow）。
  * 不复用那一个是因为候选类型不同——它吃 FriendEntry（我的好友），而管理员候选是群成员（可能不是我的好友）。
  * 上限 5 的原因见 groupAdmin.ts MAX_ADMIN_BATCH（每人一条系统消息，且后端无批量接口）。
  */
-export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, onConfirm, onCancel, remote }: {
+export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, onConfirm, onCancel, remote, maxPick = MAX_ADMIN_BATCH }: {
   candidates: GroupMember[];
   selected: string[];
+  /** 还能勾几位（= 管理员总上限 5 − 现有管理员，见 adminSlotsLeft）；副标题「已勾选x/max人」的分母。 */
+  maxPick?: number;
   /** 本机显示名（备注 > 群昵称 > 昵称）。备注只在本机渲染，发出去的字节只有 uid。 */
   memberLabel: (m: GroupMember) => string;
   onToggle: (userId: string) => void;
@@ -41,6 +43,7 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
   return (
     <Modal onClose={onCancel}>
       <h3>{tr("group.admin_picker.title")}</h3>
+      <div className="picker-subtitle">{tr("group.admin_picker.selected_subtitle", { count: selected.length, max: maxPick })}</div>
       {(remote || candidates.length > 0) && <ListSearchInput value={q} onChange={setQ} placeholder={tr("group.picker.search_placeholder")} />}
       {visible.length === 0 && (
         <div className="empty">
@@ -53,7 +56,7 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
         {visible.map((m) => {
           const on = selected.includes(m.user_id);
           // 达上限后**未选中**行置灰不可点（已选中的仍可点=取消，否则用户卡死在满选态）。
-          const atCap = selected.length >= MAX_ADMIN_BATCH && !on;
+          const atCap = selected.length >= maxPick && !on;
           const sub = memberSubtitle(m);
           return (
             <CheckRow key={m.user_id} selected={on} url={m.avatar_url} seed={m.user_id}
@@ -63,13 +66,13 @@ export function AdminPickerModal({ candidates, selected, memberLabel, onToggle, 
           );
         })}
       </div>
-      {selected.length >= MAX_ADMIN_BATCH && (
-        <div className="detail-foot-note">{tr("group.admin_picker.limit_note", { max: MAX_ADMIN_BATCH })}</div>
+      {selected.length >= maxPick && (
+        <div className="detail-foot-note">{tr("group.admin_picker.limit_note", { max: maxPick })}</div>
       )}
       <div className="modal-actions">
         <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
         <button className="mini-btn" disabled={selected.length === 0} onClick={onConfirm}>
-          {selected.length > 0 ? tr("group.admin_picker.add_count", { selected: selected.length, max: MAX_ADMIN_BATCH }) : tr("common.add")}
+          {selected.length > 0 ? tr("group.admin_picker.add_count", { selected: selected.length, max: maxPick }) : tr("common.add")}
         </button>
       </div>
     </Modal>

@@ -4,6 +4,7 @@
 > 历史流水见 `current_task.archive.md`（2026-10-02 瘦身前的全量快照在其顶部）+ `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+**三端已读/菜单/管理员一批修复（2026-10-06，已 commit + push）**：群语音已读双勾（iOS 曾无条件排除群聊）、九宫格已读勾（三端同规则，见 `IMServer/docs/design/READ_TICK_DESIGN.md` §4；Android 相册行曾不上报已读）、iOS 单字气泡 meta 被压成「…」、Android 长按菜单恒在气泡下方（气泡上移让位）、添加管理员总数 ≤ 5（上限 = 5 − 已有，客户端规则，服务端无总数上限）、会话列表搜索提示词含设置、Android 置顶/未读样式对齐 iOS、通讯录入口建群后进群、「跟随系统」改读 `LocaleManager.systemLocales`（OPPO 实测英文→跟随系统变回中文）。用户真机自测通过。余项：管理员总数上限服务端未做；Android 切语言后会回到消息页（未处理）。
 
 2026-10-02 **本机清空位点 `clearedUpTo`**（IMServer `docs/design/OFFLINE_BACKLOG_DESIGN.md` §6.7，Android 先行、Web 本次对齐）代码完成，**待用户审查后提交**：
 清空聊天记录改为同事务「删消息 + 清区间 + 抬位点 + 推游标、墓碑不动」，位点以内的消息一律不落库/不上屏/不问服务端；有效可见下界 = 服务端下界 ∪ 位点（`sdk/clearFloor.ts`，各存各的、用时取大）。

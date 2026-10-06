@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { GroupInfo, GroupMember } from "./sdk/protocol";
 import {
   MAX_ADMIN_BATCH, ownerOf, adminsOf, adminCountText, adminCandidates, transferCandidates,
-  clampBatch, batchToast, memberSubtitle, adminErrorToast,
+  clampBatch, adminSlotsLeft, MAX_ADMINS, batchToast, memberSubtitle, adminErrorToast,
 } from "./groupAdmin";
 
 // 与 iOS IMGroupAdminLogicTests 逐条对齐——两端口径漂移就是"同一个群在两端管理员数不一样"的来源。
@@ -105,5 +105,19 @@ describe("错误码映射（§4.4）", () => {
 
   it("未收录的码 / 无码错误回退服务端原文", () => {
     expect(adminErrorToast(new Error("Failed to fetch"))).toBe("操作失败：Failed to fetch");
+  });
+});
+
+describe("管理员总数上限（现有 + 新增 ≤ 5）", () => {
+  it("总上限 5；gp() 已有 2 位管理员 → 还能加 3 位", () => {
+    expect(MAX_ADMINS).toBe(5);
+    expect(adminSlotsLeft(gp())).toBe(3);
+  });
+  it("无管理员 → 5；已满 5 或超过（他端绕过）→ 0；undefined → 5", () => {
+    const admins = (n: number) => Array.from({ length: n }, (_, i) => m({ user_id: `48205716${i}0`, role: "admin" }));
+    expect(adminSlotsLeft(gp({ members: [] }))).toBe(5);
+    expect(adminSlotsLeft(gp({ members: admins(5) }))).toBe(0);
+    expect(adminSlotsLeft(gp({ members: admins(7) }))).toBe(0);
+    expect(adminSlotsLeft(undefined)).toBe(5);
   });
 });

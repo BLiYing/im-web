@@ -86,7 +86,7 @@ import { FriendRequestModal } from "./components/modals/FriendRequestModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
 import { publicNameOf } from "./groupName";
 import { FriendPickerModal } from "./components/modals/FriendPickerModal";
-import { adminCandidates, transferCandidates } from "./groupAdmin";
+import { adminCandidates, adminSlotsLeft, transferCandidates } from "./groupAdmin";
 import { useUserProfiles } from "./useUserProfiles";
 import { RtcHost } from "./rtc/RtcHost";
 import { rtcNameOf } from "./rtc/rtcProfiles";
@@ -2794,7 +2794,7 @@ export default function App() {
           {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
           <div className="home-search">
             <Search size={15} className="home-search-lead" />
-            <input className="home-search-input" value={search.homeSearch} placeholder={t("common.search")}
+            <input className="home-search-input" value={search.homeSearch} placeholder={t("search.global.placeholder")}
               onChange={(e) => search.setHomeSearch(e.target.value)} />
             {search.homeSearch && <button className="home-search-clear" title={t("common.clear")} onClick={() => search.setHomeSearch("")}><X size={14} /></button>}
           </div>
@@ -3310,7 +3310,7 @@ export default function App() {
           remote={adminPickerSuperConv
             ? { query: adminSearch.query, setQuery: adminSearch.setQuery, failed: adminSearch.failed }
             : undefined}
-          selected={adminPicker.selected}
+          selected={adminPicker.selected} maxPick={adminSlotsLeft(groupInfos[adminPicker.convId])}
           memberLabel={groupMemberLabel}
           onToggle={(userId) => setAdminPicker({
             ...adminPicker,

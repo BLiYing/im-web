@@ -6,10 +6,18 @@ import { t } from "./i18n";
 // 与 iOS IMGroupAdminLogic 一一对应——两端口径漂移就是"同一个群在两端管理员数不一样"这类灵异问题的来源。
 // 设计见 IMServer/docs/design/GROUP_ADMIN_TRANSFER_DESIGN.md §4 / §5。
 
-/** 一次最多添加几位管理员。后端 setGroupRole **每调一次发一条系统消息**且无批量接口，
- *  一次选 12 个人 = 群里瞬间刷 12 条系统消息。
- *  ⚠️ 这**不是**管理员总数上限——后端对总数无约束，客户端假上限只是自欺（设计 §7.1）。 */
+/** 管理员**总数**上限（群主不计）：现有管理员 + 本次新增 ≤ 5。产品规则（2026-10-06）。
+ *  ⚠️ 后端 setGroupRole 对总数仍无约束（GROUP_ADMIN_TRANSFER_DESIGN §7.1），这里是客户端口径，
+ *  别的设备/管理端可绕过——要硬限须后端加 MaxGroupAdmins + 错误码。 */
+export const MAX_ADMINS = 5;
+
+/** 一次最多添加几位（兜底截断）。后端 setGroupRole **每调一次发一条系统消息**且无批量接口。 */
 export const MAX_ADMIN_BATCH = 5;
+
+/** 还能再添加几位管理员 = 总上限 − 现有管理员（≥0）。选人页的勾选上限与副标题分母。 */
+export function adminSlotsLeft(gp: GroupInfo | undefined): number {
+  return Math.max(0, Math.min(MAX_ADMINS - adminsOf(gp).length, MAX_ADMIN_BATCH));
+}
 
 /** 群主（没有则 undefined）。 */
 export function ownerOf(gp: GroupInfo | undefined): GroupMember | undefined {

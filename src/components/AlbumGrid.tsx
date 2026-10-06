@@ -1,6 +1,7 @@
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
 import type { ChatMessage } from "../sdk/protocol";
-import { albumRowPattern } from "../album";
+import { albumRowPattern, type AlbumTick } from "../album";
+import { ReadTick } from "./ReadTick";
 import { formatMediaDuration } from "../media";
 import { formatFileSize } from "../fileMetadata";
 import { videoFrameSrc } from "../messageContent";
@@ -9,9 +10,10 @@ import { VideoFrame } from "./VideoFrame";
 
 /** 相册宫格（M4+）：同 group_id 的多图/视频合并为一个 Telegram 式宫格。
  *  发送中（convSeq=0）的格子压暗 + 转圈；失败标 "!"；右键单格 → 该条成员消息的菜单（单张引用/转发/撤回）。 */
-export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, onOpen, onMenu, onMediaError, selectMode, isSelected, onToggleTile }: {
+export function AlbumGrid({ members, timeLabel, tick = "none", progress, gateFor, expiredFor, onOpen, onMenu, onMediaError, selectMode, isSelected, onToggleTile }: {
   members: ChatMessage[];
   timeLabel: string;
+  tick?: AlbumTick; // 右下角胶囊状态：sending「…」/ sent 灰单勾 / read 蓝双勾（albumTickState）
   progress: Record<string, { sent: number; total: number }>;
   gateFor: (m: ChatMessage) => boolean; // 该格是否门控（收到的未下载图/视频）：档 A，逐格独立判定
   expiredFor?: (m: ChatMessage) => boolean; // 该格是否已失效（服务端已清理）：失效则不给 ↓、只留磨砂 dim
@@ -81,7 +83,11 @@ export function AlbumGrid({ members, timeLabel, progress, gateFor, expiredFor, o
           </div>
         );
       })}
-      <span className="album-meta">{timeLabel}</span>
+      <span className="album-meta">
+        {timeLabel}
+        {tick === "sending" && " …"}
+        {(tick === "sent" || tick === "read") && <ReadTick read={tick === "read"} className="ck" />}
+      </span>
     </div>
   );
 }
