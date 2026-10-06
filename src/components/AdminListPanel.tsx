@@ -60,8 +60,8 @@ export function AdminListPanel({ gp, uid, memberLabel, onBack, onAdd, onRevoke, 
       <div className="detail-card-title">{tr("group.admin_list.count_title", { count: admins.length })}</div>
       <div className="detail-card">
         {isOwner && (
-          <button className="detail-row accent" onClick={onAdd}>
-            <span className="detail-row-ic"><UserPlus size={18} /></span><span>{tr("group.admin_picker.title")}</span>
+          <button className="detail-row accent list-entry" onClick={onAdd}>
+            <span className="entry-slot"><UserPlus size={20} /></span><span>{tr("group.admin_picker.title")}</span>
           </button>
         )}
         {admins.length === 0

@@ -205,8 +205,8 @@ export function DetailTabs({
               {/* 「仅管理员可邀请」开启且我非管理员 → 隐藏「添加成员」（对齐 iOS；服务端仍是权威闸门）。
                   搜索态也隐藏：它属于浏览态，混在搜索结果里只会被误点。 */}
               {canInvite && !searching && (
-                <button className="detail-row accent" onClick={() => onAddMember(gp.conv_id)}>
-                  <span className="detail-row-ic"><UserPlus size={18} /></span><span>{tr("group.member.add")}</span>
+                <button className="detail-row accent list-entry" onClick={() => onAddMember(gp.conv_id)}>
+                  <span className="entry-slot"><UserPlus size={20} /></span><span>{tr("group.member.add")}</span>
                 </button>
               )}
               {/* 满员告知（**升级前**时态；三条定稿见 docs/design/SUPERGROUP_DESIGN.md §4.1，

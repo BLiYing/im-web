@@ -1372,6 +1372,11 @@ button.detail-row:hover { background: var(--surface-hover); }
 /* 免打扰行需要锚定二级菜单（NOTIFICATIONS_P1_DESIGN §4.2），外面套一层 relative 容器——
    分隔线规则跟着补上面两条「锚点前/后接普通行」，否则套壳后这条行两侧的分隔线会消失。 */
 .detail-row-anchor { position: relative; }
+/* 列表首行入口行（LIST_ENTRY_ROW_DESIGN §3.3）：槽宽 = 头像宽 52，图标居中；文字左缘 14+52+12=78，行高不小于成员行 68 */
+.entry-slot { width: 52px; display: flex; align-items: center; justify-content: center; flex: none; }
+.list-entry { min-height: 68px; font-size: 15px; color: var(--accent); }
+.entry-circle { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--on-accent); background: var(--accent); }
+.settings-row.list-entry { min-height: 74px; }  /* 例外页：与下方头像 52 的例外行同高（settings-row 上下 padding 11） */
 .detail-row-ic { flex-shrink: 0; color: var(--text-secondary); display: flex; }
 .detail-row.accent, .detail-row.accent .detail-row-ic { color: var(--accent); }
 /* 危险行（转让群组）：整行红——与详情页底部「解散群组」同族。本页唯一的红色例外，有意为之。 */
@@ -1416,7 +1421,7 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .detail-member-search {
   position: sticky; top: 57px; z-index: 2;
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; background: var(--card-bg);
+  padding: 8px 14px; background: var(--card-bg);
   border-bottom: 1px solid var(--separator);
   border-radius: var(--radius-card) var(--radius-card) 0 0;
 }

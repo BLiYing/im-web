@@ -8,12 +8,14 @@ import { Avatar } from "./Avatar";
 // badge：右侧红色圆角计数（「新的朋友」待确认数）。**与 value 分开**——value 是灰色小字，
 // 用来显示"当前值"（如设置项里选了什么）；未处理的待办要的是抢眼，跟 iOS
 // IMContactsViewController 的入口红点徽标同一套观感（红底白字、圆角胶囊）。
-export type Row = { id: string; label: string; icon?: LucideIcon; iconTint?: string; value?: string; badge?: string; danger?: boolean; muted?: boolean; chevron?: boolean; onClick: () => void };
+export type Row = { id: string; label: string; icon?: LucideIcon; iconTint?: string; value?: string; badge?: string; danger?: boolean; muted?: boolean; entry?: boolean; chevron?: boolean; onClick: () => void };
 
 // 通用行渲染（cls 区分容器样式）。muted=灰置占位（标题/右值半档灰，图标保留全彩）。
 export const renderRow = (r: Row, cls: string) => (
-  <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}${r.muted ? " muted" : ""}`} onClick={r.onClick}>
-    {r.icon && (r.iconTint
+  <button key={r.id} className={`${cls}${r.danger ? " danger" : ""}${r.muted ? " muted" : ""}${r.entry ? " list-entry" : ""}`} onClick={r.onClick}>
+    {r.icon && (r.entry
+      ? <span className="entry-slot"><span className="entry-circle"><r.icon size={16} /></span></span>
+      : r.iconTint
       ? <span className={`row-icon-tile ${r.iconTint}`}><r.icon size={17} /></span>
       : <r.icon size={20} className="row-icon" />)}
     <span className="row-label">{r.label}</span>

@@ -85,7 +85,7 @@ export function NotificationsPanel({
     return (
       <SubPanel className="notif-panel" title={t("notif.section.exceptions")} onBack={() => setShowExceptions(false)}>
         <div className="settings-group">
-          {renderRow({ id: "add", label: t("notif.exceptions.add"), icon: Plus, iconTint: "green", onClick: () => setPickingException(true) }, "settings-row")}
+          {renderRow({ id: "add", label: t("notif.exceptions.add"), icon: Plus, entry: true, onClick: () => setPickingException(true) }, "settings-row")}
           {muted.map((c) => (
             <div key={c.conv_id} className="settings-row notif-exceptions-row" onClick={() => onOpenConv(c.conv_id)}>
               <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer} />
