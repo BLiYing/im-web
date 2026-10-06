@@ -120,6 +120,8 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
     );
   }
 
+  // 群主占 1 席：最多选 maxInitialMembers 人；配置没拉到时 App 传回退值，故恒有上限（≤0 才不限）。
+  const atCap = maxInitialMembers > 0 && draft.selected.length >= maxInitialMembers;
   return (
     <Modal onClose={onCancel}>
         <h3 className="create-head">{tr("group.create.title")}<span className="create-step">1 / 2</span></h3>
@@ -154,13 +156,18 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             const on = draft.selected.includes(f.user_id);
             return (
               <CheckRow key={f.user_id} selected={on} url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}
-                onClick={() => onChange({
-                  ...draft,
-                  selected: on ? draft.selected.filter((x) => x !== f.user_id) : [...draft.selected, f.user_id],
-                })} />
+                onClick={() => {
+                  // 手点与全选同一个上限（已达上限只允许取消），免得点过上限到创建才被服务端拒。
+                  if (!on && atCap) return;
+                  onChange({
+                    ...draft,
+                    selected: on ? draft.selected.filter((x) => x !== f.user_id) : [...draft.selected, f.user_id],
+                  });
+                }} />
             );
           })}
         </div>
+        {atCap && <p className="create-hint">{tr("group.create.limit_reached", { max: maxInitialMembers + 1 })}</p>}
         <div className="modal-actions">
           <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
           <button className="mini-btn" disabled={draft.selected.length === 0} onClick={() => goStep2(draft)}>{tr("common.next")}</button>
