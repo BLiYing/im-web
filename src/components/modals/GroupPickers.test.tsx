@@ -115,6 +115,37 @@ describe("CreateGroupModal 搜索与全选", () => {
     fireEvent.click(screen.getByText("全选"));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: ["1001", "1002"] }));
   });
+
+  it("上限截断时已选保留：先留已选，再按可见顺序补到上限", () => {
+    const onChange = vi.fn();
+    render(<CreateGroupModal {...base} draft={{ name: "", selected: ["1003"] }} maxInitialMembers={2} onChange={onChange} />);
+    fireEvent.click(screen.getByText("全选"));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: ["1003", "1001"] }));
+  });
+
+  it("已选本身已超上限（手点无拦截）时，全选不丢已选也不再新增", () => {
+    const onChange = vi.fn();
+    render(<CreateGroupModal {...base} draft={{ name: "", selected: ["1002", "1003"] }} maxInitialMembers={1} onChange={onChange} />);
+    fireEvent.click(screen.getByText("全选"));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: ["1002", "1003"] }));
+  });
+
+  it("无搜索时全部选中后变「取消全选」，点后清空", () => {
+    const onChange = vi.fn();
+    render(<CreateGroupModal {...base} draft={{ name: "", selected: ["1001", "1002", "1003"] }} onChange={onChange} />);
+    fireEvent.click(screen.getByText("取消全选"));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: [] }));
+  });
+
+  it("可见行为 0（搜索无命中 / 无好友）时不显示全选与取消全选", () => {
+    render(<CreateGroupModal {...base} />);
+    fireEvent.change(screen.getByLabelText("搜索好友"), { target: { value: "zzzz不存在" } });
+    expect(screen.queryByText("全选")).toBeNull();
+    expect(screen.queryByText("取消全选")).toBeNull();
+    cleanup();
+    render(<CreateGroupModal {...base} accepted={[]} />);
+    expect(screen.queryByText("全选")).toBeNull();
+  });
 });
 
 // 第二步（群资料）是有状态的：draft 由调用方持有，弹窗内部只有 step。

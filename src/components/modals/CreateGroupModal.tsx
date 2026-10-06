@@ -133,7 +133,10 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             const allOn = visibleIds.every((id) => draft.selected.includes(id));
             const next = allOn
               ? draft.selected.filter((id) => !visibleIds.includes(id))
-              : [...new Set([...draft.selected, ...visibleIds])].slice(0, maxInitialMembers);
+              // 已选整体保留（手点行没有上限拦截，selected 可能已超限，不能 slice 掉已选），
+              // 只在剩余席位内按可见顺序补新人。
+              : [...draft.selected, ...visibleIds.filter((id) => !draft.selected.includes(id))
+                  .slice(0, Math.max(0, maxInitialMembers - draft.selected.length))];
             return (
               <button type="button" className="section-action"
                 onClick={() => onChange({ ...draft, selected: next })}>
