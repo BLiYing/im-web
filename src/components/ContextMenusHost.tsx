@@ -3,6 +3,7 @@
 // 详情内容（文件/媒体/链接）菜单 + 删除两档子菜单 B、好友行菜单。
 // App 仍是唯一状态源：各菜单的开关态与动作都经 props 传入，本组件不持有业务状态；
 // clientRef / t 经 useAppServices()/useT() 自取。纯搬移，DOM/行为逐字不变（Fragment 不引入包裹节点）。
+import { useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Forward, MessageCircle, Trash2, X } from "lucide-react";
 import { useAppServices } from "../AppServicesContext";
@@ -68,12 +69,19 @@ export function ContextMenusHost(p: ContextMenusHostProps) {
     friendMenu, setFriendMenu, blockedSet, doFriendAction, unblock,
   } = p;
 
+  // 无可见项（如发送中的名片/合并转发：删除对发送中隐藏、取消发送又不覆盖）时不弹菜单，避免空白气泡。
+  const msgMenuItems = menu
+    ? messageActions.filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
+    : [];
+  // 菜单为空时 menu 不能留着：MessageList 以 menu 驱动气泡 ctx-active 高亮，没有菜单可点外关闭就会一直亮着。
+  const emptyMenu = !!menu && msgMenuItems.length === 0;
+  useEffect(() => { if (emptyMenu) setMenu(null); }, [emptyMenu, setMenu]);
+
   return (
     <>
-      {menu && (
+      {menu && msgMenuItems.length > 0 && (
         <AnchoredMenu x={menu.x} y={menu.y} className="ctx-menu">
-          {messageActions
-            .filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
+          {msgMenuItems
             .map((a) => (
               <button key={a.id} className={a.danger ? "danger" : undefined}
                 onClick={() => {

@@ -35,6 +35,8 @@ export function useVoiceSend(d: VoiceSendDeps) {
   // 上传失败留存的原始 Blob（红❗重试据此重新上传，不重录）；键=占位 clientMsgId。
   // 仅内存、不跨刷新——与图片/文件的 pendingFilesRef 同一取舍（Web 平台限制，见 current_task.md 已知坑）。
   const pendingVoiceRef = useRef<Map<string, PendingVoice>>(new Map());
+  // 上传途中被「取消发送」的占位键：uploadVoice 无法 abort，传完必须在这里拦住，否则会照常 sendMedia（僵尸发送）。
+  const cancelledVoiceRef = useRef<Set<string>>(new Set());
 
   /** 上传 + 发送共用尾段：占位 localId 已在库里、content 是本地 blobUrl（首发或重试都先插好）。 */
   const uploadAndSendVoice = useCallback(async (kept: PendingVoice, localId: string) => {
@@ -43,6 +45,7 @@ export function useVoiceSend(d: VoiceSendDeps) {
     try {
       const { url, size } = await client.uploadVoice(kept.blob, kept.fileName);
       pendingVoiceRef.current.delete(localId);
+      if (cancelledVoiceRef.current.delete(localId)) return; // 上传期间已取消：占位已摘，不发
       const clientMsgId = client.sendMedia(url, "voice", kept.to, kept.convId, {
         duration: kept.duration, fileSize: size, waveform: kept.waveform,
       });
@@ -55,6 +58,7 @@ export function useVoiceSend(d: VoiceSendDeps) {
         convSeq: 0, timestamp: Date.now(), status: "sending",
       });
     } catch (e) {
+      if (cancelledVoiceRef.current.delete(localId)) return;
       // 占位原地转失败：content **保留本地 blobUrl 不清空**——resendPolicyFor 按"content 是 blob: 本地占位"
       // 判 retry-upload，且这条判断排在 note 判断之前，与是否挂 note 无关（note 只在"本地也没字节"时
       // 才代表"不可重发"，顺序见 resendPolicy.ts 的注释；这正是 iOS 2026-08-30 code-review 抓到过的
@@ -104,5 +108,14 @@ export function useVoiceSend(d: VoiceSendDeps) {
     void uploadAndSendVoice({ ...kept, blobUrl }, localId);
   }, [uid, appendMsg, removeMsgRow, setToast, uploadAndSendVoice]);
 
-  return { sendVoice, retryVoiceUpload };
+  /** 取消发送（右键菜单）：占位仍在上传 → 标记取消（上传落地后不再发）；已失败 → 丢留存字节。两者都回收 blobUrl 并移除气泡。仅对 blob: 占位有意义——content 已是服务器 URL 说明 WS 帧已发出，撤不回（菜单层已隐藏）。 */
+  const cancelVoiceSend = useCallback((m: ChatMessage) => {
+    const key = m.clientMsgId ?? "";
+    const kept = pendingVoiceRef.current.get(key);
+    if (kept) { pendingVoiceRef.current.delete(key); URL.revokeObjectURL(kept.blobUrl); }
+    else if (m.status === "sending") { cancelledVoiceRef.current.add(key); if (m.content.startsWith("blob:")) URL.revokeObjectURL(m.content); } // 上传在飞：立刻回收占位 blobUrl
+    removeMsgRow(m.convId, key);
+  }, [removeMsgRow]);
+
+  return { sendVoice, retryVoiceUpload, cancelVoiceSend };
 }

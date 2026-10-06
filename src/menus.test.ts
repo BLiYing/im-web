@@ -31,7 +31,7 @@ describe("buildMessageActions", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
       "readReceipts", "transcribe", "transcribeOff", "copy", "reply", "forward", "favorite", "download", "recall", "pin", "unpin", "edit",
-      "multiSelect", "translate", "report", "cancelSend", "delete",
+      "cancelSend", "multiSelect", "translate", "report", "delete",
     ]);
   });
 
@@ -112,6 +112,63 @@ describe("buildMessageActions", () => {
     expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "text" }), uid: "1001" })).toBe(false);  // 文本无上传可取消
     expect(find({ m: msg({ from: "1001", convSeq: 5, status: "sending", contentType: "image" }), uid: "1001" })).toBe(false); // 已发出→走撤回
     expect(find({ m: msg({ from: "2002", convSeq: 0, status: "sending", contentType: "image" }), uid: "1001" })).toBe(false); // 非本人
+  });
+
+  it("取消发送覆盖语音，且位于 编辑 之后、多选 之前", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "cancelSend")!.visible(ctx);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "voice", content: "blob:v" }), uid: "1001" })).toBe(true);
+    // 语音已换成服务器 URL（WS 帧已发出等 ack）：撤不回，不给取消
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "voice", content: "/u/v.m4a" }), uid: "1001" })).toBe(false);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "failed", contentType: "voice", content: "blob:v" }), uid: "1001" })).toBe(true);
+    expect(find({ m: msg({ from: "1001", convSeq: 0, status: "sending", contentType: "contact_card" }), uid: "1001" })).toBe(false);
+    const ids = actions.map((a) => a.id);
+    expect(ids.indexOf("cancelSend")).toBe(ids.indexOf("edit") + 1);
+    expect(ids.indexOf("multiSelect")).toBe(ids.indexOf("cancelSend") + 1);
+  });
+
+  it("图片「复制」要求已发出：发送中/失败乐观行不给；有图说的待发件仍给（#5 待定，保持现状）", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const find = (ctx: MessageCtx) => actions.find((a) => a.id === "copy")!.visible(ctx);
+    expect(find({ m: msg({ contentType: "image", content: "/u/x.jpg", convSeq: 5 }), uid: "1001" })).toBe(true);
+    expect(find({ m: msg({ from: "1001", contentType: "image", content: "blob:x", convSeq: 0, status: "sending" }), uid: "1001" })).toBe(false);
+    expect(find({ m: msg({ from: "1001", contentType: "image", content: "blob:x", convSeq: 0, status: "failed" }), uid: "1001" })).toBe(false);
+    expect(find({ m: msg({ from: "1001", contentType: "image", content: "blob:x", convSeq: 0, status: "sending", caption: "c" }), uid: "1001" })).toBe(true);
+  });
+
+  // 类型 × 已发出/待发 × 本人/他人：可见项集合（ContextMenusHost 在为空时不弹菜单）。
+  it("各类型 × 已发出/待发 × 本人/他人 的可见项矩阵；待发名片/合并转发/语音可见项符合预期", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const ids = (over: Partial<ChatMessage>) => visibleIds(actions, { m: msg(over), uid: "1001" });
+    const types = ["image", "video", "file", "voice", "contact_card", "merged_forward"];
+    for (const ct of types) {
+      for (const status of ["sending", "failed"] as const) {
+        const mine = ids({ from: "1001", contentType: ct, content: "blob:x", convSeq: 0, status });
+        const theirs = ids({ from: "2002", contentType: ct, content: "blob:x", convSeq: 0, status });
+        expect(theirs.filter((i) => i !== "delete")).toEqual([]); // 他人待发不存在，保险：只剩删除
+        if (ct === "image" || ct === "video" || ct === "file" || ct === "voice") {
+          expect(mine).toContain("cancelSend");
+          expect(mine).not.toContain("copy");
+        }
+        if (status === "sending" && !["image", "video", "file", "voice"].includes(ct)) expect(mine).toEqual([]); // 空 → 不弹菜单
+        if (status === "failed") expect(mine).toContain("delete");
+      }
+      // 已发出：本人 / 他人
+      const sentMine = ids({ from: "1001", contentType: ct, content: "/u/x", convSeq: 5, timestamp: Date.now() });
+      const sentTheirs = ids({ from: "2002", contentType: ct, content: "/u/x", convSeq: 5 });
+      expect(sentMine).toContain("recall");
+      expect(sentMine).not.toContain("cancelSend");
+      expect(sentMine).not.toContain("report");
+      expect(sentTheirs).toContain("report");
+      expect(sentTheirs).not.toContain("recall");
+      expect(sentTheirs).not.toContain("cancelSend");
+      expect(sentTheirs.includes("download")).toBe(["image", "video", "file"].includes(ct));
+    }
+    // 图片已发出：本人/他人都有复制；视频无图说无复制
+    expect(ids({ from: "2002", contentType: "image", content: "/u/x", convSeq: 5 })).toContain("copy");
+    expect(ids({ from: "2002", contentType: "video", content: "/u/x", convSeq: 5 })).not.toContain("copy");
+    // 待发文本翻译不动（#2）
+    expect(ids({ from: "1001", contentType: "text", content: "hi", convSeq: 0, status: "sending" })).toContain("translate");
   });
 
   it("删除对 发送中且未落库(convSeq=0) 的本地件隐藏（要撤走用取消发送，防僵尸上传）", () => {

@@ -2105,8 +2105,7 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 /* ============ 好友申请（2026-09-05） ============ */
 /* 「发好友申请」弹窗：验证消息输入。宽一点（360）——三行文本框在 320 里会显得局促。 */
 .friendreq-modal { width: 360px; }
-.friendreq-target { font-size: 13px; color: var(--text-secondary); }
-.friendreq-label { font-size: 12px; color: var(--text-secondary); }
+.friendreq-target { font-size: 13px; color: var(--text-secondary); white-space: pre-line; }
 .friendreq-input { width: 100%; box-sizing: border-box; resize: none; padding: 8px 10px; font: inherit; font-size: 14px;
   border: 1px solid var(--separator); border-radius: 8px; background: var(--page-bg); color: var(--text); }
 .friendreq-input:focus { outline: none; border-color: var(--accent); }

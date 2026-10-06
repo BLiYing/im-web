@@ -119,7 +119,7 @@ describe("AdminPickerModal（多选 ≤5）", () => {
     const { getByText, container } = render(
       <AdminPickerModal candidates={many} selected={selected} memberLabel={label}
         onToggle={onToggle} onConfirm={vi.fn()} onCancel={vi.fn()} />);
-    expect(getByText("一次最多添加 5 位管理员。")).toBeTruthy();
+    expect(getByText("最多还能添加 5 位管理员。")).toBeTruthy();
     const rows = container.querySelectorAll(".check-row");
     fireEvent.click(rows[5]); // 第 6 个人
     expect(onToggle).not.toHaveBeenCalled();
@@ -135,8 +135,8 @@ describe("AdminPickerModal（多选 ≤5）", () => {
         onToggle={onToggle} onConfirm={vi.fn()} onCancel={vi.fn()} />);
     expect(getByText("添加管理员")).toBeTruthy();
     expect(getByText("已勾选3/3人")).toBeTruthy();
-    expect(getByText("一次最多添加 3 位管理员。")).toBeTruthy();
-    expect(queryByText("一次最多添加 5 位管理员。")).toBeNull();
+    expect(getByText("最多还能添加 3 位管理员。")).toBeTruthy();
+    expect(queryByText("最多还能添加 5 位管理员。")).toBeNull();
     fireEvent.click(container.querySelectorAll(".check-row")[3]);
     expect(onToggle).not.toHaveBeenCalled();
   });

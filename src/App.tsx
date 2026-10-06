@@ -1061,7 +1061,7 @@ export default function App() {
   // 记 convId/groupId：重试时按**原会话/原相册**重发（不耦合当前打开的会话，宫格成员回原格）。
   // 语音发送簇 → useVoiceSend：录音条松手立即插占位、上传失败原地转 Failed（红❗可重传，不重录）。
   // 须先于 useMediaSend——resendOne 的语音分支要注入它的 retryVoiceUpload。
-  const { sendVoice, retryVoiceUpload } = useVoiceSend({ uid, convId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
+  const { sendVoice, retryVoiceUpload, cancelVoiceSend } = useVoiceSend({ uid, convId, clientRef, setToast, appendMsg, patchMsg, removeMsgRow });
 
   // 媒体/文件发送簇 → useMediaSend（阶段 5）：attachPanel/粘贴攒批/上传进度/批发·单发流水线/重试/附件入口。
   // 须在 clientRef/useMessageStore/uid/peer/groupConvId/setToast 之后、send()（deps 捕获 sendMediaBatch/uploadAndSend/pastedImages）之前。
@@ -1662,11 +1662,11 @@ export default function App() {
       // 此 handler 不经 a.run 触发，仅为 buildMessageActions 的类型契约占位（requestDelete 内部另直接用 deleteMessage 处理 convSeq<=0）。
       delete: deleteMessage,
       reportMsg,
-      cancelSend: cancelSendMessage,
+      cancelSend: (m: ChatMessage) => (m.contentType === "voice" ? cancelVoiceSend(m) : cancelSendMessage(m)),
       transcribe: transcribeMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMsg, cancelSendMessage, transcribeMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMsg, cancelSendMessage, cancelVoiceSend, transcribeMessage, comingSoon],
   );
 
   // 全屏文本阅读器：Esc 关闭（点蒙层/✕ 已在 JSX 处理）。

@@ -15,34 +15,44 @@ describe("FriendRequestModal（发申请时填验证消息）", () => {
   it("预填默认理由，改完发出的是 trim 后的文本", () => {
     const onSend = vi.fn();
     render(<FriendRequestModal name="小明" defaultHello="我是老王" busy={false} onSend={onSend} onClose={vi.fn()} />);
-    const box = screen.getByLabelText(/验证消息/) as HTMLTextAreaElement;
+    const box = screen.getByPlaceholderText(/让对方知道你是谁/) as HTMLTextAreaElement;
     expect(box.value).toBe("我是老王");
     fireEvent.change(box, { target: { value: "  同事，加一下  " } });
-    fireEvent.click(screen.getByText("发送申请"));
+    fireEvent.click(screen.getByText("发送"));
     expect(onSend).toHaveBeenCalledWith("同事，加一下");
   });
 
   it("理由是选填：清空也能发（发空串，不拦）", () => {
     const onSend = vi.fn();
     render(<FriendRequestModal name="小明" defaultHello="我是老王" busy={false} onSend={onSend} onClose={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText(/验证消息/), { target: { value: "" } });
-    fireEvent.click(screen.getByText("发送申请"));
+    fireEvent.change(screen.getByPlaceholderText(/让对方知道你是谁/), { target: { value: "" } });
+    fireEvent.click(screen.getByText("发送"));
     expect(onSend).toHaveBeenCalledWith("");
   });
 
   // 服务端超长会**截断**，端上先拦一道是为了当场知道写不下了，而不是发完才发现被剪掉半句。
   it("输入框按 MAX_FRIEND_HELLO 限长，并显示字数", () => {
     render(<FriendRequestModal name="小明" defaultHello="" busy={false} onSend={vi.fn()} onClose={vi.fn()} />);
-    const box = screen.getByLabelText(/验证消息/) as HTMLTextAreaElement;
-    expect(box.maxLength).toBe(MAX_FRIEND_HELLO);
+    const box = screen.getByPlaceholderText(/让对方知道你是谁/) as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "你好" } });
     expect(screen.getByText(`2/${MAX_FRIEND_HELLO}`)).toBeTruthy();
+    // 按码点：50 个 emoji（各 2 个 UTF-16 单元）全收；粘贴 60 个截成 50 个且不劈开代理对
+    fireEvent.change(box, { target: { value: "😀".repeat(60) } });
+    expect(box.value).toBe("😀".repeat(MAX_FRIEND_HELLO));
+    expect(screen.getByText(`${MAX_FRIEND_HELLO}/${MAX_FRIEND_HELLO}`)).toBeTruthy();
+  });
+
+  it("提示行含对方名并渲染成两行；无重复 label 行", () => {
+    render(<FriendRequestModal name="小明" defaultHello="" busy={false} onSend={vi.fn()} onClose={vi.fn()} />);
+    const tip = screen.getByText(/发送给 小明/);
+    expect(tip.textContent).toBe("发送给 小明\n验证消息会展示给对方（选填）");
+    expect(document.querySelector(".friendreq-label")).toBeNull();
   });
 
   // autoFocus 会把光标停在预填文案的**最前面**：想在「我是老王」后面补一句的人得先按 End。
   it("打开即聚焦，且光标落在预填文案末尾", () => {
     render(<FriendRequestModal name="小明" defaultHello="我是老王" busy={false} onSend={vi.fn()} onClose={vi.fn()} />);
-    const box = screen.getByLabelText(/验证消息/) as HTMLTextAreaElement;
+    const box = screen.getByPlaceholderText(/让对方知道你是谁/) as HTMLTextAreaElement;
     expect(document.activeElement).toBe(box);
     expect(box.selectionStart).toBe("我是老王".length);
     expect(box.selectionEnd).toBe("我是老王".length);

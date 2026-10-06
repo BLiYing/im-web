@@ -44,6 +44,23 @@ describe("useVoiceSend", () => {
     expect(deps.appendMsg).toHaveBeenLastCalledWith("u_u1_u_u2", expect.objectContaining({ clientMsgId: "cmid-1", content: "https://cdn/voice.m4a", status: "sending" }));
   });
 
+  it("cancelVoiceSend：上传途中取消 → 摘占位，传完后不再 sendMedia（防僵尸发送）", async () => {
+    let finish!: (v: { url: string; size: number }) => void;
+    const uploadVoice = vi.fn(() => new Promise<{ url: string; size: number }>((r) => { finish = r; }));
+    const { result, deps, client } = mount({ uploadVoice });
+    act(() => result.current.sendVoice(blob(8), "a.m4a", "", 1000));
+    const localId = (deps.appendMsg as ReturnType<typeof vi.fn>).mock.calls[0][1].clientMsgId as string;
+    act(() => result.current.cancelVoiceSend({
+      clientMsgId: localId, convId: "u_u1_u_u2", from: "u1", content: "blob:voice-1", contentType: "voice",
+      convSeq: 0, timestamp: 1, status: "sending",
+    }));
+    expect(deps.removeMsgRow).toHaveBeenCalledWith("u_u1_u_u2", localId);
+    await act(async () => { finish({ url: "https://cdn/v.m4a", size: 8 }); await Promise.resolve(); });
+    expect(client.sendMedia).not.toHaveBeenCalled();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:voice-1"); // 上传落地后由 uploadAndSendVoice 回收
+    expect(deps.appendMsg).toHaveBeenCalledTimes(1); // 只有最初的占位
+  });
+
   it("群聊目标：to 留空（服务端按 conv_id 写扩散）", async () => {
     const client = { uploadVoice: vi.fn(async (b: Blob) => ({ url: "https://cdn/voice.m4a", size: b.size })), sendMedia: vi.fn(() => "cmid-1") };
     const deps: VoiceSendDeps = {

@@ -7,6 +7,12 @@ import { useT } from "../../i18n";
  *  端上先拦一道只是为了让用户当场知道写不下了，而不是发完才发现被剪掉半句。 */
 export const MAX_FRIEND_HELLO = 50;
 
+/** 按 Unicode 码点（rune）截断，与服务端口径一致；不按 UTF-16 切，避免劈开 emoji 代理对。 */
+export function clipRunes(s: string, max: number): string {
+  const cps = [...s];
+  return cps.length > max ? cps.slice(0, max).join("") : s;
+}
+
 /** 「发好友申请」弹窗：填验证消息（申请理由）后发出。
  *
  *  全站五个加好友入口（通讯录搜索结果 / 资料页 / 群成员菜单 / 扫码结果 / 被拒收系统行）
@@ -22,7 +28,7 @@ export function FriendRequestModal({ name, defaultHello, busy, onSend, onClose }
   onClose: () => void;
 }) {
   const tr = useT();
-  const [hello, setHello] = useState(defaultHello);
+  const [hello, setHello] = useState(clipRunes(defaultHello, MAX_FRIEND_HELLO));
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // 光标落到**末尾**再聚焦。`autoFocus` 单用会把光标停在预填文案的最前面，
   // 于是想改成「我是×××，同事」的人只能先按一下 End——预填值越有用，这个别扭就越常撞上。
@@ -35,16 +41,24 @@ export function FriendRequestModal({ name, defaultHello, busy, onSend, onClose }
   return (
     <Modal className="modal friendreq-modal" onClose={onClose}>
       <h3 className="modal-title"><UserPlus size={18} /> {tr("friend.request.title")}</h3>
-      <div className="friendreq-target">{tr("friend.request.send_to")} <b>{name}</b></div>
-      <label className="friendreq-label" htmlFor="friendreq-hello">{tr("friend.request.hello_label")}</label>
-      <textarea id="friendreq-hello" ref={inputRef} className="friendreq-input" rows={3} maxLength={MAX_FRIEND_HELLO}
-        value={hello} placeholder={tr("friend.request.hello_placeholder")}
-        onChange={(e) => setHello(e.target.value)} />
-      <div className="friendreq-count">{hello.length}/{MAX_FRIEND_HELLO}</div>
+      <div id="friendreq-tip" className="friendreq-target">{tr("friend.request.alert_message", { name })}</div>
+      <textarea id="friendreq-hello" ref={inputRef} className="friendreq-input" rows={3} aria-labelledby="friendreq-tip"
+        value={hello} placeholder={tr("friend.request.placeholder")}
+        onChange={(e) => {
+          const raw = e.target.value;
+          const clipped = clipRunes(raw, MAX_FRIEND_HELLO);
+          setHello(clipped);
+          if (clipped !== raw) {
+            // 截断后受控值回写会把光标顶到末尾（在中间编辑时尤其突兀）；React 回写在事件结束时同步完成，微任务里还原。
+            const el = e.target, caret = Math.min(el.selectionStart, clipped.length);
+            queueMicrotask(() => el.setSelectionRange(caret, caret));
+          }
+        }} />
+      <div className="friendreq-count">{[...hello].length}/{MAX_FRIEND_HELLO}</div>
       <div className="modal-actions">
         <button className="link" onClick={onClose}>{tr("common.cancel")}</button>
         <button className="mini-btn" disabled={busy} onClick={() => onSend(hello.trim())}>
-          {busy ? tr("friend.request.sending") : tr("friend.request.submit")}
+          {busy ? tr("friend.request.sending") : tr("common.send")}
         </button>
       </div>
     </Modal>

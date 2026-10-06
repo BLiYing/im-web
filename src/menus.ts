@@ -94,8 +94,8 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "transcribeOff", label: t("chat.msg_menu.transcribe_cancel"), icon: FileText,
       visible: (c) => c.m.contentType === "voice" && c.m.convSeq > 0 && !c.m.recalledAt && !!c.hasTranscript,
       run: (c) => h.transcribe(c.m) },
-    // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发）。
-    { id: "copy", label: t("common.copy"), icon: Copy, visible: (c) => isText(c.m) || c.m.contentType === "image" || !!c.m.caption, run: (c) => h.copy(c.m) },
+    // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发；须已发出，发送中/失败乐观行不给，对齐 iOS）。
+    { id: "copy", label: t("common.copy"), icon: Copy, visible: (c) => isText(c.m) || (c.m.contentType === "image" && c.m.convSeq > 0) || !!c.m.caption, run: (c) => h.copy(c.m) },
     { id: "reply", label: t("chat.msg_menu.reply"), icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
     { id: "forward", label: t("common.forward"), icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
     // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
@@ -115,19 +115,21 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "unpin", label: t("conv.menu.unpin"), icon: PinOff,
       visible: (c) => !!c.canPin && c.m.convSeq > 0 && !!c.m.pinnedAt, run: (c) => h.pin(c.m, false) },
     { id: "edit", label: t("common.edit"), icon: Pencil, visible: (c) => c.m.from === c.uid && isText(c.m) && !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.edit(c.m) },
+    // 取消发送：仅本人、仍在发送/失败的媒体/文件/语音出箱行（convSeq=0，尚未发出去；发出去后走撤回）。
+    // 限 image/video/file/voice——文本 sending 是 WS 帧已发出等 ack，无上传可取消，列出来会误导。与 iOS 同语义。
+    { id: "cancelSend", label: t("chat.msg_menu.cancel_send"), icon: XCircle,
+      visible: (c) => c.m.from === c.uid && c.m.convSeq === 0
+        && (c.m.status === "sending" || c.m.status === "failed")
+        && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"
+          // 语音只在仍是本地 blob 占位（上传中/失败）时可取消；content 已换成服务器 URL = WS 帧已发出、撤不回。
+          || (c.m.contentType === "voice" && c.m.content.startsWith("blob:"))),
+      run: (c) => h.cancelSend(c.m) },
     { id: "multiSelect", label: t("forward.picker.multi"), icon: CheckSquare, visible: (c) => c.m.convSeq > 0 && !c.m.recalledAt, run: (c) => h.multiSelect(c.m) },
     { id: "translate", label: t("chat.msg_menu.translate"), icon: Languages, visible: (c) => isText(c.m) && !c.m.recalledAt, run: (c) => h.translate(c.m) },
     // 举报（2026-09-06 由「举报消息 / 举报发送者」合并为单项）：对用户来说这本就是同一个动作，
     // 两个入口只让人犹豫选哪个；而消息类工单的信息是用户类的**超集**——服务端已按 (conv_id, conv_seq)
     // 反查发送者，管理员的一键禁言/封号照常落到那个人身上。「只举报这个人」的入口保留在资料页。
     { id: "report", label: t("common.report"), icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
-    // 取消发送：仅本人、仍在发送/失败的媒体/文件出箱行（convSeq=0，尚未发出去；发出去后走撤回）。
-    // 限 image/video/file——文本 sending 是 WS 帧已发出等 ack，无上传可取消，列出来会误导。与 iOS 同语义。
-    { id: "cancelSend", label: t("chat.msg_menu.cancel_send"), icon: XCircle,
-      visible: (c) => c.m.from === c.uid && c.m.convSeq === 0
-        && (c.m.status === "sending" || c.m.status === "failed")
-        && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
-      run: (c) => h.cancelSend(c.m) },
     // 删除对发送中的本地件隐藏：删除只删行不停上传，传完仍会发出去（僵尸任务）；要撤走用「取消发送」。
     { id: "delete", label: t("common.delete"), icon: Trash2, danger: true,
       visible: (c) => !(c.m.status === "sending" && c.m.convSeq === 0), run: (c) => h.delete(c.m) },
