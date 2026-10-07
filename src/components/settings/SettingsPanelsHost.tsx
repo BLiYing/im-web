@@ -39,7 +39,7 @@ export interface SettingsPanelsHostProps {
   stateText: string;
   infoRows: Row[];
   groups: Row[][];
-  openProfile: () => Promise<void> | void;
+  openProfile: (opts?: { edit?: boolean }) => Promise<void> | void;
   logout: () => void;
 
   // 数据与存储
@@ -163,7 +163,8 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           infoRows={p.infoRows}
           groups={groups}
           onBack={() => p.setShowSettings(false)}
-          onEditProfile={() => void p.openProfile()}
+          onOpenProfile={() => void p.openProfile()}
+          onEditProfile={() => void p.openProfile({ edit: true })}
           onLogout={p.logout}
         />
       )}

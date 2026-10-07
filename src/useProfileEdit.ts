@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
+import { t } from "./i18n";
 
 export interface ProfileEditDeps { clientRef: MutableRefObject<IMClient | null>; setToast: (msg: string | null) => void; }
 export function useProfileEdit(d: ProfileEditDeps) {
@@ -15,6 +16,9 @@ export function useProfileEdit(d: ProfileEditDeps) {
   const [profileBusy, setProfileBusy] = useState(false);
   // 资料面板双态：进页默认只读，点「编辑」才可改（与 iOS IMProfileEditViewController 拉齐）。
   const [profileEditing, setProfileEditing] = useState(false);
+  // 从设置页右上角「编辑」直接进的编辑态（2026-10-07，三端同口径）：编辑就是这一趟的目的，
+  // 取消 / 保存成功都直接关面板回设置页，不落回只读态（否则要多点一次返回）。点头部进来的仍是双态。
+  const [profileDirect, setProfileDirect] = useState(false);
   const [cropReq, setCropReq] = useState<{ file: File; onDone: (blob: Blob) => void | Promise<void> } | null>(null);
 
   // 加载本人资料到 myInfo（左上角头像 / 设置页头部共用同一份数据）。失败静默回退首字母圈。
@@ -25,15 +29,17 @@ export function useProfileEdit(d: ProfileEditDeps) {
     } catch { /* 忽略：头像回退首字母圈 */ }
   }, []);
 
-  // 打开"编辑资料"弹窗：拉本人资料填入草稿（tags 以空格连接成可编辑串）。
-  const openProfile = useCallback(async () => {
+  // 打开"我的资料"面板：拉本人资料填入草稿（tags 以空格连接成可编辑串）。edit=true 时直进编辑态（见 profileDirect）。
+  const openProfile = useCallback(async (opts?: { edit?: boolean }) => {
     try {
       const p = await clientRef.current?.fetchMyProfile();
       // phone 后端是 omitempty：空时 JSON 无该键 → undefined，须兜底为 ""，否则 input 由非受控变受控告警。
       if (p) {
         setProfileDraft({ nickname: p.nickname ?? "", username: p.username ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
         setLoadedUsername(p.username ?? "");
-        setProfileEditing(false); // 每次进页都从只读态开始
+        const direct = opts?.edit === true;
+        setProfileEditing(direct); // 点头部进来从只读态开始；右上角「编辑」直进编辑态
+        setProfileDirect(direct);
       }
     } catch (e) {
       setToast(`加载资料失败：${(e as Error).message}`);
@@ -75,8 +81,15 @@ export function useProfileEdit(d: ProfileEditDeps) {
       }
       // 保存后刷新设置页顶部名片（否则头像/昵称仍显旧值）。改名接口回的名片更新，优先用它。
       const fresh = renamed ?? updated;
+      if (fresh) setMyInfo({ nickname: fresh.nickname ?? "", username: fresh.username ?? "", phone: fresh.phone ?? "", avatar_url: fresh.avatar_url ?? "" });
+      if (profileDirect) {
+        // 直进编辑的一趟：保存即完成，关面板回设置页（设置页头部已由上面的 myInfo 刷新）
+        setProfileDraft(null);
+        setProfileEditing(false);
+        setToast(t("profile.saved_toast"));
+        return;
+      }
       if (fresh) {
-        setMyInfo({ nickname: fresh.nickname ?? "", username: fresh.username ?? "", phone: fresh.phone ?? "", avatar_url: fresh.avatar_url ?? "" });
         // 保存后**回只读态而不是关面板**：用户刚改完就被关掉，看不到改后的样子；
         // 留在页内看到新昵称/新句柄才是完整的反馈闭环（与 iOS exitEditingAfterSave 同）。
         setProfileDraft({
@@ -90,7 +103,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
     } finally {
       setProfileBusy(false);
     }
-  }, [profileDraft, loadedUsername]);
+  }, [profileDraft, loadedUsername, profileDirect]);
 
   // 选本机图片做头像：<input type=file> 浏览器自动用当前系统(Mac/Windows/Linux)的原生文件框，无需检测系统。
   // 个人头像（方案 C）：选图 → 圆形裁切 → 上传专用端点 → 存 /avatars/<hash>.jpg（不再 data URL）。
@@ -114,8 +127,9 @@ export function useProfileEdit(d: ProfileEditDeps) {
   /** 取消编辑：丢弃未保存的输入，用最后一次载入/保存的权威值重填，回只读态。 */
   const cancelProfileEditing = useCallback(() => {
     setProfileEditing(false);
+    if (profileDirect) { setProfileDraft(null); return; } // 直进编辑的一趟：取消即关面板（见 profileDirect）
     void openProfile(); // 重拉一次权威资料，确保只读态显示的是服务端认的值
-  }, [openProfile]);
+  }, [openProfile, profileDirect]);
 
   return { myInfo, setMyInfo, profileDraft, setProfileDraft, profileBusy, cropReq, setCropReq,
     loadMyInfo, openProfile, saveProfile, onPickAvatar,

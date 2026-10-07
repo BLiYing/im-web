@@ -6,7 +6,7 @@ import { useT } from "../../i18n";
 
 /** 设置面板主页：占据侧栏列（绝对定位），右侧聊天 .main 保持不动、可继续聊（对齐 Telegram Web）。
  *  纯展示：行数据（infoRows/groups）与全部动作由 App 组装传入。 */
-export function SettingsPanel({ avatarUrl, name, seed, stateText, infoRows, groups, onBack, onEditProfile, onLogout }: {
+export function SettingsPanel({ avatarUrl, name, seed, stateText, infoRows, groups, onBack, onOpenProfile, onEditProfile, onLogout }: {
   avatarUrl?: string;
   name: string;
   seed: string;
@@ -14,6 +14,9 @@ export function SettingsPanel({ avatarUrl, name, seed, stateText, infoRows, grou
   infoRows: Row[];
   groups: Row[][];
   onBack: () => void;
+  /** 点头部：进「我的资料」（只读 ↔ 编辑双态）。 */
+  onOpenProfile: () => void;
+  /** 右上角铅笔：直进编辑态，取消 / 保存后直接回本页（三端同口径）。 */
   onEditProfile: () => void;
   onLogout: () => void;
 }) {
@@ -22,10 +25,10 @@ export function SettingsPanel({ avatarUrl, name, seed, stateText, infoRows, grou
     <SubPanel title={t("settings.title")} onBack={onBack}
       right={<button className="icon-btn" title={t("settings.edit_profile")} onClick={onEditProfile}><SquarePen size={24} /></button>}>
         {/* 点头部（头像/昵称/状态）→ 我的资料页，与 iOS 的「点头部进资料页」拉齐。
-            右上角铅笔仍在（直接进编辑态的快捷方式）。 */}
+            右上角铅笔是另一条路：直接进编辑态。 */}
         <div className="settings-profile settings-profile-tappable" role="button" tabIndex={0}
-          onClick={onEditProfile}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEditProfile(); } }}>
+          onClick={onOpenProfile}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenProfile(); } }}>
           <Avatar url={avatarUrl} label={name} seed={seed} cls="settings-avatar" />
           <div className="settings-name">{name}</div>
           <div className="settings-status">{stateText}</div>

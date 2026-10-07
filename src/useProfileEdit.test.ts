@@ -100,3 +100,47 @@ describe("useProfileEdit 的只读/编辑双态", () => {
     expect(c.fetchMyProfile.mock.calls.length).toBeGreaterThan(before);
   });
 });
+
+// 设置页右上角「编辑」直进编辑态（2026-10-07，三端同口径）：编辑就是这一趟的目的，
+// 取消 / 保存成功都直接关面板回设置页，不落回只读态。点头部进来的仍是上面那套双态。
+describe("useProfileEdit 直进编辑（openProfile({ edit: true })）", () => {
+  it("进页即编辑态", async () => {
+    const { result } = mount();
+    await act(async () => { await result.current.openProfile({ edit: true }); });
+    expect(result.current.profileEditing).toBe(true);
+    expect(result.current.profileDraft).not.toBeNull();
+  });
+
+  it("取消 = 关面板，不回只读、不重拉", async () => {
+    const { result, c } = mount();
+    await act(async () => { await result.current.openProfile({ edit: true }); });
+    const before = c.fetchMyProfile.mock.calls.length;
+    await act(async () => { result.current.cancelProfileEditing(); });
+    expect(result.current.profileDraft).toBeNull();
+    expect(result.current.profileEditing).toBe(false);
+    expect(c.fetchMyProfile.mock.calls.length).toBe(before);
+  });
+
+  it("保存成功 = 刷新 myInfo + 关面板 + 「已保存」吐司", async () => {
+    const { result, deps } = mount();
+    await act(async () => { await result.current.openProfile({ edit: true }); });
+    act(() => result.current.setProfileDraft({ nickname: "新名", username: "myhandle", avatar_url: "a.png", phone: "", tags: "" }));
+    await act(async () => { await result.current.saveProfile(); });
+    expect(result.current.myInfo?.nickname).toBe("新名");
+    expect(result.current.profileDraft).toBeNull();
+    expect(deps.setToast).toHaveBeenCalledWith("已保存");
+  });
+
+  it("之后再从头部进来，仍是只读双态（直进标记不残留）", async () => {
+    const { result, c } = mount();
+    await act(async () => { await result.current.openProfile({ edit: true }); });
+    await act(async () => { result.current.cancelProfileEditing(); });
+    await act(async () => { await result.current.openProfile(); });
+    expect(result.current.profileEditing).toBe(false);
+    act(() => result.current.enterProfileEditing());
+    const before = c.fetchMyProfile.mock.calls.length;
+    await act(async () => { result.current.cancelProfileEditing(); });
+    expect(result.current.profileDraft).not.toBeNull(); // 双态：取消回只读、面板还在
+    expect(c.fetchMyProfile.mock.calls.length).toBeGreaterThan(before);
+  });
+});
