@@ -132,7 +132,10 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             // 无搜索词时 visible === accepted，行为与加搜索前一致。
             // 上限 = maxInitialMembers（群主占 1 席）：并集后截断，已选的人不会被全选清掉。
             const visibleIds = visible.map((f) => f.user_id);
-            const allOn = visibleIds.every((id) => draft.selected.includes(id));
+            // 「取消全选」：可见行全选中，或已选满上限且可见行里有已选的（三端同，2026-10-07）——
+            // 好友多于上限时全选只补到上限、可见行永远选不全，按钮若仍写「全选」、再点又补不进，就没法一键撤回。
+            const allOn = visibleIds.every((id) => draft.selected.includes(id))
+              || (atCap && visibleIds.some((id) => draft.selected.includes(id)));
             const next = allOn
               ? draft.selected.filter((id) => !visibleIds.includes(id))
               // 已选整体保留（手点行没有上限拦截，selected 可能已超限，不能 slice 掉已选），
@@ -147,6 +150,8 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             );
           })()}
         </div>
+        {/* 选满提示放列表之上（与 iOS / Android 同在顶部），别等滚到底才看见 */}
+        {atCap && <p className="create-hint">{tr("group.create.limit_reached", { max: maxInitialMembers + 1 })}</p>}
         {accepted.length > 0 && <ListSearchInput value={q} onChange={setQ} placeholder={tr("friend.picker.search_placeholder")} />}
         {visible.length === 0 && (
           <div className="empty">{isSearching(q) ? tr("friend.picker.no_match") : tr("group.create.no_friends")}</div>
@@ -167,7 +172,6 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
             );
           })}
         </div>
-        {atCap && <p className="create-hint">{tr("group.create.limit_reached", { max: maxInitialMembers + 1 })}</p>}
         <div className="modal-actions">
           <button className="link" onClick={onCancel}>{tr("common.cancel")}</button>
           <button className="mini-btn" disabled={draft.selected.length === 0} onClick={() => goStep2(draft)}>{tr("common.next")}</button>

@@ -123,11 +123,21 @@ describe("CreateGroupModal 搜索与全选", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: ["1003", "1001"] }));
   });
 
-  it("已选本身已超上限（如配置后到）时，全选不丢已选也不再新增", () => {
+  it("已选本身已超上限但可见行一个没选（搜索过滤）时，全选不丢已选也不再新增", () => {
     const onChange = vi.fn();
     render(<CreateGroupModal {...base} draft={{ name: "", selected: ["1002", "1003"] }} maxInitialMembers={1} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("搜索好友"), { target: { value: "老王" } });
     fireEvent.click(screen.getByText("全选"));
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: ["1002", "1003"] }));
+  });
+
+  // 好友多于上限：全选只补到上限，可见行选不全——按钮也要变「取消全选」，否则没法一键撤回
+  it("全选被上限截断后按钮变「取消全选」，点后只摘可见行", () => {
+    const onChange = vi.fn();
+    render(<CreateGroupModal {...base} draft={{ name: "", selected: ["1001", "1002"] }} maxInitialMembers={2} onChange={onChange} />);
+    expect(screen.queryByText("全选")).toBeNull();
+    fireEvent.click(screen.getByText("取消全选"));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ selected: [] }));
   });
 
   it("手点同样受上限约束：已达上限时未选行点不动并提示，已选行仍可取消", () => {
