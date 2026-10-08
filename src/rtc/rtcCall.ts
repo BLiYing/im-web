@@ -1,6 +1,6 @@
 // 通话动作 / 引擎本体的模块级出口：详情页 / 群资料页的按钮、通话记录页都不在 CallProvider 树内，
 // 靠这里拿到 uikit 的 actions 和 engine 本体。两者**不是同一个生命周期**：engine 在 RtcHost 的
-// startRtcEngine effect 里就绪（登录后即有），actions 要等 CallProvider 的子组件 ActionsBridge
+// createRtcEngine effect 里就绪（建好即有，登录由 Kit 负责），actions 要等 CallProvider 的子组件 ActionsBridge
 // 拿到 uikit 内部状态才就绪（比 engine 晚半拍），所以特意分开注册、不揉进一个对象——合并成一个
 // `{actions, engine}` 会让"引擎已经能查通话记录了"被迫等到"uikit actions 也齐了"才通知订阅者，
 // 对通话记录页是个平白无故的延迟。
@@ -53,6 +53,15 @@ export function getCallEngine(): CallEngine | null {
  * 原先只在挂载那一刻读一次 getCallEngine()）。 */
 export function onCallEngineChange(listener: () => void): () => void {
   return engineRegistry.subscribe(listener);
+}
+
+/**
+ * 确保 im-rtc 已登录（Kit 没登上时会先补一次取票登录，im-rtc 2.2.0）。宿主自己直接用引擎的地方
+ * （通话记录 `fetchCallHistory`）先调它。Kit 还没挂好（actions 未注册）时返回 false。
+ */
+export async function ensureRtcReady(): Promise<boolean> {
+  const actions = actionsRegistry.get();
+  return actions === null ? false : actions.ensureReady();
 }
 
 /** 通话服务是否就绪。 */

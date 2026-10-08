@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadRtcConfig, rtcConfigProblem } from "./rtcConfig";
-import { signToken } from "./rtcEngine";
+import { rtcTokenProvider, signToken } from "./rtcEngine";
 import { buildInviteCandidates, rtcNameOf } from "./rtcProfiles";
 import { callCandidates, togglePick } from "./RtcGroupCallPicker";
 import { MAX_GROUP_CALL_PICK } from "./rtcCall";
@@ -115,5 +115,19 @@ describe("buildInviteCandidates", () => {
   it("query 本地过滤；空成员给空页", () => {
     expect(buildInviteCandidates(ms, "me", [], "BOB", none, none).map((x) => x.uid)).toEqual(["b"]);
     expect(buildInviteCandidates([], "me", [], "", none, none)).toEqual([]);
+  });
+});
+
+describe("rtcTokenProvider（交给 Kit 的取票函数，im-rtc 2.2.0）", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it("成功时给 Kit 一张票", async () => {
+    stubFetch({ "/api/v1/rtc/token": { code: 0, data: { token: "rtc-jwt", expires_at_ms: 1, expires_in_sec: 43200 } } });
+    await expect(rtcTokenProvider(() => "IM-TOKEN")()).resolves.toEqual({ token: "rtc-jwt" });
+  });
+
+  it("换票失败时 reject（Kit 据此退避重试 / 拨号时提示），不吞成空票", async () => {
+    stubFetch({ "/api/v1/rtc/token": { code: 600001, message: "rtc not configured" } });
+    await expect(rtcTokenProvider(() => "IM-TOKEN")()).rejects.toMatchObject({ code: 600001 });
   });
 });

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CallHistoryRecord } from "im-rtc-call-engine";
 import { ErrorCode, isRtcError } from "im-rtc-call-engine";
-import { getCallEngine, onCallEngineChange } from "./rtc/rtcCall";
+import { ensureRtcReady, getCallEngine, onCallEngineChange } from "./rtc/rtcCall";
 import { needsAutoContinue, type CallHistoryTab } from "./callHistoryView";
 import { logger, LOG_TAG } from "./logging/logger";
 
@@ -56,7 +56,9 @@ export function useCallHistory(myUid: string): UseCallHistoryResult {
     const ticket = first ? ++generation.current : generation.current;
     const cursor = first ? undefined : (cursorRef.current ?? undefined);
     setLoading(true);
-    engine.fetchCallHistory({ limit: PAGE_SIZE, ...(cursor === undefined ? {} : { cursor }) })
+    // 先让 Kit 确认已登录（启动时没登上的话它会先补一次）；补不上照常走 fetchCallHistory，由它报 2007 落到 network 态。
+    ensureRtcReady()
+      .then(() => engine.fetchCallHistory({ limit: PAGE_SIZE, ...(cursor === undefined ? {} : { cursor }) }))
       .then((page) => {
         if (ticket !== generation.current) return; // 在途请求已作废
         setRecords((prev) => (first ? [...page.records] : [...prev, ...page.records]));

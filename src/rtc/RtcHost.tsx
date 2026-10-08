@@ -1,4 +1,5 @@
 // im-rtc 通话宿主：登录后（本组件挂载）起引擎，退出登录（卸载）销毁；来电浮层与通话界面都由 uikit 画。
+// 登录归 Kit（`tokenProvider`，im-rtc 2.2.0）：引擎一建好就挂 CallProvider，由它取票登录 / 失败重试 / 拨号前补登录。
 // 名字与头像走宿主的解析链（备注 > 昵称 > @句柄），通过 ProfileProvider 交给 uikit。
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CallEngine } from "im-rtc-call-engine";
@@ -6,7 +7,7 @@ import { CallOverlay, CallProvider, ProfileProvider, useCall } from "im-rtc-call
 import type { InviteMemberProvider, ProfileResolver } from "im-rtc-call-uikit-react";
 import { useLang } from "../i18n";
 import { logger, LOG_TAG } from "../logging/logger";
-import { startRtcEngine } from "./rtcEngine";
+import { createRtcEngine, rtcTokenProvider } from "./rtcEngine";
 import { registerCallActions, registerCallEngine } from "./rtcCall";
 import { buildInviteCandidates, type InviteMemberLike } from "./rtcProfiles";
 import { useCallRecordSend, type CallRecordSendDeps } from "../useCallRecordSend";
@@ -37,7 +38,7 @@ function ActionsBridge(): null {
 
 export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
   uid: string;
-  /** 当前 IM 会话的 Bearer token（实时取值，不是快照）：换票/续票用，见 rtcEngine.ts signToken。
+  /** 当前 IM 会话的 Bearer token（实时取值，不是快照）：Kit 取票时用，见 rtcEngine.ts signToken。
    *  调用方须保证引用稳定（如 `useCallback(() => ref.current?.authToken ?? "", [])`）——它是本
    *  effect 的依赖之一，引用不稳会导致每次渲染都重建 RTC 引擎。 */
   getAuthToken: () => string;
@@ -54,28 +55,20 @@ export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
 
   useEffect(() => {
     if (!uid) return undefined;
-    // StrictMode 会把 effect 跑两遍：cancelled 挡住第一遍还没登完就被清理的那次；
-    // controller 真正中止第一遍的换票请求（见 rtcEngine.ts startRtcEngine 的 signal 注释）——
-    // 不然调试密钥时代不明显的"白算一次"，换成真实网络换票后会变成白打一次后端 + 消耗配额。
-    let cancelled = false;
-    let dispose: (() => void) | null = null;
-    const controller = new AbortController();
-    // onDead：引擎在拿到之后意外死掉（如被踢下线）；一并把模块级出口注销，通话记录页随之回落「未登录」态。
-    void startRtcEngine(uid, getAuthToken, () => { setEngine(null); registerCallEngine(null); }, controller.signal).then((h) => {
-      if (!h) return;
-      if (cancelled) { h.dispose(); return; }
-      dispose = h.dispose;
-      setEngine(h.engine);
-      registerCallEngine(h.engine);
-    });
+    // onDead：被顶号 / 配置被拒（换票救不了）；一并把模块级出口注销，通话记录页随之回落「未登录」态。
+    // StrictMode 下 effect 会跑两遍：第一遍的 CallProvider 卸载时 Kit 会作废它在途的取票（不会用它登录），
+    // 只是开发期多发一次换票请求。
+    const h = createRtcEngine(uid, () => { setEngine(null); registerCallEngine(null); });
+    if (!h) return undefined;
+    setEngine(h.engine);
+    registerCallEngine(h.engine);
     return () => {
-      cancelled = true;
-      controller.abort();
-      dispose?.();
+      h.dispose();
       setEngine(null);
       registerCallEngine(null);
     };
-  }, [uid, getAuthToken]);
+  }, [uid]);
+  const tokenProvider = useMemo(() => rtcTokenProvider(getAuthToken), [getAuthToken]);
 
   // 通话记录：订阅 SDK 的 callSummary。宿主不自己记通话上下文，事实由 SDK 一次给齐；发不发（role==caller）由 planCallRecord 判。
   const { sendCallRecord } = useCallRecordSend({ ...record, uid });
@@ -140,6 +133,7 @@ export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
         bannerFirst
         ringtoneMuted={false}
         locale={lang === "zh-Hans" ? "zh-CN" : "en"}
+        tokenProvider={tokenProvider}
       >
         <ActionsBridge />
         <CallOverlay />

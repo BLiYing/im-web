@@ -2,7 +2,7 @@
 # 切换 im-rtc SDK 的来源（两个包：im-rtc-call-engine / im-rtc-call-uikit-react）。
 #
 #   ./scripts/sdk-source.sh npm [版本]   默认。用 npm 正式版（默认 2.0.0）。
-#   ./scripts/sdk-source.sh local        本地包：改成 file:../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz
+#   ./scripts/sdk-source.sh local        本地包：改成 file:../../im-rtc/im-rtc-web/.sdk-release/local/tgz/*.tgz
 #                                        （先在 im-rtc-web 跑 `./scripts/pack-sdk.sh local`；改了 SDK 源码要重新打包再跑本脚本）
 #
 # 用途：验尚未发布的 SDK 改动时切 local；验完切回 npm。
@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 MODE="${1:-}"
-LOCAL_DIR="../im-rtc/im-rtc-web/.sdk-release/local/tgz"
+LOCAL_DIR="../../im-rtc/im-rtc-web/.sdk-release/local/tgz"
 
 case "$MODE" in
   npm)
@@ -21,7 +21,7 @@ case "$MODE" in
     ;;
   local)
     # 版本取 im-rtc-web 的 SDK_VERSION，tgz 文件名 = <包名>-<版本>.tgz
-    VER="$(sed -n "s/.*SDK_VERSION *= *['\"]\([0-9.]*\)['\"].*/\1/p" ../im-rtc/im-rtc-web/packages/call-engine/src/version.ts | head -1)"
+    VER="$(sed -n "s/.*SDK_VERSION *= *['\"]\([0-9.]*\)['\"].*/\1/p" ../../im-rtc/im-rtc-web/packages/call-engine/src/version.ts | head -1)"
     [ -n "$VER" ] || { echo "读不到 im-rtc-web 的 SDK_VERSION" >&2; exit 1; }
     E="$LOCAL_DIR/im-rtc-call-engine-${VER}.tgz"; U="$LOCAL_DIR/im-rtc-call-uikit-react-${VER}.tgz"
     [ -f "$E" ] && [ -f "$U" ] || { echo "缺本地 tgz：先在 im-rtc-web 跑 ./scripts/pack-sdk.sh local" >&2; exit 1; }

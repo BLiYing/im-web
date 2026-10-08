@@ -13,6 +13,8 @@ import { useCallHistory } from "./useCallHistory";
 const { engineChangeListeners } = vi.hoisted(() => ({ engineChangeListeners: [] as Array<() => void> }));
 
 vi.mock("./rtc/rtcCall", () => ({
+  // Kit 已登录：通话记录拉取前的 ensureRtcReady 直接放行（补登录本身由 im-rtc Kit 的单测覆盖）。
+  ensureRtcReady: vi.fn(async () => true),
   getCallEngine: vi.fn(),
   onCallEngineChange: vi.fn((fn: () => void) => {
     engineChangeListeners.push(fn);

@@ -1,4 +1,6 @@
-// im-rtc 引擎的创建与销毁（宿主侧）：登录后建、退出登录后销毁；换票与被踢的处置也在这里。
+// im-rtc 引擎的创建与销毁（宿主侧）：登录后建、退出登录后销毁。**登录归 Kit**（im-rtc 2.2.0 的
+// `<CallProvider tokenProvider>`）：取票登录、失败退避重试、拨号前补登录、续票、票失效重登都由它做，
+// 这里只提供「怎么取票」（rtcTokenProvider）。
 //
 // **接入票只有一个来源：signToken**。调 IMServer 的 POST /api/v1/rtc/token 代为向 im-rtc-server
 // 换票——本端只带上当前 IM 会话的 Bearer token，device_id 由 IMServer 从登录会话登记值里取，
@@ -6,6 +8,7 @@
 import {
   CallEngine, VideoProfiles, WebRTCAdapter, setLogLevel, setLogSink,
 } from "im-rtc-call-engine";
+import type { TokenProvider } from "im-rtc-call-uikit-react";
 import { callJson } from "../sdk/http";
 import { logger, LOG_TAG } from "../logging/logger";
 import { platform } from "../platform";
@@ -25,12 +28,11 @@ interface RTCTokenData {
 /**
  * 接入票唯一来源：调 IMServer 换票。
  *
- * `getAuthToken` 取的是**当前**IM 会话的 Bearer token（不是登录那一刻的快照）——换票会在
- * 初次登录与断线重连（下方 disconnected code=4401）两个时刻发生，中间 IM 会话可能已经续过期，
- * 用旧闭包值会拿着一枚已失效的 token 去换，白白多一轮失败。
+ * `getAuthToken` 取的是**当前**IM 会话的 Bearer token（不是登录那一刻的快照）——Kit 会在启动、
+ * 失败重试、拨号前补登录、续票等多个时刻来取票，中间 IM 会话可能已经续过期，用旧闭包值会拿着
+ * 一枚已失效的 token 去换，白白多一轮失败。
  *
- * `signal` 可选：初次登录时由 `startRtcEngine` 透传，供调用方中止在途请求（见该函数注释）；
- * 续票（disconnected code=4401）不传——那时引擎已经登录成功，没有"这次调用被取消"的概念。
+ * `signal` 可选：供调用方中止在途请求。
  */
 export async function signToken(getAuthToken: () => string, signal?: AbortSignal): Promise<string> {
   const authToken = getAuthToken();
@@ -54,6 +56,18 @@ function installSdkLog(): void {
   });
 }
 
+/** 交给 Kit 的取票函数（`<CallProvider tokenProvider>`）：失败就 reject，Kit 据此退避重试 / 给用户提示。 */
+export function rtcTokenProvider(getAuthToken: () => string): TokenProvider {
+  return async () => {
+    try {
+      return { token: await signToken(getAuthToken) };
+    } catch (err) {
+      logger.warn(LOG_TAG.rtc, "rtc_sign_failed", { err: String(err) });
+      throw err;
+    }
+  };
+}
+
 export interface RtcHandle {
   engine: CallEngine;
   /** 销毁：退订并退出登录。幂等。 */
@@ -61,22 +75,10 @@ export interface RtcHandle {
 }
 
 /**
- * 建引擎并登录。配置不全返回 null；登录失败也返回 null（已记日志，不打扰 IM）。
- * `getAuthToken`：取当前 IM 会话 Bearer token 的稳定函数（见 signToken 注释）。
- * `onDead`：被踢 / 换票换不上——引擎已死，宿主该决定怎么办（这里只记日志并让调用方丢弃句柄）。
- * `signal`：可选，调用方（`RtcHost`）传入，用来中止**初次登录**这次换票请求——React
- * StrictMode 会把挂载 effect 连续跑两次（mount → cleanup → mount，几乎无间隔），不传的话
- * 第一次那份 `POST /api/v1/rtc/token` 请求已经真的发出去了却被 `cancelled` 标记直接丢弃结果，
- * 调试密钥时代这只是白算一次 HMAC（无网络开销），换成真实换票后会白打一次 IMServer + 消耗
- * im-rtc-server 的换票配额。cleanup 调 `controller.abort()`，这里请求会以 AbortError 结束、
- * 走 catch 分支静默 dispose，不会误伤"真正被保留"的那次调用（那次有自己独立的 controller）。
+ * 建引擎（**不登录**，登录归 Kit 的 tokenProvider）。配置不全返回 null。
+ * `onDead`：被顶号 / 配置被拒——换票救不了，宿主丢弃这台引擎（票失效被踢由 Kit 自己换票重登，不走这里）。
  */
-export async function startRtcEngine(
-  uid: string,
-  getAuthToken: () => string,
-  onDead: () => void,
-  signal?: AbortSignal,
-): Promise<RtcHandle | null> {
+export function createRtcEngine(uid: string, onDead: () => void): RtcHandle | null {
   const cfg = loadRtcConfig();
   if (!cfg) return null;
   installSdkLog();
@@ -86,26 +88,12 @@ export async function startRtcEngine(
     deviceId,
     media: new WebRTCAdapter(browserMediaSource, VideoProfiles.p1080),
   });
-
-  let refreshing = false;
   const offs = [
-    engine.on("connected", () => { refreshing = false; }),
-    engine.on("disconnected", (e) => {
-      if (e.code !== 4401 || refreshing) return;
-      refreshing = true;
-      void signToken(getAuthToken)
-        .then((t) => engine.updateToken(t))
-        .catch((err: unknown) => {
-          refreshing = false;
-          logger.warn(LOG_TAG.rtc, "token_refresh_failed", { err: String(err) });
-        });
-    }),
-    engine.on("kickedOut", () => {
-      logger.warn(LOG_TAG.rtc, "rtc_kicked_out");
-      onDead();
+    engine.on("kickedOut", ({ reason }) => {
+      logger.warn(LOG_TAG.rtc, "rtc_kicked_out", { reason });
+      if (reason !== "authExpired") onDead();
     }),
   ];
-
   let disposed = false;
   const dispose = () => {
     if (disposed) return;
@@ -113,13 +101,6 @@ export async function startRtcEngine(
     offs.forEach((off) => off());
     engine.logout();
   };
-  try {
-    await engine.login(await signToken(getAuthToken, signal));
-    logger.info(LOG_TAG.rtc, "rtc_start", { url: cfg.wsUrl, uid });
-    return { engine, dispose };
-  } catch (err) {
-    logger.error(LOG_TAG.rtc, "rtc_login_failed", { err: String(err) });
-    dispose();
-    return null;
-  }
+  logger.info(LOG_TAG.rtc, "rtc_start", { url: cfg.wsUrl, uid });
+  return { engine, dispose };
 }
