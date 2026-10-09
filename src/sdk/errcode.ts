@@ -24,7 +24,9 @@ export const FRIENDLY_MESSAGES: Record<number, string> = {
   200110: "err.200110",
   300201: "err.300201",
   300202: "err.300202",
+  300004: "err.300004", // 账号被禁言（对齐 iOS；发消息被拒时用）
   300203: "err.300203",
+  300206: "chat.input.disabled_mute_all", // 群全员禁言
   // 300204 不映射：服务端会带具体原因（如"群主需先转让群主再退群"），透传更有用。
   300205: "err.300205",
   300207: "qr.action.banned_note",
@@ -44,4 +46,30 @@ export const FRIENDLY_MESSAGES: Record<number, string> = {
 export function friendlyMessage(code: number, fallback: string): string {
   const key = FRIENDLY_MESSAGES[code];
   return key ? t(key) : fallback || t("err.request_failed", { code: String(code) });
+}
+
+/**
+ * 发送被服务端拒收（WS error 帧带 client_msg_id）时挂到消息上的提示（对齐 iOS `IMSendRejectionNote` / Android `SendRejection`）。
+ *
+ * **只有「重发必然再被拒」的这几个码有提示**（iOS `IMSendRejectionShowsNote` 白名单）：有提示 = 气泡下方一行说明、
+ * 红点不可点；其余码（限频 300002 等）返回空串 = 不挂提示，红点照常可点重发。
+ *
+ * 拉黑 200102 / 非好友 200103 / 内容过大 300001 用**专用文案**：不能走 `FRIENDLY_MESSAGES` 的 `err.200102`
+ * （那是「加好友」场景的措辞），且拉黑 200102 必须读起来是模糊的「被拒收」、不泄露被拉黑（微信式）；
+ * 非好友 200103 在同句后多一句「请先发送好友申请」，用来引出加好友入口。
+ * 服务端对这几个码下发的是中文原文，直接用会让英文界面也显中文，所以三端都改走本地字符串。
+ */
+const SEND_REJECT_KEYS: Record<number, string> = {
+  200102: "chat.reject.blocked",
+  200103: "chat.reject.not_friend",
+  300001: "chat.reject.too_large",
+  300004: "err.300004", // 被禁言
+  300203: "err.300203", // 非群成员
+  300206: "chat.input.disabled_mute_all", // 群全员禁言
+  300208: "chat.input.disabled_muted", // 成员级禁言
+};
+
+export function sendRejectNote(code: number): string {
+  const key = SEND_REJECT_KEYS[code];
+  return key ? t(key) : "";
 }

@@ -63,7 +63,7 @@ export function useMessageStore() {
   /** 消息被拒收（onMsgRejected，被拉黑）：跨所有会话按 clientMsgId 标失败 + 挂原因/码。 */
   const markRejected = useCallback((clientMsgId: string, note: string, code: number) => {
     if (dropFailedCallRecord(clientMsgId, `rejected_${code}`)) return; // 被拉黑（200102）等：同上，吞掉
-    setMsgsByConv((prev) => mapMatchingClientMsgId(prev, clientMsgId, (m) => ({ ...m, status: "failed", note, noteCode: code })));
+    setMsgsByConv((prev) => mapMatchingClientMsgId(prev, clientMsgId, (m) => ({ ...m, status: "failed", note: note || undefined, noteCode: note ? code : undefined })));
   }, []);
 
   return {

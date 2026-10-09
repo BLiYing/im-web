@@ -566,8 +566,8 @@ export function MessageList(p: MessageListProps) {
             {mine && m.status === "failed" && m.note && (
               <div className="sys-note">
                 <span>{m.note}</span>
-                {/* 恢复入口：仅非好友(200103) 给——被拉黑(200102) 刻意不给，服务端对两者回同样的
-                    模糊文案以不泄露拉黑，给了入口反而会因申请被 200102 拒而暴露。 */}
+                {/* 恢复入口：仅非好友(200103) 给——被拉黑(200102) 刻意不给——它的文案是不带「请先发送好友申请」的模糊拒收，
+                    给了入口反而会因申请被 200102 拒而暴露。 */}
                 {m.noteCode === 200103 && peer && (
                   <button className="sys-note-action" onClick={() => void requestFriendFromNote(peer)}>{tr("chat.system.send_friend_request")}</button>
                 )}

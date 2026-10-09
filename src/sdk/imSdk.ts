@@ -26,7 +26,7 @@ import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, typ
 // isAuthCode：「鉴权失败类错误码」判据（对齐 errcode / iOS IMIsAuthErrorCode），与续期同源，故同住一个模块。
 import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
-import { friendlyMessage } from "./errcode";
+import { friendlyMessage, sendRejectNote } from "./errcode";
 import * as voiceApi from "./voiceApi"; import { t } from "../i18n";
 
 const PING_INTERVAL_MS = 25_000;
@@ -1043,7 +1043,8 @@ export class IMClient extends IMRestApi {
         if (cmid) {
           const timer = this.sendTimers.get(cmid);
           if (timer !== undefined) { clearTimeout(timer); this.sendTimers.delete(cmid); }
-          const note = d.message || t("common.send_failed");
+          const code = Number(d.code) || 200102; // 缺 code 按拒收处理（对齐 iOS handleSendRejected）
+          const note = sendRejectNote(code);
           // 被拒（如被拉黑）服务端永不接受、无 conv_seq → 把该条按失败态 + 系统提示落库，刷新/重进会话仍在。
           const pend = this.pendingSends.get(cmid);
           if (pend) {
@@ -1055,10 +1056,10 @@ export class IMClient extends IMRestApi {
               message: note,
             });
             // 字段集与 ACK 落库同源（pendingToMessage）：各抄一份时丢过 contentType/groupId/尺寸，见该函数注释。
-            void localStore.saveRejected(this.uid, pendingToMessage(this.uid, pend, { clientMsgId: cmid, convSeq: 0, status: "failed", note }));
+            void localStore.saveRejected(this.uid, pendingToMessage(this.uid, pend, { clientMsgId: cmid, convSeq: 0, status: "failed", note: note || undefined }));
           }
           this.pendingSends.delete(cmid);
-          this.handlers.onMsgRejected?.(cmid, note, Number(d.code) || 0);
+          this.handlers.onMsgRejected?.(cmid, note, code);
         }
         break;
       }
