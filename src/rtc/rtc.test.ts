@@ -3,7 +3,7 @@ import { loadRtcConfig, rtcConfigProblem } from "./rtcConfig";
 import { rtcTokenProvider, signToken } from "./rtcEngine";
 import { buildInviteCandidates, rtcNameOf } from "./rtcProfiles";
 import { callCandidates, togglePick } from "./RtcGroupCallPicker";
-import { MAX_GROUP_CALL_PICK } from "./rtcCall";
+import { MAX_GROUP_CALL_PICK, placeGroupCall, placeSingleCall, registerCallActions, registerRtcRestart, shouldRestartRtc } from "./rtcCall";
 import type { GroupMember } from "../sdk/protocol";
 
 const full = { wsUrl: "ws://h:8787/v1/ws" };
@@ -129,5 +129,82 @@ describe("rtcTokenProvider（交给 Kit 的取票函数，im-rtc 2.2.0）", () =
   it("换票失败时 reject（Kit 据此退避重试 / 拨号时提示），不吞成空票", async () => {
     stubFetch({ "/api/v1/rtc/token": { code: 600001, message: "rtc not configured" } });
     await expect(rtcTokenProvider(() => "IM-TOKEN")()).rejects.toMatchObject({ code: 600001 });
+  });
+});
+
+describe("被踢后现场重启", () => {
+  afterEach(() => {
+    registerRtcRestart(null);
+    registerCallActions(null);
+  });
+
+  it("引擎收掉、账号还在才重启；在跑或已退出登录都不重启", () => {
+    expect(shouldRestartRtc(false, true)).toBe(true);
+    expect(shouldRestartRtc(true, true)).toBe(false);
+    expect(shouldRestartRtc(false, false)).toBe(false);
+  });
+
+  it("没有 actions 也没有重启方（已退出登录）→ 呼叫失败，由调用方提示", () => {
+    expect(placeSingleCall("1002", false)).toBe(false);
+    expect(placeGroupCall("g_1", ["1002"])).toBe(false);
+  });
+
+  it("没有 actions 但可重启 → 排队，actions 就绪后补发这一次呼叫（只发一次）", () => {
+    const requested = vi.fn(() => true);
+    registerRtcRestart(requested);
+    expect(placeSingleCall("1002", true)).toBe(true);
+    expect(requested).toHaveBeenCalledTimes(1);
+
+    const placeCall = vi.fn(async () => undefined);
+    const actions = { placeCall } as unknown as Parameters<typeof registerCallActions>[0];
+    registerCallActions(actions);
+    expect(placeCall).toHaveBeenCalledWith(["1002"], "video");
+    registerCallActions(null);
+    registerCallActions(actions); // 再次就绪不应重复拨出
+    expect(placeCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("重启在途时再点一次：不重复重启，以最后一次为准，只拨一次", () => {
+    const requested = vi.fn(() => true);
+    registerRtcRestart(requested);
+    expect(placeSingleCall("1002", false)).toBe(true);
+    expect(placeSingleCall("1003", true)).toBe(true); // 连点 / 换了一个人
+    expect(requested).toHaveBeenCalledTimes(1);
+
+    const placeCall = vi.fn(async () => undefined);
+    registerCallActions({ placeCall } as unknown as Parameters<typeof registerCallActions>[0]);
+    expect(placeCall).toHaveBeenCalledTimes(1);
+    expect(placeCall).toHaveBeenCalledWith(["1003"], "video");
+  });
+
+  it("重启方拒绝重启 → 返回 false，不排队", () => {
+    registerRtcRestart(() => false);
+    expect(placeSingleCall("1002", false)).toBe(false);
+    const placeCall = vi.fn(async () => undefined);
+    registerCallActions({ placeCall } as unknown as Parameters<typeof registerCallActions>[0]);
+    expect(placeCall).not.toHaveBeenCalled();
+  });
+
+  it("排队的呼叫超过有效期就作废（重启失败时不会很久以后突然拨出）", () => {
+    vi.useFakeTimers();
+    try {
+      registerRtcRestart(() => true);
+      expect(placeSingleCall("1002", false)).toBe(true);
+      vi.advanceTimersByTime(16_000);
+      const placeCall = vi.fn(async () => undefined);
+      registerCallActions({ placeCall } as unknown as Parameters<typeof registerCallActions>[0]);
+      expect(placeCall).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("注销重启方（退出登录）会作废排着的呼叫", () => {
+    registerRtcRestart(() => true);
+    expect(placeSingleCall("1002", false)).toBe(true);
+    registerRtcRestart(null);
+    const placeCall = vi.fn(async () => undefined);
+    registerCallActions({ placeCall } as unknown as Parameters<typeof registerCallActions>[0]);
+    expect(placeCall).not.toHaveBeenCalled();
   });
 });

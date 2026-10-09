@@ -34,6 +34,53 @@ const actionsRegistry = createSingletonRegistry<CallActions>();
 /** RtcHost 里的 ActionsBridge 负责注册与注销；没注册 = 通话服务不可用（未配置 / 未登录 / 引擎没起来）。 */
 export function registerCallActions(a: CallActions | null): void {
   actionsRegistry.set(a);
+  if (a && pending) {
+    const p = pending;
+    pending = null;
+    if (Date.now() - p.at <= PENDING_TTL_MS) p.run(a);
+  }
+}
+
+// —— 被服务端踢下线后的现场重启 ——
+// 被顶号 / 配置被拒时 RtcHost 会把引擎收掉（actions 随 CallProvider 卸载而注销），此前这之后每次点呼叫都只会提示
+// 「通话服务不可用」，重新登录救不了被踢。现在：账号还在（RtcHost 仍挂载）就在用户点呼叫那一刻重建引擎，
+// 等 actions 重新就绪后把这次呼叫补发出去；退出登录（RtcHost 卸载）后不再重启。
+
+/** 呼叫入口发现引擎没在跑时要不要现场重启：引擎在跑不用；没有账号（已退出登录 / 从没起过）不能重启。纯函数，便于单测。 */
+export function shouldRestartRtc(engineRunning: boolean, hasAccount: boolean): boolean {
+  return !engineRunning && hasAccount;
+}
+
+/** 重启请求方：RtcHost 注册，返回 true 表示已发起重启（actions 稍后就绪）。 */
+let restartRequester: (() => boolean) | null = null;
+
+/** 重启期间排着的那一次呼叫。 */
+let pending: { run: (a: CallActions) => void; at: number } | null = null;
+/** 排队的呼叫超过这个时间还没等到 actions 就作废（重启失败时别在很久以后突然拨出去）。 */
+const PENDING_TTL_MS = 15_000;
+
+/** RtcHost 挂载时注册、卸载时注销（注销同时作废排着的呼叫）。 */
+export function registerRtcRestart(fn: (() => boolean) | null): void {
+  restartRequester = fn;
+  if (!fn) pending = null;
+}
+
+/** 有 actions 就立即执行；没有则尝试现场重启并排队；都不行返回 false。 */
+function dispatchCall(run: (a: CallActions) => void): boolean {
+  const actions = actionsRegistry.get();
+  if (actions) {
+    run(actions);
+    return true;
+  }
+  // 重启已在途（上一次点击排的队还没等到 actions）：这次点击顶替它（以最后一次为准），不再重复触发重启——
+  // 否则连点两下会重建两次引擎，或者第一次的呼叫被悄悄丢掉却已经回了 true。
+  if (pending && Date.now() - pending.at <= PENDING_TTL_MS) {
+    pending = { run, at: Date.now() };
+    return true;
+  }
+  if (!restartRequester || !restartRequester()) return false;
+  pending = { run, at: Date.now() };
+  return true;
 }
 
 const engineRegistry = createSingletonRegistry<CallEngine>();
@@ -71,16 +118,12 @@ export function rtcReady(): boolean {
 
 /** 单聊 1v1：`video=true` 视频，否则语音。就绪返回 true。 */
 export function placeSingleCall(peerUid: string, video: boolean): boolean {
-  const actions = actionsRegistry.get();
-  if (!actions) return false;
-  void actions.placeCall([peerUid], video ? "video" : "audio");
-  return true;
+  return dispatchCall((actions) => { void actions.placeCall([peerUid], video ? "video" : "audio"); });
 }
 
 /** 群通话：类型固定 video（默认不开摄像头由 Kit 决定），chatGroupId = 群会话 id。 */
 export function placeGroupCall(chatGroupId: string, calleeUids: string[]): boolean {
-  const actions = actionsRegistry.get();
-  if (!actions) return false;
-  void actions.placeCall(calleeUids.slice(0, MAX_GROUP_CALL_PICK), "video", { isGroup: true, chatGroupId });
-  return true;
+  return dispatchCall((actions) => {
+    void actions.placeCall(calleeUids.slice(0, MAX_GROUP_CALL_PICK), "video", { isGroup: true, chatGroupId });
+  });
 }

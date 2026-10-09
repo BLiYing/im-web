@@ -8,7 +8,8 @@ import type { InviteMemberProvider, ProfileResolver } from "im-rtc-call-uikit-re
 import { useLang } from "../i18n";
 import { logger, LOG_TAG } from "../logging/logger";
 import { createRtcEngine, rtcTokenProvider } from "./rtcEngine";
-import { registerCallActions, registerCallEngine } from "./rtcCall";
+import { loadRtcConfig } from "./rtcConfig";
+import { registerCallActions, registerCallEngine, registerRtcRestart, shouldRestartRtc } from "./rtcCall";
 import { buildInviteCandidates, type InviteMemberLike } from "./rtcProfiles";
 import { useCallRecordSend, type CallRecordSendDeps } from "../useCallRecordSend";
 
@@ -49,6 +50,10 @@ export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
   profileKey: readonly unknown[];
 }): ReactNode {
   const [engine, setEngine] = useState<CallEngine | null>(null);
+  // 被踢后现场重启：呼叫入口发现引擎没了就加一，触发下面的 effect 重建引擎（见 rtcCall.ts registerRtcRestart）。
+  const [restartTick, setRestartTick] = useState(0);
+  const engineRef = useRef<CallEngine | null>(null);
+  engineRef.current = engine;
   // 已解析的界面语言（不是"跟系统"，是用户在设置里选的那个），直接映射到 Kit 的 locale——
   // 与 iOS/Android 同一个选择：绕开 uikit 自带的 resolveLocale('auto', ...)，避免两套"跟系统"判据打架。
   const lang = useLang();
@@ -67,6 +72,19 @@ export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
       setEngine(null);
       registerCallEngine(null);
     };
+  }, [uid, restartTick]);
+
+  // 把「现场重启」交给呼叫入口：只有账号在（本组件挂载且 uid 非空）且引擎已被收掉才真重启。
+  useEffect(() => {
+    if (!uid) return undefined;
+    registerRtcRestart(() => {
+      // 通话没配置时重建也起不来：返回 false，让呼叫入口照旧提示「通话不可用」，别吞掉用户这一次点击。
+      if (!loadRtcConfig() || !shouldRestartRtc(engineRef.current !== null, !!uid)) return false;
+      logger.info(LOG_TAG.rtc, "rtc_restart_after_kick", { uid });
+      setRestartTick((n) => n + 1);
+      return true;
+    });
+    return () => registerRtcRestart(null);
   }, [uid]);
   const tokenProvider = useMemo(() => rtcTokenProvider(getAuthToken), [getAuthToken]);
 
