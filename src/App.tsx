@@ -81,6 +81,7 @@ import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
 import { PinnedListModal } from "./components/modals/PinnedListModal";
 import { GroupsModal } from "./components/modals/GroupsModal";
+import { recentAdded } from "./friendRequests";
 import { FriendRequestsModal } from "./components/modals/FriendRequestsModal";
 import { FriendRequestModal } from "./components/modals/FriendRequestModal";
 import { CreateGroupModal } from "./components/modals/CreateGroupModal";
@@ -2494,7 +2495,6 @@ export default function App() {
         // 内部 ID 仍可搜（粘贴 ID 精准定位），但它不在任何地方展示，属兜底能力。
         f.user_id.toLowerCase().includes(contactFilterQ))
     : accepted;
-  const incomingCount = incoming.length;
   // 「这个人 / 这个会话在本机叫什么、用哪张头像」的一族只读派生 → chatNaming.ts（纯工厂，可单测）。
   // **整组一次性解构**而不是各自散在下面：它们互相引用（convDisplayLabel→convLabel、
   // localNameOf→memberNick、chatTitle→groupRemark…），分散定义时的声明顺序曾踩过 TDZ 白屏
@@ -2760,7 +2760,7 @@ export default function App() {
     // 而"有人加我"恰恰是需要主动去处理的事。红色徽标显待确认数（0 时不显，别摆一个恒亮的 0）——
     // 早先走的是 value（灰色小字），跟"设置项当前值"长得一模一样，一眼扫过去根本不像有待办。
     { id: "friendRequests", label: t("friend.requests.title"), icon: UserPlus, iconTint: "green", chevron: true,
-      badge: incomingCount > 0 ? unreadBadgeText(incomingCount) : undefined,
+      badge: incoming.length > 0 ? unreadBadgeText(incoming.length) : undefined,
       onClick: () => { setFriendRequests(true); void refreshFriends(); } },
     { id: "official", label: t("contacts.row.official_accounts"), icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("contacts.row.official_accounts")) },
     { id: "service", label: t("contacts.row.service_accounts"), icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon(t("contacts.row.service_accounts")) },
@@ -2786,7 +2786,7 @@ export default function App() {
           {/* 显示公开句柄而非 uid（10 位随机内部 ID）。没有 username 时只留连接状态。 */}
           <span className="account-meta">{myInfo?.username ? `@${myInfo.username} · ` : ""}{stateText}</span>
         </header>
-        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incomingCount} includeMuted={notif.settings.badge.includeMuted}
+        <SidebarTabs tab={tab} conversations={conversations} incomingCount={incoming.length} includeMuted={notif.settings.badge.includeMuted}
           onChats={() => setTab("chats")}
           onContacts={() => { setTab("contacts"); void refreshFriends(); }} />
         {tab === "chats" ? (
@@ -3185,7 +3185,7 @@ export default function App() {
       {/* 「新的朋友」列表：通讯录入口（群聊下方）。见 components/modals/FriendRequestsModal。 */}
       {friendRequests && (
         <FriendRequestsModal
-          incoming={incoming} outgoing={outgoing} labelOf={friendLabel} busyUser={busyUser}
+          incoming={incoming} outgoing={outgoing} added={recentAdded(friends, Date.now())} onOpenProfile={openPeerDetail} labelOf={friendLabel} busyUser={busyUser}
           onAccept={(id) => void doFriendAction(id, () => clientRef.current!.friendAction("accept", id))}
           onReject={(id) => void doFriendAction(id, () => clientRef.current!.friendAction("reject", id))}
           onClose={() => setFriendRequests(false)}

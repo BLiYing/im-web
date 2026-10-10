@@ -268,6 +268,8 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .contact-filter-input:focus { outline: none; border-color: var(--accent); }
 .convitem.static { cursor: default; }
 .convitem.static:hover { background: none; }
+/* 「已添加」行整行可点：禁用的「已添加」标记不吞点击（disabled 按钮不冒泡），让点击落到行上 */
+.convitem:not(.static) .row-actions .mini-btn:disabled { pointer-events: none; }
 .row-actions { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 .mini-btn { padding: 5px 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); font-size: 13px; cursor: pointer; }
 .mini-btn.ghost { background: var(--surface); color: var(--text-secondary); border: 1px solid var(--separator); }

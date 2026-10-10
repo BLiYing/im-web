@@ -65,7 +65,7 @@ describe("FriendRequestModal（发申请时填验证消息）", () => {
 });
 
 describe("FriendRequestsModal（新的朋友）", () => {
-  const base = { labelOf: label, busyUser: null, onAccept: vi.fn(), onReject: vi.fn(), onClose: vi.fn() };
+  const base = { added: [] as FriendEntry[], labelOf: label, busyUser: null, onAccept: vi.fn(), onReject: vi.fn(), onOpenProfile: vi.fn(), onClose: vi.fn() };
 
   it("待我确认的申请显示验证消息，同意/拒绝回传 uid", () => {
     const onAccept = vi.fn(); const onReject = vi.fn();
@@ -92,8 +92,51 @@ describe("FriendRequestsModal（新的朋友）", () => {
     expect(screen.queryByText("同意")).toBeNull();
   });
 
-  it("两段都空时显空态", () => {
-    render(<FriendRequestsModal {...base} incoming={[]} outgoing={[]} />);
+  it("三段都空时显空态；只有已添加时不显空态", () => {
+    const { unmount } = render(<FriendRequestsModal {...base} incoming={[]} outgoing={[]} />);
     expect(screen.getByText("没有待处理的好友申请")).toBeTruthy();
+    unmount();
+    render(<FriendRequestsModal {...base} incoming={[]} outgoing={[]} added={[f({ user_id: "a1", status: "accepted" })]} />);
+    expect(screen.queryByText("没有待处理的好友申请")).toBeNull();
+  });
+
+  describe("已添加段", () => {
+    const addedRow = f({ user_id: "a1", status: "accepted", nickname: "阿花", username: "ahua", hello: "不该显示" });
+
+    it("段标题在已发出之后；行显 @句柄 与禁用的「已添加」标记，不显验证消息/无验证消息文案", () => {
+      const { container } = render(<FriendRequestsModal {...base}
+        incoming={[]} outgoing={[f({ user_id: "o1", status: "requested" })]} added={[addedRow]} />);
+      const labels = Array.from(container.ownerDocument.querySelectorAll(".section-label")).map((n) => n.textContent);
+      expect(labels).toEqual(["已发出（1）", "已添加（1）"]);
+      expect(screen.getByText("@ahua")).toBeTruthy();
+      expect((screen.getByText("已添加").closest("button") as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.queryByText("不该显示")).toBeNull();
+      expect(screen.getAllByText("没有留下验证消息")).toHaveLength(1); // 仅 outgoing 那行
+    });
+
+    it("无 username 时不渲染副标题行；已添加行不是 static（可点）", () => {
+      render(<FriendRequestsModal {...base} incoming={[]} outgoing={[]} added={[f({ user_id: "a2", status: "accepted", nickname: "无句柄" })]} />);
+      const row = screen.getByText("无句柄").closest(".convitem") as HTMLElement;
+      expect(row.querySelector(".convlast")).toBeNull();
+      expect(row.classList.contains("static")).toBe(false);
+    });
+
+    it("点行：先关弹窗再回传 uid 打开资料；incoming/outgoing 行仍是 static 且点击无动作", () => {
+      const onClose = vi.fn(); const onOpenProfile = vi.fn();
+      render(<FriendRequestsModal {...base} onClose={onClose} onOpenProfile={onOpenProfile}
+        incoming={[f({ user_id: "p1", nickname: "待确认" })]} outgoing={[f({ user_id: "o1", status: "requested", nickname: "已发" })]} added={[addedRow]} />);
+      expect((screen.getByText("待确认").closest(".convitem") as HTMLElement).classList.contains("static")).toBe(true);
+      expect((screen.getByText("已发").closest(".convitem") as HTMLElement).classList.contains("static")).toBe(true);
+      fireEvent.click(screen.getByText("已发"));
+      expect(onOpenProfile).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByText("阿花"));
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onOpenProfile).toHaveBeenCalledWith("a1");
+    });
+
+    it("没有任何删除入口", () => {
+      render(<FriendRequestsModal {...base} incoming={[]} outgoing={[]} added={[addedRow]} />);
+      expect(screen.queryByText(/删除|移除/)).toBeNull();
+    });
   });
 });

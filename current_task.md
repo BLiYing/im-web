@@ -4,15 +4,12 @@
 > 历史流水见 `current_task.archive.md`（2026-10-02 瘦身前的全量快照在其顶部）+ `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
-**通话被踢后现场重启（2026-10-09，未 commit）**：`rtcCall.ts` 的 `registerRtcRestart` / `shouldRestartRtc`，RtcHost 注册重启方（`restartTick` 重建引擎），呼叫在 actions 就绪后补发（15s 有效）；`rtc.test.ts` 有单测。Chrome 实测正常呼叫无回归。设计见 `IMServer/docs/design/CALL_ACCESS_CONTROL_DESIGN.md`。
+**2026-10-09 「新的朋友」加「已添加」段（未提交）**：设计 `IMServer/docs/design/NEW_FRIENDS_DESIGN.md`；纯函数 `src/friendRequests.ts#recentAdded`（30 天/50 条，updated_at 为毫秒），`FriendRequestsModal` 新增 `added`/`onOpenProfile`（点行关弹窗→`openPeerDetail`）；i18n 键 `friend.requests.added(_tag)` 已手加到 `src/i18n/locales` 与 `desktop/src/shared/locales`，**源表 `IMServer/docs/i18n/strings.json` 需同步加键，否则下次生成会覆盖**。角标口径核对无需改（只数 pending，accept/reject 后 `refreshFriends`）。未做浏览器实测。
 
-- **10-08 接 im-rtc 2.2.0 Kit tokenProvider（已切 npm 正式版 2.2.0）**：`createRtcEngine` 只建不登，`<CallProvider tokenProvider={rtcTokenProvider(getAuthToken)}>` 由 Kit 登录；删掉 4401 续票 / AbortController；被踢只对 takenOver/configRejected 丢引擎；`useCallHistory` 先 `ensureRtcReady()`。修了 `sdk-source.sh` 相对路径。vitest 2023 绿、`npm run build` 过。Chrome 实测：换票失败退避重试、拨号两种失败提示、online 后 22 ms 重登；npm 2.2.0 下 Kit 自动登录。
-**三端已读/菜单/管理员一批修复（2026-10-06，已 commit + push）**：群语音已读双勾（iOS 曾无条件排除群聊）、九宫格已读勾（三端同规则，见 `IMServer/docs/design/READ_TICK_DESIGN.md` §4；Android 相册行曾不上报已读）、iOS 单字气泡 meta 被压成「…」、Android 长按菜单恒在气泡下方（气泡上移让位）、添加管理员总数 ≤ 5（上限 = 5 − 已有，客户端规则，服务端无总数上限）、会话列表搜索提示词含设置、Android 置顶/未读样式对齐 iOS、通讯录入口建群后进群、「跟随系统」改读 `LocaleManager.systemLocales`（OPPO 实测英文→跟随系统变回中文）。用户真机自测通过。管理员总数上限已补服务端（`MaxGroupAdmins=5`、`300213`，**后端需重启**：`cd ../IMServer && ./scripts/dev.sh --no-tail`）；Android 重建 Activity 后停在原 tab / 「我」二级页（`rememberSaveable`）。
+**2026-10-09 全部已提交（工作区干净）**：发送被拒提示与 iOS/Android 同口径（6c9dd07 / 27a3716）；通话被踢后现场重启（448b240，`rtcCall.ts` `registerRtcRestart` / `shouldRestartRtc`，RtcHost 注册重启方，呼叫在 actions 就绪后补发 15s 有效）。
 
-2026-10-02 **本机清空位点 `clearedUpTo`**（IMServer `docs/design/OFFLINE_BACKLOG_DESIGN.md` §6.7，Android 先行、Web 本次对齐）代码完成，**待用户审查后提交**：
-清空聊天记录改为同事务「删消息 + 清区间 + 抬位点 + 推游标、墓碑不动」，位点以内的消息一律不落库/不上屏/不问服务端；有效可见下界 = 服务端下界 ∪ 位点（`sdk/clearFloor.ts`，各存各的、用时取大）。
-web(IndexedDB v6，位点存游标行、升级事务回填)与桌面(SQLite `sync_cursors.cleared_up_to`，加列+回填、不清缓存)两套都过契约；真浏览器验过「清空→切走切回/刷新不拉回」。
-未做：`docs/ROADMAP.md`/`CLIENT_PARITY.md`/`SYMMETRY.md` 状态（IMServer 仓，用户来改）。最近另有：桌面系统通知对齐（2026-10-01）。
+- **10-08 接 im-rtc 2.2.0 Kit tokenProvider（npm 正式版 2.2.0）**：`createRtcEngine` 只建不登，`<CallProvider tokenProvider={rtcTokenProvider(getAuthToken)}>` 由 Kit 登录；被踢只对 takenOver/configRejected 丢引擎；`useCallHistory` 先 `ensureRtcReady()`。
+- **清空位点 `clearedUpTo`**（10-02，IndexedDB v6 + 桌面 SQLite，设计 `IMServer/docs/design/OFFLINE_BACKLOG_DESIGN.md` §6.7）已落地；`ROADMAP.md`/`CLIENT_PARITY.md`/`SYMMETRY.md` 状态在 IMServer 仓。
 
 ## 下一步
 
