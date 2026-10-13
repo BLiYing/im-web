@@ -66,6 +66,19 @@ describe("老库加列迁移", () => {
     store.close();
   });
 
+  it("sys_event/sys_args 补列后可往返（单聊 friend_accepted，from 为空），老行读回 undefined", async () => {
+    const store = createSqliteStore(legacyDb(), () => {});
+    await store.saveMessage("o1", {
+      convId: "c1", from: "", content: "兜底", contentType: "system",
+      convSeq: 2, timestamp: 2000, sysEvent: "friend_accepted",
+    });
+    const got = await store.loadConversation("o1", "c1");
+    expect(got[0].sysEvent).toBeUndefined();
+    expect(got[1].sysEvent).toBe("friend_accepted");
+    expect(got[1].sysArgs).toBeUndefined();
+    store.close();
+  });
+
   it("老库里既有的行**不会**因为补列而丢字段（补的列是空值，不是整行重建）", async () => {
     const store = createSqliteStore(legacyDb(), () => {});
     const got = (await store.loadConversation("o1", "c1"))[0];

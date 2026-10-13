@@ -2053,7 +2053,7 @@ export default function App() {
     }
 
     // 真·新消息（live）或自己发送。
-    const newPeer = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current).length;
+    const fresh = messages.filter((m) => m.from !== uid && m.convSeq > prevMaxSeqRef.current); // 含系统行（也要贴底）；↓N 只数计未读的
     const lastMine = messages[messages.length - 1]?.from === uid;
     prevMinSeqRef.current = curMin;
     prevMaxSeqRef.current = curMax;
@@ -2063,11 +2063,11 @@ export default function App() {
       // 新发消息始终贴底；末条状态变更（如被拒收挂系统行致变高）仅在原本贴底时贴底，
       // 不打断已上滚看历史的用户（CHAT_UX §9）。
       if (grew || wasNearBottomRef.current) stickBottom();
-    } else if (newPeer > 0) {
+    } else if (fresh.length > 0) {
       if (wasNearBottomRef.current) {
         stickBottom();
       } else {
-        setJumpCount((n) => n + newPeer);
+        setJumpCount((n) => n + fresh.filter((m) => countsAsUnread(m.contentType)).length);
         setShowJump(true);
       }
     }

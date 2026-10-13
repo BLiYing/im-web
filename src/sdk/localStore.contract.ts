@@ -188,6 +188,16 @@ export function runLocalStoreContract(store: LocalStore): void {
       ]);
     });
 
+    it("sys_event/sys_args 落库：刷新后单聊系统消息（friend_accepted，from 为空）仍按 App 语言本地化", async () => {
+      const o = newOwner("sysev");
+      await store.saveMessage(o, msg("u_a_u_b", 1, { from: "", contentType: "system", content: "兜底", sysEvent: "friend_accepted" }));
+      await store.saveMessage(o, msg("u_a_u_b", 2, { from: "", contentType: "system", content: "改名", sysEvent: "group_rename", sysArgs: { name: "摸鱼群" } }));
+      const got = await store.loadConversation(o, "u_a_u_b");
+      expect(got[0].sysEvent).toBe("friend_accepted");
+      expect(got[0].sysArgs).toBeUndefined();
+      expect(got[1].sysArgs).toEqual({ name: "摸鱼群" });
+    });
+
     it("conv_seq<=0（发送中/普通失败的临时态）不入库", async () => {
       const o = newOwner("nozero");
       await store.saveMessage(o, msg("c1", 0));

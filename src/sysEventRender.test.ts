@@ -48,6 +48,16 @@ describe("buildGroupSysSegments", () => {
     expect(buildGroupSysSegments(m, t, "9999", localNameOf, "en")).toEqual([{ text: "An admin turned on mute-all" }]);
   });
 
+  it("friend_accepted：单聊系统消息（sender 空、无 args/segments），按 App 语言渲染，不崩", () => {
+    const m: ChatMessage = {
+      convId: "u_1001_u_1002", from: "", content: "你们已成为好友，现在可以开始聊天了", contentType: "system",
+      convSeq: 1, timestamp: 0, status: "received", sysEvent: "friend_accepted",
+    };
+    expect(buildGroupSysSegments(m, t, "1001", localNameOf, "zh-Hans")).toEqual([{ text: "你们已成为好友，现在可以开始聊天了" }]);
+    setPref("en");
+    expect(buildGroupSysSegments(m, t, "1001", localNameOf, "en")).toEqual([{ text: "You are now friends. You can start chatting." }]);
+  });
+
   it("member_invite：actor 来自第 1 个候选段，其余候选按语言习惯拼成 names（纯文本不可点）", () => {
     const m: ChatMessage = {
       convId: "c1", from: "", content: "", contentType: "system", convSeq: 1, timestamp: 0, status: "received",

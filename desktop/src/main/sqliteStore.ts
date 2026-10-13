@@ -37,6 +37,8 @@ export interface ChatMessageLike {
   mentionSpans?: { offset: number; length: number; uid: string }[];
   mentionAll?: boolean;
   sysSegments?: { uid?: string; text: string }[];
+  sysEvent?: string;
+  sysArgs?: Record<string, string>;
   serverMsgId?: string;
   clientMsgId?: string;
   note?: string;
@@ -125,7 +127,7 @@ function messageRecord(owner: string, m: ChatMessageLike): MsgRecord {
     content: m.content, contentType: m.contentType,
     fileName: m.fileName, fileSize: m.fileSize, caption: m.caption,
     mentions: m.mentions, mentionSpans: m.mentionSpans, mentionAll: m.mentionAll,
-    sysSegments: m.sysSegments, timestamp: m.timestamp, serverMsgId: m.serverMsgId,
+    sysSegments: m.sysSegments, sysEvent: m.sysEvent, sysArgs: m.sysArgs, timestamp: m.timestamp, serverMsgId: m.serverMsgId,
     recalledAt: m.recalledAt, recalledBy: m.recalledBy, editedAt: m.editedAt, pinnedAt: m.pinnedAt,
     replyToConvSeq: m.replyToConvSeq, replySnapshot: m.replySnapshot,
     replyToFrom: m.replyToFrom, forwardFrom: m.forwardFrom,
@@ -151,7 +153,7 @@ function toChatMessage(r: MsgRecord): ChatMessageLike & { status: "failed" | "re
     : {
         ...media,
         serverMsgId: r.serverMsgId ?? r.id,  // 老记录无此字段则回退复合键（与 web 侧同）
-        sysSegments: r.sysSegments,
+        sysSegments: r.sysSegments, sysEvent: r.sysEvent, sysArgs: r.sysArgs,
         convSeq: r.convSeq, status: "received" as const,
         recalledAt: r.recalledAt, recalledBy: r.recalledBy, editedAt: r.editedAt, pinnedAt: r.pinnedAt,
       };

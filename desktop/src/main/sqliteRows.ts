@@ -30,6 +30,9 @@ export interface MsgRecord {
   mentionSpans?: { offset: number; length: number; uid: string }[];
   mentionAll?: boolean;
   sysSegments?: { uid?: string; text: string }[];
+  /** P3 结构化系统事件 + 参数（渲染时按 App 语言本地化；缺列时回退 content 中文兜底）。 */
+  sysEvent?: string;
+  sysArgs?: Record<string, string>;
   timestamp: number;
   serverMsgId?: string;
   clientMsgId?: string;
@@ -189,6 +192,7 @@ export function toRow(rec: MsgRecord): Record<string, unknown> {
     mentions: json(rec.mentions), mention_spans: json(rec.mentionSpans),
     mention_all: rec.mentionAll === undefined ? null : rec.mentionAll ? 1 : 0,
     sys_segments: json(rec.sysSegments),
+    sys_event: n(rec.sysEvent), sys_args: json(rec.sysArgs),
     timestamp: rec.timestamp, server_msg_id: n(rec.serverMsgId), client_msg_id: n(rec.clientMsgId),
     status: n(rec.status), note: n(rec.note),
     recalled_at: n(rec.recalledAt), recalled_by: n(rec.recalledBy),
@@ -218,6 +222,7 @@ export function fromRow(row: unknown): MsgRecord {
     mentionSpans: parse<MsgRecord["mentionSpans"]>(r.mention_spans) as MsgRecord["mentionSpans"],
     mentionAll: r.mention_all === null ? undefined : r.mention_all === 1,
     sysSegments: parse<MsgRecord["sysSegments"]>(r.sys_segments) as MsgRecord["sysSegments"],
+    sysEvent: u(r.sys_event), sysArgs: parse<Record<string, string>>(r.sys_args),
     timestamp: r.timestamp, serverMsgId: u(r.server_msg_id), clientMsgId: u(r.client_msg_id),
     status: u(r.status) as "failed" | undefined, note: u(r.note),
     recalledAt: u(r.recalled_at), recalledBy: u(r.recalled_by),
@@ -253,6 +258,8 @@ const MESSAGE_COLUMNS: readonly (readonly [string, string])[] = [
   ["mention_spans", "TEXT"],
   ["mention_all", "INTEGER"],
   ["sys_segments", "TEXT"],
+  ["sys_event", "TEXT"],
+  ["sys_args", "TEXT"],
   ["timestamp", "INTEGER NOT NULL"],
   ["server_msg_id", "TEXT"],
   ["client_msg_id", "TEXT"],

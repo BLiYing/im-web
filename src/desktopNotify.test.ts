@@ -89,6 +89,10 @@ describe("shouldNotify", () => {
     expect(shouldNotify(msg({ contentType: "system", content: "张三 加入了群聊" }), ctx())).toBe(false);
   });
 
+  it("单聊系统消息（friend_accepted，from 为空）不通知", () => {
+    expect(shouldNotify(msg({ from: "", contentType: "system", sysEvent: "friend_accepted", content: "你们已成为好友，现在可以开始聊天了" }), ctx())).toBe(false);
+  });
+
   it("已撤回的不通知（同步时可能带着撤回标记过来）", () => {
     expect(shouldNotify(msg({ recalledAt: Date.now() }), ctx())).toBe(false);
   });

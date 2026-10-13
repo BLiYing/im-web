@@ -1,6 +1,7 @@
 // convPreview：会话列表那一行的预览文本。抽出 App.tsx 后才测得到——而它踩过的坑
 // 恰恰是"看一眼像对的、真数据才露馅"那一类（整串 JSON 显在列表上、同一句话两副面孔）。
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
+import { setPref } from "./i18n";
 import { convPreview, mediaPreview } from "./convPreview";
 import type { Conversation } from "./sdk/protocol";
 import { CONTACT_CONTENT_TYPE } from "./contactCard";
@@ -11,6 +12,7 @@ const PEER = "1002";
 const localNameOf = (id: string, _cid: string, fallback?: string) =>
   (id === PEER ? "老王" : (fallback || "未命名用户"));
 const deps = { uid: ME, localNameOf };
+afterEach(() => setPref("zh-Hans"));
 
 const conv = (last: Record<string, unknown> | null, o: Partial<Conversation> = {}): Conversation =>
   ({ conv_id: "c1", peer: PEER, is_group: false, last_message: last, ...o } as Conversation);
@@ -73,6 +75,14 @@ describe("convPreview", () => {
       sys_segments: [{ uid: PEER, text: "老王" }, { uid: "1003", text: "小赵" }],
     }, { is_group: true });
     expect(convPreview(c, deps)).toBe("老王 将 小赵 移出群聊");
+  });
+  it("friend_accepted：单聊系统消息（from 空）预览按 sys_event 本地化，无发送者前缀，无 sys_event 回退 content", () => {
+    const c = conv({ from: "", content_type: "system", sys_event: "friend_accepted", content: "你们已成为好友，现在可以开始聊天了" });
+    expect(convPreview(c, deps)).toBe("你们已成为好友，现在可以开始聊天了");
+    setPref("en");
+    expect(convPreview(c, deps)).toBe("You are now friends. You can start chatting.");
+    setPref("zh-Hans");
+    expect(convPreview(conv({ from: "", content_type: "system", content: "兜底" }), deps)).toBe("兜底");
   });
   it("P3：sys_event 不认识/为空则回退 sys_segments/content（不破坏现有回退路径）", () => {
     const unknown = conv({ from: PEER, content_type: "system", sys_event: "some_future_event", content: "整句兜底" }, { is_group: true });

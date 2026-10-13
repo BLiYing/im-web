@@ -48,6 +48,8 @@ const GROUP_SYS_EVENTS: Record<string, SysEventDef> = {
   mute_all_off: { key: "sys.group.mute_all_off", slots: [] },
   mute_member: { key: "sys.group.mute_member", slots: ["actor", "target"] },
   unmute_member: { key: "sys.group.unmute_member", slots: ["actor", "target"] },
+  // 单聊系统消息（content_type=system、sender 空、无 sys_args/sys_segments）：好友关系新建立的留痕。无人名槽位。
+  friend_accepted: { key: "sys.friend.accepted", slots: [] },
 };
 
 /** §1.3：多人名单按语言习惯拼接的分隔符（zh 顿号，en 逗号+空格，不做 "A, B and C" 语法优化）。 */
