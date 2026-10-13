@@ -4,6 +4,7 @@
 > 历史流水见 `current_task.archive.md`（2026-10-02 瘦身前的全量快照在其顶部）+ `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+- **2026-10-13 会话列表待审（未提交）**：群主/管理员有待审时，该行只显蓝色药丸「入群申请 N」（可带 @我），不再接最后一条消息预览；清零恢复。文案 `conv.list.pending_badge` 改为「入群申请 {count}」，三端同口径（原生为红字 `[入群申请 N]`）。
 - **好友建立系统消息 `friend_accepted`（2026-10-13，未提交，已验证）**：单聊 system/sender 空消息。`sysEventRender.ts#GROUP_SYS_EVENTS` 加表项（聊天页 `renderSysLine` 与 `convPreview` 共用，未知事件回退 content）；`App.tsx` ↓N 只数 `countsAsUnread`（系统行仍触发贴底，行数 3520 持平）；桌面 SQLite 补 `sys_event`/`sys_args` 列（`sqliteRows.ts`/`sqliteStore.ts`，加列自动迁移）。通知/提示音由 `alertDecision.isSystem` 拒绝；会话不存在时 new_msg→`scheduleConversationRefresh` 拉服务端列表建壳并置顶（名片/头像随列表字段）。未浏览器实测。
 - **桌面通知相册合并（2026-10-13，已验证）**：`src/notifyAlbum.ts` 按 (会话, groupId) 记进度，后到成员正文「[N 张图片]」、不再响；桥新增 `albumKey`（preload→index.ts→`shellCaps.notify`），主进程先收掉同 albumKey 的旧通知再弹（`notifyRegistry` 的 `albumKey` scope）。群文字通知本来就是标题群名 + `发送人: 内容`，无改动。
 **2026-10-09 「新的朋友」加「已添加」段（未提交）**：设计 `IMServer/docs/design/NEW_FRIENDS_DESIGN.md`；纯函数 `src/friendRequests.ts#recentAdded`（30 天/50 条，updated_at 为毫秒），`FriendRequestsModal` 新增 `added`/`onOpenProfile`（点行关弹窗→`openPeerDetail`）；i18n 键 `friend.requests.added(_tag)` 已手加到 `src/i18n/locales` 与 `desktop/src/shared/locales`，**源表 `IMServer/docs/i18n/strings.json` 需同步加键，否则下次生成会覆盖**。角标口径核对无需改（只数 pending，accept/reject 后 `refreshFriends`）。未做浏览器实测。

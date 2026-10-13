@@ -2840,7 +2840,7 @@ export default function App() {
                 <div className={`convlast${isMissedCallPreview(c, uid) ? " missed-call" : ""}`}>
                   {/* 群「@我」红字前缀（M4-8）：未读区间内被 @（含 @所有人）。不另加右侧红 @ 角标——左侧红字已够醒目。 */}
                   {c.is_group && c.mention_unread ? <span className="conv-mention">{t("conv.list.mention_tag")}</span> : null}
-                  {/* 待审入群角标（G3）：仅群主/管理员会收到 pending_count>0，一眼看到有人等待审批。 */}
+                  {/* 待审入群角标（G3）：仅群主/管理员会收到 pending_count>0；有待审时整行只显它（可带 @我），不接上一条消息，清零后回到预览。 */}
                   {c.is_group && (c.pending_count ?? 0) > 0
                     ? <span className="conv-pending-badge">{t("conv.list.pending_badge", { count: unreadBadgeText(c.pending_count!) })}</span>
                     : null}
@@ -2848,7 +2848,7 @@ export default function App() {
                   {!c.is_group && c.last_message?.from === uid && (
                     <ReadTick read={c.latest_conv_seq > 0 && c.latest_conv_seq <= (c.peer_read_seq ?? 0)} className="convck" />
                   )}
-                  {convPreview(c)}
+                  {c.is_group && (c.pending_count ?? 0) > 0 ? null : convPreview(c)}
                 </div>
               </div>
               {/* 免打扰置灰未读数，但**被 @ 时破例回到高亮**——免打扰只压普通消息，不压 @我（M4-8）。
