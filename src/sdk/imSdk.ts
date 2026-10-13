@@ -18,7 +18,7 @@ import { parseIncomingMessage } from "./parseMessage";
 import * as localStore from "./localStore";
 import { loadRanges, registerRange, updateRangesHead } from "./localStore.ranges";
 import { atVisibleFloor, effectiveFloor } from "./clearFloor";
-import { ReceiptBatcher } from "./receiptBatch";
+import { ReceiptBatcher } from "./receiptBatch"; import { groupEventKeepsFloor } from "./groupFloor";
 import { addRange, normalizeRanges, type SeqRange } from "./ranges";
 import { pendingToMessage, type PendingSend } from "./pendingSend";
 import { LOG_TAG, logger } from "../logging/logger";
@@ -943,6 +943,7 @@ export class IMClient extends IMRestApi {
         this.handlers.onFriend?.(d.event, d.from);
         break;
       case T.GROUP:
+        if (d.conv_id && !groupEventKeepsFloor(d.event, d.target, this.uid)) this.floorSeq.delete(String(d.conv_id));
         this.handlers.onGroup?.(d.event, d.conv_id, d.from, d.target ?? "", d.result ?? "");
         break;
       case T.WINDOW_RESP: { // 锚点窗口到达：消息走常规落库，边界信息交给 UI 决定滚动/提示
