@@ -46,6 +46,7 @@ export function setBadge(count: number, tooltip: (text: string) => void): boolea
  * App 自己的提示音叠成两声。
  *
  * 弹出的通知登记进 `notifications`（`convId` + `convSeq`），撤回 / 别处已读 / 窗口回到前台时据此收回。
+ * `albumKey` 非空 = 相册成员：同 key 的上一条先被收掉（替换）。
  * `icon` 是页面画好的会话头像（data: URL，群聊=群头像、单聊=对端，见 `src/notifyIcon.ts`）；
  * 解不出来就不带，系统用应用图标——不因头像失败而不弹。
  */
@@ -53,14 +54,16 @@ export const notifications = createNotifyRegistry();
 
 export function notify(
   win: BrowserWindow | null,
-  req: { title: string; body: string; convId?: string; convSeq?: number; icon?: string },
+  req: { title: string; body: string; convId?: string; convSeq?: number; icon?: string; albumKey?: string },
 ): boolean {
   if (!Notification.isSupported()) return false;
   const { title, body, convId } = req;
   try {
     const icon = req.icon?.startsWith("data:image/") ? nativeImage.createFromDataURL(req.icon) : undefined;
     const n = new Notification({ title, body, silent: true, icon: icon && !icon.isEmpty() ? icon : undefined });
-    notifications.add(convId, req.convSeq, n);
+    // 相册后到的成员：先收掉同相册前一条再弹，通知栏里只留一条「[N 张图片]」（src/notifyAlbum.ts）。
+    if (convId && req.albumKey) notifications.clear({ convId, albumKey: req.albumKey });
+    notifications.add(convId, req.convSeq, n, req.albumKey);
     n.on("close", () => notifications.forget(n));
     n.on("click", () => {
       notifications.forget(n);

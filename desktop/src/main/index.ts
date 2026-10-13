@@ -206,13 +206,14 @@ function installBridgeIpc(getWin: () => BrowserWindow | null): void {
   ipcMain.handle("im:set-badge", (_e, count: unknown) =>
     setBadge(typeof count === "number" ? count : 0, setTrayTooltip));
   ipcMain.handle("im:notify", (_e, p: unknown) => {
-    const q = (p ?? {}) as { title?: unknown; body?: unknown; convId?: unknown; convSeq?: unknown; icon?: unknown };
+    const q = (p ?? {}) as { title?: unknown; body?: unknown; convId?: unknown; convSeq?: unknown; icon?: unknown; albumKey?: unknown };
     return notify(getWin(), {
       title: String(q.title ?? ""),
       body: String(q.body ?? ""),
       convId: typeof q.convId === "string" ? q.convId : undefined,
       convSeq: typeof q.convSeq === "number" ? q.convSeq : undefined,
       icon: typeof q.icon === "string" ? q.icon : undefined,
+      albumKey: typeof q.albumKey === "string" ? q.albumKey : undefined,
     });
   });
   // 收回已弹的通知（撤回 / 别处已读）。参数形状不对就什么都不收（parseNotifyScope 的约定）。

@@ -14,6 +14,8 @@ export interface Closable {
 /** 收哪些通知。**不带 convId = 全部**；带 convId 时 `convSeqs`（精确几条）优先于 `upTo`（≤ 该位点），都不带 = 该会话全部。 */
 export interface NotifyScope {
   convId?: string;
+  /** 只收同一相册（宫格）的那条：后到的成员替换前一条时用，主进程内部用（IPC 的 parseNotifyScope 不会产出它）。 */
+  albumKey?: string;
   convSeqs?: number[];
   upTo?: number;
 }
@@ -21,12 +23,14 @@ export interface NotifyScope {
 interface Entry {
   convId?: string;
   convSeq?: number;
+  albumKey?: string;
   n: Closable;
 }
 
 function matches(e: Entry, s: NotifyScope): boolean {
   if (!s.convId) return true;
   if (e.convId !== s.convId) return false;
+  if (s.albumKey !== undefined) return e.albumKey === s.albumKey;
   if (s.convSeqs) return e.convSeq !== undefined && s.convSeqs.includes(e.convSeq);
   if (s.upTo !== undefined) return e.convSeq !== undefined && e.convSeq <= s.upTo;
   return true;
@@ -51,7 +55,7 @@ export function parseNotifyScope(p: unknown): NotifyScope | null {
 }
 
 export interface NotifyRegistry {
-  add(convId: string | undefined, convSeq: number | undefined, n: Closable): void;
+  add(convId: string | undefined, convSeq: number | undefined, n: Closable, albumKey?: string): void;
   /** 通知自己没了（用户划掉 / 点开）：只放手，不再 close。 */
   forget(n: Closable): void;
   /** 关掉命中的通知，返回关了几条。 */
@@ -62,8 +66,8 @@ export interface NotifyRegistry {
 export function createNotifyRegistry(max = 200): NotifyRegistry {
   let entries: Entry[] = [];
   return {
-    add(convId, convSeq, n) {
-      entries.push({ convId, convSeq, n });
+    add(convId, convSeq, n, albumKey) {
+      entries.push({ convId, convSeq, albumKey, n });
       if (entries.length > max) entries = entries.slice(entries.length - max);
     },
     forget(n) {

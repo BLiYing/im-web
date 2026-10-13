@@ -23,7 +23,7 @@ export interface DesktopBridge {
   openExternal?(url: string): void;
   /** 返回**是否真的发出去了**（见 types.ts 的契约）。系统拒绝通知权限 / 开了勿扰时必须回 false，
    *  否则调用方会以为已通知而跳过应用内兜底，用户什么都看不到。 */
-  notify?(title: string, body: string, convId?: string, extra?: { convSeq?: number; icon?: string }): Promise<boolean>;
+  notify?(title: string, body: string, convId?: string, extra?: { convSeq?: number; icon?: string; albumKey?: string }): Promise<boolean>;
   /** 收回已弹的通知；返回收了几条（只给日志/自检看）。旧壳没有就退回 web 的空操作。 */
   clearNotifications?(req: NotifyClearRequest): Promise<number>;
   /** 同上：真的设上了才回 true。 */
@@ -112,7 +112,7 @@ export function createDesktopPlatform(bridge: DesktopBridge): Platform {
       if (!bridge.notify) { fellBack("notify"); return webPlatform.notify(req); }
       // 如实透传桥的结果，**不要无条件 true**（/code-review 抓到）：系统拒了权限或开着勿扰时
       // 谎报成功，调用方就会跳过应用内兜底，用户什么都看不到。
-      return bridge.notify(req.title, req.body, req.convId, { convSeq: req.convSeq, icon: req.icon });
+      return bridge.notify(req.title, req.body, req.convId, { convSeq: req.convSeq, icon: req.icon, albumKey: req.albumKey });
     },
 
     clearNotifications(req: NotifyClearRequest): void {

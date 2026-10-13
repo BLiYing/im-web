@@ -44,6 +44,8 @@ export interface NotifyRequest {
   convId?: string;
   convSeq?: number;
   icon?: string;
+  /** 相册（宫格）成员的替换键：同 key 的上一条通知被它替换（`notifyAlbum.ts`）；非相册不带。 */
+  albumKey?: string;
 }
 
 /** 要收回的已弹通知：`convSeqs` = 这几条被撤回/删除；`upTo` = 本人在别处读到了这里（≤ 它的都收）。 */

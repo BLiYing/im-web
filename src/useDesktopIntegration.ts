@@ -11,6 +11,8 @@ import type { NotifyClearRequest } from "./platform";
 import { alertDecision, type AlertContext } from "./alertDecision";
 import { playAlertSound, preloadAlertSounds } from "./alertPlayer";
 import { isMutedNow } from "./muteState";
+import { albumBody, createAlbumTracker } from "./notifyAlbum";
+import { t as i18nT } from "./i18n";
 import { CALL_CONTENT_TYPE, callRecordIsGroup, isMissedCall } from "./callRecord";
 import { getCallEngine } from "./rtc/rtcCall";
 import { LOG_TAG, logger } from "./logging/logger";
@@ -89,6 +91,8 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
   // 上次真的响了一声的时刻：`alertDecision` 的 1.5 秒节流要靠它（连发十条只响一声）。
   // 只在 `sound` 判为 true 时才推进——被节流/开关关掉/免打扰拦下的那些不算「响过」。
   const lastSoundAtRef = useRef(0);
+  // 相册（宫格）进度：同相册后到的成员替换前一条通知、不再响（notifyAlbum.ts，同手机推送口径）。
+  const albumsRef = useRef(createAlbumTracker());
 
   // 新会话的第一条消息：此刻本地会话列表里还没有这一行（App 收到消息后才去拉列表），拿不到会话名、
   // 头像、是群还是单聊、免打扰——直接弹会是标题「新消息」+ 占位头像（2026-10-02 用户实测）。
@@ -162,21 +166,29 @@ export function useDesktopIntegration(opts: DesktopIntegrationOptions): DesktopI
       muted: ctx.muted, mentions_me: mentionsMe, in_call: inCall, desktop_enabled: settings.desktop.enabled,
     });
 
-    if (d.sound && d.soundId) {
+    // 只在「真的会弹」时登记相册进度：被免打扰 / 前台拦下的成员不该占用计数。
+    const album = d.osNotify ? albumsRef.current.note(m, nowMs) : null;
+    const albumUpdate = !!album && album.count >= 2;
+    if (d.sound && d.soundId && !albumUpdate) {
       lastSoundAtRef.current = nowMs;
       playAlertSound(d.soundId, settings.desktop.volume);
     }
     if (d.osNotify) {
       // 正文与手机推送同一套拼法（osNotifyBodyOf）：预览关 →「新消息」（§3.3）、群聊带发送人、@我带前缀。
-      const body = osNotifyBodyOf(m, {
+      let body = osNotifyBodyOf(m, {
         isGroup: !!conv?.is_group, preview: typeSettings.preview, senderName: cbRef.current.senderOf(m), mentionsMe,
       });
+      if (albumUpdate && typeSettings.preview) {
+        // 相册后到的成员：正文换成「[N 张图片]」，群聊仍带发送人前缀（与 osNotifyBodyOf 同拼法）。
+        const text = albumBody(album.kind, album.count);
+        body = conv?.is_group ? i18nT("push.group_body", { sender: cbRef.current.senderOf(m), text }) : text;
+      }
       // 等过了仍没有会话行（见 notifyInbound）：标题与头像按发送人兜底，不出「新消息」+ 会话 id 占位。
       const title = conv ? cbRef.current.titleOf(m.convId) : cbRef.current.senderOf(m);
       const convId = m.convId;
       // 头像：群聊=群头像、单聊=对端（notifyIcon.ts）；带上 convSeq，之后撤回 / 别处已读才收得回来。
       withNotifyIcon(notifyIconSource(conv, convId, title, m.from), (icon) => {
-        void platform().notify({ title, body, convId, convSeq: m.convSeq, icon }).then((ok) => {
+        void platform().notify({ title, body, convId, convSeq: m.convSeq, icon, albumKey: album?.key }).then((ok) => {
           logger.info(LOG_TAG.app, "desktop_notify_sent", { conv_id: convId, conv_seq: m.convSeq, ok, has_icon: !!icon });
         });
       });

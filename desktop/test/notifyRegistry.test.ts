@@ -74,3 +74,17 @@ describe("parseNotifyScope（IPC 入参是 unknown）", () => {
     expect(parseNotifyScope({ convId: "a", upTo: 0 })).toBeNull();
   });
 });
+
+describe("同相册替换（albumKey）", () => {
+  it("只收同会话、同 albumKey 的那条，别的相册 / 普通通知不动", () => {
+    const reg = createNotifyRegistry();
+    const alb = fake(), other = fake(), plain = fake(), otherConv = fake();
+    reg.add("a", 1, alb, "a|alb1");
+    reg.add("a", 2, other, "a|alb2");
+    reg.add("a", 3, plain);
+    reg.add("b", 1, otherConv, "a|alb1");
+    expect(reg.clear({ convId: "a", albumKey: "a|alb1" })).toBe(1);
+    expect(alb.closed).toBe(1);
+    expect([other.closed, plain.closed, otherConv.closed]).toEqual([0, 0, 0]);
+  });
+});
