@@ -76,6 +76,7 @@ import { renderRow, type Row } from "./components/rows";
 import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
 import { useOpenSettingsHit } from "./useOpenSettingsHit";
 import { useAccountNotifySettings } from "./useAccountNotifySettings";
+import { useChatFolders } from "./useChatFolders"; import { ChatFoldersProvider } from "./ChatFoldersContext"; import { filterConversations } from "./chatFolders"; import { ConvListHead, ConvListEmpty } from "./components/ChatFolderTabs"; import { ChatFoldersPanel } from "./components/settings/ChatFoldersPanel";
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
@@ -131,7 +132,7 @@ import {
   Headphones, Phone,
   BellOff, Menu,
   Pin,
-  Search, X,
+ 
   UserPlus } from "lucide-react";
 
 type Phase = "login" | "app"; // 登录页 / 双栏主界面（左列表 + 右聊天，Telegram 桌面式）
@@ -315,6 +316,7 @@ export default function App() {
     wallpaperColorOpen, setWallpaperColorOpen, colorHSV, pickWallpaperImage, resetWallpaper, applyWallpaperColor, openWallpaperColor,
   } = useAppearanceSettings(setToast);
   const clientRef = useRef<IMClient | null>(null);
+  const folders = useChatFolders({ clientRef }); const [foldersPanel, setFoldersPanel] = useState<{ editId: string | null } | null>(null); // 聊天文件夹（CHAT_FOLDERS_DESIGN）
   const notif = useAccountNotifySettings({ clientRef }); // 通知设置簇（private/group/badge 账号级+服务端同步，M5；inApp/desktop 仍每设备本地）；须在下方 useDesktopIntegration 之前
   // 系统深色偏好（仅在 theme==="system" 时决定实际明暗）：跟随 prefers-color-scheme 实时变化，供默认壁纸随主题切换。
 
@@ -681,7 +683,7 @@ export default function App() {
         setState(nextState);
         // 离线冷启动后重连成功：补取权威会话列表、登记新会话并从各自连续游标同步。
         if (nextState === "connected" && clientRef.current) {
-          void refreshConversations().then(async (latest) => {
+          void folders.refresh(); void refreshConversations().then(async (latest) => {
             if (latest.length === 0) return;
             await preloadLocal(latest);
             clientRef.current?.syncTracked();
@@ -845,6 +847,7 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
+      onFolderUpdate: (d) => { folders.applyRaw(d, { fromFrame: true }); }, // 会话文件夹整表快照（§6.15）
       onNotifySettingsUpdate: (version) => void notif.onServerVersionBump(version), // 账号级通知设置版本变更（M5 §6.13）→ 本端按需重拉
       // 续期凭据变化（登录下发 / 改密轮换 / 已死清空）→ 记下并尽快落盘；uid 尚未定时由入场末尾那次 saveSession 兜住。
       onRefreshToken: (t) => { refreshRef.current = t; if (uidRef.current) saveSession({ uid: uidRef.current, username: name || loginName, refresh: t, token }); },
@@ -913,7 +916,7 @@ export default function App() {
     client.syncTracked(); // OPEN 前调用安全无副作用；onopen 会从各会话连续持久化位点补拉到最新
     void refreshFriends(); // 拉好友关系：让"通讯录"Tab 的新申请红点即时显示
     void loadMyInfo();     // 拉本人资料：左上角头像 / 设置页头部立即可用
-    void refreshDownloadSettings(); void notif.syncAfterLogin(myUID); // 拉账号级自动下载策略 + 通知设置（M4-7/M5，多端同步）
+    void refreshDownloadSettings(); void notif.syncAfterLogin(myUID); folders.adopt(myUID); void folders.refresh(); // 拉账号级自动下载策略 + 通知设置（M4-7/M5，多端同步）
     // 部署级能力/配额（超级群开关、群成员上限）：本次会话内不会变，登录后拉一次即可。
     // 失败不阻断登录——UI 会退回保守默认值，真超限仍由服务端兜底拒绝。
     // **取 client.authToken 而不是入参 token**：入参只有扫码登录路径才有值，
@@ -1021,7 +1024,7 @@ export default function App() {
     schedulePinnedRefreshRef.current?.cancelAll(); // 挂着的置顶横幅合并重拉：别在登出后/换号后替旧会话去拉
     resetMsgStore(); // 清空消息表 + 去重/墓碑集
     currentConvRef.current = "";
-    setConversations([]);
+    setConversations([]); folders.forget();
     setPresence({});
     setPeerReadSeq({});
     setFriends([]);
@@ -2741,7 +2744,7 @@ export default function App() {
       { id: "notifications", label: t("settings.row.notifications"), icon: Bell, iconTint: "red", chevron: true, onClick: () => setNotificationsOpen(true) },
       { id: "data", label: t("settings.row.data_storage"), icon: Database, iconTint: "green", chevron: true, onClick: () => setDataStorageOpen(true) },
       { id: "privacy", label: t("settings.row.privacy"), icon: Lock, iconTint: "indigo", chevron: true, onClick: () => { setPrivacyOpen(true); void openBlacklist(); } },
-      { id: "folders", label: t("settings.row.folders"), icon: Folder, iconTint: "blue", chevron: true, onClick: () => comingSoon(t("settings.row.folders")) },
+      { id: "folders", label: t("settings.row.folders"), icon: Folder, iconTint: "blue", chevron: true, onClick: () => setFoldersPanel({ editId: null }) },
       { id: "devices", label: t("settings.row.devices"), icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
       { id: "language", label: t("settings.language.title"), icon: Languages, iconTint: "purple", value: langPrefLabel(), chevron: true, onClick: () => setLanguageOpen(true) },
       { id: "stickers", label: t("settings.row.stickers"), icon: Smile, iconTint: "pink", chevron: true, onClick: () => comingSoon(t("settings.row.stickers")) },
@@ -2767,7 +2770,7 @@ export default function App() {
 
   return (
     <AppServicesProvider value={services}>
-    <ChatActionsProvider value={chatActions}>
+    <ChatFoldersProvider value={folders}><ChatActionsProvider value={chatActions}>
     <div className={`app ${peer || groupConvId ? "has-sel" : "no-sel"}`}>
       <aside className="sidebar">
         <header>
@@ -2790,13 +2793,8 @@ export default function App() {
           onContacts={() => { setTab("contacts"); void refreshFriends(); }} />
         {tab === "chats" ? (
         <div className="convlist">
-          {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
-          <div className="home-search">
-            <Search size={15} className="home-search-lead" />
-            <input className="home-search-input" value={search.homeSearch} placeholder={t("search.global.placeholder")}
-              onChange={(e) => search.setHomeSearch(e.target.value)} />
-            {search.homeSearch && <button className="home-search-clear" title={t("common.clear")} onClick={() => search.setHomeSearch("")}><X size={14} /></button>}
-          </div>
+          <ConvListHead query={search.homeSearch} setQuery={search.setHomeSearch} conversations={conversations}
+            onEditFolder={(id) => setFoldersPanel({ editId: id })} />
           {homeQ ? (
           <HomeSearchResults
             homeConvHits={homeConvHits} homeFriendHits={homeFriendHits} homeRecordHits={search.homeRecordHits}
@@ -2809,8 +2807,8 @@ export default function App() {
           />
           ) : (
           <>
-          {conversations.length === 0 && <div className="empty">{t("conv.list.empty_find_contacts")}</div>}
-          {conversations.map((c) => {
+          <ConvListEmpty conversations={conversations} />
+          {filterConversations(conversations, folders.selectedFolder).map((c) => {
             // 定时免打扰到期后按未免打扰渲染（NOTIFICATIONS_P1_DESIGN §4.3）：铃铛消失、未读数不再置灰。
             const mutedNow = isMutedNow(!!c.muted, c.mute_until, Date.now());
             return (
@@ -2902,6 +2900,7 @@ export default function App() {
           wallpaperColorOpen={wallpaperColorOpen} setWallpaperColorOpen={setWallpaperColorOpen}
           colorHSV={colorHSV} applyWallpaperColor={applyWallpaperColor}
         />
+        {foldersPanel && <ChatFoldersPanel conversations={conversations} convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl} initialEditId={foldersPanel.editId} onBack={() => setFoldersPanel(null)} />}
       </aside>
 
       {/* chat 面板始终挂载（即使未选会话），让 VList 在 app 加载时就测到稳定高度；
@@ -3494,7 +3493,7 @@ export default function App() {
 
       {toast && <div className="toast">{toast}</div>}
     </div>
-    </ChatActionsProvider>
+    </ChatActionsProvider></ChatFoldersProvider>
     </AppServicesProvider>
   );
 }

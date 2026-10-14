@@ -3,6 +3,7 @@
 // 详情内容（文件/媒体/链接）菜单 + 删除两档子菜单 B、好友行菜单。
 // App 仍是唯一状态源：各菜单的开关态与动作都经 props 传入，本组件不持有业务状态；
 // clientRef / t 经 useAppServices()/useT() 自取。纯搬移，DOM/行为逐字不变（Fragment 不引入包裹节点）。
+import { ChatFolderMenuItems } from "./ChatFolderMenuItems";
 import { useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Forward, MessageCircle, Trash2, X } from "lucide-react";
@@ -103,6 +104,8 @@ export function ContextMenusHost(p: ContextMenusHostProps) {
 
       {convMenu && (
         <AnchoredMenu x={convMenu.x} y={convMenu.y} className="ctx-menu">
+          {/* 文件夹项放菜单第一位（CHAT_FOLDERS_DESIGN §4.4）：未入夹=添加到文件夹；已入夹=从「X」移出排第一 */}
+          <ChatFolderMenuItems conv={convMenu.c} onDone={() => setConvMenu(null)} />
           {conversationActions
             .filter((a) => a.visible({ c: convMenu.c }))
             .map((a) => (

@@ -25,6 +25,7 @@ export const T = {
   /** 账号级通知设置版本变更（M5，PROTOCOL §6.13）：private/group/badge 迁到服务端后的多端同步信号，
    *  与上面的 CAPS_UPDATE 是两个独立版本序列，不要混用；收到即重拉 GET /notify-settings。 */
   NOTIFY_SETTINGS_UPDATE: "notify_settings_update",
+  FOLDER_UPDATE: "folder_update", // 会话文件夹整表快照（PROTOCOL §6.15）
   /** 「仅为我删除」多设备同步（任务2）：本人另一端删了某条 → 本端物理移除该 (conv_id, conv_seq)。 */
   MSG_HIDDEN: "msg_hidden",
   /**

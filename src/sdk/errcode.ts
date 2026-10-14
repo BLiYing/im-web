@@ -35,6 +35,12 @@ export const FRIENDLY_MESSAGES: Record<number, string> = {
   300211: "err.300211",
   300212: "qr.action.admin_only_note",
   300213: "err.300213",
+  // 会话文件夹 3003xx（PROTOCOL §6.15）
+  300301: "err.300301",
+  300302: "err.300302",
+  300303: "err.300303",
+  300304: "err.300304",
+  300305: "err.300305",
   100002: "err.100002",
   // 语音转文字 5001xx：这三个码只由 /voice/transcripts 产出，文案直接进总表。
   500101: "err.500101",

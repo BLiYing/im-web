@@ -1,0 +1,384 @@
+{
+  "_comment": "聊天文件夹纯逻辑的三端共用向量（IMServer/docs/design/CHAT_FOLDERS_DESIGN.md §3.3 / §4.3）。改口径先改这里，三端测试（iOS IMChatFolderLogicTests / Android ChatFolderLogicTest / Web chatFolders.test.ts）同读。",
+  "min_translation": 8,
+  "tail_zone_max_ratio": 0.4,
+  "tail_zone": [
+    {
+      "name": "4 格按钮展开接近整行 → 取 40% 上限",
+      "list_width": 390,
+      "actions_width": 296,
+      "expect": 156
+    },
+    {
+      "name": "按钮组更窄 → 取按钮组宽",
+      "list_width": 390,
+      "actions_width": 100,
+      "expect": 100
+    },
+    {
+      "name": "窄屏",
+      "list_width": 200,
+      "actions_width": 296,
+      "expect": 80
+    }
+  ],
+  "swipe": [
+    {
+      "name": "向左滑·尾部区域内 → 行滑动",
+      "tx": -80,
+      "start_x": 300,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": false,
+      "expect": "row"
+    },
+    {
+      "name": "向左滑·尾部区域边界（start_x == 宽-尾部）→ 行滑动",
+      "tx": -80,
+      "start_x": 234,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": false,
+      "expect": "row"
+    },
+    {
+      "name": "向左滑·尾部区域外 → 下一个 Tab",
+      "tx": -80,
+      "start_x": 100,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": false,
+      "expect": "next"
+    },
+    {
+      "name": "向左滑·最后一个 Tab → 退回行滑动（不限起手位置）",
+      "tx": -80,
+      "start_x": 100,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": false,
+      "has_prev": true,
+      "row_open": false,
+      "expect": "row"
+    },
+    {
+      "name": "向右滑 → 上一个 Tab（任意位置）",
+      "tx": 80,
+      "start_x": 300,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": false,
+      "expect": "prev"
+    },
+    {
+      "name": "向右滑·已在「全部」→ 无操作",
+      "tx": 80,
+      "start_x": 100,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": false,
+      "row_open": false,
+      "expect": "none"
+    },
+    {
+      "name": "已有行按钮展开·向右滑 → 只收起，不切 Tab",
+      "tx": 80,
+      "start_x": 100,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": true,
+      "expect": "none"
+    },
+    {
+      "name": "已有行按钮展开·向左滑 → 交给行",
+      "tx": -80,
+      "start_x": 100,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": true,
+      "expect": "row"
+    },
+    {
+      "name": "位移不足阈值 → 不判定",
+      "tx": -5,
+      "start_x": 100,
+      "list_width": 390,
+      "actions_width": 296,
+      "has_next": true,
+      "has_prev": true,
+      "row_open": false,
+      "expect": "none"
+    }
+  ],
+  "badge": [
+    {
+      "name": "无文件夹范围：全部=未读条数之和",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 3,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 12,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "c",
+          "unread": 0,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 15,
+        "muted": false
+      }
+    },
+    {
+      "name": "静音不计入主数值",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 3,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 20,
+          "muted": true,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 3,
+        "muted": false
+      }
+    },
+    {
+      "name": "只有静音有未读 → 灰显，数值=静音条数",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 0,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 20,
+          "muted": true,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "c",
+          "unread": 5,
+          "muted": true,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 25,
+        "muted": true
+      }
+    },
+    {
+      "name": "静音里 @我 仍计 1，不放大成条数",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 2,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 20,
+          "muted": true,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": true
+        }
+      ],
+      "expect": {
+        "count": 3,
+        "muted": false
+      }
+    },
+    {
+      "name": "手动标为未读计 1",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 0,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": true,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 4,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 5,
+        "muted": false
+      }
+    },
+    {
+      "name": "限定文件夹：只数夹内会话",
+      "now": 1700000000000,
+      "folder": [
+        "a",
+        "c"
+      ],
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 3,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 100,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "c",
+          "unread": 2,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 5,
+        "muted": false
+      }
+    },
+    {
+      "name": "定时免打扰已到期 → 视为未静音",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 7,
+          "muted": true,
+          "mute_until": 1699999999000,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 7,
+        "muted": false
+      }
+    },
+    {
+      "name": "定时免打扰未到期 → 静音",
+      "now": 1700000000000,
+      "folder": null,
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 7,
+          "muted": true,
+          "mute_until": 1700000060000,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 7,
+        "muted": true
+      }
+    },
+    {
+      "name": "夹内无未读 → 不显示",
+      "now": 1700000000000,
+      "folder": [
+        "a"
+      ],
+      "convs": [
+        {
+          "conv_id": "a",
+          "unread": 0,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        },
+        {
+          "conv_id": "b",
+          "unread": 9,
+          "muted": false,
+          "mute_until": 0,
+          "marked_unread": false,
+          "mention_unread": false
+        }
+      ],
+      "expect": {
+        "count": 0,
+        "muted": false
+      }
+    }
+  ]
+}
