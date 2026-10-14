@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { setPref, t } from "./i18n";
 import { buildGroupSysSegments, buildSysNoticeText, localizeReplySnapshot } from "./sysEventRender";
 import { localizeSnippet } from "./messageContent";
+import { sysSegmentName } from "./sysSegments";
 import type { ChatMessage } from "./sdk/protocol";
 
 /** localizeReplySnapshot 只需要这三个字段，测试用小夹具不必凑一整条 ChatMessage。 */
@@ -21,11 +22,11 @@ describe("buildGroupSysSegments", () => {
       sysEvent: "member_remove",
       sysSegments: [{ uid: "1001", text: "群主张三" }, { uid: "1002", text: "李四" }],
     };
-    const zh = buildGroupSysSegments(m, t, "9999", localNameOf, "zh-Hans");
+    const zh = buildGroupSysSegments(m, t, "zh-Hans");
     expect(zh?.map((s) => s.text).join("")).toBe("群主张三 将 李四 移出群聊");
     expect(zh?.filter((s) => s.uid).map((s) => s.uid)).toEqual(["1001", "1002"]);
     setPref("en");
-    const en = buildGroupSysSegments(m, t, "9999", localNameOf, "en");
+    const en = buildGroupSysSegments(m, t, "en");
     expect(en?.map((s) => s.text).join("")).toBe("群主张三 removed 李四 from the group");
   });
 
@@ -34,18 +35,18 @@ describe("buildGroupSysSegments", () => {
       convId: "c1", from: "", content: "", contentType: "system", convSeq: 1, timestamp: 0, status: "received",
       sysEvent: "group_rename", sysArgs: { name: "摸鱼群" },
     };
-    expect(buildGroupSysSegments(m, t, "9999", localNameOf, "zh-Hans")?.map((s) => s.text).join(""))
+    expect(buildGroupSysSegments(m, t, "zh-Hans")?.map((s) => s.text).join(""))
       .toBe("群名已改为「摸鱼群」");
     setPref("en");
-    expect(buildGroupSysSegments(m, t, "9999", localNameOf, "en")?.map((s) => s.text).join(""))
+    expect(buildGroupSysSegments(m, t, "en")?.map((s) => s.text).join(""))
       .toBe('Group name changed to "摸鱼群"');
   });
 
   it("mute_all_on：无参数纯静态串", () => {
     const m: ChatMessage = { convId: "c1", from: "", content: "", contentType: "system", convSeq: 1, timestamp: 0, status: "received", sysEvent: "mute_all_on" };
-    expect(buildGroupSysSegments(m, t, "9999", localNameOf, "zh-Hans")).toEqual([{ text: "管理员开启了全员禁言" }]);
+    expect(buildGroupSysSegments(m, t, "zh-Hans")).toEqual([{ text: "管理员开启了全员禁言" }]);
     setPref("en");
-    expect(buildGroupSysSegments(m, t, "9999", localNameOf, "en")).toEqual([{ text: "An admin turned on mute-all" }]);
+    expect(buildGroupSysSegments(m, t, "en")).toEqual([{ text: "An admin turned on mute-all" }]);
   });
 
   it("friend_accepted：单聊系统消息（sender 空、无 args/segments），按 App 语言渲染，不崩", () => {
@@ -53,23 +54,25 @@ describe("buildGroupSysSegments", () => {
       convId: "u_1001_u_1002", from: "", content: "你们已成为好友，现在可以开始聊天了", contentType: "system",
       convSeq: 1, timestamp: 0, status: "received", sysEvent: "friend_accepted",
     };
-    expect(buildGroupSysSegments(m, t, "1001", localNameOf, "zh-Hans")).toEqual([{ text: "你们已成为好友，现在可以开始聊天了" }]);
+    expect(buildGroupSysSegments(m, t, "zh-Hans")).toEqual([{ text: "你们已成为好友，现在可以开始聊天了" }]);
     setPref("en");
-    expect(buildGroupSysSegments(m, t, "1001", localNameOf, "en")).toEqual([{ text: "You are now friends. You can start chatting." }]);
+    expect(buildGroupSysSegments(m, t, "en")).toEqual([{ text: "You are now friends. You can start chatting." }]);
   });
 
-  it("member_invite：actor 来自第 1 个候选段，其余候选按语言习惯拼成 names（纯文本不可点）", () => {
+  it("member_invite：actor 来自第 1 个候选段，其余候选逐个出名字段（全部可点），之间按语言插分隔符", () => {
     const m: ChatMessage = {
       convId: "c1", from: "", content: "", contentType: "system", convSeq: 1, timestamp: 0, status: "received",
       sysEvent: "member_invite",
       sysSegments: [{ uid: "1001", text: "群主张三" }, { uid: "1002", text: "李四" }, { uid: "1003", text: "王五" }],
     };
-    const zh = buildGroupSysSegments(m, t, "9999", localNameOf, "zh-Hans");
+    const zh = buildGroupSysSegments(m, t, "zh-Hans");
     expect(zh?.map((s) => s.text).join("")).toBe("群主张三 邀请 李四、王五 加入群聊");
-    // actor 段带 uid 可点；names 段不带 uid（不可点，刻意取舍）。
-    expect(zh?.filter((s) => s.uid)).toEqual([{ uid: "1001", text: "群主张三" }]);
+    // actor 与每个被邀请者都带 uid（可点），分隔符是不带 uid 的文案段。
+    expect(zh?.filter((s) => s.uid)).toEqual([
+      { uid: "1001", text: "群主张三" }, { uid: "1002", text: "李四" }, { uid: "1003", text: "王五" },
+    ]);
     setPref("en");
-    const en = buildGroupSysSegments(m, t, "9999", localNameOf, "en");
+    const en = buildGroupSysSegments(m, t, "en");
     expect(en?.map((s) => s.text).join("")).toBe("群主张三 invited 李四, 王五 to the group");
   });
 
@@ -79,15 +82,17 @@ describe("buildGroupSysSegments", () => {
       sysEvent: "member_invite",
       sysSegments: [{ uid: "1001", text: "群主张三" }, { uid: "9999", text: "本人" }],
     };
-    const zh = buildGroupSysSegments(m, t, "9999", localNameOf, "zh-Hans");
-    expect(zh?.map((s) => s.text).join("")).toBe("群主张三 邀请 我 加入群聊");
+    const zh = buildGroupSysSegments(m, t, "zh-Hans");
+    // 名字段保留服务端字面，「我」由渲染层（renderSysLine/convPreview）用 sysSegmentName 按 uid 替换——这里走同一套。
+    const shown = zh?.map((s) => (s.uid ? sysSegmentName(s.uid, "9999", (id) => localNameOf(id, "c1", s.text)) : s.text)).join("");
+    expect(shown).toBe("群主张三 邀请 我 加入群聊");
   });
 
   it("sysEvent 为空/不认识 → undefined（调用方回退 sysSegments/content）", () => {
     const empty: ChatMessage = { convId: "c1", from: "", content: "老消息整句", contentType: "system", convSeq: 1, timestamp: 0, status: "received" };
-    expect(buildGroupSysSegments(empty, t, "9999", localNameOf, "zh-Hans")).toBeUndefined();
+    expect(buildGroupSysSegments(empty, t, "zh-Hans")).toBeUndefined();
     const unknown: ChatMessage = { ...empty, sysEvent: "some_future_event" };
-    expect(buildGroupSysSegments(unknown, t, "9999", localNameOf, "zh-Hans")).toBeUndefined();
+    expect(buildGroupSysSegments(unknown, t, "zh-Hans")).toBeUndefined();
   });
 
   it("候选人名段数量不足（脏数据）→ 缺的槽位留空文本，不崩", () => {
@@ -95,7 +100,7 @@ describe("buildGroupSysSegments", () => {
       convId: "c1", from: "", content: "", contentType: "system", convSeq: 1, timestamp: 0, status: "received",
       sysEvent: "member_remove", sysSegments: [{ uid: "1001", text: "群主张三" }], // 只给了 actor，没给 target
     };
-    const segs = buildGroupSysSegments(m, t, "9999", localNameOf, "zh-Hans");
+    const segs = buildGroupSysSegments(m, t, "zh-Hans");
     expect(segs?.map((s) => s.text).join("")).toBe("群主张三 将  移出群聊");
   });
 });

@@ -398,7 +398,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .sys-note-action:hover { text-decoration: underline; }
 /* 群系统消息（邀请/移除/转让/禁言等留痕）：居中灰字胶囊，独立一行。 */
 .sys-line { display: flex; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
-.sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); text-align: center; max-width: 80%; padding: 3px 12px; border-radius: 999px; } /* 999px：字号放大后仍保持胶囊形（写死 11px 会退化成方角） */
+.sys-line span { background: var(--date-pill-bg); color: var(--on-media); font-size: var(--sys-font); text-align: center; max-width: 80%; padding: 3px 12px; border-radius: calc(var(--sys-font) * 0.75 + 3px); } /* = 单行高度的一半（行高 1.5 + 上下 padding 3px）：单行恒为胶囊、随字号缩放；多行长文案（邀请上百人）不再变椭圆（999px 会），默认字号下 ≈ iOS/Android 的 11 */
 /* 系统消息里的人名：强调色 + 可点进资料页。inline 按钮，不能带边框/内边距，否则会撑开胶囊。 */
 /* 名字段用 --sys-name（浅琥珀）+ 600，不用主色：胶囊底 --date-pill-bg 就是主题绿 rgba(92,138,76,.55)，
    名字再染同为绿的 --accent(#4ca64c) 两者色相几乎重合、看不出哪几个字是名字（2026-08-30 反馈）；

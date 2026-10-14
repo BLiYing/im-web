@@ -16,7 +16,6 @@
 // sysEvent/replySnapshotKind 为空或不认识 → 全部返回 undefined，调用方回退老的 sysSegments/content/
 // replySnapshot 路径（现有代码，不改）。
 import type { ChatMessage, SysSegment } from "./sdk/protocol";
-import { sysSegmentName } from "./sysSegments";
 import { tokenizeTemplate, type Args, type Lang } from "./i18n";
 import { fullDateTime } from "./time";
 import { formatMediaDuration } from "./media";
@@ -53,23 +52,24 @@ const GROUP_SYS_EVENTS: Record<string, SysEventDef> = {
 };
 
 /** §1.3：多人名单按语言习惯拼接的分隔符（zh 顿号，en 逗号+空格，不做 "A, B and C" 语法优化）。 */
+function nameSeparator(lang: Lang): string {
+  return lang === "en" ? ", " : "、";
+}
 function joinNames(names: string[], lang: Lang): string {
-  return names.join(lang === "en" ? ", " : "、");
+  return names.join(nameSeparator(lang));
 }
 
 /**
  * §1.2 通用算法：把一条群系统消息的 sysEvent/sysArgs/sysSegments 渲染成与服务端 sysSegments
  * 同构的分段数组。返回 undefined = 事件为空/不认识 → 调用方回退现有的 m.sysSegments/content 路径。
  *
- * `localNameOf`/`selfUid`/`lang` 只在 member_invite 拼 `names`（§1.3）时用到——其余人名槽位
- * （actor/target）沿用候选段自身的服务端字面兜底，真正的本地显示名解析交给调用方现有的渲染
+ * `lang` 只在 member_invite 的被邀请者之间插分隔符（§1.3）时用到——所有人名槽位
+ * 沿用候选段自身的服务端字面兜底，真正的本地显示名解析交给调用方现有的渲染
  * 管线（renderSysLine 的 sysSegmentName+localNameOf、convPreview 的同款 map），不在这里重复解析。
  */
 export function buildGroupSysSegments(
-  m: Pick<ChatMessage, "sysEvent" | "sysArgs" | "sysSegments" | "convId">,
+  m: Pick<ChatMessage, "sysEvent" | "sysArgs" | "sysSegments">,
   t: Translate,
-  selfUid: string,
-  localNameOf: (uid: string, convId: string, fallback?: string) => string,
   lang: Lang,
 ): SysSegment[] | undefined {
   const ev = m.sysEvent;
@@ -78,18 +78,22 @@ export function buildGroupSysSegments(
   if (!def) return undefined;
   const candidates = (m.sysSegments ?? []).filter((s): s is SysSegment & { uid: string } => !!s.uid);
   const args: Record<string, string> = { ...(m.sysArgs ?? {}) };
-  if (ev === "member_invite") {
-    const invitees = candidates
-      .slice(1) // 第 1 个候选是邀请人（actor 槽位），其余是被邀请者
-      .map((s) => sysSegmentName(s.uid, selfUid, (id) => localNameOf(id, m.convId ?? "", s.text)));
-    args.names = joinNames(invitees, lang);
-  }
+  // member_invite：第 1 个候选是邀请人（actor 槽位），其余是被邀请者——逐个出名字段（各自高亮、可点），
+  // 段间插入分隔符文案段（§1.3，对齐 Android）。
+  const invitees = ev === "member_invite" ? candidates.slice(1) : [];
   const tokens = tokenizeTemplate(t(def.key)); // t(key) 不传 args = 原始未替换串（见 i18n/index.ts）
   let nextCandidate = 0;
   const out: SysSegment[] = [];
   for (const tok of tokens) {
     if (tok.type === "text") {
       if (tok.value) out.push({ text: tok.value });
+      continue;
+    }
+    if (ev === "member_invite" && tok.name === "names") {
+      invitees.forEach((s, i) => {
+        if (i > 0) out.push({ text: nameSeparator(lang) });
+        out.push({ uid: s.uid, text: s.text });
+      });
       continue;
     }
     if (def.slots.includes(tok.name)) {

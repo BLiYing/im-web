@@ -63,8 +63,8 @@ export function convPreview(c: Conversation, d: ConvPreviewDeps): string {
   // 原始 sys_segments；再按分段拼，名字换成本机显示名，无分段（更老的历史消息）回退整句。无发送者前缀。
   if (m.content_type === "system") {
     const segs = buildGroupSysSegments(
-      { sysEvent: m.sys_event, sysArgs: m.sys_args, sysSegments: m.sys_segments, convId: c.conv_id },
-      t, d.uid, d.localNameOf, getLang(),
+      { sysEvent: m.sys_event, sysArgs: m.sys_args, sysSegments: m.sys_segments },
+      t, getLang(),
     ) ?? m.sys_segments;
     return segs?.length
       // 我自己 → 「我」，与聊天页系统行同口径（sysSegmentName）。

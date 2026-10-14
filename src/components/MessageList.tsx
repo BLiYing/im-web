@@ -585,7 +585,7 @@ function renderSysLine(
   localNameOf: (uid: string, convId: string, fallback?: string) => string,
   openPeerDetail: (uid: string) => void, t: (key: string, args?: Args) => string, lang: Lang,
 ): ReactNode {
-  const segs = buildGroupSysSegments(m, t, uid, localNameOf, lang) ?? m.sysSegments;
+  const segs = buildGroupSysSegments(m, t, lang) ?? m.sysSegments;
   if (!segs?.length) return m.content;
   return segs.map((seg, i) =>
     seg.uid ? (
