@@ -322,7 +322,7 @@ export default function App() {
   const {
     dlSettings, setDlSettings, dlStates, dlBlobs, mediaOptedIn, expiredSet,
     refreshDownloadSettings, saveDownloadSettings, mediaGate, mediaSrc, openReadyFile, saveMessageToDisk,
-    markExpiredIfGone, onPassiveMediaError, onGateTap, clearMediaCache,
+    markExpiredIfGone, probeExpiry, onPassiveMediaError, onGateTap, clearMediaCache,
     optInMedia, restoreDownloadState, resetDownloadState,
   } = useMediaDownload({ uid, groupConvId, clientRef, setToast, setViewer });
   // 打开查看器 = 用户主动看原图 → 标记「已解门控」（对齐 iOS 档 B「点某格才打开查看器，此时才允许拉原件」）：
@@ -2306,7 +2306,7 @@ export default function App() {
   const onGateTapEv = useEvent(onGateTap);
   const onMediaBubbleTapEv = useEvent(onMediaBubbleTap);
   const openReadyFileEv = useEvent(openReadyFile);
-  const onPassiveMediaErrorEv = useEvent(onPassiveMediaError);
+  const onPassiveMediaErrorEv = useEvent(onPassiveMediaError); const probeExpiryEv = useEvent(probeExpiry);
   const retryUploadEv = useEvent(retryUpload);
   const resendMessageEv = useEvent(resendMessage);
   const toggleUploadPauseEv = useEvent(toggleUploadPause);
@@ -2338,7 +2338,7 @@ export default function App() {
 
   const chatActions = useMemo<ChatActions>(() => ({
     setMenu, setViewer, setInput, setRecordStack, setToast, locateInChat: locateInChatEv,
-    onGateTap: onGateTapEv, onMediaBubbleTap: onMediaBubbleTapEv, openReadyFile: openReadyFileEv, onPassiveMediaError: onPassiveMediaErrorEv,
+    onGateTap: onGateTapEv, onMediaBubbleTap: onMediaBubbleTapEv, openReadyFile: openReadyFileEv, onPassiveMediaError: onPassiveMediaErrorEv, probeExpiry: probeExpiryEv,
     retryUpload: retryUploadEv, resendMessage: resendMessageEv, toggleUploadPause: toggleUploadPauseEv, toggleSelected: toggleSelectedEv, fetchLinkPreview: fetchLinkPreviewEv,
     onMediaLoad: onMediaLoadEv, pendingFilesRef,
     jumpToBottom: jumpToBottomEv, unblock: unblockEv, setEditingMsg, setReplyTo, exitSelectMode: exitSelectModeEv,
@@ -3154,7 +3154,7 @@ export default function App() {
       {/* 右键 / ⋯ 菜单（消息 / 会话 + 免打扰时长 / 详情内容 + 删除两档 / 好友行）：见 components/ContextMenusHost。 */}
       <ContextMenusHost
         menu={menu} setMenu={setMenu} messageActions={messageActions} uid={uid} peer={peer} groupConvId={groupConvId}
-        chatIsSuper={chatIsSuper} canPinHere={canPinHere} transcripts={transcripts} requestDelete={requestDelete}
+        chatIsSuper={chatIsSuper} canPinHere={canPinHere} transcripts={transcripts} expiredSet={expiredSet} requestDelete={requestDelete}
         convMenu={convMenu} setConvMenu={setConvMenu} conversationActions={conversationActions} requestMute={requestMute}
         convMuteMenu={convMuteMenu} setConvMuted={setConvMuted}
         fileMenu={fileMenu} setFileMenu={setFileMenu} deleteMenu={deleteMenu} setDeleteMenu={setDeleteMenu} dlStates={dlStates}

@@ -136,6 +136,17 @@ describe("buildMessageActions", () => {
     expect(find({ m: msg({ from: "1001", contentType: "image", content: "blob:x", convSeq: 0, status: "sending", caption: "c" }), uid: "1001" })).toBe(true);
   });
 
+  it("已失效的图片/视频：没有复制图片、转发、收藏；引用/多选/删除照旧；带图说的仍可复制文字", () => {
+    const actions = buildMessageActions(msgHandlers);
+    const ids = (over: Partial<ChatMessage>) => visibleIds(actions, { m: msg(over), uid: "1001", mediaGone: true });
+    for (const ct of ["image", "video"]) {
+      const got = ids({ from: "2002", contentType: ct, content: "/u/x", convSeq: 5 });
+      for (const gone of ["copy", "forward", "favorite"]) expect(got).not.toContain(gone);
+      for (const keep of ["reply", "multiSelect", "delete"]) expect(got).toContain(keep);
+    }
+    expect(ids({ from: "2002", contentType: "image", content: "/u/x", convSeq: 5, caption: "c" })).toContain("copy");
+  });
+
   // 类型 × 已发出/待发 × 本人/他人：可见项集合（ContextMenusHost 在为空时不弹菜单）。
   it("各类型 × 已发出/待发 × 本人/他人 的可见项矩阵；待发名片/合并转发/语音可见项符合预期", () => {
     const actions = buildMessageActions(msgHandlers);

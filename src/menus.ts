@@ -25,7 +25,9 @@ export type MenuAction<C> = {
 /** 消息菜单上下文：当前消息 + 本人 uid（判断"我发的/对方发的"）。
  *  canPin：能否置顶（G0）。群内 = 群主/管理员（对齐服务端 perm；越权服务端回 300006），单聊 = 任一方。
  *  由调用方按 my_role 算好传入——菜单层不查群资料。 */
-export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean; isSuper?: boolean; canPin?: boolean; hasTranscript?: boolean };
+export type MessageCtx = { m: ChatMessage; uid: string; isGroup?: boolean; isSuper?: boolean; canPin?: boolean; hasTranscript?: boolean;
+  /** 图片/视频且服务端已清理（expiredSet）：没有字节可复制/转发/收藏，这三项不出现（带图说的仍可复制文字）。 */
+  mediaGone?: boolean };
 
 /** 会话菜单上下文：当前会话。 */
 export type ConvCtx = { c: Conversation };
@@ -95,12 +97,12 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
       visible: (c) => c.m.contentType === "voice" && c.m.convSeq > 0 && !c.m.recalledAt && !!c.hasTranscript,
       run: (c) => h.transcribe(c.m) },
     // 复制：文本→复制文字；图片→复制图片字节（可粘贴回输入框重发；须已发出，发送中/失败乐观行不给，对齐 iOS）。
-    { id: "copy", label: t("common.copy"), icon: Copy, visible: (c) => isText(c.m) || (c.m.contentType === "image" && c.m.convSeq > 0) || !!c.m.caption, run: (c) => h.copy(c.m) },
+    { id: "copy", label: t("common.copy"), icon: Copy, visible: (c) => isText(c.m) || (c.m.contentType === "image" && c.m.convSeq > 0 && !c.mediaGone) || !!c.m.caption, run: (c) => h.copy(c.m) },
     { id: "reply", label: t("chat.msg_menu.reply"), icon: Reply, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.reply(c.m) },
-    { id: "forward", label: t("common.forward"), icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0, run: (c) => h.forward(c.m) },
+    { id: "forward", label: t("common.forward"), icon: Forward, visible: (c) => !c.m.recalledAt && c.m.convSeq > 0 && !c.mediaGone, run: (c) => h.forward(c.m) },
     // 收藏支持 文本/图片/视频/文件/链接（快照存 content+content_type，后端通用；system/撤回除外）。
     // 必须 convSeq>0：未发出的乐观行 content 是本地 blob: URL，收藏它会存成一条永久失效的死链。
-    { id: "favorite", label: t("common.favorite"), icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
+    { id: "favorite", label: t("common.favorite"), icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && !c.mediaGone && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
     // 下载：图片/视频/文件保存到本地（浏览器下载目录）。复用应用内已下的 blob，否则拉远端。必须有 content（乐观行 blob: 不算）。
     { id: "download", label: t("common.download"), icon: Download,
       visible: (c) => !c.m.recalledAt && c.m.convSeq > 0 && !!c.m.content

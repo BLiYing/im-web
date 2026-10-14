@@ -1,4 +1,7 @@
-import { ChevronLeft, ChevronRight, Play, Download, LayoutGrid, MoreHorizontal } from "lucide-react";
+import { useEffect } from "react";
+import { ExpiredViewerPage } from "./ExpiredCover";
+import { useProbeExpiry } from "../ChatActionsContext";
+import { ChevronLeft, ChevronRight, Play, Download, LayoutGrid, MoreHorizontal, X } from "lucide-react";
 import type { ChatMessage } from "../sdk/protocol";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
@@ -43,23 +46,23 @@ export function MediaViewer({
   onDelete: (x: number, y: number) => void;
 }) {
   const tr = useT();
+  // 进查看器复验一次：命中浏览器缓存的图不会 onError，列表里又不批量探；每地址每会话一次，命中落持久失效标记
+  const probe = useProbeExpiry();
+  useEffect(() => { if (!isExpired) probe?.(m); }, [m.content]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="modal-mask viewer-mask" onClick={onClose}>
-      {m.contentType === "video" ? (
+      {isExpired ? (
+        // 服务端已清理（404/410）：图片 / 视频同一张失效页（黑底 + 八角 ✕ + 一行文案），不建 <video>、不画破图、不给下载
+        // ——对齐 Android `ExpiredViewerPage`。onError 复验命中后 isExpired 翻真，自动切到这一页。
+        <ExpiredViewerPage caption={m.contentType === "video" ? tr("media.video_expired") : tr("media.image_expired")} />
+      ) : m.contentType === "video" ? (
         // 浏览器解不了码（对端发来的 HEVC 等）时 <video> 只会黑屏 → 降级成明确提示 + 下载入口，
         // 而不是让用户对着黑框以为坏了。封面仍能显示（poster 是 JPEG，与视频编码无关）。
         videoUnplayable ? (
           <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>
             {m.posterUrl && <img src={m.posterUrl} alt="" />}
-            {isExpired ? (
-              // 404=服务端已清理：显失效、不给"下载后本地播放"（那个链接也会 404），别误导成编码问题（对齐 iOS 查看器）。
-              <p>{tr("media.viewer.video_expired")}</p>
-            ) : (
-              <>
-                <p>{tr("media.viewer.video_unsupported")}</p>
-                <a className="viewer-unplayable-btn" href={m.content} download>{tr("media.viewer.download_open_player")}</a>
-              </>
-            )}
+            <p>{tr("media.viewer.video_unsupported")}</p>
+            <a className="viewer-unplayable-btn" href={m.content} download>{tr("media.viewer.download_open_player")}</a>
           </div>
         ) : !videoStarted ? (
           // 封面待点：只显封面图 + 居中 ▶，点了才挂 <video>。翻页到视频＝翻到图片一样轻，无黑色控件条/无 metadata 预拉。
@@ -117,8 +120,11 @@ export function MediaViewer({
           )}
         </div>
       )}
+      {/* 左上角关闭（iOS/Android 都有 ✕）：此前只能点黑底关，找不到入口 */}
+      <button className="viewer-btn viewer-close" title={tr("common.close")}
+              onClick={(e) => { e.stopPropagation(); onClose(); }}><X size={18} /></button>
       <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
-        <a className="viewer-btn" href={m.content} download title={tr("common.download")}><Download size={18} /></a>
+        {!isExpired && <a className="viewer-btn" href={m.content} download title={tr("common.download")}><Download size={18} /></a>}
         {!fromGallery && (
           <button className="viewer-btn" title={tr("media.viewer.gallery")} onClick={onOpenGallery}><LayoutGrid size={18} /></button>
         )}
@@ -128,13 +134,15 @@ export function MediaViewer({
           {more && (
             <div className="viewer-more-pop">
               <button onClick={onLocate}>{tr("media.viewer.locate")}</button>
-              <button onClick={onFavorite}>{tr("common.favorite")}</button>
-              <a href={m.content} download>{tr("common.download")}</a>
+              {/* 媒体库/群资料里打开的查看器与 iOS/Android 同：定位 · 转发 · 删除（无收藏/复制）；
+                  失效页再去掉所有要字节的项（转发/下载）。聊天页内打开的保留收藏与复制（iOS/Android 聊天查看器同）。 */}
+              {!fromGallery && !isExpired && <button onClick={onFavorite}>{tr("common.favorite")}</button>}
+              {!isExpired && <a href={m.content} download>{tr("common.download")}</a>}
               {/* 视频不提供复制：无"复制字节"语义，产品上禁止复制视频消息（与 iOS 对齐）。图片才有复制。 */}
-              {m.contentType !== "video" && (
+              {!fromGallery && !isExpired && m.contentType !== "video" && (
                 <button onClick={onCopy}>{tr("common.copy")}</button>
               )}
-              <button onClick={onForward}>{tr("common.forward")}</button>
+              {!isExpired && <button onClick={onForward}>{tr("common.forward")}</button>}
               <button className="danger" onClick={(e) => onDelete(e.clientX, e.clientY)}>{tr("common.delete")}</button>
             </div>
           )}

@@ -23,15 +23,15 @@ describe("MediaTile 两 variant 的门控徽标/尺寸差异（合并自 gallery
     expect(d.container.querySelector("button.detail-media-tile")).toBeTruthy();
   });
 
-  it("失效格：gallery 显 ⊘ 徽标且不显尺寸；detail 无徽标但仍显尺寸", () => {
-    const g = render(<MediaTile variant="gallery" m={img()} gate={gate("expired")} onClick={noop} onMenu={noop} onMediaError={noop} />);
-    expect(g.container.querySelector(".play-badge.expired")).toBeTruthy(); // ⊘
-    expect(g.container.querySelector(".detail-media-size")).toBeNull();    // 失效不显尺寸
-    cleanup();
-    const d = render(<MediaTile variant="detail" m={img()} gate={gate("expired")} onClick={noop} onMenu={noop} onMediaError={noop} />);
-    expect(d.container.querySelector(".play-badge.expired")).toBeNull();   // 无 ⊘
-    expect(d.container.querySelector(".detail-media-dl")).toBeNull();      // 也无 ↓
-    expect(d.container.querySelector(".detail-media-size")?.textContent).toBe("2 KB"); // 仍显尺寸
+  it("失效格：两 variant 都压暗 + 中心 ⊘，不显 ↓ / 尺寸 / 时长（对齐 iOS setExpired: 与 Android AlbumTileGate）", () => {
+    for (const variant of ["gallery", "detail"] as const) {
+      const r = render(<MediaTile variant={variant} m={img()} gate={gate("expired")} onClick={noop} onMenu={noop} onMediaError={noop} />);
+      expect(r.container.querySelector(".tile-expired-dim")).toBeTruthy();   // 压暗
+      expect(r.container.querySelector(".play-badge.expired svg")).toBeTruthy(); // 八角 ✕（lucide OctagonX，与 Android 同款）
+      expect(r.container.querySelector(".detail-media-dl")).toBeNull();      // 无 ↓
+      expect(r.container.querySelector(".detail-media-size")).toBeNull();    // 失效不显尺寸
+      cleanup();
+    }
   });
 
   it("未下载（非失效）：两 variant 都显 ↓ + 尺寸", () => {

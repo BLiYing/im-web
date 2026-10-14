@@ -118,9 +118,10 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     if ((kind === "image" || kind === "video") && unsupportedSet.has(m.content)) {
       return { phase: "unsupported", received: 0, total: m.fileSize ?? 0 };
     }
-    if (m.from === uid) return undefined; // 自己发的（本浏览器可渲染）不门控
     // 持久失效标记优先（草图 §06）：已知服务端已清理 → 直接失效态、不回源（掐 404 风暴）。三类消息统一。
+    // **自己发的也算，且不看浏览器缓存**（2026-10-14 起取代「缓存过的照显」：后台标了失效就得显出来）。
     if (expiredSet.has(m.content)) return { phase: "expired", received: 0, total: m.fileSize ?? 0 };
+    if (m.from === uid) return undefined; // 自己发的（本浏览器可渲染）不门控
     // 群/单聊分档：渲染中的消息恒属当前打开的会话，故用 groupConvId 判定（isGroupChat 在此之后才定义）。
     const passesPolicy = shouldAutoDownload(dlSettings, kind, m.fileSize ?? 0, !!groupConvId, localAutoDownload);
     if (kind === "image" || kind === "video") {
@@ -277,6 +278,20 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
   const markExpiredIfGoneRef = useRef(markExpiredIfGone);
   markExpiredIfGoneRef.current = markExpiredIfGone;
 
+  /**
+   * 进页主动探一次「这条是不是服务端已清理」（媒体 tab / 媒体库宫格用）。
+   * 门控挡着的格子不加载原件、有封面的视频也不会请求视频本体，不探的话失效要等用户点开才显出来
+   * （2026-10-14 用户报：失效视频没被标记）。每个地址本次会话只探一次；已知失效直接略过。
+   */
+  const probedRef = useRef<Set<string>>(new Set());
+  const probeExpiry = useCallback((m: ChatMessage) => {
+    const key = m.content;
+    // 仅 http(s)：blob:/data:/本地占位地址不会被服务端清理，探了是白请求
+    if (!key || !/^https?:\/\//i.test(key) || expiredRef.current.has(key) || probedRef.current.has(key)) return;
+    probedRef.current.add(key);
+    void markExpiredIfGone(m);
+  }, [markExpiredIfGone]);
+
   /** 被动展示（气泡/宫格/资料卡的原件 <img>/<video>）加载失败统一入口：先复验 404→失效；否则=编解码失败→标"网页端无法渲染"降级卡（不再破图）。 */
   const onPassiveMediaError = useCallback(async (m: ChatMessage) => {
     const gone = await markExpiredIfGone(m);
@@ -356,12 +371,13 @@ export function useMediaDownload(deps: MediaDownloadDeps) {
     setDlStates({});
     setMediaOptedIn(new Set()); // 图片/视频解门控记录：换账号重新门控
     setExpiredSet(new Set());   // 失效标记内存态清空（每 uid 各自持久化，登录时按账号重载）
+    probedRef.current = new Set(); // 主动探测记号随账号清空
   }, []);
 
   return {
     dlSettings, setDlSettings, dlStates, dlBlobs, mediaOptedIn, expiredSet,
     refreshDownloadSettings, saveDownloadSettings, mediaGate, mediaSrc, openReadyFile, saveMessageToDisk,
-    markExpired, markExpiredIfGone, onPassiveMediaError, onGateTap, clearMediaCache,
+    markExpired, markExpiredIfGone, probeExpiry, onPassiveMediaError, onGateTap, clearMediaCache,
     optInMedia, restoreDownloadState, resetDownloadState,
   };
 }

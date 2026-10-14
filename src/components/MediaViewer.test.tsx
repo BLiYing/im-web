@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MediaViewer } from "./MediaViewer";
 import type { ChatMessage } from "../sdk/protocol";
+import { ChatActionsProvider, type ChatActions } from "../ChatActionsContext";
 
 afterEach(cleanup);
 
@@ -65,8 +66,19 @@ describe("MediaViewer 分支与动作", () => {
     expect(screen.getByText("下载后用本地播放器打开")).toBeTruthy();
     cleanup();
     render(<MediaViewer {...base} m={msg({ contentType: "video" })} videoUnplayable={true} isExpired={true} />);
-    expect(screen.getByText(/视频已失效/)).toBeTruthy();
+    expect(screen.getByText("视频已失效")).toBeTruthy();
     expect(screen.queryByText("下载后用本地播放器打开")).toBeNull();
+  });
+
+  it("图片/视频已失效：同一张失效页（八角 ✕ + 文案），无破图、不给下载入口", () => {
+    const { container } = render(<MediaViewer {...base} m={msg({ thumb: "data:image/jpeg;base64,AA" })} isExpired={true} />);
+    expect(screen.getByText("图片已失效")).toBeTruthy();
+    expect(container.querySelector(".viewer-expired svg")).toBeTruthy();
+    expect(container.querySelector("a[download]")).toBeNull();
+    cleanup();
+    const v = render(<MediaViewer {...base} m={msg({ contentType: "video" })} isExpired={true} />);
+    expect(screen.getByText("视频已失效")).toBeTruthy();
+    expect(v.container.querySelector("video")).toBeNull();
   });
 
   it("不支持的图片格式（HEIC）：降级卡 + 下载入口", () => {
@@ -104,5 +116,40 @@ describe("MediaViewer 分支与动作", () => {
     expect(screen.getByTitle("媒体库")).toBeTruthy();
     rerender(<MediaViewer {...base} m={msg()} fromGallery={true} />);
     expect(screen.queryByTitle("媒体库")).toBeNull();
+  });
+
+  it("左上角有关闭按钮，点击回传 onClose（不冒泡成二次关闭）", () => {
+    const onClose = vi.fn();
+    render(<MediaViewer {...base} m={msg()} onClose={onClose} />);
+    fireEvent.click(screen.getByTitle("关闭"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("更多浮层：媒体库里打开的没有收藏/复制；失效页再去掉转发与下载，只留定位与删除", () => {
+    render(<MediaViewer {...base} m={msg()} more={true} fromGallery={true} />);
+    expect(screen.queryByText("收藏")).toBeNull();
+    expect(screen.queryByText("复制")).toBeNull();
+    expect(screen.getByText("转发")).toBeTruthy();
+    cleanup();
+    render(<MediaViewer {...base} m={msg()} more={true} isExpired={true} />);
+    expect(screen.queryByText("收藏")).toBeNull();
+    expect(screen.queryByText("复制")).toBeNull();
+    expect(screen.queryByText("转发")).toBeNull();
+    expect(screen.queryByText("下载")).toBeNull();
+    expect(screen.getByText("定位到聊天位置")).toBeTruthy();
+    expect(screen.getByText("删除")).toBeTruthy();
+  });
+
+  it("进查看器复验一次（命中浏览器缓存的图不会 onError）；已失效的不再探", () => {
+    const probeExpiry = vi.fn();
+    const wrap = (ui: React.ReactElement) => (
+      <ChatActionsProvider value={{ probeExpiry } as unknown as ChatActions}>{ui}</ChatActionsProvider>
+    );
+    render(wrap(<MediaViewer {...base} m={msg()} />));
+    expect(probeExpiry).toHaveBeenCalledTimes(1);
+    cleanup();
+    probeExpiry.mockClear();
+    render(wrap(<MediaViewer {...base} m={msg()} isExpired={true} />));
+    expect(probeExpiry).not.toHaveBeenCalled();
   });
 });

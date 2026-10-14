@@ -688,6 +688,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .viewer-bar { position: fixed; right: 24px; bottom: 24px; display: flex; gap: 12px; align-items: center; }
 .viewer-btn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
 .viewer-btn:hover { background: var(--overlay-strong); }
+.viewer-close { position: fixed; top: 14px; left: 16px; z-index: 3; }
 .viewer-more-wrap { position: relative; }
 .viewer-more-pop { position: absolute; right: 0; bottom: 48px; min-width: 160px; padding: 4px; display: flex; flex-direction: column; }
 .viewer-more-pop button, .viewer-more-pop a { display: block; width: 100%; padding: 8px 12px; border: 0; background: none; color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; text-decoration: none; }
@@ -743,8 +744,15 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
    收藏宫格里 .fav-icon 本就 relative、wrap 又铺满它，加这条不改那边的观感。 */
 .fav-thumb-wrap { position: relative; display: inline-block; }
 .play-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--on-media); font-size: 26px; text-shadow: 0 1px 6px var(--overlay-strong); pointer-events: none; }
-/* 已失效（服务端已清理）：中心 ⊘ 灰白、略降透明 —— 与"加载中/可重试"区分（草图 §02/§03 终态）。 */
+/* 已失效（服务端已清理）：中心 ⊘/八角 ✕ 灰白、略降透明 —— 与"加载中/可重试"区分（草图 §02/§03 终态）。 */
 .play-badge.expired { color: var(--on-media); opacity: .82; font-size: 30px; }
+/* 失效统一外观（对齐 iOS expiredOverlay / IMAlbumTileView.setExpired: / Android ExpiredCover·AlbumTileGate）：
+   整块压暗 + 中心 ⊘；单图/视频气泡再在 ⊘ 下带一行「图片/视频已失效」，宫格小格只剩 ⊘。 */
+.tile-expired-dim { position: absolute; inset: 0; background: var(--overlay); pointer-events: none; z-index: 0; }
+.album-tile .play-badge.expired, .detail-media-tile .play-badge.expired { font-size: 22px; z-index: 1; }
+.play-badge.expired.expired-cover { flex-direction: column; gap: 4px; opacity: 1; z-index: 1; }
+.expired-cover .expired-glyph { display: flex; opacity: .9; }
+.expired-cover .expired-cap { font-size: 12px; font-weight: 500; line-height: 16px; text-shadow: none; white-space: nowrap; }
 
 /* 视频解不了码时的降级卡片（HEVC 等）：给出原因 + 下载入口，不留一个黑框让人猜。 */
 /* 用定宽而非 max-width：作为 .modal-mask 的 flex item，内部 img 的 max-width:100% 会与
@@ -2179,3 +2187,7 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 :root.no-blur *, :root.no-blur *::before, :root.no-blur *::after {
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
 }
+
+/* 查看器·失效页（图片 / 视频同一页，对齐 Android ExpiredViewerPage）：蒙层本就是黑底，页内只放白色八角 ✕ + 一行文案。 */
+.viewer-expired { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #fff; }
+.viewer-expired p { margin: 0; font-size: 15px; font-weight: 500; color: #fff; }

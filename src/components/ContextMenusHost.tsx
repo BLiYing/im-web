@@ -28,6 +28,8 @@ export interface ContextMenusHostProps {
   chatIsSuper: boolean;
   canPinHere: boolean;
   transcripts: Record<number, unknown>;
+  /** 持久失效集合（key=完整内容 URL）：长按菜单据此隐藏复制图片/转发/收藏。 */
+  expiredSet: ReadonlySet<string>;
   requestDelete: (m: ChatMessage, x: number, y: number) => void;
   // 会话行菜单 + 免打扰时长子菜单
   convMenu: At<{ c: Conversation }> | null;
@@ -58,11 +60,16 @@ export interface ContextMenusHostProps {
   unblock: (userId: string) => Promise<void>;
 }
 
+/** 图片/视频且已被服务端清理（服务端清理即标记，不看浏览器缓存）。 */
+function isMediaGone(m: ChatMessage, expired: ReadonlySet<string>): boolean {
+  return (m.contentType === "image" || m.contentType === "video") && expired.has(m.content);
+}
+
 export function ContextMenusHost(p: ContextMenusHostProps) {
   const { clientRef } = useAppServices();
   const t = useT();
   const {
-    menu, setMenu, messageActions, uid, peer, groupConvId, chatIsSuper, canPinHere, transcripts, requestDelete,
+    menu, setMenu, messageActions, uid, peer, groupConvId, chatIsSuper, canPinHere, transcripts, expiredSet, requestDelete,
     convMenu, setConvMenu, conversationActions, requestMute, convMuteMenu, setConvMuted,
     fileMenu, setFileMenu, deleteMenu, setDeleteMenu, dlStates, setForwardMode, setForwarding, setGalleryOpen, setViewer,
     locateInChat, onGateTap, hideFileForMe, deleteFileForEveryone,
@@ -71,7 +78,7 @@ export function ContextMenusHost(p: ContextMenusHostProps) {
 
   // 无可见项（如发送中的名片/合并转发：删除对发送中隐藏、取消发送又不覆盖）时不弹菜单，避免空白气泡。
   const msgMenuItems = menu
-    ? messageActions.filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }))
+    ? messageActions.filter((a) => a.visible({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined, mediaGone: isMediaGone(menu.m, expiredSet) }))
     : [];
   // 菜单为空时 menu 不能留着：MessageList 以 menu 驱动气泡 ctx-active 高亮，没有菜单可点外关闭就会一直亮着。
   const emptyMenu = !!menu && msgMenuItems.length === 0;
@@ -87,7 +94,7 @@ export function ContextMenusHost(p: ContextMenusHostProps) {
                 onClick={() => {
                   // 删除走统一两档路由（弹子菜单 B / 直接仅删自己 / 本地删），对齐详情页；其余动作照常。
                   if (a.id === "delete") { const mm = menu.m, x = menu.x, y = menu.y; setMenu(null); requestDelete(mm, x, y); return; }
-                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined }); setMenu(null);
+                  a.run({ m: menu.m, uid, isGroup: !!groupConvId && !peer, isSuper: chatIsSuper, canPin: canPinHere, hasTranscript: transcripts[menu.m.convSeq] !== undefined, mediaGone: isMediaGone(menu.m, expiredSet) }); setMenu(null);
                 }}>
                 {a.icon && <a.icon size={16} className="menu-icon" />}{a.label}</button>
             ))}

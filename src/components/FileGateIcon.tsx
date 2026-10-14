@@ -1,13 +1,14 @@
 import { downloadGlyph, downloadFraction, type DownloadState } from "../download";
+import { ExpiredGlyph } from "./ExpiredCover";
 
 /**
  * 文件门控圆形图标（对齐 iOS IMChatDetailViewController 的 `_disc`/`_ring`）：固定 36px 圆底 + 白色字形，
  * 聊天气泡与详情文件列表共用。**下载中叠加环形进度**——去掉了原来的底部线性进度条，图标槽位恒定，
  * 状态切换（↓→✕）不再撑高卡片 / 下移图标（修下载抖动）。
- * 未下载=accent 圆底 ↓ / 下载中=中性圆底 + accent 进度环 + ✕ / 失败=danger 圆底 ↻ / 已失效=中性圆底 ⊘。
+ * 未下载=accent 圆底 ↓ / 下载中=中性圆底 + accent 进度环 + ✕ / 失败=danger 圆底 ↻ / 已失效=中性圆底 八角 ✕。
  */
 export function FileGateIcon({ state }: { state: DownloadState }) {
-  const glyph = downloadGlyph(state) ?? "⊘";
+  const glyph = downloadGlyph(state) ?? <ExpiredGlyph size={18} />;
   const cls = state.phase === "downloading" ? "downloading"
             : state.phase === "failed" ? "failed"
             : state.phase === "expired" ? "expired" : "";

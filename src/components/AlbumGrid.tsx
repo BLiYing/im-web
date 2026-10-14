@@ -1,3 +1,4 @@
+import { ExpiredGlyph } from "./ExpiredCover";
 import { chunkedTaskFor } from "../sdk/chunkedUpload";
 import type { ChatMessage } from "../sdk/protocol";
 import { albumRowPattern, type AlbumTick } from "../album";
@@ -59,11 +60,14 @@ export function AlbumGrid({ members, timeLabel, tick = "none", progress, gateFor
                     ? (m.posterUrl ? <img src={m.posterUrl} alt="" onError={() => onMediaError?.(m)} /> : <VideoFrame src={videoFrameSrc(m.content)} thumb={m.thumb} onError={() => onMediaError?.(m)} />)
                     : <img src={m.content} alt="" onError={() => onMediaError?.(m)} />}
                 {gated
-                  ? (expiredFor?.(m) ? null : <span className="album-dl">↓</span>) // 失效格不给 ↓（无从重下），只留磨砂 dim
+                  ? (expiredFor?.(m)
+                      // 失效格（对齐 iOS setExpired: / Android AlbumTileGate）：整格压暗 + 中心 ⊘，**只剩 ⊘**——不给 ↓（无从重下）。
+                      ? <><span className="tile-expired-dim" /><span className="play-badge expired" role="img" title={tr("media.placeholder.expired")} aria-label={tr("media.placeholder.expired")}><ExpiredGlyph size={22} /></span></>
+                      : <span className="album-dl">↓</span>)
                   : m.contentType === "video" && !(m.status === "sending" && m.convSeq === 0) && <span className="play-badge">▶</span>}
                 {/* 角标：门控显「尺寸(·时长)」；否则仅时长（上传中也显示——宫格进度在中心，左上角是空的，与 iOS 一致）。 */}
                 {gated
-                  ? ((sizeText || durText) && <span className="album-duration">{[sizeText, durText].filter(Boolean).join(" · ")}</span>)
+                  ? (!expiredFor?.(m) && (sizeText || durText) && <span className="album-duration">{[sizeText, durText].filter(Boolean).join(" · ")}</span>)
                   : (durText && <span className="album-duration">{durText}</span>)}
                 {m.status === "sending" && m.convSeq === 0 && (
                   <span className="album-tile-dim">

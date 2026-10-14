@@ -1,8 +1,7 @@
 // MessageList：聊天消息流的逐行渲染（系统行/撤回墓碑/相册宫格/文本·图片·视频·文件·合并转发气泡/引用条/图说/
 // 状态标记/多选勾选）。从 App.tsx 平移（阶段 1，行为保持型：JSX 逐字搬，CODING_STYLE §7）。
 // - **稳定动作**从 ChatActionsContext 取（setMenu/setViewer/onGateTap/...，App 侧 useMemo 一次）；
-// - **reactive 值与 App 内闭包**（messages/selectMode/mediaGate/senderLabel/renderMessageText/...）走 props；
-// - `.msgs` 滚动容器与 onScroll 仍留在 App（滚动核心互咬 ref，§7 明确缓拆），本组件只出行。
+// - **reactive 值与 App 内闭包**（messages/selectMode/mediaGate/senderLabel/renderMessageText/...）走 props；`.msgs` 滚动容器与 onScroll 仍留在 App（§7 缓拆），本组件只出行。
 // 护栏：App.messageList.test.tsx（15 例）+ App.smoke.test.tsx。
 import { bubbleLayoutClass } from "../bubbleLayout";
 import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
@@ -25,6 +24,7 @@ import { IdCard } from "lucide-react";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
 import { CALL_CONTENT_TYPE, renderCallRecord } from "../callRecord";
 import { placeSingleCall } from "../rtc/rtcCall";
+import { ExpiredCover } from "./ExpiredCover";
 import { CallRecordBody, CallSysItem } from "./CallRecordBubble";
 import { Avatar } from "./Avatar";
 import { AlbumGrid } from "./AlbumGrid";
@@ -32,8 +32,7 @@ import { QuoteThumb, QuoteSnapshotIcon } from "./QuoteThumb";
 import { FileGateIcon } from "./FileGateIcon";
 import { LinkCard } from "./LinkCard";
 import { VoiceBubble, setVoiceRelayResolver, voicePlayedSet } from "./VoiceBubble";
-import { useChatActions } from "../ChatActionsContext";
-import { resendPolicyFor } from "../resendPolicy";
+import { useChatActions } from "../ChatActionsContext"; import { resendPolicyFor } from "../resendPolicy"; import { useExpiryProbe } from "../useExpiryProbe";
 import { VideoFrame } from "./VideoFrame"; import { ReadTick } from "./ReadTick";
 
 export interface MessageListProps {
@@ -84,6 +83,7 @@ export function MessageList(p: MessageListProps) {
     onGateTap, onMediaBubbleTap, openReadyFile, onPassiveMediaError, retryUpload, resendMessage, toggleUploadPause,
     toggleSelected, fetchLinkPreview, onMediaLoad, pendingFilesRef,
   } = useChatActions();
+  useExpiryProbe(messages, mediaGate); // 进会话就探门控媒体是否已被服务端清理（与群资料媒体页签同一套失效登记）
   // 语音接力连播（§6.4，对齐 iOS）：把"下一条该播谁"的数据源注入 VoiceBubble 的模块级单例 audio。
   // 规则本身在 pickNextVoiceRelay（纯函数，voice.test.ts 护栏）；这里只负责 finishedMid→索引 的定位
   // 与 src 拼装。卸载（切会话）即注销 → 接力自然停在本会话内。
@@ -353,8 +353,7 @@ export function MessageList(p: MessageListProps) {
                             : <VideoFrame className="msg-image" src={videoFrameSrc(mediaSrc(m))} thumb={m.thumb} thumbClass="msg-image msg-image-blur" emptyClass="msg-image msg-image-empty" onLoadedData={onMediaLoad} onError={() => void onPassiveMediaError(m)} />)
                         : <img className="msg-image" src={mediaSrc(m)} alt={tr("common.image")} onLoad={onMediaLoad} onError={() => void onPassiveMediaError(m)} />}
                     {gate
-                      ? (gate.phase === "expired"
-                          ? <span className="play-badge expired" title={tr("media.placeholder.expired")}>⊘</span>
+                      ? (gate.phase === "expired" ? <ExpiredCover caption={downloadText(gate, "", m.contentType as MediaKind)} />
                           : downloadGlyph(gate) && <span className="play-badge">{downloadGlyph(gate)}</span>)
                       : uploading
                       ? (chunkedTaskFor(m.clientMsgId ?? "") && <span className="play-badge">{uploadPaused ? "↑" : "⏸"}</span>)
@@ -362,10 +361,10 @@ export function MessageList(p: MessageListProps) {
                         ? <span className="play-badge">↻</span>
                         : m.contentType === "video" && <span className="play-badge">▶</span>}
                     {gate
-                      ? <span className="media-badge media-badge-tl">
+                      ? (gate.phase !== "expired" && <span className="media-badge media-badge-tl">
                           {/* 未下载=「大小 · 时长」（大小在前，与宫格/iOS 统一）；下载中/暂停/失败=只显状态，藏时长（省空间、防溢出）。 */}
                           {downloadText(gate, formatFileSize(m.fileSize), m.contentType as MediaKind)}{gate.phase === "notStarted" && durationText ? ` · ${durationText}` : ""}
-                        </span>
+                        </span>)
                       : uploading
                       ? <span className="media-badge media-badge-tl">{uploadPaused ? "⏸ " : ""}{formatUploadProgress(uploading.sent, uploading.total)}</span>
                       : (durationText && <span className="media-badge media-badge-tl">{durationText}</span>)}
