@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { ExpiredViewerPage } from "./ExpiredCover";
 import { useProbeExpiry } from "../ChatActionsContext";
 import { ChevronLeft, ChevronRight, Play, Download, LayoutGrid, MoreHorizontal, X } from "lucide-react";
@@ -6,6 +6,8 @@ import type { ChatMessage } from "../sdk/protocol";
 import { videoFrameSrc } from "../messageContent";
 import { useT } from "../i18n";
 import { ZoomableImage } from "./ZoomableImage";
+import { HeicViewerImage } from "./HeicViewerImage";
+import { isHeicLike } from "../heicDecode";
 import { VideoFrame } from "./VideoFrame";
 
 /** 媒体查看器（镜像 iOS）：图片/视频 + 右下 下载/媒体库/更多（点击浮层 6 功能）。点击遮罩关闭。
@@ -48,6 +50,8 @@ export function MediaViewer({
   const tr = useT();
   // 进查看器复验一次：命中浏览器缓存的图不会 onError，列表里又不批量探；每地址每会话一次，命中落持久失效标记
   const probe = useProbeExpiry();
+  // 本地解码 HEIC 失败的地址：命中后落回「下载」降级卡（按地址记，翻页不串）
+  const [heicFailed, setHeicFailed] = useState<string | null>(null);
   useEffect(() => { if (!isExpired) probe?.(m, true); }, [m.content]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="modal-mask viewer-mask" onClick={onClose}>
@@ -89,6 +93,10 @@ export function MediaViewer({
                  onClick={(e) => { e.stopPropagation(); onDismissMore(); }}
                  onError={onVideoError} />
         )
+      ) : unsupported && isHeicLike(m.content) && heicFailed !== m.content ? (
+        // HEIC/HEIF：浏览器不认（Safari 除外，它不会走到这里）→ 本地 WASM 解成 JPEG 再显示；失败才降级
+        <HeicViewerImage key={mediaKey} src={m.content} thumb={m.thumb} onTap={onDismissMore}
+                         onFail={() => setHeicFailed(m.content)} />
       ) : unsupported ? (
         // 网页端无法渲染的图片格式（HEIC 等）：不塞进 <img> 变破图，显缩略(若有)+提示+下载入口（与视频降级卡同版式）。
         <div className="viewer-unplayable" onClick={(e) => e.stopPropagation()}>

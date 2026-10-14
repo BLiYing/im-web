@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.9",
+    "heic2any": "^0.0.4",
     "im-rtc-call-engine": "2.2.0",
     "im-rtc-call-uikit-react": "2.2.0",
     "jsqr": "^1.4.0",

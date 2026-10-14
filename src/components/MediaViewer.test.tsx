@@ -1,11 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import * as heic from "../heicDecode";
 import { MediaViewer } from "./MediaViewer";
 import type { ChatMessage } from "../sdk/protocol";
 import { ChatActionsProvider, type ChatActions } from "../ChatActionsContext";
 
-afterEach(cleanup);
+const realCreateObjectURL = URL.createObjectURL;
+const realRevokeObjectURL = URL.revokeObjectURL;
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks(); // heicDecode 的 spyOn 不能漏进后面的用例
+  URL.createObjectURL = realCreateObjectURL;
+  URL.revokeObjectURL = realRevokeObjectURL;
+});
 
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
   convId: "c", from: "u2", content: "https://x/a.jpg", contentType: "image",
@@ -85,6 +93,22 @@ describe("MediaViewer 分支与动作", () => {
     render(<MediaViewer {...base} m={msg({ thumb: "https://x/t.jpg" })} unsupported={true} />);
     expect(screen.getByText(/HEIC/)).toBeTruthy();
     expect(screen.getByText("下载后用本地程序打开")).toBeTruthy();
+  });
+
+  it("HEIC：本地解码成功 → 显示解码后的大图，不落降级卡", async () => {
+    vi.spyOn(heic, "decodeHeicToJpeg").mockResolvedValue(new Blob(["x"], { type: "image/jpeg" }));
+    URL.createObjectURL = vi.fn(() => "blob:decoded");
+    URL.revokeObjectURL = vi.fn();
+    const { container } = render(<MediaViewer {...base} m={msg({ content: "https://x/a.HEIC" })} unsupported={true} />);
+    expect(screen.getByText("正在转换图片格式…")).toBeTruthy();
+    await waitFor(() => expect(container.querySelector("img.image-viewer")?.getAttribute("src")).toBe("blob:decoded"));
+    expect(screen.queryByText("下载后用本地程序打开")).toBeNull();
+  });
+
+  it("HEIC：本地解码失败 → 落回下载降级卡", async () => {
+    vi.spyOn(heic, "decodeHeicToJpeg").mockRejectedValue(new Error("boom"));
+    render(<MediaViewer {...base} m={msg({ content: "https://x/a.heic", thumb: "https://x/t.jpg" })} unsupported={true} />);
+    await waitFor(() => expect(screen.getByText("下载后用本地程序打开")).toBeTruthy());
   });
 
   it("翻页箭头：中间项显上一/下一；两端各自隐藏；点击回传方向", () => {
