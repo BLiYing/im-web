@@ -268,7 +268,7 @@ export function DetailTabs({
         {activeTab === "media" && (
           media.length === 0 ? <div className="detail-empty">{tr("detail.tab.empty_media")}</div> : (
             <div className="detail-media-grid">
-              {/* 门控格子与会话媒体库共用 <MediaTile>（variant=detail：失效格无 ↓ 徽标、仍显尺寸）。
+              {/* 门控格子与会话媒体库共用 <MediaTile>（variant=detail：失效格 = 压暗 + ⊘，无 ↓ 徽标也无尺寸角标）。
                   点门控格=就地解门控（不进查看器），就绪格才打开查看器（对齐 iOS 详情宫格 档 A，autoPrefetch=NO）。 */}
               {media.map((m) => {
                 const gate = mediaGate(m);

@@ -1221,7 +1221,6 @@
   "media.viewer.next": "Next (→)",
   "media.viewer.offline_partial_notice": "No network. You can only browse what's already loaded.",
   "media.viewer.prev": "Previous (←)",
-  "media.viewer.video_expired": "This video has expired and was removed from the server.",
   "media.viewer.video_unsupported": "This browser can't play this video format (e.g. HEVC).",
   "mute.10m": "10 minutes",
   "mute.1d": "1 day",

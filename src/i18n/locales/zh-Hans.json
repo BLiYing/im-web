@@ -1187,7 +1187,6 @@
   "media.viewer.next": "下一张（→）",
   "media.viewer.offline_partial_notice": "网络不通，只能翻已加载的部分",
   "media.viewer.prev": "上一张（←）",
-  "media.viewer.video_expired": "视频已失效（已被服务端清理）。",
   "media.viewer.video_unsupported": "当前浏览器不支持该视频的编码格式（如 HEVC）。",
   "mute.10m": "10 分钟",
   "mute.1d": "1 天",

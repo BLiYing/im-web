@@ -32,7 +32,9 @@ export function MediaTile({ variant, m, gate, onClick, onMenu, onMediaError }: {
   const tr = useT();
   const probe = useProbeExpiry();
   // 进页就探一次是否已被服务端清理：门控格 / 只拉封面的视频格都不会请求原件，不探就要等用户点开才显失效。
-  useEffect(() => { if (m.content) probe?.(m); }, [m.content, probe]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 就绪的图不批量探（自己会加载，缓存命中的留到进查看器再复验）。
+  const needsProbe = !!gate || m.contentType === "video";
+  useEffect(() => { if (m.content && needsProbe) probe?.(m); }, [m.content, needsProbe, probe]); // eslint-disable-line react-hooks/exhaustive-deps
   const s = SPEC[variant];
   const sizeText = formatFileSize(m.fileSize);
   const title = gate ? (sizeText ? tr("chat.file.size_tap_download", { size: sizeText }) : tr("media.download.tap_to_download")) : undefined;

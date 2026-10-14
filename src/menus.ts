@@ -105,7 +105,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     { id: "favorite", label: t("common.favorite"), icon: Bookmark, visible: (c) => c.m.convSeq > 0 && !!c.m.content && !c.m.recalledAt && !c.mediaGone && c.m.contentType !== "system", run: (c) => h.favorite(c.m) },
     // 下载：图片/视频/文件保存到本地（浏览器下载目录）。复用应用内已下的 blob，否则拉远端。必须有 content（乐观行 blob: 不算）。
     { id: "download", label: t("common.download"), icon: Download,
-      visible: (c) => !c.m.recalledAt && c.m.convSeq > 0 && !!c.m.content
+      visible: (c) => !c.m.recalledAt && c.m.convSeq > 0 && !!c.m.content && !c.mediaGone
         && (c.m.contentType === "image" || c.m.contentType === "video" || c.m.contentType === "file"),
       run: (c) => h.download(c.m) },
     { id: "recall", label: t("chat.msg_menu.recall"), icon: Undo2, visible: (c) => canRecall(c.m, c.uid), run: (c) => h.recall(c.m) },

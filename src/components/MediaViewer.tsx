@@ -48,7 +48,7 @@ export function MediaViewer({
   const tr = useT();
   // 进查看器复验一次：命中浏览器缓存的图不会 onError，列表里又不批量探；每地址每会话一次，命中落持久失效标记
   const probe = useProbeExpiry();
-  useEffect(() => { if (!isExpired) probe?.(m); }, [m.content]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!isExpired) probe?.(m, true); }, [m.content]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="modal-mask viewer-mask" onClick={onClose}>
       {isExpired ? (

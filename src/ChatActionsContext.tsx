@@ -23,7 +23,7 @@ export interface ChatActions {
   openReadyFile: (m: ChatMessage) => Promise<void>;
   onPassiveMediaError: (m: ChatMessage) => Promise<void>;
   /** 进页主动探失效（媒体 tab / 媒体库宫格）：每地址每会话一次，404/410 落持久失效标记。 */
-  probeExpiry: (m: ChatMessage) => void;
+  probeExpiry: (m: ChatMessage, force?: boolean) => void;
   retryUpload: (m: ChatMessage) => void;
   /** 发送失败红❗点击：按 resendPolicyFor 分派重发。相册传该组任一成员 + 当前会话消息表（整组重发）。 */
   resendMessage: (m: ChatMessage, all?: ChatMessage[]) => void;
@@ -81,6 +81,6 @@ export function useChatActions(): ChatActions {
 }
 
 /** 可选版：没有 Provider（单测 / 预览）时返回 undefined，不抛错。 */
-export function useProbeExpiry(): ((m: ChatMessage) => void) | undefined {
+export function useProbeExpiry(): ((m: ChatMessage, force?: boolean) => void) | undefined {
   return useContext(ChatActionsContext)?.probeExpiry;
 }
