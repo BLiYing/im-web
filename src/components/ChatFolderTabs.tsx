@@ -5,7 +5,7 @@
 // Tab 条：首位恒为「全部」，其后是各文件夹；每个 Tab 带未读消息总数角标（蓝=有提醒，灰=只有静音会话有未读）。
 // 样式沿用 `.detail-tabs`（选中=主色实心）。右键某个文件夹 Tab → 编辑 / 删除（「全部」不触发）。
 // 没有任何文件夹时不画 Tab 条，搜索框与此前完全一致。
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { Conversation } from "../sdk/protocol";
 import { folderBadge, type ChatFolder } from "../chatFolders";
@@ -32,6 +32,14 @@ export function ConvListHead({ query, setQuery, conversations, onEditFolder }: {
     { folder: null, label: t("folder.tab.all") },
     ...list.map((f) => ({ folder: f, label: f.name })),
   ];
+  const stripRef = useRef<HTMLDivElement>(null);
+  // Tab 多到放不下时横向滚动：选中项（含左右横滑切换）自动滚进可视区，鼠标滚轮竖向滚动映射为横向。
+  useEffect(() => {
+    stripRef.current?.querySelector<HTMLElement>(".folder-tab.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [folders.selectedId, list.length]);
+  const onWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (e.deltaX === 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) e.currentTarget.scrollLeft += e.deltaY;
+  };
   return (
     <div className="convlist-head">
       {/* 首页全局搜索框（SEARCH_DESIGN §3/§04）：输入即出「会话 / 联系人 / 聊天记录」三分组。 */}
@@ -42,7 +50,7 @@ export function ConvListHead({ query, setQuery, conversations, onEditFolder }: {
         {query && <button className="home-search-clear" title={t("common.clear")} onClick={() => setQuery("")}><X size={14} /></button>}
       </div>
       {list.length > 0 && !query.trim() && (
-        <div className="folder-tabs" role="tablist">
+        <div className="folder-tabs" role="tablist" ref={stripRef} onWheel={onWheel}>
           {tabs.map(({ folder, label }) => {
             const id = folder?.id ?? null;
             const b = folderBadge(conversations, folder, now);

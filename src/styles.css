@@ -35,6 +35,7 @@
   /* 压在媒体上的已读双勾：底恒为暗色遮罩，故用亮蓝（不随明暗主题变化，与 iOS mediaBadgeCheckRead 同值）。 */
   --check-read-on-media: #66a9ff;
   --subtle-fill: rgba(29, 33, 41, 0.05);
+  --segment-pill: #ffffff;   /* 分段条选中药丸（同 Android IMColors.segmentPill） */
   --accent-flash: rgba(76, 166, 76, 0.35);
   --overlay: rgba(0, 0, 0, 0.4);
   --overlay-strong: rgba(0, 0, 0, 0.72);
@@ -88,7 +89,7 @@
   --text: #e6e8eb; --text-secondary: #a0a7b0; --text-tertiary: #707883;
   --danger: #ff696e; --online: #42c77a; --link: #66a9ff;
   --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（§8.1b）：accent 深浅一致，故与浅色同值 */
-  --subtle-fill: rgba(255, 255, 255, 0.07);
+  --subtle-fill: rgba(255, 255, 255, 0.07); --segment-pill: #494949;
   --check-read: #66a9ff; --meta-time: #9fb89a;
   --wall-top: #0e1a12; --wall-bottom: #16261a;
   --date-pill-bg: rgba(0, 0, 0, 0.45);
@@ -109,7 +110,7 @@
     --text: #e6e8eb; --text-secondary: #a0a7b0; --text-tertiary: #707883;
     --danger: #ff696e; --online: #42c77a; --link: #66a9ff;
     --accent-soft: rgba(76, 166, 76, 0.12); /* 淡主色底（§8.1b）：accent 深浅一致，故与浅色同值 */
-    --subtle-fill: rgba(255, 255, 255, 0.07);
+    --subtle-fill: rgba(255, 255, 255, 0.07); --segment-pill: #494949;
     --check-read: #66a9ff; --meta-time: #9fb89a;
     --wall-top: #0e1a12; --wall-bottom: #16261a;
     --date-pill-bg: rgba(0, 0, 0, 0.45);
@@ -2199,14 +2200,12 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 /* ── 聊天文件夹（CHAT_FOLDERS_DESIGN）：会话列表顶部固定头（搜索 + Tab 条）与 Tab 条 ─────────────── */
 /* 搜索框与 Tab 条一起吸顶：列表滚动时二者都不动（对齐 iOS / Android）。上下间距相等：搜索框自带 8px 下边距 = Tab 条 8px 下边距 */
 .convlist-head { position: sticky; top: 0; z-index: 4; background: var(--page-bg); }
-.folder-tabs { display: flex; gap: 4px; padding: 4px; margin: 0 var(--space-3) var(--space-2); background: var(--card-bg); border-radius: 10px; overflow-x: auto; scrollbar-width: none; }
+.folder-tabs { display: flex; gap: 4px; padding: 4px; width: fit-content; max-width: calc(100% - 2 * var(--space-3)); box-sizing: border-box; margin: 0 auto var(--space-2); background: var(--subtle-fill); border-radius: 18px; overflow-x: auto; scrollbar-width: none; }
 .folder-tabs::-webkit-scrollbar { display: none; }
-.folder-tab { flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 52px; padding: 7px 10px; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); font-size: 14px; cursor: pointer; white-space: nowrap; }
-.folder-tab.active { background: var(--accent); color: var(--on-accent); }
+.folder-tab { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 14px; border: 0; border-radius: 14px; background: none; color: var(--text-primary); font-size: 14px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.folder-tab.active { background: var(--segment-pill); font-weight: 600; }
 .folder-tab-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--unread-badge); color: var(--on-accent); font-size: 11px; line-height: 18px; text-align: center; }
 .folder-tab-badge.muted { background: var(--text-secondary); }
-.folder-tab.active .folder-tab-badge { background: var(--on-accent); color: var(--accent); }
-.folder-tab.active .folder-tab-badge.muted { background: var(--on-accent); color: var(--text-secondary); }
 /* 添加到文件夹：长按（右键）菜单里的二级折叠区 */
 .ctx-folder-sub { border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); margin: 4px 0; padding: 4px 0; }
 .ctx-folder-sub button { padding-left: 28px; }
