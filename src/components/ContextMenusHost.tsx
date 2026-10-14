@@ -126,11 +126,14 @@ export function ContextMenusHost(p: ContextMenusHostProps) {
 
       {fileMenu && (() => {
         // 详情内容右键菜单（**文件/媒体/链接三 tab 共用**，成员除外；对齐 iOS 详情各 tab 长按）：
-        // 转发 / 定位到聊天 / 取消下载（仅下载中）/ 删除（任务2 两档）。菜单对任意 ChatMessage 通用。
+        // 定位到聊天（第一位，三端同序）/ 转发 / 取消下载（仅下载中）/ 删除（任务2 两档）。菜单对任意 ChatMessage 通用。
         const m = fileMenu.m;
         const downloading = dlStates[m.content]?.phase === "downloading";
         return (
           <AnchoredMenu x={fileMenu.x} y={fileMenu.y} className="ctx-menu">
+            {/* 定位=回到聊天：只关会遮聊天的宿主（媒体库 / 查看器）；详情卡是右侧列不遮聊天，按用户要求保持不消失。 */}
+            <button onClick={() => { setFileMenu(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
+              <MessageCircle size={16} className="menu-icon" />{t("chat.menu.locate")}</button>
             <button onClick={() => {
               setFileMenu(null); setForwardMode("each");
               // 资料页文件 tab 视角只显文件名，看不到源消息的 caption/mentions；若原样透传会把当年
@@ -139,9 +142,6 @@ export function ContextMenusHost(p: ContextMenusHostProps) {
               setForwarding([{ ...m, caption: undefined, mentions: undefined, mentionAll: false }]);
             }}>
               <Forward size={16} className="menu-icon" />{t("common.forward")}</button>
-            {/* 定位=回到聊天：只关会遮聊天的宿主（媒体库 / 查看器）；详情卡是右侧列不遮聊天，按用户要求保持不消失。 */}
-            <button onClick={() => { setFileMenu(null); setGalleryOpen(false); setViewer(null); locateInChat(m.convId, m.convSeq); }}>
-              <MessageCircle size={16} className="menu-icon" />{t("chat.menu.locate")}</button>
             {downloading && (
               <button onClick={() => { setFileMenu(null); onGateTap(m); }}>
                 <X size={16} className="menu-icon" />{t("file.menu.cancel_download")}</button>

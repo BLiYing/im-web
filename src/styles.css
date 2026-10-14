@@ -38,6 +38,10 @@
   --accent-flash: rgba(76, 166, 76, 0.35);
   --overlay: rgba(0, 0, 0, 0.4);
   --overlay-strong: rgba(0, 0, 0, 0.72);
+  /* 查看器浮钮（关闭 / 翻页 / 右下三枚）：蒙层本身已是 90% 黑，黑色半透明底看不出来，改用浅色玻璃底 + 细描边 */
+  --viewer-ctl-bg: rgba(255, 255, 255, 0.18);
+  --viewer-ctl-bg-hover: rgba(255, 255, 255, 0.3);
+  --viewer-ctl-border: rgba(255, 255, 255, 0.32);
   --shadow-soft: rgba(0, 0, 0, 0.18);
   --shadow-strong: rgba(0, 0, 0, 0.28);
   --neutral-control: rgba(127, 127, 127, 0.18);
@@ -669,8 +673,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .image-viewer.zoomable.zoom-anim { transition: transform .16s ease; }
 
 /* 任务3 · 查看器左右翻页箭头（会话媒体时间线，竖直居中贴边）+ 顶部计数 */
-.viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1; }
-.viewer-nav:hover { background: var(--overlay-strong); }
+.viewer-nav { position: fixed; top: 50%; transform: translateY(-50%); width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--viewer-ctl-border); background: var(--viewer-ctl-bg); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; z-index: 1; }
+.viewer-nav:hover { background: var(--viewer-ctl-bg-hover); }
 .viewer-nav.prev { left: 24px; }
 .viewer-nav.next { right: 24px; }
 /* 顶部标题栏（对齐 iOS）：会话名 + 「第 i 张 / 共 N 张」。渐变底带预留高度，取代原先浮在图上、与图片重叠的孤立计数。
@@ -686,8 +690,8 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 
 /* 媒体查看器工具条（右下：下载/媒体库/更多，镜像 iOS） */
 .viewer-bar { position: fixed; right: 24px; bottom: 24px; display: flex; gap: 12px; align-items: center; }
-.viewer-btn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: var(--overlay); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
-.viewer-btn:hover { background: var(--overlay-strong); }
+.viewer-btn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--viewer-ctl-border); background: var(--viewer-ctl-bg); color: var(--on-media); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.viewer-btn:hover { background: var(--viewer-ctl-bg-hover); }
 .viewer-close { position: fixed; top: 14px; left: 16px; z-index: 3; }
 .viewer-more-wrap { position: relative; }
 .viewer-more-pop { position: absolute; right: 0; bottom: 48px; min-width: 160px; padding: 4px; display: flex; flex-direction: column; }

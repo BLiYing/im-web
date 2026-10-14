@@ -7,7 +7,7 @@ import { CALL_CONTENT_TYPE } from "./callRecord";
 import { isMutedNow } from "./muteState";
 import { t } from "./i18n";
 import {
-  Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2, Flag,
+  Copy, Reply, Forward, Bookmark, Undo2, CheckSquare, Languages, Trash2,
   Pin, PinOff, Bell, BellOff, CheckCheck, Circle, Pencil, XCircle, Download, Eye,
   FileText,
 } from "lucide-react";
@@ -59,7 +59,6 @@ export interface MessageHandlers {
   pin: (m: ChatMessage, pinned: boolean) => void;
   delete: (m: ChatMessage) => void;
   readReceipts: (m: ChatMessage) => void;
-  reportMsg: (m: ChatMessage) => void; // 举报这条消息（2026-09-06 合并后菜单里唯一的举报入口；举报人本身在资料页）
   cancelSend: (m: ChatMessage) => void;
   /** 语音转文字（服务端识别）；hasTranscript 为真时该动作是"取消转文字"（只收本地面板）。 */
   transcribe: (m: ChatMessage) => void;
@@ -131,7 +130,7 @@ export function buildMessageActions(h: MessageHandlers): MenuAction<MessageCtx>[
     // 举报（2026-09-06 由「举报消息 / 举报发送者」合并为单项）：对用户来说这本就是同一个动作，
     // 两个入口只让人犹豫选哪个；而消息类工单的信息是用户类的**超集**——服务端已按 (conv_id, conv_seq)
     // 反查发送者，管理员的一键禁言/封号照常落到那个人身上。「只举报这个人」的入口保留在资料页。
-    { id: "report", label: t("common.report"), icon: Flag, visible: (c) => c.m.from !== c.uid && c.m.convSeq > 0, run: (c) => h.reportMsg(c.m) },
+    // 举报：**长按菜单不再给**（2026-10-14 用户要求去掉，三端同口径）；入口保留在多选批量举报与资料页（用户级）。
     // 删除对发送中的本地件隐藏：删除只删行不停上传，传完仍会发出去（僵尸任务）；要撤走用「取消发送」。
     { id: "delete", label: t("common.delete"), icon: Trash2, danger: true,
       visible: (c) => !(c.m.status === "sending" && c.m.convSeq === 0), run: (c) => h.delete(c.m) },

@@ -125,11 +125,10 @@ describe("MediaViewer 分支与动作", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("更多浮层：媒体库里打开的没有收藏/复制；失效页再去掉转发与下载，只留定位与删除", () => {
-    render(<MediaViewer {...base} m={msg()} more={true} fromGallery={true} />);
-    expect(screen.queryByText("收藏")).toBeNull();
-    expect(screen.queryByText("复制")).toBeNull();
-    expect(screen.getByText("转发")).toBeTruthy();
+  it("更多浮层：与 iOS/Android 同项同序（下载·定位·收藏·复制·转发·删除），媒体库里打开的也一样；失效页只留定位与删除", () => {
+    const { container } = render(<MediaViewer {...base} m={msg()} more={true} fromGallery={true} />);
+    const labels = Array.from(container.querySelectorAll(".viewer-more-pop > *")).map((e) => e.textContent);
+    expect(labels).toEqual(["下载", "定位到聊天位置", "收藏", "复制", "转发", "删除"]);
     cleanup();
     render(<MediaViewer {...base} m={msg()} more={true} isExpired={true} />);
     expect(screen.queryByText("收藏")).toBeNull();
@@ -151,5 +150,11 @@ describe("MediaViewer 分支与动作", () => {
     probeExpiry.mockClear();
     render(wrap(<MediaViewer {...base} m={msg()} isExpired={true} />));
     expect(probeExpiry).not.toHaveBeenCalled();
+  });
+
+  it("右下角顺序：更多 · 媒体库 · 下载（下载恒在最右）", () => {
+    const { container } = render(<MediaViewer {...base} m={msg()} />);
+    const titles = Array.from(container.querySelectorAll(".viewer-bar > *")).map((e) => e.getAttribute("title") ?? e.querySelector("button")?.getAttribute("title"));
+    expect(titles).toEqual(["更多", "媒体库", "下载"]);
   });
 });

@@ -18,7 +18,7 @@ function conv(over: Partial<Conversation>): Conversation {
 }
 
 const msgHandlers = {
-  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), pin: vi.fn(), delete: vi.fn(), reportMsg: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), transcribe: vi.fn(), readReceipts: vi.fn(),
+  copy: vi.fn(), reply: vi.fn(), forward: vi.fn(), favorite: vi.fn(), download: vi.fn(), edit: vi.fn(), translate: vi.fn(), multiSelect: vi.fn(), recall: vi.fn(), pin: vi.fn(), delete: vi.fn(), reportUser: vi.fn(), cancelSend: vi.fn(), transcribe: vi.fn(), readReceipts: vi.fn(),
     comingSoon: vi.fn(),
 };
 const convHandlers = { setPinned: vi.fn(), setMuted: vi.fn(), markRead: vi.fn(), markUnread: vi.fn(), delete: vi.fn() };
@@ -31,7 +31,7 @@ describe("buildMessageActions", () => {
     const ids = buildMessageActions(msgHandlers).map((a) => a.id);
     expect(ids).toEqual([
       "readReceipts", "transcribe", "transcribeOff", "copy", "reply", "forward", "favorite", "download", "recall", "pin", "unpin", "edit",
-      "cancelSend", "multiSelect", "translate", "report", "delete",
+      "cancelSend", "multiSelect", "translate", "delete",
     ]);
   });
 
@@ -79,18 +79,13 @@ describe("buildMessageActions", () => {
     expect(find({ m: msg({ from: "1001", convSeq: 5, timestamp: now, recalledAt: now }), uid: "1001" })).toBe(false); // 已撤回
   });
 
-  // 2026-09-06：「举报消息 / 举报发送者」合并为单个 report（消息类工单的信息是用户类的超集，
-  // 服务端已按 conv_seq 反查发送者）。举报某个**人**本身的入口移到资料页「更多」。
-  it("举报项仅对对方消息可见，且只有一项；删除/复制对自己消息也可见", () => {
+  // 2026-10-14：长按菜单不再给举报（三端同口径）；举报入口只在多选批量与资料页（用户级）。
+  it("长按菜单没有举报项；删除/复制对自己消息可见", () => {
     const mine = { m: msg({ from: "1001", convSeq: 5 }), uid: "1001" };
     const theirs = { m: msg({ from: "2002", convSeq: 5 }), uid: "1001" };
     const actions = buildMessageActions(msgHandlers);
-    expect(visibleIds(actions, mine)).not.toContain("report");
-    expect(visibleIds(actions, theirs)).toContain("report");
-    // 合并后不该再有第二个举报入口（回归护栏：别哪天又加回「举报发送者」）。
-    expect(visibleIds(actions, theirs).filter((id) => id.startsWith("report"))).toEqual(["report"]);
-    // 未发出的本地件没有 conv_seq，服务端定位不到 → 不给举报。
-    expect(visibleIds(actions, { m: msg({ from: "2002", convSeq: 0 }), uid: "1001" })).not.toContain("report");
+    expect(visibleIds(actions, mine).filter((id) => id.startsWith("report"))).toEqual([]);
+    expect(visibleIds(actions, theirs).filter((id) => id.startsWith("report"))).toEqual([]);
     expect(visibleIds(actions, mine)).toContain("delete");
     expect(visibleIds(actions, mine)).toContain("copy");
   });
@@ -170,7 +165,7 @@ describe("buildMessageActions", () => {
       expect(sentMine).toContain("recall");
       expect(sentMine).not.toContain("cancelSend");
       expect(sentMine).not.toContain("report");
-      expect(sentTheirs).toContain("report");
+      expect(sentTheirs).not.toContain("report");
       expect(sentTheirs).not.toContain("recall");
       expect(sentTheirs).not.toContain("cancelSend");
       expect(sentTheirs.includes("download")).toBe(["image", "video", "file"].includes(ct));

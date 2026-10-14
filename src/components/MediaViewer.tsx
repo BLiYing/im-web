@@ -123,23 +123,20 @@ export function MediaViewer({
       {/* 左上角关闭（iOS/Android 都有 ✕）：此前只能点黑底关，找不到入口 */}
       <button className="viewer-btn viewer-close" title={tr("common.close")}
               onClick={(e) => { e.stopPropagation(); onClose(); }}><X size={18} /></button>
+      {/* 右下角三枚钮顺序与 iOS / Android 同：更多 · 媒体库 · 下载（下载恒在最右） */}
       <div className="viewer-bar" onClick={(e) => e.stopPropagation()}>
-        {!isExpired && <a className="viewer-btn" href={m.content} download title={tr("common.download")}><Download size={18} /></a>}
-        {!fromGallery && (
-          <button className="viewer-btn" title={tr("media.viewer.gallery")} onClick={onOpenGallery}><LayoutGrid size={18} /></button>
-        )}
         <div className="viewer-more-wrap">
           {/* 点击切换（原 hover：鼠标从按钮移向弹窗时穿过间隙触发 onMouseLeave 即消失，够不到菜单项）。 */}
           <button className="viewer-btn" title={tr("common.more")} onClick={(e) => { e.stopPropagation(); onToggleMore(); }}><MoreHorizontal size={18} /></button>
           {more && (
             <div className="viewer-more-pop">
-              <button onClick={onLocate}>{tr("media.viewer.locate")}</button>
-              {/* 媒体库/群资料里打开的查看器与 iOS/Android 同：定位 · 转发 · 删除（无收藏/复制）；
-                  失效页再去掉所有要字节的项（转发/下载）。聊天页内打开的保留收藏与复制（iOS/Android 聊天查看器同）。 */}
-              {!fromGallery && !isExpired && <button onClick={onFavorite}>{tr("common.favorite")}</button>}
+              {/* 项与顺序和 iOS / Android 查看器「更多」同一份：下载 · 定位 · 收藏 · 复制 · 转发 · 删除；
+                  失效页去掉要字节的项（下载/收藏/复制/转发）。 */}
               {!isExpired && <a href={m.content} download>{tr("common.download")}</a>}
+              <button onClick={onLocate}>{tr("media.viewer.locate")}</button>
+              {!isExpired && <button onClick={onFavorite}>{tr("common.favorite")}</button>}
               {/* 视频不提供复制：无"复制字节"语义，产品上禁止复制视频消息（与 iOS 对齐）。图片才有复制。 */}
-              {!fromGallery && !isExpired && m.contentType !== "video" && (
+              {!isExpired && m.contentType !== "video" && (
                 <button onClick={onCopy}>{tr("common.copy")}</button>
               )}
               {!isExpired && <button onClick={onForward}>{tr("common.forward")}</button>}
@@ -147,6 +144,10 @@ export function MediaViewer({
             </div>
           )}
         </div>
+        {!fromGallery && (
+          <button className="viewer-btn" title={tr("media.viewer.gallery")} onClick={onOpenGallery}><LayoutGrid size={18} /></button>
+        )}
+        {!isExpired && <a className="viewer-btn" href={m.content} download title={tr("common.download")}><Download size={18} /></a>}
       </div>
     </div>
   );

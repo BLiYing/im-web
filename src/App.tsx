@@ -1508,7 +1508,7 @@ export default function App() {
   }, []);
 
   // 举报簇（AG-3）→ useReport：长按菜单举报这条 / 资料页举报这个人 / 多选批量举报同一发送者的多条。
-  const { reportMsg, reportPeer, reportSelected, reportableSender, reportHasMine } = useReport({
+  const { reportPeer, reportSelected, reportableSender, reportHasMine } = useReport({
     clientRef, uid, remarks, askPrompt, setToast, setMenu,
     convId, msgsByConv, selected, selectMode, exitSelectMode,
   });
@@ -1662,12 +1662,11 @@ export default function App() {
       // 聊天菜单的「删除」在渲染层按锚点特判 → requestDelete（两档子菜单/仅删自己/本地删，需菜单 x/y）；
       // 此 handler 不经 a.run 触发，仅为 buildMessageActions 的类型契约占位（requestDelete 内部另直接用 deleteMessage 处理 convSeq<=0）。
       delete: deleteMessage,
-      reportMsg,
       cancelSend: (m: ChatMessage) => (m.contentType === "voice" ? cancelVoiceSend(m) : cancelSendMessage(m)),
       transcribe: transcribeMessage,
       comingSoon,
     }),
-    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, reportMsg, cancelSendMessage, cancelVoiceSend, transcribeMessage, comingSoon],
+    [copyMessage, replyMessage, forwardMessage, favoriteMessage, saveMessageToDisk, editMessage, translateMessage, enterSelectMode, recallMessage, pinMessage, deleteMessage, cancelSendMessage, cancelVoiceSend, transcribeMessage, comingSoon],
   );
 
   // 全屏文本阅读器：Esc 关闭（点蒙层/✕ 已在 JSX 处理）。
