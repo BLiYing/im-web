@@ -84,6 +84,13 @@ export class FakeIMClient {
   loadNewer(...a: unknown[]) { this.rec("loadNewer", ...a); }
   async fetchUserPresence() { return { onlineUntil: 0, lastSeen: 0 }; }
   async fetchPinned() { this.rec("fetchPinned"); return FakeIMClient.pinned; }
+  /** 一键取消所有置顶：模拟服务端当场清空集合（广播帧由测试经 handlers.onMsgOp 自行驱动）。失败用例可设 clearPinnedError。 */
+  static clearPinnedError: Error | null = null;
+  async clearPinned(...a: unknown[]) {
+    this.rec("clearPinned", ...a);
+    if (FakeIMClient.clearPinnedError) throw FakeIMClient.clearPinnedError;
+    const n = FakeIMClient.pinned.length; FakeIMClient.pinned = []; return n;
+  }
   sendText(content: string, to: string, convId: string): string {
     this.rec("sendText", content, to, convId);
     return `cmid-${++this.seq}`;
@@ -101,6 +108,7 @@ export type Fake = {
   last: { handlers: Record<string, (...a: unknown[]) => void>; calls: Record<string, unknown[][]> } | null;
   conversations: Conversation[];
   pinned: PinnedMessage[];
+  clearPinnedError: Error | null;
   ranges: { lo: number; hi: number }[];
   head: number;
   floor: number;

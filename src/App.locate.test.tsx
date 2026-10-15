@@ -28,6 +28,12 @@ const Fake = IMClient as unknown as Fake;
 const HEAD = 500;
 const PIN_SEQ = 7;
 
+/** 置顶面板 v3：点横幅只开面板，定位走面板里那条的定位图标（先关面板再定位）。 */
+async function locateViaPinnedPanel(): Promise<void> {
+  fireEvent.click(document.querySelector(".pin-banner-main")!);
+  fireEvent.click(await screen.findByRole("button", { name: "定位到聊天位置" }));
+}
+
 const msg = (seq: number): ChatMessage => ({
   convId: CID, from: PEER, content: `#${seq}`, contentType: "text",
   convSeq: seq, timestamp: 1_700_000_000_000 + seq, status: "sent",
@@ -78,7 +84,7 @@ describe("跨窗口定位：一次点击就该到位", () => {
     await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
     serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
 
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
 
     // 一次点击：目标要真的渲染出来并高亮。旧实现在这里只会渲染尾段（401..500）。
     await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
@@ -94,7 +100,7 @@ describe("跨窗口定位：一次点击就该到位", () => {
     await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
     serveWindow({ anchorFound: true, deliverFrom: 20, deliverTo: 60 }); // 就是不给 PIN_SEQ
 
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
 
     await waitFor(() => expect(screen.getByText("原消息已被删除")).toBeInTheDocument());
     const opened = (Fake.last!.calls["requestWindow"] ?? []).length;
@@ -118,7 +124,7 @@ describe("跳到历史之后，必须有回程", () => {
     expect(document.querySelector(".jump-btn")).toBeNull(); // 贴最新时本就不该有
     serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
 
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
 
     await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
     await waitFor(() => expect(document.querySelector(".jump-btn")).toBeInTheDocument());
@@ -129,7 +135,7 @@ describe("跳到历史之后，必须有回程", () => {
     await enterWithTail();
     await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
     serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
     await waitFor(() => expect(document.querySelector(".jump-btn")).toBeInTheDocument());
 
     act(() => { fireEvent.click(document.querySelector(".jump-btn")!); });
@@ -166,7 +172,7 @@ describe("跳到历史之后，往下滚要能回到最新", () => {
     await enterWithTail();
     await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
     serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
     await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
     expect(renderedSeqs()).not.toContain(HEAD); // 窗口确实挪到了旧的那一段
 
@@ -191,7 +197,7 @@ describe("跳到历史之后，往下滚要能回到最新", () => {
     await enterWithTail();
     await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
     serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 12 }); // 一小段：整屏放得下
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
     await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
 
     // 浏览器钳位后的几何：内容只比视口高一点点，且已在最底
@@ -220,7 +226,7 @@ describe("在历史里发消息：必须当场回到最新并贴底（CHAT_UX §
     await enterWithTail();
     await waitFor(() => expect(document.querySelector(".pin-banner")).toBeInTheDocument());
     serveWindow({ anchorFound: true, deliverFrom: 1, deliverTo: 60 });
-    fireEvent.click(document.querySelector(".pin-banner-main")!);
+    await locateViaPinnedPanel();
     await waitFor(() => expect(renderedSeqs()).toContain(PIN_SEQ));
     expect(renderedSeqs()).not.toContain(HEAD); // 确实停在旧的那一段
 

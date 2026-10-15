@@ -25,11 +25,13 @@ WARN_RATIO=${WARN_RATIO:-80}          # 达上限该比例即预警（不失败�
 #   - src/sdk/imSdk.ts : IM 客户端 API 面（40+ 方法），大而由业务性质决定；如拆按域分（auth/messages/groups/qr）。
 grandfather_limit() {
   case "$1" in
-    src/App.tsx)      echo 3520 ;;  # 2026-09-30 3579→3520：右键/⋯ 菜单一族（消息 / 会话 + 免打扰时长子菜单 / 详情内容 + 删除两档子菜单 B / 好友行）抽到 components/ContextMenusHost.tsx（3579→3496），留 ~24 行余量。
+    src/App.tsx)      echo 3490 ;;  # 2026-10-15 3520→3490：置顶面板 v3——置顶状态簇抽到 usePinnedMessages.ts、气泡渲染抽到 components/MessageBubble.tsx（3518→3468），留 ~20 行余量。
+                                    # 2026-09-30 3579→3520：右键/⋯ 菜单一族（消息 / 会话 + 免打扰时长子菜单 / 详情内容 + 删除两档子菜单 B / 好友行）抽到 components/ContextMenusHost.tsx（3579→3496），留 ~24 行余量。
                                     # 2026-09-29 3679→3579：设置页 11 个子面板路由（SettingsPanel/DataStoragePanel/EditProfilePanel/DevicesPanel/PrivacySecurityPanel/BlockedListPanel/ChangePasswordPanel/GeneralPanel/LanguageSettings/WallpaperPanel/WallpaperColorPanel）抽到 components/settings/SettingsPanelsHost.tsx——不只搬 JSX，onReset/onSubmit 等胶水回调体一并随迁，改经 useAppServices()/useT() 自取 clientRef/setToast/comingSoon/askConfirm/t，App 侧收窄成一次组件调用；留出的余量供随后同批的「设置 ▸ 通知」P0（NotificationsPanel，接进同一个 host）落地，不必再动这条基线。
                                     # 2026-09-11 3697→3679：本地库预载（preloadLocal + 会话刷新用的 preloadNew）抽到 useLocalPreload.ts  # 2026-09-08 3770→3697：文本渲染一族（@提及/URL/搜索高亮/长文本三档）抽到 components/messageText.tsx  # 2026-09-05 棘轮 4000→3800→3790→3770（语音转文字那一族抽到 useVoiceTranscript.ts 后 3756）。
                                     # 4000 那次是「触顶挡了 bug fix→用户拍板放宽」，不是设计值；现在有余量了就收回来。
-    src/sdk/imSdk.ts) echo 1359 ;;  # 2026-09-30 1356→1359：M5 账号级通知设置——notify_settings_update 帧的 handlers 字段 + switch case（PROTOCOL §6.13），REST 转发/wire 映射另落 sdk/imSdk.rest.ts+notifySettingsApi.ts+notifySettingsSync.ts，未挤占这个文件。
+    src/sdk/imSdk.ts) echo 1350 ;;  # 2026-10-15 1359→1350：fetchPinned 移到 sdk/pinnedApi.ts（REST 转发进 imSdk.rest.ts），本文件只多一行批量取消置顶帧分派（1343）。
+                                    # 2026-09-30 1356→1359：M5 账号级通知设置——notify_settings_update 帧的 handlers 字段 + switch case（PROTOCOL §6.13），REST 转发/wire 映射另落 sdk/imSdk.rest.ts+notifySettingsApi.ts+notifySettingsSync.ts，未挤占这个文件。
                                     # 2026-09-11 1386→1356：C4 删掉已无调用的分页补拉路径（syncConversation/requestPage/pagedPending）+ 同步游标两条纯函数移到 sdk/syncCursor.ts  # 2026-09-09 1416→1386：REST 转发面（下载策略/设备/好友/群/二维码/收藏）拆到 sdk/imSdk.rest.ts 的 IMRestApi 基类
                                     # 2026-09-07 1445→1416：webDeviceId/webDeviceName 移入 src/platform/web.ts（D1 适配层，棘轮只降不升）
                                     # 2026-09-05 1465→1445：帧→ChatMessage 的解析抽到 sdk/parseMessage.ts

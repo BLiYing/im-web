@@ -170,8 +170,9 @@ export interface Favorite {
 }
 
 /** msg_op 应用到某条消息的补丁（撤回/编辑/置顶）。 */
-/** 会话置顶消息（G0，GET /conversations/{id}/pinned 的一项）：顶部横幅与置顶列表的渲染源。
- *  字段是横幅所需最小集——点它跳到聊天里那条消息本体，不在这里重建富渲染。 */
+/** 会话置顶消息（G0，GET /conversations/{id}/pinned 的一项）：顶部横幅与置顶面板的渲染源。
+ *  平铺字段是横幅所需最小集；`message` 是服务端附带的完整消息对象（与 new_msg 同形，置顶面板据此画真气泡，
+ *  旧服务端不带 → 面板退回本地行或类型词纯文本气泡，见 pinned.ts 的 pinnedBubbleMessage）。 */
 export interface PinnedMessage {
   convSeq: number;
   serverMsgId: string;
@@ -182,6 +183,7 @@ export interface PinnedMessage {
   caption?: string; // 图说随附文本：置顶横幅/列表「有字显字」（媒体带 caption 时显文字而非 [图片]）
   timestamp: number;
   pinnedAt: number;
+  message?: ChatMessage;
 }
 
 export interface MsgOpPatch {

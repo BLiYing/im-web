@@ -7,10 +7,9 @@ import { useLocalPreload } from "./useLocalPreload";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { planBatchDelete } from "./selectDelete";
-import type { KeyedDebounced } from "./keyedDebounce";
 import { useBatchDelete } from "./useBatchDelete";
 import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
-import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type PinnedMessage, type UserCard } from "./sdk/protocol";
+import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type UserCard } from "./sdk/protocol";
 import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionSpans, countsAsUnread } from "./mention";
@@ -18,7 +17,7 @@ import { remarkMap, displayNameOf } from "./remarks";
 import { resolveDetailFollow } from "./detailFollow";
 import { makeNameResolvers } from "./chatNaming";
 import { useGroupInfoRefresh } from "./useGroupInfoRefresh";
-import { nextPinnedIndex, clampPinnedIndex } from "./pinned";
+import { usePinnedMessages } from "./usePinnedMessages";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
@@ -80,7 +79,7 @@ import { useChatFolders } from "./useChatFolders"; import { ChatFoldersProvider 
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
-import { PinnedListModal } from "./components/modals/PinnedListModal";
+import { PinnedListModal } from "./components/modals/PinnedListModal"; import type { BubbleEnv } from "./components/MessageBubble";
 import { GroupsModal } from "./components/modals/GroupsModal";
 import { recentAdded } from "./friendRequests";
 import { FriendRequestsModal } from "./components/modals/FriendRequestsModal";
@@ -335,15 +334,7 @@ export default function App() {
     if (vm.contentType !== "image" && vm.contentType !== "video") return;
     optInMedia(vm.content);
   }, [viewer, uid, optInMedia]);
-  // 会话置顶消息（G0）：conv_id -> 置顶集合（服务端按 pinned_at 倒序）。进会话拉一次，
-  // 之后靠实时 msg_op{op:pin} 帧触发重拉——置顶是低频操作，重拉比在本地拼装列表更不容易错。
-  const [pinnedByConv, setPinnedByConv] = useState<Record<string, PinnedMessage[]>>({});
-  // 置顶集合镜像：WS 回调是登录那一刻建的闭包（见 enterApp），读不到后续的 state——
-  // onMsgOp 要判断「被撤回/编辑的这条是不是横幅里的置顶项」，只能经 ref 取当前值（同 messagesRef 套路）。
-  const pinnedRef = useRef<Record<string, PinnedMessage[]>>({});
-  const schedulePinnedRefreshRef = useRef<KeyedDebounced | null>(null); // 置顶横幅合并重拉（见 schedulePinnedRefresh）
-  const [pinnedIdx, setPinnedIdx] = useState(0);          // 多条置顶时横幅显示第几条（点条轮转）
-  const [pinnedListOpen, setPinnedListOpen] = useState(false);
+  const pinned = usePinnedMessages(clientRef, convId); // 置顶集合 + 重拉 + 置顶面板开合（G0，见 usePinnedMessages.ts）
   // 顶部横幅本地收起（✕）：按「账号 + 会话 + 内容签名」记，仅隐藏视图、不动服务端置顶/公告。
   // 持久化到 localStorage——退出会话/刷新后仍保持收起，直到内容变化（新置顶/改公告）签名变了才复现。
   const [dismissedBanners, setDismissedBanners] = useState<Record<string, boolean>>(() => {
@@ -813,13 +804,7 @@ export default function App() {
         const opPatch = patch.content !== undefined ? { ...patch, mentionSpans: undefined } : patch;
         applyOp(cid, targetSeq, opPatch); // 按 conv_seq 就地打补丁（撤回→墓碑/编辑→改文本/置顶）
         if (patch.recalledAt !== undefined) desktop.clearNotifications({ convId: cid, convSeqs: [targetSeq] }); // 撤回 → 收回它的桌面通知
-        // 置顶态变化（G0）：重拉该会话置顶集合刷新顶部横幅（含别人置顶/取消置顶的实时同步）。
-        // 撤回/编辑若命中横幅里的置顶项**也要重拉**：服务端置顶列表已剔除撤回消息（PinnedMessages
-        // 带 recalled_at = 0）、编辑则改了文案；不刷会留一条指向墓碑/旧文案的横幅——点它只会滚到
-        // 一条「撤回了一条消息」的系统行并高亮，用户看不出原消息已经没了（与 iOS +SendService 同口径）。
-        const touchesPinnedBanner = (patch.recalledAt !== undefined || patch.editedAt !== undefined)
-          && (pinnedRef.current[cid] ?? []).some((pm) => pm.convSeq === targetSeq);
-        if (patch.pinnedAt !== undefined || touchesPinnedBanner) void refreshPinned(cid);
+        pinned.onMsgOp(cid, targetSeq, patch); // 置顶态变化 / 撤回·编辑命中置顶项 → 对齐置顶集合（含批量取消帧逐条）
         // 全屏阅读器持有的是 ChatMessage 快照：被读的这条一旦撤回/编辑，快照即失真（撤回内容仍可读可复制）→ 关闭，让用户回到会话看最新态。
         setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r));
         scheduleListRefresh(); // 撤回后会话列表预览也要更新（"撤回了一条消息"）
@@ -831,8 +816,7 @@ export default function App() {
       // **不看是否命中横幅**（置顶列表还没加载完时会漏判、横幅晚一拍），改成按会话合并：短时间内多条移除
       // （别人批量删、msg_hidden 批量帧）只拉一次。只管打开过的会话——没拉过置顶的会话进来时自会拉。
       onMessageRemoved: (cid, targetSeq) => {
-        // 经 ref 取：本回调是登录时建的闭包，schedulePinnedRefresh 声明在下方，别让它依赖声明顺序与 memo 恒定。
-        if (cid === currentConvRef.current || cid in pinnedRef.current) schedulePinnedRefreshRef.current?.(cid);
+        pinned.onRemoved(cid, cid === currentConvRef.current);
         removeSeq(cid, targetSeq); desktop.clearNotifications({ convId: cid, convSeqs: [targetSeq] }); // 从聊天列表移除该条 + 收回它的桌面通知
         setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
         setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
@@ -1021,7 +1005,7 @@ export default function App() {
       clearTimeout(conversationRefreshTimerRef.current);
       conversationRefreshTimerRef.current = null;
     }
-    schedulePinnedRefreshRef.current?.cancelAll(); // 挂着的置顶横幅合并重拉：别在登出后/换号后替旧会话去拉
+    pinned.schedule.cancelAll(); // 挂着的置顶横幅合并重拉：别在登出后/换号后替旧会话去拉
     resetMsgStore(); // 清空消息表 + 去重/墓碑集
     currentConvRef.current = "";
     setConversations([]); folders.forget();
@@ -1306,20 +1290,7 @@ export default function App() {
     () => planBatchDelete(selectMode ? (msgsByConv[convId] ?? []) : [], selected, uid, groupInfos[convId]?.my_role),
     [selectMode, msgsByConv, convId, selected, uid, groupInfos],
   );
-  // 重新拉某会话的置顶集合（G0）。best-effort：拉不到就不显横幅，绝不打断聊天。
-  const refreshPinned = useCallback(async (cid: string) => {
-    if (!cid) return;
-    try {
-      const items = (await clientRef.current?.fetchPinned(cid)) ?? [];
-      setPinnedByConv((prev) => ({ ...prev, [cid]: items }));
-    } catch (e) {
-      logger.warn(LOG_TAG.ui, "fetch_pinned_failed", { conv_id: cid, message: (e as Error).message });
-    }
-  }, []);
-
-  // 置顶横幅合并重拉 + 批量删除执行（useBatchDelete.ts）。logout 定义在前面且依赖为 []，经 ref 取到调度器（同 pinnedRef 套路）。
-  const { schedulePinnedRefresh, runBatchDelete } = useBatchDelete(refreshPinned, setToast);
-  schedulePinnedRefreshRef.current = schedulePinnedRefresh;
+  const { runBatchDelete } = useBatchDelete(pinned.schedule, setToast); // 批量删除执行（结束后合并重拉置顶）
 
   // 仅为我删除：批量 hide（上限 SELECT_MAX 条，与服务端 100 同值）。
   const deleteSelected = useCallback(() => {
@@ -1471,13 +1442,13 @@ export default function App() {
     const localAll = msgsByConvRef.current[currentConvRef.current] ?? [];
     if (localAll.some((m) => m.convSeq === seq && m.recalledAt)) {
       setToast(t("conv.error.original_recalled"));
-      void refreshPinned(currentConvRef.current);
+      void pinned.refresh(currentConvRef.current);
       return;
     }
     // 走统一定位入口：置顶消息天然是较早那条，**最需要跨窗口定位**——
     // 此前这里直接 jumpToSeq，目标不在窗口就只弹"请上拉加载后重试"，等于让用户自己翻。
     locateInChat(currentConvRef.current, seq);
-  }, [locateInChat, refreshPinned, setToast]);
+  }, [locateInChat, pinned.refresh, setToast]);
 
   // 置顶 / 取消置顶（G0）：发 msg_op，成功由服务端广播回 msg_op 帧（onMsgOp 里重拉横幅），
   // 越权/失效由 onMsgOpFailed toast。乐观更新交给帧回来那一下，避免本地先亮再被打回。
@@ -1862,13 +1833,6 @@ export default function App() {
 
   const stateText = { connected: t("conn.state.connected"), connecting: t("conn.state.connecting"), disconnected: t("conn.state.disconnected") }[state];
 
-  // 进会话拉一次置顶集合（G0）；切会话时把横幅索引复位到第一条。
-  useEffect(() => {
-    setPinnedIdx(0);
-    setPinnedListOpen(false);
-    if (convId) void refreshPinned(convId);
-  }, [convId, refreshPinned]);
-
   // 切换会话时清空 @提及态（M4-8）：input 不随会话清空，候选表若留到下一个会话，
   // 按时间戳排序（发送中/失败的 convSeq=0 但有发送时刻，故按时间能正确落位——
   // 否则它们会被挤到末尾，导致"解除拉黑后新发的消息排在更早的失败消息之前"）。
@@ -1896,7 +1860,6 @@ export default function App() {
   messagesRef.current = messages; // 每次渲染同步镜像（jumpToSeq 等早于此处定义，经 ref 取当前值）
   renderViewRef.current = renderView;      // 同上：driveLocate 定义在前，要读当前窗口
   msgsByConvRef.current = msgsByConv;     // 同上：定位要判断目标是否已在本地库
-  pinnedRef.current = pinnedByConv; // 同上：WS 回调（onMsgOp）判断撤回/编辑是否命中置顶项要读当前集合
 
   // ===== 会话内搜索 / 日历 / 「来自」发件人 / 首页全局搜索：状态+逻辑抽到 useChatSearch（CODING_STYLE §7）。
   // searchOpen/searchQuery 受控注入（见上）；副作用依赖（locateInChat/setToast/客户端）注入进去。
@@ -2518,12 +2481,8 @@ export default function App() {
   // ---- 群聊派生 + 动作（早退 return 之后：全部普通函数，禁用 Hook）----
   const isGroupChat = !!groupConvId;
   const activeGroupInfo = groupConvId ? groupInfos[groupConvId] : undefined;
-  // 当前会话的置顶集合与横幅上那条。索引可能因别人取消置顶而越界 → 夹紧。
-  const activePinned = pinnedByConv[convId] ?? [];
-  const pinnedShownIdx = clampPinnedIndex(pinnedIdx, activePinned.length);
-  const pinnedShown = activePinned[pinnedShownIdx];
   // 横幅收起键**带账号 + 内容签名**（对齐 iOS）：换账号互不影响；新置顶/改公告生成新键 → 自动复现，而非一收永久隐藏。
-  const pinDismissKey = `${uid}:${convId}:pin:${activePinned.length}:${activePinned[0]?.convSeq ?? 0}`;
+  const pinDismissKey = `${uid}:${convId}:pin:${pinned.active.length}:${pinned.shown?.convSeq ?? 0}`;
   const annDismissKey = `${uid}:${groupConvId}:announce:${activeGroupInfo?.announcement_at ?? 0}`;
   // 能否置顶：群内读 perm_pin——开=仅群主/管理员，关=全员可置顶（对齐服务端 hub.go 校验）；单聊任一方可。
   const canPinHere = isGroupChat
@@ -2658,6 +2617,7 @@ export default function App() {
     onOpenReader: (m) => { setTextReader(m); setReaderFontStep(0); },
     onOpenPeer: (uid) => { setTextReader(null); openPeerDetail(uid); },
   });
+  const bubbleEnv: BubbleEnv = { mediaGate, mediaSrc, senderLabel, localNameOf, senderRole, senderAvatar, renderMentionText, renderMessageText, openPeerDetail, handleScanRaw }; // 聊天页 / 置顶面板气泡同源
 
   // 清空聊天记录（仅本机，对齐 iOS）：存储事务清消息 + 区间并抬「清空位点」（§6.7，否则切走再切回会把服务端那一页拉回来）→ 清内存。
   const doClearHistory = (cid: string) => {
@@ -2919,11 +2879,9 @@ export default function App() {
             isGroupChat={isGroupChat} groupInfo={activeGroupInfo}
             dismissedBanners={dismissedBanners} annDismissKey={annDismissKey} pinDismissKey={pinDismissKey}
             dismiss={(key) => setDismissedBanners((d) => ({ ...d, [key]: true }))}
-            pinnedShown={pinnedShown} pinnedShownIdx={pinnedShownIdx} activePinned={activePinned}
+            pinnedShown={pinned.shown} pinnedCount={pinned.active.length} onOpenPinnedList={() => pinned.setPanelOpen(true)}
             onOpenJoinRequests={() => void openJoinRequests(groupConvId)}
             onOpenAnnouncement={() => openGroupText("announcement", groupConvId)}
-            onJumpPinned={() => { jumpToPinned(pinnedShown!.convSeq); setPinnedIdx(nextPinnedIndex(pinnedShownIdx, activePinned.length)); }}
-            onOpenPinnedList={() => setPinnedListOpen(true)}
           />
           <div className="msgs" ref={msgsRef} onScroll={onMsgsScroll}
             onWheel={(e) => { if (e.deltaY > 0) userScrollIntentRef.current = true; }}
@@ -2933,9 +2891,7 @@ export default function App() {
                 messages={messages} peer={peer} isGroupChat={isGroupChat} isSuperGroup={chatIsSuper} uid={uid}
                 selectMode={selectMode} selected={selected} menu={menu} readSeq={readSeq} firstUnreadIdx={firstUnreadIdx}
                 timeFormat={timeFormat} translations={translations} transcripts={transcripts} uploadProgress={uploadProgress} dividerRef={dividerRef}
-                mediaGate={mediaGate} mediaSrc={mediaSrc} senderLabel={senderLabel} localNameOf={localNameOf} senderRole={senderRole} senderAvatar={senderAvatar}
-                renderMentionText={renderMentionText} renderMessageText={renderMessageText}
-                openPeerDetail={openPeerDetail} handleScanRaw={handleScanRaw} requestFriendFromNote={requestFriendFromNote}
+                {...bubbleEnv} requestFriendFromNote={requestFriendFromNote}
               />
           </div>
           {/* 常驻滚动条滑块：必须是 .msgs 的兄弟（不在滚动容器内、不 portal 到 body），原因见组件注释。 */}
@@ -3139,15 +3095,9 @@ export default function App() {
         />
       )}
 
-      {/* 全部置顶消息（G0）：见 components/modals/PinnedListModal。 */}
-      {pinnedListOpen && (
-        <PinnedListModal
-          pinned={activePinned} isGroupChat={isGroupChat} timeFormat={timeFormat} canPin={canPinHere}
-          onJump={jumpToPinned}
-          onUnpin={(seq) => clientRef.current?.pinMessage(convId, seq, false)}
-          onClose={() => setPinnedListOpen(false)}
-        />
-      )}
+      {/* 置顶消息面板（G0 v3）：见 components/modals/PinnedListModal（状态在 usePinnedMessages）。 */}
+      {pinned.panelOpen && pinned.active.length > 0 && <PinnedListModal pinned={pinned.active} local={msgsByConv[convId]} convId={convId} uid={uid} peer={peer} isGroupChat={isGroupChat}
+        timeFormat={timeFormat} canPin={canPinHere} env={bubbleEnv} onLocate={jumpToPinned} onRefresh={() => void pinned.refresh(convId)} onClose={() => pinned.setPanelOpen(false)} />}
 
       {/* 右键 / ⋯ 菜单（消息 / 会话 + 免打扰时长 / 详情内容 + 删除两档 / 好友行）：见 components/ContextMenusHost。 */}
       <ContextMenusHost

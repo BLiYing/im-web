@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { pinnedPreview, pinnedSenderLabel, nextPinnedIndex, clampPinnedIndex } from "./pinned";
+import { pinnedPreview, pinnedSenderLabel, latestPinned, pinnedBubbleMessage, pinnedMenuIds } from "./pinned";
+import type { ChatMessage, PinnedMessage } from "./sdk/protocol";
 
 describe("pinnedPreview", () => {
   it("文本原样显示", () => {
@@ -50,20 +51,49 @@ describe("pinnedSenderLabel", () => {
   });
 });
 
-describe("index 轮转与夹紧", () => {
-  it("点横幅按顺序轮转，到末尾回到第一条", () => {
-    expect(nextPinnedIndex(0, 3)).toBe(1);
-    expect(nextPinnedIndex(2, 3)).toBe(0);
-  });
+const pm = (convSeq: number, pinnedAt: number, over: Partial<PinnedMessage> = {}): PinnedMessage => ({
+  convSeq, serverMsgId: `s${convSeq}`, from: "1002", contentType: "text", content: `第${convSeq}条`, timestamp: 1000 + convSeq, pinnedAt, ...over,
+});
+const cm = (convSeq: number, over: Partial<ChatMessage> = {}): ChatMessage => ({
+  convId: "c1", from: "1002", content: `本地${convSeq}`, contentType: "text", convSeq, timestamp: 1, status: "received", ...over,
+} as ChatMessage);
 
-  it("空列表恒为 0，不产生 NaN/-1", () => {
-    expect(nextPinnedIndex(0, 0)).toBe(0);
-    expect(clampPinnedIndex(5, 0)).toBe(0);
+describe("latestPinned（横幅恒显最新置顶，不轮转）", () => {
+  it("取 pinned_at 最大的一条，不依赖服务端排序", () => {
+    expect(latestPinned([pm(1, 10), pm(2, 30), pm(3, 20)])?.convSeq).toBe(2);
   });
+  it("空集合 → undefined（不显横幅）", () => {
+    expect(latestPinned([])).toBeUndefined();
+  });
+});
 
-  it("别人取消置顶导致列表变短时，越界索引回到 0（否则横幅空白）", () => {
-    expect(clampPinnedIndex(2, 2)).toBe(0);
-    expect(clampPinnedIndex(1, 2)).toBe(1);
-    expect(clampPinnedIndex(-1, 2)).toBe(0);
+describe("pinnedBubbleMessage（面板气泡兜底顺序：本地行 → 接口完整消息 → 类型词纯文本）", () => {
+  it("① 本地已有该 conv_seq → 用本地行", () => {
+    const full = cm(5, { content: "接口里的" });
+    expect(pinnedBubbleMessage(pm(5, 1, { message: full }), [cm(5)], "c1").content).toBe("本地5");
+  });
+  it("本地那条已撤回 → 不用墓碑，退到接口完整消息", () => {
+    const full = cm(5, { content: "接口里的", contentType: "image" });
+    expect(pinnedBubbleMessage(pm(5, 1, { message: full }), [cm(5, { recalledAt: 9 })], "c1")).toBe(full);
+  });
+  it("② 本地没有 → 接口附带的完整消息对象", () => {
+    const full = cm(6, { contentType: "video", content: "https://x/v.mp4", duration: 12 });
+    expect(pinnedBubbleMessage(pm(6, 1, { message: full }), [cm(5)], "c1")).toBe(full);
+  });
+  it("③ 都没有（旧服务端）→ 类型词纯文本气泡，带原发送者/时间/conv_seq", () => {
+    const m = pinnedBubbleMessage(pm(7, 1, { contentType: "image", content: "https://x/a.png" }), undefined, "c1");
+    expect(m).toMatchObject({ contentType: "text", content: "[图片]", convSeq: 7, from: "1002", timestamp: 1007, convId: "c1" });
+  });
+});
+
+describe("pinnedMenuIds（长按菜单允许项）", () => {
+  it("有权限 + 文本：取消置顶 / 复制 / 定位（按此顺序）", () => {
+    expect(pinnedMenuIds({ contentType: "text", content: "hi" }, true)).toEqual(["unpin", "copy", "locate"]);
+  });
+  it("无权限：没有取消置顶", () => {
+    expect(pinnedMenuIds({ contentType: "text", content: "hi" }, false)).toEqual(["copy", "locate"]);
+  });
+  it("非文本（图片/文件…）：没有复制", () => {
+    expect(pinnedMenuIds({ contentType: "image", content: "https://x/a.png" }, true)).toEqual(["unpin", "locate"]);
   });
 });

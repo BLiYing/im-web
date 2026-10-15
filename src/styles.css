@@ -1839,17 +1839,39 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .pin-banner-text { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pin-banner-list { flex: none; align-self: center; }
 
-.pinned-modal { width: 420px; }
-.pinned-list { display: flex; flex-direction: column; max-height: 50vh; overflow-y: auto; }
-.pinned-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--separator); }
-.pinned-row:last-child { border-bottom: none; }
-.pinned-row-main {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
-  background: none; border: none; padding: 4px 2px; cursor: pointer; text-align: left; color: inherit; border-radius: var(--radius-card);
-}
-.pinned-row-main:hover { background: var(--page-bg); }
-.pinned-row-from { font-size: 11px; color: var(--text-secondary); }
-.pinned-row-text { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 置顶横幅整条可点（PINNED_PANEL_DESIGN §1：点横幅 = 打开置顶面板；≡ 恒显作视觉提示）。 */
+.pin-banner.pinned { cursor: pointer; }
+.pin-banner.pinned .pin-banner-list { color: var(--text-secondary); pointer-events: none; }
+
+/* ── 置顶消息面板（G0 v3，PINNED_PANEL_DESIGN §2 / 草图 ④）：居中 Modal 宽 480，标题栏同 settings-head，
+   列表区底色 = 聊天壁纸，行 = 聊天页真气泡（只读）+ 紧挨气泡的定位图标；底栏在流内（不悬浮、不遮挡列表）。 ── */
+.pinned-modal { width: 480px; max-width: calc(100vw - 32px); padding: 0; gap: 0; overflow: hidden; }
+.pinned-panel { display: flex; flex-direction: column; min-height: 0; }
+/* 标题栏（ModalHead）：栏高 56、左右固定 64 占位，标题 17/600 + 副标题 13 居中（UI_SPEC §4.5）。 */
+.modal-head { min-height: 56px; padding: 0 12px; background: var(--surface); border-bottom: 1px solid var(--separator); }
+.modal-head-side { width: 64px; flex-shrink: 0; display: flex; align-items: center; }
+.modal-head-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; text-align: center; line-height: 1.25; text-spacing-trim: trim-both; /* 全角括号「）」右侧留白不参与居中，标题与副标题光学对齐 */ }
+.modal-head-titles .settings-title { flex: none; }
+.modal-head-sub { font-size: 13px; color: var(--text-secondary); text-align: center; }
+.pinned-list { max-height: 60vh; overflow-y: auto; background: var(--chat-wallpaper); padding: 6px 0 12px; }
+/* 一行：气泡 + 定位图标同在一条 flex 行，底边对齐、间距 8；我发的整行靠右（图标在 DOM 里排在气泡前 → 气泡左侧）。
+   气泡最大宽 = 行宽 − 图标列 40（头像列在 .row 内部，自然再扣掉）。 */
+.pinned-line { display: flex; align-items: flex-end; gap: 8px; }
+.pinned-item.me .pinned-line { justify-content: flex-end; }
+.pinned-line > .row { margin: 0; flex: 0 1 auto; min-width: 0; max-width: calc(100% - 40px); cursor: pointer; }
+/* 只读气泡：内容不可交互、文本不可选；指针事件全落到气泡本身（右键/长按菜单 + 点击定位）。 */
+.bubble.readonly { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.bubble.readonly * { pointer-events: none; }
+.btext.pinned-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 8; overflow: hidden; }
+/* 定位到聊天位置：32 圆形底（压在壁纸上要有底）+ 18 图标，accent 色。 */
+.pinned-locate { width: 32px; height: 32px; flex: none; border: 0; padding: 0; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface-elevated); box-shadow: 0 1px 1px var(--shadow-soft); color: var(--accent); cursor: pointer; }
+.pinned-locate:hover { background: var(--surface-hover); }
+.pinned-foot { border-top: 1px solid var(--separator); background: var(--surface-elevated); }
+.pinned-unpin-all { display: block; width: 100%; padding: 12px 16px; border: 0; background: none; color: var(--danger);
+  font-size: 15px; font-weight: 600; text-align: center; cursor: pointer; }
+.pinned-unpin-all:hover { background: var(--surface-hover); }
+.pinned-confirm h3 { margin: 0; font-size: 16px; }
 
 /* ── 群公告横幅（G1）：黄/橙条，与置顶横幅同结构、换强调色 ── */
 .pin-banner.announce .pin-banner-bar { background: var(--warning, #F5A623); }

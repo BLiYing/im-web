@@ -15,9 +15,10 @@ import { listDevices, revokeDevice, revokeOtherDevices } from "./devicesApi";
 import { qrMyCard, qrResetMyCard, groupQR, groupQRReset, qrResolve } from "./qrApi";
 import { addFavorite, listFavorites, deleteFavorite, type FavoriteDraft } from "./favoritesApi";
 import { hideBatch, deleteBatch } from "./batchDeleteApi";
+import { fetchPinned, clearPinned } from "./pinnedApi";
 import * as groupApi from "./groupApi";
 import * as contactApi from "./contactApi";
-import type { UserCard, FriendEntry, GroupInfo, GroupSummary, Favorite, GroupBan, QRCard, QRResolved, JoinRequest, DeviceView } from "./protocol";
+import type { PinnedMessage, UserCard, FriendEntry, GroupInfo, GroupSummary, Favorite, GroupBan, QRCard, QRResolved, JoinRequest, DeviceView } from "./protocol";
 
 /** 收藏列表每页条数。滚到底自动加载下一页（见 useFavorites）。 */
 export const FAVORITES_PAGE_SIZE = 60;
@@ -45,6 +46,10 @@ export abstract class IMRestApi {
   deleteMessagesForEveryone(convId: string, seqs: number[]): Promise<number> {
     return this.runBatchDelete(deleteBatch, convId, seqs);
   }
+
+  /** 会话置顶消息（G0）：拉集合（每项带完整消息对象）/ 一键取消所有置顶（回清除条数）。实现在 sdk/pinnedApi.ts。 */
+  fetchPinned(convId: string): Promise<PinnedMessage[]> { return fetchPinned(this.token, convId); }
+  clearPinned(convId: string): Promise<number> { return clearPinned(this.token, convId); }
 
   /** 账号级自动下载策略（M4-7）：读 / 整体替换。实现在 sdk/downloadSettingsApi.ts（无状态 HTTP）。 */
   downloadSettings(): Promise<DownloadSettingsResult> { return fetchDownloadSettings(this.token); }

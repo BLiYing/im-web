@@ -2,12 +2,12 @@
 // 职责：登录换 token、WebSocket 连接、收发、心跳、重连、增量同步、回执；不含任何 UI。
 // 默认走同源相对路径（开发期由 Vite 代理到后端，见 vite.config.ts）。
 
-import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type MyProfile, type MsgOpPatch, type PinnedMessage, } from "./protocol";
+import { T, OP, type Envelope, type ChatMessage, type Conversation, type ConvUpdate, type UserCard, type MyProfile, type MsgOpPatch, } from "./protocol";
 import { createProbeWatchdog, runWake } from "./wake";
 import { platform } from "../platform";
 import { IMRestApi, FAVORITES_PAGE_SIZE } from "./imSdk.rest";
 import { parseConvBumpItems } from "./convBump";
-import { applyBatchDeleteFrame, removeBatchLocal } from "./batchRemove";
+import { applyBatchDeleteFrame, applyBatchUnpinFrame, removeBatchLocal } from "./batchRemove";
 import { hiddenSeqsOf } from "../selectDelete"; // msg_hidden 帧取 seq（批量帧 conv_seqs / 单条 conv_seq）
 import { planEntryWindow, planJumpToLatest, planBumpCatchUp, nextHistoryFloor, type WindowPlan } from "../windowPlan";
 import { shouldHealGap, nextSyncCursor } from "./syncCursor";
@@ -629,23 +629,6 @@ export class IMClient extends IMRestApi {
     return this.sendMsgOp(OP.PIN, convId, targetConvSeq, { pinned });
   }
 
-  /** 拉会话当前置顶消息集合（G0，进会话时回填顶部横幅；之后靠实时 msg_op 帧增量维护，不轮询）。 */
-  async fetchPinned(convId: string): Promise<PinnedMessage[]> {
-    const data = await this.api(`/api/v1/conversations/${encodeURIComponent(convId)}/pinned`);
-    const items = (data?.items ?? []) as Array<Record<string, any>>;
-    return items.map((it) => ({
-      convSeq: it.conv_seq ?? 0,
-      serverMsgId: it.server_msg_id ?? "",
-      from: it.sender ?? "",
-      fromNickname: it.from_nickname || undefined,
-      contentType: it.content_type ?? "text",
-      content: it.content ?? "",
-      caption: it.caption || undefined, // 图说：置顶横幅「有字显字」
-      timestamp: it.timestamp ?? 0,
-      pinnedAt: it.pinned_at ?? 0,
-    }));
-  }
-
   /** 语音转文字（服务端识别）。实现在 sdk/voiceApi.ts（voice 域已拆出）。 */
   async transcribeVoice(convId: string, convSeq: number): Promise<{ status: string; text: string }> {
     return voiceApi.transcribeVoice(this.token, convId, convSeq);
@@ -1000,6 +983,7 @@ export class IMClient extends IMRestApi {
         this.handlers.onNotifySettingsUpdate?.(Number(d.version) || 0); break; // M5 §6.13：账号级通知设置版本变更 → 本端重拉
       case T.MSG_OP: // 实时消息操作帧（撤回/编辑/置顶/为所有人删除）：应用到本地
         if (applyBatchDeleteFrame(d, (c, q) => void this.removeMessagesLocal(c, q), (c, o) => this.registerSeq(c, o))) break;
+        if (applyBatchUnpinFrame(d, (c, q) => this.applyMsgOp({ op: OP.PIN, conv_id: c, target_conv_seq: q, pinned: false }), (c, o) => this.registerSeq(c, o))) break; // 一键取消所有置顶（pinnedApi.ts）
         this.applyMsgOp(d);
         // 事件行自己占的 op_conv_seq 永远不成为消息：同样登记，否则它是清单里的一个洞（sync 补拉是整段登记，本就含它）。
         if (d.conv_id && Number(d.op_conv_seq) > 0) this.registerSeq(String(d.conv_id), Number(d.op_conv_seq));

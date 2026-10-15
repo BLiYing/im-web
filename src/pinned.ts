@@ -1,6 +1,6 @@
-// 置顶消息横幅的纯逻辑（G0）：预览文案 + 多条置顶的轮转索引。
+// 置顶消息横幅 / 置顶面板的纯逻辑（G0）：预览文案、横幅显哪条、面板气泡兜底、长按菜单允许项。
 // 与 iOS `IMPinnedBanner` 的对应实现保持一致（parity），逻辑集中在此以便单测。
-import type { PinnedMessage } from "./sdk/protocol";
+import type { ChatMessage, PinnedMessage } from "./sdk/protocol";
 import { CALL_CONTENT_TYPE } from "./callRecord";
 import { CONTACT_CONTENT_TYPE, contactCardPreview } from "./contactCard";
 import { chatRecordSnippet } from "./messageContent";
@@ -55,16 +55,36 @@ export function pinnedSenderLabel(p: Pick<PinnedMessage, "from" | "fromNickname"
   return p.fromNickname || p.from;
 }
 
-/** 点横幅后的下一个索引（Telegram 式轮转：到末尾回到第一条）。
- *  列表为空时恒为 0，避免出现 NaN/-1 让渲染取到 undefined。 */
-export function nextPinnedIndex(current: number, total: number): number {
-  if (total <= 0) return 0;
-  return (current + 1) % total;
+/** 横幅恒显的那条 = **最新置顶**（pinned_at 最大；并列取靠前者）。服务端本就按 pinned_at 倒序，这里不依赖它。
+ *  2026-10-15 置顶面板 v3：横幅不再轮转（删 nextPinnedIndex/clampPinnedIndex），点横幅改为打开面板。 */
+export function latestPinned(list: readonly PinnedMessage[]): PinnedMessage | undefined {
+  let best: PinnedMessage | undefined;
+  for (const p of list) if (!best || p.pinnedAt > best.pinnedAt) best = p;
+  return best;
 }
 
-/** 把索引夹到合法范围内。置顶被别人取消后列表会变短，旧索引可能越界（横幅空白）。 */
-export function clampPinnedIndex(current: number, total: number): number {
-  if (total <= 0) return 0;
-  if (current < 0) return 0;
-  return current >= total ? 0 : current;
+/** 置顶面板里一条要画成什么气泡（PINNED_PANEL_DESIGN §4.0 兜底顺序）：
+ *  ① 本地已有该 conv_seq（聊天窗口里加载过，且未撤回）→ 本地行；② 接口附带的完整消息对象；
+ *  ③ 都没有（旧服务端）→ 「类型词」单行纯文本气泡（仅兜底，不是设计目标）。 */
+export function pinnedBubbleMessage(
+  pm: PinnedMessage, local: readonly ChatMessage[] | undefined, convId: string,
+  translate: (key: string, args?: Args) => string = i18nT,
+): ChatMessage {
+  const hit = local?.find((m) => m.convSeq === pm.convSeq && !m.recalledAt);
+  if (hit) return hit;
+  if (pm.message) return pm.message;
+  return {
+    serverMsgId: pm.serverMsgId, convId, from: pm.from, fromNickname: pm.fromNickname,
+    content: pinnedPreview(pm, translate), contentType: "text", convSeq: pm.convSeq, timestamp: pm.timestamp, status: "received",
+  };
+}
+
+/** 置顶面板长按菜单的允许项（DESIGN §2.3，按此顺序）：取消置顶（仅有权限）/ 复制（仅文本）/ 定位到消息。转发排期再加。 */
+export type PinnedMenuId = "unpin" | "copy" | "locate";
+export function pinnedMenuIds(m: Pick<ChatMessage, "contentType" | "content">, canPin: boolean): PinnedMenuId[] {
+  const ids: PinnedMenuId[] = [];
+  if (canPin) ids.push("unpin");
+  if (m.contentType === "text" && !!m.content) ids.push("copy");
+  ids.push("locate");
+  return ids;
 }

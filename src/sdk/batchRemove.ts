@@ -3,6 +3,7 @@
 
 import * as localStore from "./localStore";
 import { batchDeleteTargetsOf } from "../selectDelete";
+import { batchUnpinTargetsOf } from "./pinnedApi";
 
 /** 先把墓碑全部落库，再在**同一个同步循环**里逐条通知 UI——React 把这一串 setState 合成一次渲染，
  *  而不是每条 await 一次、渲染一次。 */
@@ -24,6 +25,20 @@ export function applyBatchDeleteFrame(
   const batch = batchDeleteTargetsOf(d);
   if (!batch || !d.conv_id) return false;
   remove(String(d.conv_id), batch.seqs);
+  batch.opSeqs.forEach((o) => register(String(d.conv_id), o));
+  return true;
+}
+
+/** 批量「取消置顶」广播帧（一键取消所有置顶，PROTOCOL §6.7.2 / §11 `/pinned/clear`）：逐个目标按单条 pin(pinned=false)
+ *  应用（落库 + onMsgOp），各 op_conv_seq 同样登记。是该帧返回 true；否则 false，调用方按单条 msg_op 处理。 */
+export function applyBatchUnpinFrame(
+  d: { op?: unknown; pinned?: unknown; conv_id?: unknown; targets?: unknown },
+  unpin: (convId: string, seq: number) => void,
+  register: (convId: string, opSeq: number) => void,
+): boolean {
+  const batch = batchUnpinTargetsOf(d);
+  if (!batch || !d.conv_id) return false;
+  batch.seqs.forEach((s) => unpin(String(d.conv_id), s));
   batch.opSeqs.forEach((o) => register(String(d.conv_id), o));
   return true;
 }
