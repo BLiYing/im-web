@@ -224,3 +224,18 @@ export function planBumpCatchUp(input: BumpCatchUpInput): WindowPlan {
   if (tailHi > 0 && gap <= input.historyPage) return { source: "server", anchor: tailHi, before: 0, after: gap };
   return { source: "server", anchor: 0, before: input.historyPage, after: 0 };
 }
+
+/**
+ * 下方是否还有**没加载**的更新历史（下滚到底要不要 loadNewer）。
+ *
+ * 只比「本地最大 seq < 服务端最新 seq」不够：最新位点含 msg_op 事件行（置顶 / 取消置顶 / 撤回 / 编辑 / 删除，
+ * 占 conv_seq 却不成为消息）。尾部全是事件行时，本地最大真消息 seq 恒小于最新位点——于是每次滚到底都向服务端
+ * 要「更新的一页」，回来仍只有事件行，下次滚动再要（iOS 同款缺陷实测每 ~50ms 一次，见 IMChatViewController+Window）。
+ * 区间清单（ranges）把事件行也登记为「已下载」，故以它为准：(max(newest, floor), latest] 已被覆盖就不算缺。
+ */
+export function hasUnloadedBelow(input: { newest: number; floor: number; latest: number; ranges: SeqRange[] }): boolean {
+  const from = Math.max(input.newest, input.floor);
+  if (from >= input.latest) return false;
+  return !coversSpan(input.ranges, from + 1, input.latest);
+}
+

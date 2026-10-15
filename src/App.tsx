@@ -123,7 +123,7 @@ import { pauseVoicePlayback } from "./components/VoiceBubble";
 import { unreadBelowCount } from "./unreadBelow";
 import { coversSpan } from "./sdk/ranges";
 import { visibleSlice } from "./renderWindow";
-import { moreLocalAbove } from "./windowPlan";
+import { hasUnloadedBelow, moreLocalAbove } from "./windowPlan";
 import { ReadTick } from "./components/ReadTick";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
@@ -2144,7 +2144,7 @@ export default function App() {
     const newest = maxSeqOf(list);
     // 刻意**不再**取 minSeqOf(list) 当"历史边界"：本地全量的最小 seq 在有缺口时
     // 指向缺口另一侧的旧岛，不是用户正看到的那一段（见下方上滚分支）。
-    const moreBelow = Math.max(newest, clientRef.current?.visibleFloorOf(cid) ?? 0) < latestSeqRef.current; // 下方还有未加载的更新历史（清空位点以内的不算）
+    const moreBelow = hasUnloadedBelow({ newest, floor: clientRef.current?.visibleFloorOf(cid) ?? 0, latest: latestSeqRef.current, ranges: clientRef.current?.rangesOf(cid) ?? [] }); // 下方还有未加载的更新历史（清空位点以内、尾部事件行都不算）
     // 按钮显示只看「视觉贴底」（与 iOS updateJumpButton 对齐）——若 moreBelow=true 亦一并纳入
     // 判定，会出现「用户视觉已在最底部，但按钮仍显」的伪 bug（未读多/大群/进会话瞬间 push 到达时高发）：
     // 视觉贴底后 L1792 会自动 loadNewer 追齐，此时不必弹按钮打扰。

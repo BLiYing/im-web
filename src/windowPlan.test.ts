@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow, nextHistoryFloor, planJumpToLatest, planBumpCatchUp } from "./windowPlan";
+import { entryWindowAnchor, planEntryWindow, moreLocalAbove, floorFromWindow, nextHistoryFloor, planJumpToLatest, planBumpCatchUp, hasUnloadedBelow } from "./windowPlan";
 import type { SeqRange } from "./sdk/ranges";
 
 const base = { contextBefore: 10, historyPage: 200 };
@@ -306,5 +306,19 @@ describe("planJumpToLatest / planBumpCatchUp —— floor", () => {
     // 本地尾段在位点以下（清空前的残留）/ 根本没有：补的起点是位点，不是 0。
     expect(bump({ head: 1005, latestSeq: 1005, floor: 1000, localNewest: 0 }))
       .toEqual({ source: "server", anchor: 1000, before: 0, after: 5 });
+  });
+});
+
+describe("hasUnloadedBelow（尾部事件行不算「下面还缺」）", () => {
+  const ranges = [{ lo: 1, hi: 141 }];
+  it("本地最大真消息 99、最新位点 141，但 100..141 已登记为已下载（全是事件行）→ 不缺", () => {
+    expect(hasUnloadedBelow({ newest: 99, floor: 0, latest: 141, ranges })).toBe(false);
+  });
+  it("区间清单里 100..141 没下载 → 真的缺", () => {
+    expect(hasUnloadedBelow({ newest: 99, floor: 0, latest: 141, ranges: [{ lo: 1, hi: 99 }] })).toBe(true);
+  });
+  it("清空位点在最新之上 → 不缺；本地已到最新 → 不缺", () => {
+    expect(hasUnloadedBelow({ newest: 10, floor: 141, latest: 141, ranges: [] })).toBe(false);
+    expect(hasUnloadedBelow({ newest: 141, floor: 0, latest: 141, ranges: [] })).toBe(false);
   });
 });
