@@ -936,9 +936,11 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
    注意 .row-badge（「新的朋友」待办）仍是 18——那对的是 iOS 通讯录入口红点，不是这个。 */
 .badge { position: absolute; right: var(--space-4); bottom: var(--space-3); min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: var(--unread-badge); color: var(--on-accent); font-size: 11px; line-height: 20px; text-align: center; }
 /* 会话管理指示（M4.5）：置顶左侧强调条、置顶/免打扰小图标、免打扰红点转灰、手动标未读小圆点。 */
-.convitem.pinned { box-shadow: inset 3px 0 0 var(--accent); }
-.conv-pin { color: var(--accent); vertical-align: -1px; margin-right: 3px; }
-.conv-mute { color: var(--text-secondary); vertical-align: -1px; margin-left: 4px; }
+/* 置顶行整行淡强调色底（对齐 iOS：accent 10%），不再用左侧强调条；选中/悬停仍优先。 */
+.convitem.pinned { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.convitem.pinned:hover { background: var(--surface-hover); }
+.convitem.pinned.active { background: var(--selection-bg); }
+.conv-pin, .conv-mute { color: var(--text-secondary); vertical-align: -2px; margin-left: 4px; }
 /* 群「有人@我」红字前缀（M4-8）：只染前缀，正文保持次要色（对齐 iOS 会话行）。 */
 .conv-mention { color: var(--danger); font-weight: 600; margin-right: 4px; }
 /* 待审入群角标（G3，仅群主/管理员）：小号药丸，跟 .detail-badge 同色系但更贴合列表行。

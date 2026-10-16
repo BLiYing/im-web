@@ -2797,14 +2797,15 @@ export default function App() {
               <div className="convbody">
                 <div className="convtop">
                   <span className="convpeer">
-                    {c.pinned_at ? <Pin size={12} className="conv-pin" /> : null}
                     {convDisplayLabel(c)}
                     {/* 「大群」标记：用户在列表里第一个察觉到的异常正是这里——这个群没有在线绿点、
                         没有「正在输入」。不标出来就会被当成 bug 报上来（SUPERGROUP_DESIGN §9）。
                         文字 pill 而非图标：标记的价值是**解释**那些消失的能力，图标不自解释；
                         与聊天页副标题、群资料页说明行、后台列表 pill 同一套语汇。 */}
                     {c.is_super ? <span className="conv-super-tag">{t("group.text.super")}</span> : null}
-                    {mutedNow ? <BellOff size={12} className="conv-mute" /> : null}
+                    {/* 状态图标顺序对齐 iOS：名称 → 大群标记 → 置顶 → 免打扰（灰色、14px） */}
+                    {c.pinned_at ? <Pin size={14} className="conv-pin" /> : null}
+                    {mutedNow ? <BellOff size={14} className="conv-mute" /> : null}
                   </span>
                   <span className="convtime">
                     {c.last_message ? conversationTime(c.last_message.timestamp, timeFormat) : ""}
