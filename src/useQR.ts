@@ -15,7 +15,7 @@ import { t } from "./i18n";
 export interface QRDeps {
   phase: "login" | "app";
   uid: string;
-  myInfo: Pick<UserCard, "nickname" | "avatar_url"> | null;
+  myInfo: Pick<UserCard, "nickname" | "avatar_url" | "username"> | null;
   groupInfos: Record<string, GroupInfo>;
   clientRef: MutableRefObject<IMClient | null>;
   setToast: (msg: string | null) => void;
@@ -30,7 +30,7 @@ export interface QRDeps {
 export function useQR(d: QRDeps) {
   const { phase, uid, myInfo, groupInfos, clientRef, setToast, openChat, openGroupChat, refreshConversations, openPeerDetailRef, askFriendRequest } = d;
   const [qrScan, setQrScan] = useState(false); // 扫一扫浮层
-  const [qrCardModal, setQrCardModal] = useState<{ title: string; subtitle: string; name: string; avatarUrl?: string; card: QRCard; canReset: boolean; kind: "me" | "group"; convId?: string } | null>(null);
+  const [qrCardModal, setQrCardModal] = useState<{ title: string; subtitle: string; meta?: string; mode?: "code" | "link"; name: string; avatarUrl?: string; card: QRCard; canReset: boolean; kind: "me" | "group"; convId?: string } | null>(null);
   const [qrResult, setQrResult] = useState<{ data: QRResolved | { kind: "expired" }; raw: string } | null>(null);
   const bootQrRef = useRef<string | null>(null);
   useEffect(() => {
@@ -79,6 +79,7 @@ export function useQR(d: QRDeps) {
     try {
       const card = await clientRef.current!.qrMyCard();
       setQrCardModal({ title: t("qr.scan.my_code"), subtitle: t("qr.card.my_subtitle"),
+        meta: myInfo?.username ? `@${myInfo.username}` : undefined,
         name: myInfo?.nickname || uid, avatarUrl: myInfo?.avatar_url, card, canReset: true, kind: "me" });
     } catch (e) { setToast(t("qr.toast.my_card_failed", { error: (e as Error).message })); }
   };
@@ -96,6 +97,7 @@ export function useQR(d: QRDeps) {
     try {
       const card = await clientRef.current!.groupQR(cid);
       setQrCardModal({ title: t(asLink ? "qr.card.group_title_link" : "qr.card.group_title_code"), subtitle: t(asLink ? "qr.card.group_subtitle_link" : "qr.card.group_subtitle_code"),
+        meta: gi?.member_count != null ? t("qr.branch.group_meta", { count: gi.member_count }) : undefined, mode: asLink ? "link" : "code",
         name: gi?.name || t("qr.card.group_default_name"), avatarUrl: gi?.avatar_url, card, canReset: canManage, kind: "group", convId: cid });
     } catch (e) {
       // 服务端兜底（本地 perm_invite 可能过期）：300204 映射为中文，其余透传。

@@ -30,13 +30,15 @@ describe("useQR", () => {
     expect(deps.setToast).toHaveBeenCalledWith("网络");
   });
   it("openGroupCard：仅管理员可邀请 + 我是成员 → 直接 toast 拒绝、不请求；群主 → 打开群码模态（canReset）", async () => {
-    const gi = (role: string) => ({ g1: { conv_id: "g1", name: "群", my_role: role, perm_invite: true, members: [] } as unknown as GroupInfo });
+    const gi = (role: string) => ({ g1: { conv_id: "g1", name: "群", my_role: role, perm_invite: true, member_count: 5, members: [] } as unknown as GroupInfo });
     const { result, deps, c } = mount({}, { groupInfos: gi("member") });
     await act(async () => { await result.current.openGroupCard("g1"); });
     expect(deps.setToast).toHaveBeenCalledWith(expect.stringContaining("仅管理员可邀请")); expect(c.groupQR).not.toHaveBeenCalled();
     const m2 = mount({}, { groupInfos: gi("owner") });
     await act(async () => { await m2.result.current.openGroupCard("g1", true); });
-    expect(m2.result.current.qrCardModal).toMatchObject({ title: "群邀请链接", kind: "group", convId: "g1", canReset: true });
+    expect(m2.result.current.qrCardModal).toMatchObject({ title: "群邀请链接", kind: "group", convId: "g1", canReset: true, mode: "link", meta: expect.stringContaining("5") });
+    await act(async () => { await m2.result.current.openGroupCard("g1", false); });
+    expect(m2.result.current.qrCardModal).toMatchObject({ title: "群二维码", mode: "code" });
   });
   it("openMyCard → 名片模态；resetQRCard → 换码 + toast", async () => {
     const { result, deps } = mount();

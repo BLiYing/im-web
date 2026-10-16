@@ -1909,8 +1909,11 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 /* 名片码 / 群码 */
 .qr-avatar { border-radius: 50%; object-fit: cover; display: inline-flex; }
 .qr-avatar-fallback { align-items: center; justify-content: center; background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.qr-card-head { display: flex; align-items: center; gap: 10px; }
-.qr-card-name { font-size: 15px; font-weight: 600; color: var(--text); }
+.qr-card-head { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; }
+.qr-card-head .qr-avatar { margin-bottom: 6px; }
+.qr-card-name { font-size: 20px; font-weight: 600; color: var(--text); max-width: 100%; overflow-wrap: anywhere; }
+.qr-card-meta { font-size: 14px; color: var(--text-secondary); }
+.qr-link-box { margin: 12px 0 4px; padding: 14px 12px; border-radius: 12px; background: var(--surface); color: var(--text); font-size: 14px; line-height: 1.5; text-align: center; word-break: break-all; user-select: all; }
 .qr-img-wrap { display: flex; justify-content: center; padding: 8px 0; }
 .qr-img { width: 240px; height: 240px; border-radius: 12px; background: #fff; padding: 8px; box-sizing: border-box; }
 .qr-img-loading { background: var(--surface); }
@@ -1921,6 +1924,7 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .qr-card-actions .mini-btn, .qr-scan-actions .mini-btn { display: inline-flex; flex-direction: row; align-items: center; gap: 5px; }
 .qr-reset-link { display: inline-flex; align-items: center; gap: 5px; justify-content: center; background: transparent; border: 0; color: var(--text-secondary); font-size: 13px; cursor: pointer; padding: 4px; }
 .qr-reset-link:hover { color: var(--danger); }
+.qr-reset-link.qr-view-code, .qr-reset-link.qr-view-code:hover { align-self: center; color: var(--accent); }
 .qr-reset-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--surface); border-radius: 10px; }
 .qr-reset-warn { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
 
@@ -1954,8 +1958,9 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .qr-branch { display: flex; flex-direction: column; gap: 12px; }
 .qr-branch-center { align-items: center; text-align: center; }
 .qr-branch-icon { width: 56px; height: 56px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface); color: var(--text-secondary); }
-.qr-branch-head { display: flex; align-items: center; gap: 12px; }
-.qr-branch-title { display: flex; align-items: center; gap: 5px; font-size: 16px; font-weight: 600; color: var(--text); }
+.qr-branch-head { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.qr-branch-text { display: flex; flex-direction: column; align-items: center; max-width: 100%; overflow-wrap: anywhere; }
+.qr-branch-title { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 18px; font-weight: 600; color: var(--text); }
 .qr-branch-meta { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
 .qr-branch-note { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
 /* 群预览简介（草图 §05「未入群也能看群名/人数/简介」）：次要文本，多行可换行 */

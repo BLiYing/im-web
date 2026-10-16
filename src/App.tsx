@@ -10,7 +10,8 @@ import { planBatchDelete } from "./selectDelete";
 import { useBatchDelete } from "./useBatchDelete";
 import { fetchServerConfig, fetchGroupMembersPage } from "./sdk/serverConfigApi";
 import { convIdFor, type ServerConfig, type ChatMessage, type Conversation, type FriendEntry, type GroupInfo, type GroupMember, type Favorite, type UserCard } from "./sdk/protocol";
-import { QRCardModal, QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
+import { QRCardModal } from "./components/QRCardModal";
+import { QRScannerModal, QRResultModal, JoinRequestsModal } from "./QRUI";
 import { errorCode } from "./qr";
 import { activeMentionQuery, resolveMentions, resolveMentionAll, resolveMentionSpans, countsAsUnread } from "./mention";
 import { remarkMap, displayNameOf } from "./remarks";
@@ -3385,6 +3386,9 @@ export default function App() {
         <QRCardModal
           title={qrCardModal.title}
           subtitle={qrCardModal.subtitle}
+          meta={qrCardModal.meta}
+          mode={qrCardModal.mode}
+          onViewCode={qrCardModal.kind === "group" && qrCardModal.convId ? () => void openGroupCard(qrCardModal.convId!, false) : undefined}
           name={qrCardModal.name}
           avatarUrl={qrCardModal.avatarUrl}
           card={qrCardModal.card}

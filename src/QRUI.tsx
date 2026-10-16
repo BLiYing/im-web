@@ -3,17 +3,17 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import * as QRCode from "qrcode";
 import {
-  QrCode, X, Camera, Image as ImageIcon, RefreshCw, Download, Copy, Check,
+  QrCode, X, Camera, Image as ImageIcon, RefreshCw, Copy, Check,
   UserPlus, LogIn, Users, ExternalLink, ScanLine, Clock,
 } from "lucide-react";
-import type { QRCard, QRResolved, QRUserCard, QRGroupCard, JoinRequest, QRLoginState, QRLoginTicket } from "./sdk/protocol";
+import type { QRResolved, QRUserCard, QRGroupCard, JoinRequest, QRLoginState, QRLoginTicket } from "./sdk/protocol";
 import { decodeImageData, decodeAllImageFile, describeRaw, drawToImageData, userCardAction, groupCardAction, classifyUnknown, errorCode, type GroupAction, type RawKind } from "./qr";
 import { loginNew, loginPoll } from "./sdk/qrLogin";
 import { t, useT } from "./i18n";
 import { avatarInitial } from "./components/Avatar";
 
 /** 生成二维码图片 dataURL（容错级 M，中留白，端本地生成）。失败返回空串。 */
-async function toQRDataURL(text: string): Promise<string> {
+export async function toQRDataURL(text: string): Promise<string> {
   try {
     return await QRCode.toDataURL(text, { errorCorrectionLevel: "M", margin: 2, width: 240 });
   } catch {
@@ -21,7 +21,7 @@ async function toQRDataURL(text: string): Promise<string> {
   }
 }
 
-function Avatar({ url, name, size = 44 }: { url?: string; name: string; size?: number }) {
+export function Avatar({ url, name, size = 44 }: { url?: string; name: string; size?: number }) {
   // 首字母规则同会话列表头像（components/Avatar.tsx 的 avatarInitial）：之前这里另起了一份只取首字符
   // 的逻辑，中文名会跟别处不一致——比如"张三"这里显示"张"，别处（取末字规则）显示"三"。
   const initial = avatarInitial(name);
@@ -29,83 +29,6 @@ function Avatar({ url, name, size = 44 }: { url?: string; name: string; size?: n
   return url
     ? <img className="qr-avatar" src={url} alt="" style={style} />
     : <span className="qr-avatar qr-avatar-fallback" style={style}>{initial}</span>;
-}
-
-// ---- 名片码 / 群码 展示模态（复用：我的名片码 + 群二维码）----
-
-export function QRCardModal(props: {
-  title: string;
-  subtitle: string;          // 「扫描二维码，加我为朋友」/「扫描二维码，加入群聊」
-  name: string;
-  avatarUrl?: string;
-  card: QRCard;
-  canReset: boolean;         // 我的码恒 true；群码仅群主/管理员
-  onReset: () => Promise<void>;
-  onClose: () => void;
-}) {
-  const tr = useT();
-  const { title, subtitle, name, avatarUrl, card, canReset, onReset, onClose } = props;
-  const [img, setImg] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [resetting, setResetting] = useState(false);
-
-  useEffect(() => { void toQRDataURL(card.url).then(setImg); }, [card.url]);
-
-  const copyLink = useCallback(() => {
-    void navigator.clipboard?.writeText(card.url).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  }, [card.url]);
-
-  const downloadPNG = useCallback(() => {
-    if (!img) return;
-    const a = document.createElement("a");
-    a.href = img;
-    a.download = `${title}.png`;
-    a.click();
-  }, [img, title]);
-
-  return (
-    <div className="modal-mask" onClick={onClose}>
-      <div className="modal qr-modal" onClick={(e) => e.stopPropagation()}>
-        <button className="qr-close" onClick={onClose} aria-label={tr("common.close")}><X size={18} /></button>
-        <h3 className="modal-title">{title}</h3>
-        <div className="qr-card-head">
-          <Avatar url={avatarUrl} name={name} />
-          <div className="qr-card-name">{name}</div>
-        </div>
-        <div className="qr-img-wrap">
-          {img ? <img className="qr-img" src={img} alt={tr("qr.image_alt")} /> : <div className="qr-img qr-img-loading" />}
-        </div>
-        <div className="qr-card-sub">{subtitle}</div>
-        <div className="modal-actions qr-card-actions">
-          <button className="mini-btn ghost" onClick={downloadPNG}><Download size={15} /> {tr("qr.download_png")}</button>
-          <button className="mini-btn ghost" onClick={copyLink}>
-            {copied ? <><Check size={15} /> {tr("common.copied")}</> : <><Copy size={15} /> {tr("qr.copy_link")}</>}
-          </button>
-        </div>
-        {canReset && !confirmReset && (
-          <button className="qr-reset-link" onClick={() => setConfirmReset(true)}>
-            <RefreshCw size={14} /> {tr("qr.reset")}
-          </button>
-        )}
-        {canReset && confirmReset && (
-          <div className="qr-reset-confirm">
-            <div className="qr-reset-warn">{tr("qr.reset_warn.prefix")}<b>{tr("qr.reset_warn.strong")}</b>{tr("qr.reset_warn.suffix")}</div>
-            <div className="modal-actions">
-              <button className="mini-btn ghost" disabled={resetting} onClick={() => setConfirmReset(false)}>{tr("common.cancel")}</button>
-              <button className="mini-btn danger" disabled={resetting} onClick={async () => {
-                setResetting(true);
-                try { await onReset(); setConfirmReset(false); } finally { setResetting(false); }
-              }}>{resetting ? tr("qr.resetting") : tr("qr.confirm_reset")}</button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
 }
 
 // ---- 扫一扫（摄像头 + 上传/拖拽/粘贴图片）----
@@ -339,8 +262,8 @@ function UserBranch({ card, actions, onClose }: { card: QRUserCard; actions: QRR
   return (
     <div className="qr-branch">
       <div className="qr-branch-head">
-        <Avatar url={card.avatar_url} name={card.nickname} size={52} />
-        <div>
+        <Avatar url={card.avatar_url} name={card.nickname} size={56} />
+        <div className="qr-branch-text">
           <div className="qr-branch-title">{card.nickname || tr("common.unnamed_user")}</div>
           {/* 句柄而非内部 ID（10 位随机数字）；没有句柄就只说来源。 */}
           <div className="qr-branch-meta">{card.username ? `@${card.username} · ` : ""}{tr("qr.branch.via_scan")}</div>
@@ -368,8 +291,8 @@ function GroupBranch({ card, actions, onClose }: { card: QRGroupCard; actions: Q
   return (
     <div className="qr-branch">
       <div className="qr-branch-head">
-        <Avatar url={card.avatar_url} name={card.name} size={52} />
-        <div>
+        <Avatar url={card.avatar_url} name={card.name} size={56} />
+        <div className="qr-branch-text">
           <div className="qr-branch-title"><Users size={15} /> {card.name}</div>
           <div className="qr-branch-meta">{card.inviter_nickname ? tr("qr.branch.group_meta_invited", { count: card.member_count, name: card.inviter_nickname }) : tr("qr.branch.group_meta", { count: card.member_count })}</div>
         </div>
