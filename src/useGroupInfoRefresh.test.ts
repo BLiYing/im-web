@@ -41,13 +41,14 @@ describe("useGroupInfoRefresh 成员表过期检测", () => {
     expect(fetchGroup).toHaveBeenCalledWith("g1");
   });
 
-  it("5s 内连着两条对不上只拉一次，过了 5s 再来才拉第二次", () => {
+  it("5s 内连着两条对不上只拉一次，过了 5s 再来才拉第二次", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(100_000);
     const groupInfos = { g1: info("旧昵称") };
     const { rerender, fetchGroup } = mount({ groupConvId: "g1", msgsByConv: { g1: [msg(1)] }, groupInfos });
     rerender({ groupConvId: "g1", msgsByConv: { g1: [msg(1), msg(2, "新昵称")] }, groupInfos });
     rerender({ groupConvId: "g1", msgsByConv: { g1: [msg(1), msg(2, "新昵称"), msg(3, "新昵称")] }, groupInfos });
     expect(fetchGroup).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 300)); // 让第一轮拉取收尾并过完冷却（refreshGroupInfo 现为单飞+限速：冷却内的调用并入下一轮）
     now.mockReturnValue(106_000);
     rerender({ groupConvId: "g1", msgsByConv: { g1: [msg(1), msg(2, "新昵称"), msg(3, "新昵称"), msg(4, "新昵称")] }, groupInfos });
     expect(fetchGroup).toHaveBeenCalledTimes(2);
