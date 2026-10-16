@@ -6,6 +6,7 @@ import type { IMClient } from "./sdk/imSdk";
 import type { MsgOpPatch, PinnedMessage } from "./sdk/protocol";
 import { keyedDebounce } from "./keyedDebounce";
 import { latestPinned } from "./pinned";
+import { dropCleared } from "./sdk/clearFloor";
 import { LOG_TAG, logger } from "./logging/logger";
 
 /** 置顶重拉的合并窗口：批量删除 / 一键取消所有置顶带来的一串事件落在窗口里只拉一次（三端同 300ms，见 SYMMETRY *PinnedBanner*）。 */
@@ -27,7 +28,12 @@ export function usePinnedMessages(clientRef: MutableRefObject<IMClient | null>, 
     if (!cid) return;
     const my = (gens.current[cid] = (gens.current[cid] ?? 0) + 1);
     try {
-      const items = (await clientRef.current?.fetchPinned(cid)) ?? [];
+      const client = clientRef.current;
+      const all = (await client?.fetchPinned(cid)) ?? [];
+      // 「清空聊天记录」只记本机位点（服务端不知道）：位点以内的置顶消息本体已不可见，横幅不能再指向它们
+      // （否则清空 → 删好友 → 重新加回后，仍显示清空前的旧置顶）。
+      const floor = client ? Math.max(client.clearedUpToOf(cid), await client.loadClearedUpTo(cid)) : 0;
+      const items = dropCleared(all, floor);
       if (my !== gens.current[cid]) return;
       setByConv((prev) => ({ ...prev, [cid]: items }));
     } catch (e) {

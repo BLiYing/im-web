@@ -379,6 +379,7 @@ export default function App() {
   // 2000 人群实测连点「加载更多成员」，两次点击读到同一个 superCursor.next，同一页被拉两次、
   // 追加两次，列表里整整多出 50 行重复成员（iOS 侧一直有这个守卫，Web 漏了）。
   const superLoadingRef = useRef(false);
+  const activeSuperRef = useRef(""); // 当前开着资料页的超级群 id（人数变化回调只重拉正在看的那个群）
   // 同一件事的**可渲染副本**：ref 改了不触发重渲染，而按钮文案与「自动续拉是否挂监听」都要看它。
   const [superLoading, setSuperLoading] = useState(false);
   const typingTimer = useRef<number | null>(null);
@@ -605,7 +606,7 @@ export default function App() {
   }, []);
 
   // 拉群资料进缓存 + 群成员表过期检测（会话开着时有人改名再发消息 → 节流重拉），见 useGroupInfoRefresh.ts。
-  const refreshGroupInfo = useGroupInfoRefresh(clientRef, setGroupInfos, groupConvId, msgsByConv, groupInfos);
+  const refreshGroupInfo = useGroupInfoRefresh(clientRef, setGroupInfos, groupConvId, msgsByConv, groupInfos, (cid) => { if (cid === activeSuperRef.current) void loadSuperMembers(cid, ""); });
 
   // 打开群会话：与 openChat 同一套进会话定位逻辑，只是标识从 peer 换成 conv_id。
   const openGroupChat = useCallback((cid: string) => {
@@ -2387,6 +2388,7 @@ export default function App() {
     const gp = groupInfos[detail.convId];
     return gp?.is_super ? detail.convId : "";
   }, [detail, groupInfos]);
+  activeSuperRef.current = activeSuperGroupId;
   // 打开超级群详情（或换了个群）→ 从第一页重新拉；离开则清空，免得下次串到别的群的成员。
   useEffect(() => {
     superLoadingRef.current = false; // 切群即复位：否则上一群的在途标记会把新群的首页请求挡掉
@@ -2626,6 +2628,7 @@ export default function App() {
       if ((await clientRef.current?.clearConversation(cid, conversations.find((c) => c.conv_id === cid)?.latest_conv_seq ?? 0)) === undefined) return;   // 登出过渡态（无 client）：没清成就别报「已清空」
       clearConv(cid); // 内存同步清空（当前会话/缓存）
       setDetailMsgs([]);
+      void pinned.refresh(cid); // 位点已抬高：位点以内的置顶（横幅/面板）随之摘掉
       setToast(t("chat.clear.done"));
     })();
   };

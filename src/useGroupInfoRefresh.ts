@@ -20,12 +20,25 @@ export function useGroupInfoRefresh(
   groupConvId: string,
   msgsByConv: MsgMap,
   groupInfos: Record<string, GroupInfo>,
+  onSuperCountChanged?: (cid: string) => void,
 ): (cid: string) => Promise<GroupInfo | null> {
   // 拉群资料进缓存（best-effort）：失败（被移出/群没了）则清缓存。返回最新资料或 null。
+  // 超级群的成员列表是另一份分页 state（App.superMembers，只在切群时重拉）：人数变了（移除 / 退群 / 入群）
+  // 必须通知 App 重拉第一页，否则资料页副标题已变、列表里被移除的人还在。
+  const superCountRef = useRef<Record<string, number>>({});
+  const onCountRef = useRef(onSuperCountChanged);
+  onCountRef.current = onSuperCountChanged;
   const refreshGroupInfo = useCallback(async (cid: string): Promise<GroupInfo | null> => {
     try {
       const info = await clientRef.current?.fetchGroup(cid);
-      if (info) setGroupInfos((prev) => ({ ...prev, [cid]: info }));
+      if (info) {
+        setGroupInfos((prev) => ({ ...prev, [cid]: info }));
+        if (info.is_super) {
+          const before = superCountRef.current[cid];
+          superCountRef.current[cid] = info.member_count ?? 0;
+          if (before !== undefined && before !== (info.member_count ?? 0)) onCountRef.current?.(cid);
+        }
+      }
       return info ?? null;
     } catch {
       setGroupInfos((prev) => {
