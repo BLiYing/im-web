@@ -379,6 +379,7 @@ export default function App() {
   // 2000 人群实测连点「加载更多成员」，两次点击读到同一个 superCursor.next，同一页被拉两次、
   // 追加两次，列表里整整多出 50 行重复成员（iOS 侧一直有这个守卫，Web 漏了）。
   const superLoadingRef = useRef(false);
+  const superGenRef = useRef(0); // 强制重载代次：在途的旧页响应据此作废
   const activeSuperRef = useRef(""); // 当前开着资料页的超级群 id（人数变化回调只重拉正在看的那个群）
   // 同一件事的**可渲染副本**：ref 改了不触发重渲染，而按钮文案与「自动续拉是否挂监听」都要看它。
   const [superLoading, setSuperLoading] = useState(false);
@@ -577,8 +578,10 @@ export default function App() {
     if (superLoadingRef.current) return; // 连点/慢网下的重复请求（见 superLoadingRef 注释）
     superLoadingRef.current = true;
     setSuperLoading(true);
+    const gen = superGenRef.current;
     try {
       const page = await fetchGroupMembersPage(tok, convId, { cursor, limit: 50 });
+      if (gen !== superGenRef.current) return; // 人数变化触发了强制重载：这份旧响应作废，免得把已移除的人写回
       setSuperMembers((prev) => {
         if (!cursor) return page.members;
         // 按 user_id 去重再追加。守卫已挡住连点，这里兜的是另一种重叠：keyset 游标翻页期间
@@ -591,8 +594,10 @@ export default function App() {
       // 拉不到就维持现状：成员 Tab 少几行，不影响聊天本身。
       setSuperCursor((prev) => ({ ...prev, hasMore: false }));
     } finally {
-      superLoadingRef.current = false;
-      setSuperLoading(false);
+      if (gen === superGenRef.current) {
+        superLoadingRef.current = false;
+        setSuperLoading(false);
+      }
     }
   }, []);
 
@@ -606,7 +611,12 @@ export default function App() {
   }, []);
 
   // 拉群资料进缓存 + 群成员表过期检测（会话开着时有人改名再发消息 → 节流重拉），见 useGroupInfoRefresh.ts。
-  const refreshGroupInfo = useGroupInfoRefresh(clientRef, setGroupInfos, groupConvId, msgsByConv, groupInfos, (cid) => { if (cid === activeSuperRef.current) void loadSuperMembers(cid, ""); });
+  const refreshGroupInfo = useGroupInfoRefresh(clientRef, setGroupInfos, groupConvId, msgsByConv, groupInfos, (cid) => {
+    if (cid !== activeSuperRef.current) return;
+    superGenRef.current += 1; // 作废在途翻页，否则守卫会把这次重载吞掉
+    superLoadingRef.current = false;
+    void loadSuperMembers(cid, "");
+  });
 
   // 打开群会话：与 openChat 同一套进会话定位逻辑，只是标识从 peer 换成 conv_id。
   const openGroupChat = useCallback((cid: string) => {
@@ -2625,10 +2635,12 @@ export default function App() {
   const doClearHistory = (cid: string) => {
     void (async () => {
       if (!(await askConfirm(t("chat.clear.confirm"), { okText: t("chat.clear.ok"), danger: true }))) return;
-      if ((await clientRef.current?.clearConversation(cid, conversations.find((c) => c.conv_id === cid)?.latest_conv_seq ?? 0)) === undefined) return;   // 登出过渡态（无 client）：没清成就别报「已清空」
+      const floor = await clientRef.current?.clearConversation(cid, conversations.find((c) => c.conv_id === cid)?.latest_conv_seq ?? 0);
+      if (floor === undefined) return;   // 登出过渡态（无 client）：没清成就别报「已清空」
       clearConv(cid); // 内存同步清空（当前会话/缓存）
       setDetailMsgs([]);
-      void pinned.refresh(cid); // 位点已抬高：位点以内的置顶（横幅/面板）随之摘掉
+      pinned.dropBelowFloor(cid, floor); // 位点已抬高：位点以内的置顶（横幅/面板）当场摘掉（纯本地）
+      void pinned.refresh(cid);          // 再与服务端对齐
       setToast(t("chat.clear.done"));
     })();
   };

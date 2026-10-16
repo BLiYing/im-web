@@ -42,6 +42,16 @@ export function usePinnedMessages(clientRef: MutableRefObject<IMClient | null>, 
   }, [clientRef]);
   const schedule = useMemo(() => keyedDebounce(PINNED_REFRESH_COALESCE_MS, (cid) => void refresh(cid)), [refresh]);
 
+  /** 清空聊天记录抬了位点：就地摘掉位点以内的置顶（纯本地，离线 / 重拉失败也生效；随后 refresh 与服务端对齐）。 */
+  const dropBelowFloor = useCallback((cid: string, floor: number) => {
+    setByConv((prev) => {
+      const cur = prev[cid];
+      if (!cur) return prev;
+      const kept = dropCleared(cur, floor);
+      return kept.length === cur.length ? prev : { ...prev, [cid]: kept };
+    });
+  }, []);
+
   /** 本地先摘掉一条（取消置顶帧到达时立刻生效：面板开着能实时看到那行消失，空集自动收起），随后合并重拉对齐。 */
   const dropLocal = useCallback((cid: string, seq: number) => {
     gens.current[cid] = (gens.current[cid] ?? 0) + 1; // 作废在途的旧拉取（它仍含这一条），随后的合并重拉会补上最新
@@ -75,5 +85,5 @@ export function usePinnedMessages(clientRef: MutableRefObject<IMClient | null>, 
   // 面板开着时集合变空（最后一条被取消 / 撤回 / 一键取消所有）→ 自动收起（Android 已有，iOS/Web 补齐，DESIGN §2.3）。
   useEffect(() => { if (panelOpen && active.length === 0) setPanelOpen(false); }, [panelOpen, active.length]);
 
-  return { active, shown: latestPinned(active), refresh, schedule, onMsgOp, onRemoved, panelOpen, setPanelOpen };
+  return { active, shown: latestPinned(active), refresh, schedule, dropBelowFloor, onMsgOp, onRemoved, panelOpen, setPanelOpen };
 }
