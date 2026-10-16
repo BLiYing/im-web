@@ -42,6 +42,7 @@
 - 免密登录需后端 `-dev-login`；dev 建的号无法再走密码登录。
 - **登录寿命口径**：access token 24h；`refresh_token` 180 天绝对寿命、**续期不刷新**，唯一轮换点是改密码（`changePassword` 必须接住响应里那枚新的，否则下次冷启动被弹回登录页）。**WS 连着 ≠ token 有效**，服务端只在握手校验。
 - **凭据存 localStorage**（XSS 可读；比存密码是净改善：可吊销、不能改密码、不能登其它端）；更强的做法是 httpOnly cookie，需后端配套，未做。
+- **置顶重拉多一次本地存储读**（2026-10-16）：`usePinnedMessages.refresh` 每次 `await client.loadClearedUpTo(cid)` 取清空位点（内存 `clearedUpToOf` 取大值兜底）。有意取舍——位点可能尚未载入内存；代价是批量删除 / 取消置顶突发时每次多一次异步读，且它抛错会让该次刷新作废。要省就把位点载入前移到进会话时。
 
 ## 关联工程 / 常用命令
 - 后端 `/Users/dev/IOSProject/im-client/IMServer`；iOS `/Users/dev/IOSProject/im-client/IMProgram`；Android `/Users/dev/IOSProject/im-client/im-android`。
