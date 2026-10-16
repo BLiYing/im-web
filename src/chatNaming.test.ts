@@ -121,3 +121,21 @@ describe("groupRemark：读会话行的 remark（服务端多端同步的那份�
     expect(r.groupRemark("g2")).toBe("");
   });
 });
+
+describe("已注销用户（deleted=true）显示「已注销用户」，压过备注/昵称", () => {
+  it("好友 / 会话 / 群成员 / 气泡发送者", () => {
+    const r = makeNameResolvers(sources({
+      remarks: new Map([[UID, "老王"]]),
+      groupInfos: { g1: group([{ user_id: UID, nickname: "小明", deleted: true }]) },
+    }));
+    expect(r.friendLabel({ user_id: UID, nickname: "小明", deleted: true } as FriendEntry)).toBe("已注销用户");
+    expect(r.convLabel(conv({ peer_nickname: "小明", peer_deleted: true }))).toBe("已注销用户");
+    expect(r.groupMemberLabel({ user_id: UID, nickname: "小明", deleted: true } as never)).toBe("已注销用户");
+    expect(r.senderLabel(msg({ fromNickname: "小明" }))).toBe("已注销用户");
+  });
+  it("解析缓存里标了 deleted 也生效；未标记的不受影响", () => {
+    const r = makeNameResolvers(sources({ profileCards: { [UID]: { user_id: UID, nickname: "x", deleted: true } as UserCard } }));
+    expect(r.localNameOf(UID, "g1")).toBe("已注销用户");
+    expect(makeNameResolvers(sources()).friendLabel({ user_id: UID, nickname: "小明" } as FriendEntry)).toBe("小明");
+  });
+});

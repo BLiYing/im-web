@@ -82,6 +82,8 @@ export interface IMClientHandlers {
   /** 鉴权失效（账号不存在/密码错/被封/token 失效）：会话已失效，应退回登录页（而非无限重连）。
    *  code 为业务码，供 UI 区分处理：100101 吊销/被踢=强制退登（直接跳登录），100102 过期=可留看本地缓存。 */
   onAuthError?: (msg: string, code?: number) => void;
+  /** 本账号在别处被注销（error 帧 reason=account_deleted，PROTOCOL §6.16.2）：除走被踢路径外还要清空本机聊天缓存。 */
+  onAccountDeleted?: () => void;
   /** 续期凭据变了，**须立刻落盘**：登录下发、改密码轮换（新的一枚）、或凭据已死（空串=清掉）。
    *  端上存它而不是明文密码——密码不可吊销，"注销某台设备"对存密码的客户端完全无效。 */
   onRefreshToken?: (refreshToken: string) => void;
@@ -1005,6 +1007,7 @@ export class IMClient extends IMRestApi {
       case T.PONG:
         this.probeWatchdog.clear(); break; // 唤醒探活的回执：连接确实活着
       case T.ERROR: {
+        if (d.reason === "account_deleted") { this.handlers.onAccountDeleted?.(); break; }
         const responseSeq = typeof env.seq === "number" ? env.seq : 0;
         const syncConvs = this.syncPending.get(responseSeq) ?? [];
         this.syncPending.delete(responseSeq);

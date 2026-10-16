@@ -4,6 +4,7 @@
 > 历史流水见 `current_task.archive.md`（2026-10-02 瘦身前的全量快照在其顶部）+ `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+- **注销账号（2026-10-16，已提交 main，未 push；未浏览器实测）**：设计 `IMServer/docs/design/DELETE_ACCOUNT_DESIGN.md` + 草图，契约 PROTOCOL §6.16（已对账）。入口：`EditProfilePanel` 只读态底部红字按钮 + 脚注 → `settings/DeleteAccountPanel.tsx`（`DeleteAccountContainer` 自持状态；Host 自持 `deleteAccountOpen`）。逻辑 `useDeleteAccount.ts`（提交/二次确认 Dialogs/群主阻断 `owned_groups:[{conv_id,name}]`；`useRestoreOffer`：登录遇 `200005` 弹恢复→`restore`→再 `enterApp`）；SDK `sdk/accountApi.ts`（`tokenSession` 登录分支带 `deleteAt`，200005 计死凭据免重连）、`sdk/wipeOwner.ts`（成功后清该 owner 的 IndexedDB + 会话缓存）；WS error 帧 `reason=account_deleted` → `onAccountDeleted` → logout + 清缓存。`deleted=true`/`peer_deleted` 在 `chatNaming.ts` 显示「已注销用户」。`ConfirmDlg` 新增可选 `title`。
 - **二维码展示三端对齐（2026-10-16，已三端自测 + 全量测试，未提交）**：名片码/群二维码/群邀请链接卡片头部（头像·名字·成员数/@句柄）竖排居中（iOS `IMQRCardView`、Web `QRCardModal`+扫码结果分支）；iOS 扫一扫「我的二维码」改为嵌入 `IMQRCardViewController`（同 Android 共用整页）；群邀请链接页改为链接框 + 分享/复制 + 「查看二维码」，不画码（三端）；群码有效期提示三端统一为「X月X日 前有效，重置后旧码立即失效」（无到期时间退回 7 天口径）；链接页不放重置（重置只在二维码页）；新增 i18n 键 `qr.card.share_link/view_code/group_link_hint_expiry` 已入 `strings.json` 并重新生成。
 - **置顶消息面板 v3（2026-10-15，未提交，浏览器实测过：开面板 / 长按取消 / 实时摘除 / 一键取消所有）**：设计 `IMServer/docs/design/PINNED_PANEL_DESIGN.md` + 草图。横幅恒显最新置顶（`pinned.ts#latestPinned`）、不轮转、整条点击开面板、≡ 恒显、kicker「· N 条」；状态簇在 `usePinnedMessages.ts`（取消置顶帧本地摘除 + 300ms 合并重拉、空集自动收起）；面板 `components/modals/PinnedListModal.tsx`（`ModalHead` + 真气泡 `components/MessageBubble.tsx readOnly` + `icons/LocateInChatIcon.tsx`，长按 `.ctx-menu` 渲染在遮罩内）；SDK `sdk/pinnedApi.ts`（`message` 完整对象解析、`clearPinned`、批量取消帧 `targets` 经 `batchRemove.ts#applyBatchUnpinFrame` 逐条应用）。i18n 已改 IMServer 源表并只生成 Web/desktop 两份。
 - **聊天文件夹（2026-10-14，已提交 f4cfb4d / f041c67；右键菜单贴 Tab 下方 5a22f39；桌面端未单独验证）**：`chatFolders.ts`/`useChatFolders.ts`/`sdk/foldersApi.ts`、`components/ChatFolderTabs.tsx`（固定头：搜索 + Tab 条 + 右键编辑/删除）、`ChatFolderMenuItems.tsx`（右键菜单文件夹项第一位）、`settings/ChatFoldersPanel.tsx`；App.tsx 恰卡在 3520 行红线，新逻辑都在新文件。设计见 IMServer `docs/design/CHAT_FOLDERS_DESIGN.md`。
@@ -29,6 +30,7 @@
 - **⏸ 拆 `useChatScroll`**：独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
+- **注销后清缓存仅 Web（IndexedDB）**：桌面端 SQLite 桥无按 owner 清库原语，未清；「已注销用户」暂未禁用发消息/加好友/邀请入口（协议建议禁用）；阻断态群名不可点跳转。
 - **清空位点**：新增 `sdk/clearFloor.ts`（纯逻辑）；`localStore.clearMessages(owner,conv,knownLatest)` + `loadClearedUpTo`；桌面主进程有平行实现（`sqliteStore.ts`/`sqliteRows.ts`），改语义两边一起改。位点存在 IndexedDB **游标行**里（`advanceCursorInStore` 必须 `...prev` 保留它）。回填误伤面：history_visible 下界/不落库事件行会被当位点，无害。
 - **既有问题（未动）**：`SYNC_RESP` 里 `before` 在页内消息逐条 `updateSynced` 之后才读，页首贴着游标的连续 sync 页 `next > before` 恒假，**整页不落库、区间不登记**（只在内存）；靠开窗/重拉自愈所以没被发现。要修需先读 `before` 再处理页。
 - `imSdk.ts` 卡在 1359 行基线：新增逻辑靠把回执合批拆到 `sdk/receiptBatch.ts` + 压缩注释腾出。

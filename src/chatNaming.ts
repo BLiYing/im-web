@@ -20,6 +20,10 @@
 import type { ChatMessage, Conversation, FriendEntry, GroupInfo, GroupMember, UserCard } from "./sdk/protocol";
 import { displayNameOf } from "./remarks";
 import { resolvePeerAvatar, resolvePeerNickname } from "./peerAvatar";
+import { t } from "./i18n";
+
+/** 已注销账号的统一显示名（`deleted=true` 的用户对象，DELETE_ACCOUNT_DESIGN §5）；压过备注。 */
+export const deletedName = (): string => t("delete_account.deleted_user");
 
 export interface NamingSources {
   /** uid → 我给他起的备注（`remarkMap(friends)`）。 */
@@ -86,10 +90,10 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
 
   const labelOf = (id: string, nick: string, username?: string) => displayNameOf(id, remarks, nick, username);
   // 好友显示名优先级：备注名 > 昵称 > @句柄 > 占位。
-  const friendLabel = (f: FriendEntry) => displayNameOf(f.user_id, remarks, f.remark || f.nickname, f.username);
+  const friendLabel = (f: FriendEntry) => f.deleted ? deletedName() : displayNameOf(f.user_id, remarks, f.remark || f.nickname, f.username);
   // 会话对端显示名：备注 > 昵称 > 占位。
   // 会话列表**不下发 username**（§7.4），故末级只能到占位——那也好过露出内部 ID。
-  const convLabel = (c: Conversation) => displayNameOf(c.peer, remarks, c.peer_remark || c.peer_nickname);
+  const convLabel = (c: Conversation) => c.peer_deleted ? deletedName() : displayNameOf(c.peer, remarks, c.peer_remark || c.peer_nickname);
   const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
   const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
 
@@ -111,7 +115,11 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
     (conversations.find((c) => c.conv_id === cid)?.remark || "").trim();
 
   // 群成员昵称（气泡回退用）：群昵称 > 全局昵称 > 全局解析缓存 > 空串（调用方走自己的兜底）。
+  // 已注销（`deleted=true`）：成员表 / 全局解析缓存任一处标了就算。
+  const isDeleted = (cid: string, id: string): boolean =>
+    !!(profileCards[id]?.deleted || groupInfos[cid]?.members.find((m) => m.user_id === id)?.deleted);
   const memberNick = (cid: string, id: string): string => {
+    if (isDeleted(cid, id)) return deletedName();
     const local = memberTableNickname(groupInfos[cid], id);
     if (local) return local;
     // 成员表给不出：超级群不下发成员集、或发送者已退群。问全局解析器（缺的由 App 的
@@ -122,7 +130,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   /** 某人在**本机**的显示名：备注 > 群昵称/全局昵称 > fallback（一般是服务端字面）> 占位。
    *  系统消息里的名字、引用条发送者、typing 副标题共用；会发出去的内容一律不经过这里。 */
   const localNameOf = (id: string, cid: string, fallback?: string): string =>
-    displayNameOf(id, remarks, memberNick(cid, id) || fallback);
+    isDeleted(cid, id) ? deletedName() : displayNameOf(id, remarks, memberNick(cid, id) || fallback);
 
   // 气泡发送者：备注 > 成员表（群昵称/昵称）> 本窗该发送者最新快照 > 本条快照 > 全局解析缓存 > 占位。
   // **成员表压过快照**（2026-09-15 改，此前快照优先）：from_nickname 是发消息那一刻的名字、落进 IndexedDB 后
@@ -131,7 +139,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   // 对端：iOS IMProgram/Common/IMGroupSenderName.h、Android data/SenderNames.kt（SYMMETRY 已登记）。
   const latestNicks = latestSenderNicknames(windowMessages ?? []);
   const senderLabel = (m: ChatMessage): string =>
-    displayNameOf(m.from, remarks,
+    isDeleted(m.convId, m.from) ? deletedName() : displayNameOf(m.from, remarks,
       memberTableNickname(groupInfos[m.convId], m.from)
       || latestNicks.get(senderKey(m.convId, m.from))
       || m.fromNickname
@@ -140,7 +148,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 全局昵称 > 占位。
    *  成员列表/已读回执/成员菜单确认文案都用它；会发出去的内容（@token 等）仍用公开名。 */
   const groupMemberLabel = (m: Pick<GroupMember, "user_id"> & { group_nickname?: string; nickname?: string }): string =>
-    displayNameOf(m.user_id, remarks, m.group_nickname || m.nickname);
+    (m as { deleted?: boolean }).deleted ? deletedName() : displayNameOf(m.user_id, remarks, m.group_nickname || m.nickname);
 
   // 发送者在本群的角色（群主/管理员气泡徽标）：**优先本群成员表的当前角色**（晋升/降级后老消息
   // 随之变化，微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role 兜底

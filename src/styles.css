@@ -1621,6 +1621,21 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 /* 修改密码表单：错误红字 + 底部按钮留白。 */
 .pwd-error { padding: 8px 14px 0; color: var(--danger); font-size: 13px; line-height: 1.5; }
 .pwd-actions { padding: var(--space-3) var(--space-4); }
+/* 注销账号（DELETE_ACCOUNT_DESIGN §4 Web 列）：只用现有令牌。 */
+.delete-account-panel { z-index: 40; }
+.delacct-warn { width: 64px; height: 64px; margin: 6px auto var(--space-2); border-radius: 50%; background: var(--danger-soft); color: var(--danger); display: flex; align-items: center; justify-content: center; }
+.delacct-head { margin-bottom: var(--space-3); font-size: 18px; font-weight: 600; color: var(--text); text-align: center; }
+.delacct-li { display: flex; gap: var(--space-2); padding: 8px var(--space-4); border-bottom: 1px solid var(--separator); font-size: 14px; color: var(--text); }
+.delacct-li:last-child { border-bottom: 0; }
+.delacct-tip { margin-bottom: var(--space-3); padding: var(--space-3); border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-size: 13px; }
+.delacct-owned { margin-bottom: var(--space-3); padding: var(--space-3); border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 13px; line-height: 1.5; }
+.delacct-pwd { display: flex; align-items: center; padding-right: var(--space-2); }
+.delacct-pwd input { flex: 1; min-width: 0; padding: 10px var(--space-4); border: 0; background: transparent; color: var(--text); font-size: 15px; outline: none; }
+.delacct-btn { display: flex; width: 100%; height: 48px; margin-top: var(--space-3); align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--radius-card); background: var(--danger); color: var(--on-accent); font-size: 15px; cursor: pointer; }
+.delacct-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* 我的资料页底部入口：与 .settings-logout 同款按钮（紧贴上一组），脚注 13px --text-secondary。 */
+.profile-delete-btn { margin-top: 0; }
+.settings-foot.profile-delete-foot { margin-top: 6px; padding: 0 var(--space-4); }
 /* 层叠：隐私页盖在设置页(30)之上；黑名单/修改密码是从隐私页再进一层，盖在隐私页之上。 */
 .privacy-panel { z-index: 40; }
 .blocked-panel, .changepwd-panel { z-index: 50; }

@@ -11,6 +11,7 @@
 //   ③ 才轮到 `POST /login`——只剩两种情形：首次登录，和老会话里那份明文密码的一次性迁移。
 import { fetchEnvelope } from "./http";
 import { friendlyMessage } from "./errcode";
+import { accountError, CODE_ACCOUNT_PENDING_DELETION } from "./accountApi";
 import { t } from "../i18n";
 
 /** 鉴权类业务码：拿到这些说明「这枚凭据永远不会再好起来」，重试无意义。 */
@@ -50,7 +51,8 @@ function authError(code: number, message: string): Error & { code?: number } {
 /** 该业务码是否意味着凭据已死（重试/续期都救不回来）。 */
 export function isDeadCredential(code: number | undefined): boolean {
   return code === CODE_TOKEN_REVOKED || code === CODE_TOKEN_EXPIRED
-    || code === 200001 || code === 200002 || code === 200003; // 账号不存在 / 密码错 / 被封
+    || code === 200001 || code === 200002 || code === 200003 // 账号不存在 / 密码错 / 被封
+    || code === CODE_ACCOUNT_PENDING_DELETION; // 冷静期账号：重试无意义，等用户选「恢复」
 }
 
 /**
@@ -108,7 +110,7 @@ export async function acquireToken(c: TokenCredentials, uid: string): Promise<To
     }),
   });
   if (body.code !== 0 || !body.data?.token || !body.data?.uid) {
-    throw authError(body.code, body.message ?? t("login.error.login_failed"));
+    throw body.code === CODE_ACCOUNT_PENDING_DELETION ? accountError(body.code, body.message ?? "", body.data) : authError(body.code, body.message ?? t("login.error.login_failed"));
   }
   // data.uid 是服务端分配的内部 ID；首次登录前本端并不知道自己是谁。
   return { token: body.data.token, uid: body.data.uid, refreshToken: body.data.refresh_token ?? "" };

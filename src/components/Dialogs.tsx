@@ -9,6 +9,7 @@ import { useT } from "../i18n";
 export function ConfirmDialog({ dlg, set }: { dlg: ConfirmDlg; set: (v: ConfirmDlg | null) => void }) {
   return (
     <Modal className="modal confirm-modal" onClose={() => { dlg.resolve(false); set(null); }}>
+        {dlg.title && <h3>{dlg.title}</h3>}
         <div className="confirm-msg">{dlg.message}</div>
         <div className="modal-actions">
           <button className="link" onClick={() => { dlg.resolve(false); set(null); }}>

@@ -4,7 +4,7 @@ import { useCallback, useState } from "react";
 // 从 App.tsx 抽出：自持 confirmDlg/promptDlg 两态，askConfirm/askPrompt 返回 Promise；
 // 弹窗 JSX 仍由 App 渲染（读 confirmDlg/promptDlg 与对应 setter）。无外部依赖。
 
-export type ConfirmDlg = { message: string; okText: string; cancelText: string; danger: boolean; resolve: (ok: boolean) => void };
+export type ConfirmDlg = { title?: string; message: string; okText: string; cancelText: string; danger: boolean; resolve: (ok: boolean) => void };
 export type PromptDlg = {
   title: string; value: string; placeholder: string; okText: string; maxLength?: number;
   /** 标题下面单独一行的说明（对齐 iOS/Android 弹窗：群备注「仅你自己可见…」）。 */
@@ -19,8 +19,9 @@ export function useDialogs() {
 
   // 应用内确认框：返回 Promise<boolean>，替代 window.confirm。danger=true 时确认按钮为危险色。
   const askConfirm = useCallback(
-    (message: string, opts?: { okText?: string; cancelText?: string; danger?: boolean }) =>
+    (message: string, opts?: { title?: string; okText?: string; cancelText?: string; danger?: boolean }) =>
       new Promise<boolean>((resolve) => setConfirmDlg({
+        title: opts?.title,
         message,
         okText: opts?.okText ?? "确定",
         cancelText: opts?.cancelText ?? "取消",

@@ -262,6 +262,7 @@ export interface Conversation {
   peer_nickname?: string;   // 对端昵称（空则回退 uid）
   peer_remark?: string;     // 我对对端的备注名（显示优先级最高，仅自己可见）
   peer_avatar_url?: string; // 对端头像（data:/http，空则回退首字母圈）
+  peer_deleted?: boolean;   // 对端已注销（匿名化）：显示「已注销用户」（字段名待与 PROTOCOL 对账）
   last_message: ConvLastMessage | null;
   latest_conv_seq: number;
   unread: number;
@@ -321,6 +322,8 @@ export interface UserCard {
   avatar_url: string;
   tags: string[];
   status: string;
+  /** 已注销（匿名化后）账号：端上一律显示「已注销用户」+ 默认头像（DELETE_ACCOUNT_DESIGN §5；待与 PROTOCOL 对账）。 */
+  deleted?: boolean;
 }
 
 /** 本人完整资料（GET /api/v1/users/me，含 phone；对齐 profile.Card）。 */
@@ -354,6 +357,8 @@ export interface FriendEntry {
   /** 好友申请的**验证消息**（申请理由）：只在 status=pending/requested 时有值，accepted 后服务端清空。
    *  老服务端/老数据不带它，端上按"没写理由"渲染，不要显示空引号或占位符。 */
   hello?: string;
+  /** 对端已注销（匿名化）：显示「已注销用户」。 */
+  deleted?: boolean;
 }
 
 /** 群成员角色（对齐后端 store.GroupRole*）。 */
@@ -370,6 +375,7 @@ export interface GroupMember {
   role: GroupRole;
   joined_at: number;
   mute_until?: number; // 成员级禁言到期（G2；0=未禁言）
+  deleted?: boolean; // 已注销（匿名化）账号
 }
 
 /** 群资料 + 成员列表（对齐后端 group.Info；conv_id 即群 topic_id）。 */

@@ -3,6 +3,7 @@ import { AtSign, Check, Phone, SquarePen } from "lucide-react";
 import { renderRow } from "../rows";
 import { Avatar } from "../Avatar";
 import { SubPanel } from "./SubPanel";
+import { useT } from "../../i18n";
 
 // username 是公开句柄（登录名 + 别人搜索到我的凭据，规则严格）；nickname 是显示名（随便填）。
 // 两者独立提交：改名走独立接口，见 useProfileEdit.saveProfile。
@@ -17,7 +18,7 @@ export type ProfileDraft = { nickname: string; username: string; avatar_url: str
  *  刻意不显示内部 ID（10 位随机数字，见 docs/UI.md「用户标识」）与标签（Telegram 那张卡上无对应物）。
  *
  *  纯展示：草稿状态与保存/选头像动作由 App 注入；隐藏 file input 的 ref 归本组件私有。 */
-export function EditProfilePanel({ draft, uid, busy, editing, onEnterEditing, onCancelEditing, onChange, onSave, onPickAvatar, onBack }: {
+export function EditProfilePanel({ draft, uid, busy, editing, onEnterEditing, onCancelEditing, onChange, onSave, onPickAvatar, onDeleteAccount, onBack }: {
   draft: ProfileDraft;
   uid: string;
   busy: boolean;
@@ -27,9 +28,11 @@ export function EditProfilePanel({ draft, uid, busy, editing, onEnterEditing, on
   onChange: (next: ProfileDraft) => void;
   onSave: () => void;
   onPickAvatar: (file?: File) => void;
+  onDeleteAccount: () => void; // 只读态底部「注销账号」入口 → 二级页（DELETE_ACCOUNT_DESIGN §2）
   onBack: () => void;
 }) {
   const avatarFileRef = useRef<HTMLInputElement>(null); // 隐藏的本机图片选择 input
+  const t = useT();
 
   if (!editing) {
     return (
@@ -52,6 +55,9 @@ export function EditProfilePanel({ draft, uid, busy, editing, onEnterEditing, on
             icon: AtSign, iconTint: "blue", value: "用户名", onClick: onEnterEditing,
           }, "settings-row info")}
         </div>
+        {/* 注销入口（仅只读态）：与「退出登录」同款红字居中按钮 + 脚注；不登记设置搜索。 */}
+        <button className="settings-logout profile-delete-btn" onClick={onDeleteAccount}>{t("profile.delete_account.row")}</button>
+        <div className="settings-foot profile-delete-foot">{t("profile.delete_account.footer")}</div>
       </SubPanel>
     );
   }

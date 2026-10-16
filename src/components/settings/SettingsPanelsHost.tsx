@@ -4,7 +4,7 @@
 // 不持有业务状态。经 useAppServices()/useT() 直接取 clientRef/setToast/comingSoon/askConfirm/t，
 // 免得 App 侧再显式传一遍（这四个已经是 AppServicesContext 收拢的稳定服务）。
 // 纯搬移，DOM/行为逐字不变：Fragment 不引入包裹节点，各面板 JSX 与原 App.tsx 内联时完全一致。
-import type { Dispatch, SetStateAction } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import { useAppServices } from "../../AppServicesContext";
 import { useT } from "../../i18n";
 import { clamp, type HSVColor } from "../../color";
@@ -21,6 +21,9 @@ import { DevicesPanel } from "./DevicesPanel";
 import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
 import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
+import { DeleteAccountContainer } from "./DeleteAccountPanel";
+import { deleteAccount } from "../../sdk/accountApi";
+import { wipeOwnerLocalData } from "../../sdk/wipeOwner";
 import { GeneralPanel } from "./GeneralPanel";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { LanguageSettings } from "./LanguagePanel";
@@ -41,6 +44,7 @@ export interface SettingsPanelsHostProps {
   groups: Row[][];
   openProfile: (opts?: { edit?: boolean }) => Promise<void> | void;
   logout: () => void;
+  onAccountDeleted: () => void; // 注销成功：App 走 logout() 同路径并在登录页显示 delete_account.done_hint
 
   // 数据与存储
   dataStorageOpen: boolean;
@@ -135,6 +139,7 @@ export interface SettingsPanelsHostProps {
 export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const t = useT();
   const { clientRef, setToast, comingSoon, askConfirm } = useAppServices();
+  const [deleteAccountOpen, setDeleteAccountOpen] = useState(false); // 注销账号二级页（自持，不占 App 状态）
   const powerSave = usePowerSave();
   usePowerSaveToast(setToast); // §5 自动开启提示（电量监听 / 根 class 在 main.tsx 的 installPowerSaving，登录页也生效）
   // 设置入口行「动画与性能」：生效时右值「省电中」（稿：Row.value），否则不给。
@@ -200,7 +205,18 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onChange={p.setProfileDraft}
           onSave={() => void p.saveProfile()}
           onPickAvatar={p.onPickAvatar}
+          onDeleteAccount={() => setDeleteAccountOpen(true)}
           onBack={() => p.setProfileDraft(null)}
+        />
+      )}
+
+      {/* 注销账号二级页（从我的资料页只读态底部进入）：见 components/settings/DeleteAccountPanel。 */}
+      {deleteAccountOpen && (
+        <DeleteAccountContainer
+          run={async (pwd) => { const c = clientRef.current; if (!c) throw new Error(t("conn.state.disconnected")); await deleteAccount(c.authToken, pwd); }}
+          askConfirm={askConfirm}
+          onDeleted={() => { const owner = p.uid; setDeleteAccountOpen(false); p.onAccountDeleted(); void wipeOwnerLocalData(owner); }}
+          onBack={() => setDeleteAccountOpen(false)}
         />
       )}
 

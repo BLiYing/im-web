@@ -71,6 +71,8 @@ import { LoginView } from "./components/LoginView";
 import { SESSION_KEY, loadSession, saveSession } from "./session";
 import { useDevices } from "./useDevices";
 import { useDialogs } from "./useDialogs";
+import { useRestoreOffer } from "./useDeleteAccount";
+import { wipeOwnerLocalData } from "./sdk/wipeOwner";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
 import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
@@ -251,9 +253,9 @@ export default function App() {
   const [contactDraft, setContactDraft] = useState<{ peer: string; remark: string } | null>(null); // 编辑联系人（备注名）弹窗
   // 轻量浮层提示（如"xx（开发中）"）：状态 + 自动消失 + comingSoon 抽到 useToast（须先于用到它们的回调）。
   const { toast, setToast, comingSoon } = useToast();
-  // 应用内确认/输入弹窗（替代原生 window.confirm/prompt）：状态与 askConfirm/askPrompt 抽到 useDialogs；
-  // 弹窗本体 JSX 仍在下方渲染。须在使用 askConfirm/askPrompt 的回调之前调用（此处即最靠前）。
+  // 应用内确认/输入弹窗（替代 window.confirm/prompt；状态在 useDialogs，JSX 在下方）：须先于用到 askConfirm/askPrompt 的回调。
   const { confirmDlg, setConfirmDlg, promptDlg, setPromptDlg, askConfirm, askPrompt } = useDialogs();
+  const offerRestore = useRestoreOffer({ askConfirm, onError: setAuthErr }); // 登录遇冷静期账号 → 恢复弹窗（useDeleteAccount）
   // 群公告/群简介全文视图（决策 16/17）：只读全文 + 复制 +（管理员）编辑；简介无发布者/时间/编辑。
   const [fullTextModal, setFullTextModal] = useState<{ kind: GroupTextKind; convId: string } | null>(null);
   const [accountCard, setAccountCard] = useState(false); // 左上角头像气泡卡片
@@ -843,6 +845,7 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
+      onAccountDeleted: () => { if (client !== clientRef.current) return; const o = uidRef.current; logout(); setAuthErr(t("login.session_revoked")); void wipeOwnerLocalData(o); }, // 别处注销本账号：踢下线 + 清本机缓存（PROTOCOL §6.16.2）
       onFolderUpdate: (d) => { folders.applyRaw(d, { fromFrame: true }); }, // 会话文件夹整表快照（§6.15）
       onNotifySettingsUpdate: (version) => void notif.onServerVersionBump(version), // 账号级通知设置版本变更（M5 §6.13）→ 本端按需重拉
       // 续期凭据变化（登录下发 / 改密轮换 / 已死清空）→ 记下并尽快落盘；uid 尚未定时由入场末尾那次 saveSession 兜住。
@@ -890,6 +893,7 @@ export default function App() {
       client.disconnect();
       clientRef.current = null;
       setAuthBusy(false);
+      if (await offerRestore(e, name, pwd)) { void enterApp(name, pwd); return; } // 冷静期账号：确认恢复后重新登录
       setAuthErr((e as Error).message || t("login.error.login_failed"));
       return;
     }
@@ -924,7 +928,7 @@ export default function App() {
     saveSession({ uid: myUID, username: name || loginName, refresh: refreshRef.current, token });
     setAuthBusy(false);
     setPhase("app");
-  }, [uid, loginName, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
+  }, [uid, loginName, offerRestore, appendMsg, refreshConversations, preloadLocal, scheduleConversationRefresh, scheduleListRefresh, refreshFriends, loadMyInfo, refreshGroupInfo]);
 
   // 静默恢复登录（Web #4）：挂载后若有已存会话 → 直接用存储凭据重登（成功直达主界面；
   // 网络失败且有本地会话缓存时直接进入会话页显示“未连接”；鉴权失败或无缓存才回登录页。
@@ -1034,9 +1038,7 @@ export default function App() {
     resetDevices();
     setWallpaperOpen(false);
     setWallpaperColorOpen(false);
-    setMyInfo(null);
-    setPassword("");
-    setAuthErr("");
+    setMyInfo(null); setPassword(""); setAuthErr("");
     setGroupConvId("");
     setGroupInfos({});
     setDetail(null);
@@ -2853,7 +2855,7 @@ export default function App() {
         <SettingsPanelsHost
           showSettings={showSettings} setShowSettings={setShowSettings}
           myInfo={myInfo} uid={uid} stateText={stateText} infoRows={settingsInfoRows} groups={settingsGroups}
-          openProfile={openProfile} logout={logout}
+          openProfile={openProfile} logout={logout} onAccountDeleted={() => { logout(); setAuthErr(t("delete_account.done_hint")); }}
           dataStorageOpen={dataStorageOpen} setDataStorageOpen={setDataStorageOpen}
           dlSettings={dlSettings} setDlSettings={setDlSettings} dlBlobs={dlBlobs} mediaOptedIn={mediaOptedIn}
           saveDownloadSettings={saveDownloadSettings} clearMediaCache={clearMediaCache}
