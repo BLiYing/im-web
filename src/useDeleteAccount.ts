@@ -1,7 +1,7 @@
 // 注销账号：面板状态簇 + 登录页「冷静期恢复」流程（DELETE_ACCOUNT_DESIGN §3 / §3.5）。
 // 全是可注入依赖的逻辑，面板与 App 只接线；网络调用走 sdk/accountApi.ts。
-import { useCallback, useState } from "react";
-import { t } from "./i18n";
+import { useCallback, useRef, useState } from "react";
+import { getLang, t } from "./i18n";
 import {
   CODE_ACCOUNT_PENDING_DELETION, deleteAtMs, restoreAccount,
   type AccountError, type OwnedGroup,
@@ -31,43 +31,50 @@ export function useDeleteAccount(deps: {
   const [error, setError] = useState("");
   const [ownedGroups, setOwnedGroups] = useState<OwnedGroup[]>([]);
   const canSubmit = password.length > 0 && !busy && ownedGroups.length === 0;
+  const inFlight = useRef(false); // 确认弹窗打开期间 busy 还没置位：连按 Enter / 点击会叠弹窗（上一个 Promise 永不 settle）
 
   const submit = useCallback(async () => {
-    if (!canSubmit) return;
-    const ok = await askConfirm(t("delete_account.confirm_message"), {
-      title: t("delete_account.confirm_title"), okText: t("delete_account.confirm_action"), danger: true,
-    });
-    if (!ok) return;
-    setBusy(true); setError("");
+    if (!canSubmit || inFlight.current) return;
+    inFlight.current = true;
     try {
-      await run(password);
-      onDeleted();
-    } catch (e) {
-      const err = e as AccountError;
-      if (err.ownedGroups?.length) setOwnedGroups(err.ownedGroups);
-      else setError(err.message || t("net.error.cannot_connect"));
+      const ok = await askConfirm(t("delete_account.confirm_message"), {
+        title: t("delete_account.confirm_title"), okText: t("delete_account.confirm_action"), danger: true,
+      });
+      if (!ok) return;
+      setBusy(true); setError("");
+      try {
+        await run(password);
+        onDeleted();
+      } catch (e) {
+        const err = e as AccountError;
+        if (err.ownedGroups?.length) setOwnedGroups(err.ownedGroups);
+        else setError(err.message || t("net.error.cannot_connect"));
+      } finally {
+        setBusy(false);
+      }
     } finally {
-      setBusy(false);
+      inFlight.current = false;
     }
   }, [canSubmit, askConfirm, run, password, onDeleted]);
 
   return { password, setPassword, busy, error, ownedGroups, canSubmit, submit };
 }
 
-/** 登录遇 AccountPendingDeletion 的恢复流程。返回 true=已恢复，调用方应重新走登录；false=不是冷静期错误 / 用户取消 / 恢复失败（失败文案走 onError）。 */
+/** 登录遇 AccountPendingDeletion 的恢复流程。返回 "restored"=已恢复，调用方应重新走登录；"handled"=恢复失败（文案已走 onError，调用方别再覆盖）；"none"=不是冷静期错误 / 用户取消。 */
 export function useRestoreOffer(deps: { askConfirm: AskConfirm; onError: (msg: string) => void }) {
   const { askConfirm, onError } = deps;
-  return useCallback(async (e: unknown, username: string, password: string): Promise<boolean> => {
+  return useCallback(async (e: unknown, username: string, password: string): Promise<"restored" | "handled" | "none"> => {
     const err = e as AccountError;
-    if (err?.code !== CODE_ACCOUNT_PENDING_DELETION) return false;
+    if (err?.code !== CODE_ACCOUNT_PENDING_DELETION) return "none";
     const date = err.deleteAt
-      ? new Date(deleteAtMs(err.deleteAt)).toLocaleDateString(undefined, { month: "long", day: "numeric" })
+      ? new Date(deleteAtMs(err.deleteAt)).toLocaleDateString(getLang() === "en" ? "en" : "zh-CN", { month: "long", day: "numeric" }) // 跟 App 语言走，不跟浏览器 locale
       : "";
-    const ok = await askConfirm(t("delete_account.restore_message", { date }), {
+    const ok = await askConfirm(date ? t("delete_account.restore_message", { date }) : t("delete_account.restore_title"), { // 服务端没给 delete_at 时不渲染空日期
+
       title: t("delete_account.restore_title"), okText: t("delete_account.restore_action"),
     });
-    if (!ok) return false;
-    try { await restoreAccount(username, password); return true; }
-    catch (re) { onError((re as Error).message); return false; }
+    if (!ok) return "none";
+    try { await restoreAccount(username, password); return "restored"; }
+    catch (re) { onError((re as Error).message); return "handled"; }
   }, [askConfirm, onError]);
 }

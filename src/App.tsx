@@ -892,8 +892,8 @@ export default function App() {
       }
       client.disconnect();
       clientRef.current = null;
-      setAuthBusy(false);
-      if (await offerRestore(e, name, pwd)) { void enterApp(name, pwd); return; } // 冷静期账号：确认恢复后重新登录
+      const restored = await offerRestore(e, name, pwd); setAuthBusy(false); // 冷静期账号：弹恢复；期间保持 authBusy，防再发起并发登录
+      if (restored === "restored") { void enterApp(name, pwd); return; } if (restored === "handled") return; // handled=恢复失败文案已显示，别被 200005 原文盖掉
       setAuthErr((e as Error).message || t("login.error.login_failed"));
       return;
     }
@@ -2435,7 +2435,7 @@ export default function App() {
 
   // ---- 登录 ----
   if (phase === "login") {
-    return (
+    return (<>{confirmDlg && <ConfirmDialog dlg={confirmDlg} set={setConfirmDlg} />}{/* 登录页也要能弹确认框：冷静期账号的「恢复账号」弹窗 */}
       <LoginView
         restoring={restoring} uid={loginName} nickname={nickname} password={password}
         authErr={authErr} authBusy={authBusy} loginTab={loginTab}
@@ -2446,7 +2446,7 @@ export default function App() {
           setUid(loginUid);
           setQrTrigger((n) => n + 1); // uid 不变时也强制触发入场 effect
         }}
-      />
+      /></>
     );
   }
 
@@ -2482,7 +2482,7 @@ export default function App() {
   const {
     labelOf, friendLabel, convLabel, convDisplayLabel, convAvatarUrl,
     peerAvatar, peerNick, peerUsername, groupRemark,
-    memberNick, localNameOf, senderLabel, groupMemberLabel, senderRole, senderAvatar,
+    memberNick, localNameOf, senderLabel, groupMemberLabel, senderRole, senderAvatar, isPeerDeleted,
   } = makeNameResolvers({
     remarks, friends, conversations, groupInfos, peerCards, searchResults, profileCards: userProfiles.cards,
     windowMessages: messages,
@@ -2508,7 +2508,7 @@ export default function App() {
   const composerMuteReason: string | null = (() => {
     // 系统通知会话（peer=system）：不能回复——同一锁机制统一到 composer disabled + 占位。
     // 见 docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
-    if (!isGroupChat && (peer === SYSTEM_UID || peerConv?.peer_deleted)) return t(peer === SYSTEM_UID ? "chat.input.disabled_system" : "chat.detail.deleted_user"); // 对端已注销同样只读（§6.16.3）
+    if (!isGroupChat && (peer === SYSTEM_UID || isPeerDeleted(peer))) return t(peer === SYSTEM_UID ? "chat.input.disabled_system" : "chat.detail.deleted_user"); // 对端已注销同样只读（§6.16.3）
     if (!isGroupChat || !activeGroupInfo) return null;
     if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return t("chat.input.disabled_muted");
     if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return t("chat.input.disabled_mute_all");
@@ -3219,7 +3219,7 @@ export default function App() {
           groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
-          peerDeleted={!!detail.peer && (deletedPeers.has(detail.peer) || !!peerCards[detail.peer]?.deleted || !!conversations.find((c) => c.peer === detail.peer)?.peer_deleted || !!friends.find((f) => f.user_id === detail.peer)?.deleted)}
+          peerDeleted={!!detail.peer && (deletedPeers.has(detail.peer) || isPeerDeleted(detail.peer))}
           peerPresenceText={detail.isGroup || !detail.peer ? "" : presenceText(presence[detail.peer])}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); setAdminPanelOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}

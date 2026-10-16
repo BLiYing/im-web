@@ -80,7 +80,9 @@ export interface NameResolvers {
   memberNick: (cid: string, id: string) => string;
   localNameOf: (id: string, cid: string, fallback?: string) => string;
   senderLabel: (m: ChatMessage) => string;
-  groupMemberLabel: (m: Pick<GroupMember, "user_id"> & { group_nickname?: string; nickname?: string }) => string;
+  groupMemberLabel: (m: Pick<GroupMember, "user_id" | "deleted"> & { group_nickname?: string; nickname?: string }) => string;
+  /** 该 uid 是否已注销：会话 peer_deleted / 好友 deleted / 名片 deleted 任一标了就算（PROTOCOL §6.16.3）。入口禁用（加好友/邀请/通话/输入框）统一走它。 */
+  isPeerDeleted: (id: string) => boolean;
   senderRole: (m: ChatMessage) => "owner" | "admin" | undefined;
   senderAvatar: (m: ChatMessage) => string | undefined;
 }
@@ -103,6 +105,9 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
     conversations, friends, groups: Object.values(groupInfos),
     search: [...Object.values(peerCards), ...(searchResults ?? []), ...Object.values(profileCards)],
   });
+  const isPeerDeleted = (id: string): boolean =>
+    !!id && (conversations.some((c) => c.peer === id && c.peer_deleted) || friends.some((f) => f.user_id === id && f.deleted)
+      || !!peerCards[id]?.deleted || !!profileCards[id]?.deleted);
   const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
   const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
   // 公开句柄只有 `GET /users/{id}` 的权威名片带（好友/会话列表不下发，见 PROTOCOL「用户标识」）。
@@ -147,8 +152,8 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
 
   /** 群成员在**本机**列表里的显示名：备注 > 群昵称 > 全局昵称 > 占位。
    *  成员列表/已读回执/成员菜单确认文案都用它；会发出去的内容（@token 等）仍用公开名。 */
-  const groupMemberLabel = (m: Pick<GroupMember, "user_id"> & { group_nickname?: string; nickname?: string }): string =>
-    (m as { deleted?: boolean }).deleted ? deletedName() : displayNameOf(m.user_id, remarks, m.group_nickname || m.nickname);
+  const groupMemberLabel = (m: Pick<GroupMember, "user_id" | "deleted"> & { group_nickname?: string; nickname?: string }): string =>
+    m.deleted ? deletedName() : displayNameOf(m.user_id, remarks, m.group_nickname || m.nickname);
 
   // 发送者在本群的角色（群主/管理员气泡徽标）：**优先本群成员表的当前角色**（晋升/降级后老消息
   // 随之变化，微信式）；成员表未加载 / 发送者已退群查不到时，回退消息自带 from_role 兜底
@@ -170,6 +175,6 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   return {
     labelOf, friendLabel, convLabel, convDisplayLabel, convAvatarUrl,
     peerAvatar, peerNick, peerUsername, groupRemark,
-    memberNick, localNameOf, senderLabel, groupMemberLabel, senderRole, senderAvatar,
+    memberNick, localNameOf, senderLabel, groupMemberLabel, senderRole, senderAvatar, isPeerDeleted,
   };
 }

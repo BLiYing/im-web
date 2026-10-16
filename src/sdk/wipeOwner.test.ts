@@ -9,6 +9,7 @@ describe("wipeOwnerLocalData", () => {
   it("只清该 owner 的消息/游标/会话缓存，别的账号不动", async () => {
     await saveMessage("wipeA", msg(1)); await saveMessage("wipeB", msg(1));
     await advanceSyncCursor("wipeA", "c1", 1); await advanceSyncCursor("wipeB", "c1", 1);
+    localStorage.setItem("im.optedIn.wipeA", "[]"); localStorage.setItem("im.voice.played.wipeA.c1", "[]"); localStorage.setItem("im.optedIn.wipeB", "[]");
     saveConversations("wipeA", [{ conv_id: "c1" } as Conversation]); saveConversations("wipeB", [{ conv_id: "c1" } as Conversation]);
     await wipeOwnerLocalData("wipeA");
     expect(await loadConversation("wipeA", "c1")).toHaveLength(0);
@@ -17,6 +18,9 @@ describe("wipeOwnerLocalData", () => {
     expect(await loadConversation("wipeB", "c1")).toHaveLength(1);
     expect(await loadSyncCursor("wipeB", "c1")).toBe(1);
     expect(loadConversations("wipeB")).toHaveLength(1);
+    expect(localStorage.getItem("im.optedIn.wipeA")).toBeNull();
+    expect(localStorage.getItem("im.voice.played.wipeA.c1")).toBeNull();
+    expect(localStorage.getItem("im.optedIn.wipeB")).not.toBeNull();
   });
   it("空 owner 直接返回", async () => { await expect(wipeOwnerLocalData("")).resolves.toBeUndefined(); });
 });

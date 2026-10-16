@@ -139,6 +139,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .login-submit:disabled { opacity: 0.6; cursor: default; }
 .login-submit.secondary { background: var(--card-bg); color: var(--accent); border: 1px solid var(--accent); }
 .auth-err { margin: 0; color: var(--danger); font-size: 13px; }
+.auth-info { margin: 0; color: var(--accent); font-size: 13px; }
 /* 按钮内联菊花（登录 / 注册并登录 / 免密登录共用）：跟随按钮文字色，禁用态随 opacity 一起变淡。
    复用下方 album-spin 关键帧，不另起一套。 */
 .btn-spinner { display: inline-block; width: 13px; height: 13px; margin-right: 6px; vertical-align: -2px;

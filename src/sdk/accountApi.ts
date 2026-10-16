@@ -8,8 +8,6 @@
 import { fetchEnvelope } from "./http";
 import { friendlyMessage } from "./errcode";
 
-export const CODE_NO_PERMISSION = 100103;
-export const CODE_WRONG_PASSWORD = 200002;
 export const CODE_ACCOUNT_PENDING_DELETION = 200005;
 
 export interface OwnedGroup { conv_id: string; name: string }

@@ -51,7 +51,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
         <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => onLoginTab("qr")}>{tr("login.tab_qr")}</button>
       </div>
       {/* 鉴权失效原因（如被踢下线）在两个页签下都要可见——被踢时可能正停在扫码页。 */}
-      {authErr && <p className="auth-err">{authErr}</p>}
+      {authErr && <p className={authErr === tr("delete_account.done_hint") ? "auth-info" : "auth-err"}>{authErr}</p>} {/* 注销成功提示走 authErr 位但非红（设计 §3.4） */}
       {loginTab === "password" ? (
         <>
           <label>{tr("settings.info.username")}<input value={uid} autoFocus placeholder={tr("web.login.username_placeholder")}

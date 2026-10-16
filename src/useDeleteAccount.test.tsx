@@ -42,6 +42,17 @@ describe("useDeleteAccount", () => {
     expect(h.result.current.canSubmit).toBe(false);
     expect(onDeleted).not.toHaveBeenCalled();
   });
+  it("确认弹窗打开期间重复提交 → 只弹一次", async () => {
+    let release: (v: boolean) => void = () => {};
+    const askConfirm = vi.fn((_m: string) => new Promise<boolean>((r) => { release = r; }));
+    const run = vi.fn(async () => {});
+    const h = renderHook(() => useDeleteAccount({ run, askConfirm, onDeleted: vi.fn() }));
+    act(() => h.result.current.setPassword("pw"));
+    let p1: Promise<void> = Promise.resolve(), p2: Promise<void> = Promise.resolve();
+    act(() => { p1 = h.result.current.submit(); p2 = h.result.current.submit(); });
+    expect(askConfirm).toHaveBeenCalledOnce();
+    await act(async () => { release(false); await Promise.all([p1, p2]); });
+  });
   it("密码错：显示错误文案，可重试", async () => {
     const { h } = setup(vi.fn(async () => { throw err(200002); }));
     act(() => h.result.current.setPassword("bad"));
@@ -55,30 +66,36 @@ describe("useDeleteAccount", () => {
 describe("useRestoreOffer", () => {
   beforeEach(() => vi.restoreAllMocks());
   const pending = err(api.CODE_ACCOUNT_PENDING_DELETION, { deleteAt: 1_700_000_000 });
-  it("非冷静期错误 → false，不弹窗", async () => {
+  it("非冷静期错误 → none，不弹窗", async () => {
     const askConfirm = vi.fn(async () => true);
     const { result } = renderHook(() => useRestoreOffer({ askConfirm, onError: vi.fn() }));
-    expect(await result.current(err(200002), "u", "p")).toBe(false);
+    expect(await result.current(err(200002), "u", "p")).toBe("none");
     expect(askConfirm).not.toHaveBeenCalled();
   });
-  it("冷静期 + 同意 → restore 后返回 true", async () => {
+  it("冷静期 + 同意 → restore 后返回 restored", async () => {
     const spy = vi.spyOn(api, "restoreAccount").mockResolvedValue();
     const askConfirm = vi.fn(async () => true);
     const { result } = renderHook(() => useRestoreOffer({ askConfirm, onError: vi.fn() }));
-    expect(await result.current(pending, "limo", "pw")).toBe(true);
+    expect(await result.current(pending, "limo", "pw")).toBe("restored");
     expect(spy).toHaveBeenCalledWith("limo", "pw");
   });
-  it("冷静期 + 取消 → false，不 restore", async () => {
+  it("冷静期 + 取消 → none，不 restore", async () => {
     const spy = vi.spyOn(api, "restoreAccount").mockResolvedValue();
     const { result } = renderHook(() => useRestoreOffer({ askConfirm: async () => false, onError: vi.fn() }));
-    expect(await result.current(pending, "u", "p")).toBe(false);
+    expect(await result.current(pending, "u", "p")).toBe("none");
     expect(spy).not.toHaveBeenCalled();
   });
-  it("restore 失败 → onError 并返回 false", async () => {
+  it("restore 失败 → onError 并返回 handled（调用方不再覆盖文案）", async () => {
     vi.spyOn(api, "restoreAccount").mockRejectedValue(new Error("密码错"));
     const onError = vi.fn();
     const { result } = renderHook(() => useRestoreOffer({ askConfirm: async () => true, onError }));
-    expect(await result.current(pending, "u", "p")).toBe(false);
+    expect(await result.current(pending, "u", "p")).toBe("handled");
     expect(onError).toHaveBeenCalledWith("密码错");
+  });
+  it("服务端没给 delete_at → 弹窗正文不含空日期", async () => {
+    const askConfirm = vi.fn(async (_m: string) => false);
+    const { result } = renderHook(() => useRestoreOffer({ askConfirm, onError: vi.fn() }));
+    await result.current(err(api.CODE_ACCOUNT_PENDING_DELETION), "u", "p");
+    expect(askConfirm.mock.calls[0][0]).toBe("该账号已申请注销");
   });
 });
