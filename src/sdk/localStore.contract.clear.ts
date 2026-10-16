@@ -11,6 +11,26 @@ import { describe, expect, it } from "vitest";
 import type { ContractCtx } from "./localStore.contract";
 
 export function runClearFloorContract({ store, newOwner, msg }: ContractCtx): void {
+  describe("wipeOwner（注销账号清库）", () => {
+    it("清该 owner 的消息/游标/墓碑/区间/位点，别的 owner 不动", async () => {
+      const a = newOwner("wipe"), b = newOwner("wipe");
+      for (const o of [a, b]) {
+        await store.saveMessage(o, msg("c1", 3));
+        await store.advanceSyncCursor(o, "c1", 3);
+        await store.markMessageDeleted(o, "c1", { convSeq: 3 });
+        await store.registerRange(o, "c1", 1, 3);
+      }
+      await store.wipeOwner(a);
+      expect(await store.loadConversation(a, "c1")).toEqual([]);
+      expect(await store.loadSyncCursor(a, "c1")).toBe(0);
+      expect(await store.loadDeletedSeqs(a, "c1")).toEqual([]);
+      expect(await store.loadConversation(b, "c1")).toHaveLength(0); // b 的 seq3 被墓碑滤掉
+      expect(await store.loadSyncCursor(b, "c1")).toBe(3);
+      expect(await store.loadDeletedSeqs(b, "c1")).toEqual([3]);
+      await expect(store.wipeOwner("")).resolves.toBeUndefined();
+    });
+  });
+
   describe("本机清空位点 clearedUpTo（§6.7）", () => {
     // ---- 位点取值：max(knownLatest, 区间行 head, 同步游标, 本地最大 seq)，四个来源各钉一条 ----
     // 只喂一个来源、其余为空：任何一个来源被漏掉，对应那条就红（合在一起测会被别的来源掩护）。

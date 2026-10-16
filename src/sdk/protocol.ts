@@ -262,7 +262,7 @@ export interface Conversation {
   peer_nickname?: string;   // 对端昵称（空则回退 uid）
   peer_remark?: string;     // 我对对端的备注名（显示优先级最高，仅自己可见）
   peer_avatar_url?: string; // 对端头像（data:/http，空则回退首字母圈）
-  peer_deleted?: boolean;   // 对端已注销（匿名化）：显示「已注销用户」（字段名待与 PROTOCOL 对账）
+  peer_deleted?: boolean;   // 对端已注销（冷静期起即为 true）：显示「已注销用户」（PROTOCOL §6.16.3）
   last_message: ConvLastMessage | null;
   latest_conv_seq: number;
   unread: number;
@@ -357,7 +357,7 @@ export interface FriendEntry {
   /** 好友申请的**验证消息**（申请理由）：只在 status=pending/requested 时有值，accepted 后服务端清空。
    *  老服务端/老数据不带它，端上按"没写理由"渲染，不要显示空引号或占位符。 */
   hello?: string;
-  /** 对端已注销（匿名化）：显示「已注销用户」。 */
+  /** 对端已注销（冷静期起即为 true）：显示「已注销用户」。 */
   deleted?: boolean;
 }
 

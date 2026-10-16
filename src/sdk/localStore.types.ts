@@ -179,6 +179,7 @@ export const LOCAL_STORE_METHODS = [
   "applyMsgOpLocal", "markMessageDeleted", "clearMessages", "advanceSyncCursor",
   "registerRange", "updateRangesHead",
   "loadConversation", "loadDeletedSeqs", "loadSyncCursor", "loadRanges", "loadClearedUpTo", "searchMessages",
+  "wipeOwner",
 ] as const;
 
 export type LocalStoreMethod = (typeof LOCAL_STORE_METHODS)[number];
@@ -272,6 +273,9 @@ export interface LocalStore {
    * （区间登记与游标推进口径不变）；位点之后的新消息照常收。
    */
   clearMessages(owner: string, convId: string, knownLatest?: number): Promise<void>;
+
+  /** 清空该 owner 的**全部**本机记录（消息/游标/墓碑/区间）；别的 owner 不动。注销账号用（DELETE_ACCOUNT_DESIGN §3.4）。失败只降级不抛。 */
+  wipeOwner(owner: string): Promise<void>;
 
   /** 单调推进连续同步游标（只增不减）。写失败时下次从较低位置重拉，最多幂等重复，不会漏消息。 */
   advanceSyncCursor(owner: string, convId: string, convSeq: number): Promise<void>;

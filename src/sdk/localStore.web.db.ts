@@ -219,3 +219,25 @@ export async function advanceSyncCursor(owner: string, convId: string, convSeq: 
     logger.warn(LOG_TAG.store, "sync_cursor_write_failed", { conv_id: convId, conv_seq: convSeq, error });
   }
 }
+
+/** 该 owner 的全部记录主键范围（四张表主键均为 `owner|…`）。 */
+export function ownerKeyRange(owner: string): IDBKeyRange {
+  return IDBKeyRange.bound(`${owner}|`, `${owner}|\uffff`);
+}
+
+/** 清掉 IndexedDB 四张表里该 owner 的所有行（单事务）。失败记日志、不抛。 */
+export async function wipeOwnerRows(owner: string): Promise<void> {
+  if (!owner) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE, CURSOR_STORE, DELETIONS_STORE, RANGES_STORE], "readwrite");
+      for (const name of [STORE, CURSOR_STORE, DELETIONS_STORE, RANGES_STORE]) tx.objectStore(name).delete(ownerKeyRange(owner));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "wipe_owner_failed", { error });
+  }
+}

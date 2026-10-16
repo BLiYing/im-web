@@ -364,6 +364,17 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       });
     },
 
+    async wipeOwner(owner: string): Promise<void> {
+      if (!owner) return;
+      guard("wipe_owner_failed", {}, undefined, () => {
+        db.transaction(() => {
+          for (const table of ["messages", "deletions", "sync_cursors", "conv_ranges"]) {
+            db.prepare(`DELETE FROM ${table} WHERE owner = ?`).run(owner);
+          }
+        })();
+      });
+    },
+
     async advanceSyncCursor(owner: string, convId: string, convSeq: number): Promise<void> {
       if (!owner || !convId || convSeq <= 0) return;
       guard("sync_cursor_write_failed", { conv_id: convId, conv_seq: convSeq }, undefined, () => {

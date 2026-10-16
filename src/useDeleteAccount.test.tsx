@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ownedGroupsLine, useDeleteAccount, useRestoreOffer } from "./useDeleteAccount";
+import { useDeleteAccount, useRestoreOffer } from "./useDeleteAccount";
 import * as api from "./sdk/accountApi";
 
 const err = (code: number, extra: object = {}) => Object.assign(new Error("boom"), { code }, extra);
@@ -51,13 +51,6 @@ describe("useDeleteAccount", () => {
   });
 });
 
-describe("ownedGroupsLine", () => {
-  it("≤3 个全列；超出折成「等 N 个」", () => {
-    const g = (n: string) => ({ conv_id: n, name: n });
-    expect(ownedGroupsLine([g("A"), g("B")])).toBe("A · B");
-    expect(ownedGroupsLine([g("A"), g("B"), g("C"), g("D"), g("E")])).toBe("A · B · C · 等 2 个");
-  });
-});
 
 describe("useRestoreOffer", () => {
   beforeEach(() => vi.restoreAllMocks());

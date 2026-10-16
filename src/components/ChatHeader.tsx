@@ -114,7 +114,7 @@ export function ChatHeader(p: ChatHeaderProps) {
                   { id: "leave", label: tr("group.info.leave"), icon: LogOut, danger: true, run: () => void actions.doLeaveGroup(groupConvId) },
                 ] : [
                   { id: "edit", label: tr("chat.menu.edit_contact"), icon: SquarePen, run: () => actions.setContactDraft({ peer, remark: peerConv?.peer_remark ?? "" }) },
-                  { id: "call", label: tr("chat.header.video_call"), icon: Video, run: () => comingSoon(tr("chat.header.video_call")) },
+                  ...(peerConv?.peer_deleted ? [] : [{ id: "call", label: tr("chat.header.video_call"), icon: Video, run: () => comingSoon(tr("chat.header.video_call")) }]), // 已注销对端不给通话
                   { id: "mute", label: mutedNow ? tr("conv.menu.unmute") : tr("conv.menu.mute"), icon: BellOff,
                     run: () => { if (!activeConv) return; if (mutedNow) actions.setConvMuted(activeConv, false); else setMuteMenuOpen(true); } },
                   { id: "select", label: tr("chat.menu.select_messages"), icon: CheckSquare, run: () => actions.enterSelectMode() },

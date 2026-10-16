@@ -35,6 +35,13 @@ describe("DeleteAccountPanel", () => {
     expect(container.querySelector<HTMLInputElement>(".delacct-pwd input")!.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>(".delacct-btn")!.disabled).toBe(true);
   });
+  it("阻断态群名可点 → onOpenGroup(conv_id)", () => {
+    const onOpenGroup = vi.fn();
+    const s = state({ ownedGroups: [{ conv_id: "g1", name: "产品讨论组" }, { conv_id: "g2", name: "B" }] });
+    const { getByText } = render(<DeleteAccountPanel state={s} onBack={vi.fn()} onOpenGroup={onOpenGroup} />);
+    fireEvent.click(getByText("B"));
+    expect(onOpenGroup).toHaveBeenCalledWith("g2");
+  });
   it("眼睛按钮切换明文", () => {
     const { container } = render(<DeleteAccountPanel state={state()} onBack={vi.fn()} />);
     const input = container.querySelector<HTMLInputElement>(".delacct-pwd input")!;

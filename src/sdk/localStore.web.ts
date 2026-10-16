@@ -20,7 +20,7 @@ import {
 } from "./localStore.types";
 import {
   CURSOR_STORE, DELETIONS_STORE, RANGES_STORE, STORE,
-  advanceCursorInStore, advanceSyncCursor, loadClearedUpTo, loadSyncCursor, openDB,
+  advanceCursorInStore, advanceSyncCursor, loadClearedUpTo, loadSyncCursor, openDB, wipeOwnerRows,
   type DeletionRecord, type MsgRow, type RangesRecord, type SyncCursorRecord,
 } from "./localStore.web.db";
 import { loadRanges, registerRange, updateRangesHead } from "./localStore.web.ranges";
@@ -394,6 +394,7 @@ export const webLocalStore: LocalStore = {
   applyMsgOpLocal,
   markMessageDeleted,
   clearMessages,
+  wipeOwner: wipeOwnerRows,
   advanceSyncCursor,
   registerRange,
   updateRangesHead,

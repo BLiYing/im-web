@@ -9,12 +9,6 @@ import {
 
 type AskConfirm = (message: string, opts?: { title?: string; okText?: string; danger?: boolean }) => Promise<boolean>;
 
-/** 阻断态群名列表：最多 3 个，其余折成「等 N 个」。 */
-export function ownedGroupsLine(groups: readonly OwnedGroup[]): string {
-  const shown = groups.slice(0, 3).map((g) => g.name).join(" · ");
-  return groups.length > 3 ? `${shown} · ${t("delete_account.owned_groups_more", { n: groups.length - 3 })}` : shown;
-}
-
 export interface DeleteAccountState {
   password: string;
   setPassword: (v: string) => void;

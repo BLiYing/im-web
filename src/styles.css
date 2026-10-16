@@ -1629,6 +1629,7 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .delacct-li:last-child { border-bottom: 0; }
 .delacct-tip { margin-bottom: var(--space-3); padding: var(--space-3); border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-size: 13px; }
 .delacct-owned { margin-bottom: var(--space-3); padding: var(--space-3); border-radius: 12px; background: var(--danger-soft); color: var(--danger); font-size: 13px; line-height: 1.5; }
+.delacct-group { padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .delacct-pwd { display: flex; align-items: center; padding-right: var(--space-2); }
 .delacct-pwd input { flex: 1; min-width: 0; padding: 10px var(--space-4); border: 0; background: transparent; color: var(--text); font-size: 15px; outline: none; }
 .delacct-btn { display: flex; width: 100%; height: 48px; margin-top: var(--space-3); align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--radius-card); background: var(--danger); color: var(--on-accent); font-size: 15px; cursor: pointer; }

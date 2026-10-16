@@ -301,15 +301,15 @@ export function DetailPanel(p: DetailPanelProps) {
               <div className="detail-pills">
                 {/* 加好友走全站统一的「发好友申请」弹窗（填验证消息），不直接调接口——
                     少走一次就少一次理由，收件人那边又变回"只有一个名字"。 */}
-                {!isSystemPeer && !d.isGroup && !detailPeerIsFriend && (
+                {!isSystemPeer && !d.isGroup && !detailPeerIsFriend && !peerDeleted && (
                   <button className="detail-pill" onClick={() => askFriendRequest(d.peer!, title)}>
                     <UserPlus size={20} /><span>{tr("contacts.search.action_add")}</span></button>
                 )}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !d.fromOwnChat && (
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !peerDeleted && !d.fromOwnChat && (
                   <button className="detail-pill" onClick={() => { onClose(); openChat(d.peer!); }}><MessageCircle size={20} /><span>{tr("chat.detail.pill_message")}</span></button>
                 )}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, false)}><Phone size={20} /><span>{tr("chat.header.call")}</span></button>}
-                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && <button className="detail-pill" onClick={() => startCall(d.peer!, true)}><Video size={20} /><span>{tr("common.video")}</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !peerDeleted && <button className="detail-pill" onClick={() => startCall(d.peer!, false)}><Phone size={20} /><span>{tr("chat.header.call")}</span></button>}
+                {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !peerDeleted && <button className="detail-pill" onClick={() => startCall(d.peer!, true)}><Video size={20} /><span>{tr("common.video")}</span></button>}
                 {d.isGroup && showDetailBody && <button className="detail-pill" onClick={() => setGroupCallPick(true)}><Users size={20} /><span>{tr("chat.detail.pill_group_call")}</span></button>}
                 {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>{tr("common.search")}</span></button>}
                 {/* 「更多」：单聊**非好友**不显示——菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友），

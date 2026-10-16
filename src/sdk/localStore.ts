@@ -70,6 +70,8 @@ export const markMessageDeleted = (owner: string, convId: string, target: Delete
 export const clearMessages = (owner: string, convId: string, knownLatest = 0): Promise<void> =>
   activeLocalStore().clearMessages(owner, convId, knownLatest);
 
+export const wipeOwner = (owner: string): Promise<void> => activeLocalStore().wipeOwner(owner);
+
 export const loadClearedUpTo = (owner: string, convId: string): Promise<number> =>
   activeLocalStore().loadClearedUpTo(owner, convId);
 

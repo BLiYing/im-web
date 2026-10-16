@@ -26,6 +26,7 @@ export const STORE_METHODS = [
   "applyMsgOpLocal",
   "markMessageDeleted",
   "clearMessages",
+  "wipeOwner",
   "advanceSyncCursor",
   "registerRange",
   "updateRangesHead",

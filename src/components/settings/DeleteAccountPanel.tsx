@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Eye, EyeOff, TriangleAlert } from "lucide-react";
 import { useT } from "../../i18n";
-import { ownedGroupsLine, useDeleteAccount, type DeleteAccountState } from "../../useDeleteAccount";
+import { useDeleteAccount, type DeleteAccountState } from "../../useDeleteAccount";
 import { SubPanel } from "./SubPanel";
 
 /** 注销账号二级页（DELETE_ACCOUNT_DESIGN §3 / §4 Web 列，草图 DELETE_ACCOUNT_UX_SKETCH §C/§D）。
  *  风格参照 ChangePasswordPanel；状态与提交全在 useDeleteAccount，本组件纯展示。
  *  二次确认（Dialogs confirm）与成功后回登录页由 hook / App 接线完成。 */
-export function DeleteAccountPanel({ state, onBack }: { state: DeleteAccountState; onBack: () => void }) {
+export function DeleteAccountPanel({ state, onBack, onOpenGroup }: { state: DeleteAccountState; onBack: () => void; onOpenGroup?: (convId: string) => void }) {
   const t = useT();
   const [reveal, setReveal] = useState(false);
   const blocked = state.ownedGroups.length > 0;
@@ -23,7 +23,12 @@ export function DeleteAccountPanel({ state, onBack }: { state: DeleteAccountStat
       <div className="delacct-tip">{t("delete_account.cooldown_hint")}</div>
       {blocked && (
         <div className="delacct-owned" role="alert">
-          {t("delete_account.owned_groups")}<br />{ownedGroupsLine(state.ownedGroups)}
+          {t("delete_account.owned_groups")}<br />
+          {state.ownedGroups.slice(0, 3).map((g, i) => (
+            <span key={g.conv_id}>{i > 0 && " · "}
+              <button type="button" className="delacct-group" onClick={() => onOpenGroup?.(g.conv_id)}>{g.name}</button></span>
+          ))}
+          {state.ownedGroups.length > 3 && ` · ${t("delete_account.owned_groups_more", { n: state.ownedGroups.length - 3 })}`}
         </div>
       )}
       <div className="settings-group delacct-pwd">
@@ -43,12 +48,13 @@ export function DeleteAccountPanel({ state, onBack }: { state: DeleteAccountStat
 }
 
 /** 容器：状态簇随面板挂载/卸载（关掉即丢密码与阻断态），Host 只传依赖。 */
-export function DeleteAccountContainer({ run, askConfirm, onDeleted, onBack }: {
+export function DeleteAccountContainer({ run, askConfirm, onDeleted, onBack, onOpenGroup }: {
   run: (password: string) => Promise<void>;
   askConfirm: Parameters<typeof useDeleteAccount>[0]["askConfirm"];
   onDeleted: () => void;
   onBack: () => void;
+  onOpenGroup?: (convId: string) => void;
 }) {
   const state = useDeleteAccount({ run, askConfirm, onDeleted });
-  return <DeleteAccountPanel state={state} onBack={onBack} />;
+  return <DeleteAccountPanel state={state} onBack={onBack} onOpenGroup={onOpenGroup} />;
 }

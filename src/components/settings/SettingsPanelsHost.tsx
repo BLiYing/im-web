@@ -44,6 +44,7 @@ export interface SettingsPanelsHostProps {
   groups: Row[][];
   openProfile: (opts?: { edit?: boolean }) => Promise<void> | void;
   logout: () => void;
+  openGroupPanel: (convId: string) => void; // 注销阻断态点群名：打开该群资料面板（App 的 openGroupPanel）
   onAccountDeleted: () => void; // 注销成功：App 走 logout() 同路径并在登录页显示 delete_account.done_hint
 
   // 数据与存储
@@ -215,8 +216,13 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
         <DeleteAccountContainer
           run={async (pwd) => { const c = clientRef.current; if (!c) throw new Error(t("conn.state.disconnected")); await deleteAccount(c.authToken, pwd); }}
           askConfirm={askConfirm}
-          onDeleted={() => { const owner = p.uid; setDeleteAccountOpen(false); p.onAccountDeleted(); void wipeOwnerLocalData(owner); }}
+          onDeleted={() => {
+            // 先断连（停掉在途写入）→ 等清库落完 → 再退回登录页，避免回登录页后异步落库把缓存写回来。
+            const owner = p.uid; clientRef.current?.disconnect(); setDeleteAccountOpen(false);
+            void wipeOwnerLocalData(owner).finally(() => p.onAccountDeleted());
+          }}
           onBack={() => setDeleteAccountOpen(false)}
+          onOpenGroup={(cid) => { setDeleteAccountOpen(false); p.setProfileDraft(null); p.setShowSettings(false); p.openGroupPanel(cid); }} // 阻断态群名 → 该群资料面板（群主可进「管理」转让/解散）
         />
       )}
 

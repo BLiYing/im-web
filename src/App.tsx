@@ -2508,7 +2508,7 @@ export default function App() {
   const composerMuteReason: string | null = (() => {
     // 系统通知会话（peer=system）：不能回复——同一锁机制统一到 composer disabled + 占位。
     // 见 docs/design/SYSTEM_NOTICE_SESSION_DESIGN.md §5.2；服务端也会拒 send_msg to=system（护栏 §2.2）。
-    if (!isGroupChat && peer === SYSTEM_UID) return t("chat.input.disabled_system");
+    if (!isGroupChat && (peer === SYSTEM_UID || peerConv?.peer_deleted)) return t(peer === SYSTEM_UID ? "chat.input.disabled_system" : "chat.detail.deleted_user"); // 对端已注销同样只读（§6.16.3）
     if (!isGroupChat || !activeGroupInfo) return null;
     if ((activeGroupInfo.my_mute_until ?? 0) > Date.now()) return t("chat.input.disabled_muted");
     if ((activeGroupInfo.mute_until ?? 0) > Date.now() && activeGroupInfo.my_role === "member") return t("chat.input.disabled_mute_all");
@@ -2855,7 +2855,7 @@ export default function App() {
         <SettingsPanelsHost
           showSettings={showSettings} setShowSettings={setShowSettings}
           myInfo={myInfo} uid={uid} stateText={stateText} infoRows={settingsInfoRows} groups={settingsGroups}
-          openProfile={openProfile} logout={logout} onAccountDeleted={() => { logout(); setAuthErr(t("delete_account.done_hint")); }}
+          openProfile={openProfile} openGroupPanel={openGroupPanel} logout={logout} onAccountDeleted={() => { logout(); setAuthErr(t("delete_account.done_hint")); }}
           dataStorageOpen={dataStorageOpen} setDataStorageOpen={setDataStorageOpen}
           dlSettings={dlSettings} setDlSettings={setDlSettings} dlBlobs={dlBlobs} mediaOptedIn={mediaOptedIn}
           saveDownloadSettings={saveDownloadSettings} clearMediaCache={clearMediaCache}
@@ -3195,7 +3195,7 @@ export default function App() {
           群名会随建群请求发出去并显示给全群，见 groupName.ts 文件头的隐私红线。 */}
       {createDraft && (
         <CreateGroupModal
-          draft={createDraft} accepted={accepted} friendLabel={friendLabel}
+          draft={createDraft} accepted={accepted.filter((f) => !f.deleted)} friendLabel={friendLabel}
           myPublicName={publicNameOf({ nickname: myInfo?.nickname, username: myInfo?.username, user_id: uid })}
           busy={createBusy} avatarBusy={createAvatarBusy}
           maxInitialMembers={(serverConfig?.max_group_members ?? FALLBACK_MAX_GROUP_MEMBERS) - 1}
@@ -3219,7 +3219,7 @@ export default function App() {
           groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
-          peerDeleted={!!detail.peer && deletedPeers.has(detail.peer)}
+          peerDeleted={!!detail.peer && (deletedPeers.has(detail.peer) || !!peerCards[detail.peer]?.deleted || !!conversations.find((c) => c.peer === detail.peer)?.peer_deleted || !!friends.find((f) => f.user_id === detail.peer)?.deleted)}
           peerPresenceText={detail.isGroup || !detail.peer ? "" : presenceText(presence[detail.peer])}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); setAdminPanelOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
@@ -3249,7 +3249,7 @@ export default function App() {
         // 想补全就得为每个好友查一次成员身份。正确做法是让服务端当权威——它会跳过老成员
         // （幂等，不是错误），doInvite 按返回的 added 给准确反馈。别把这里"修"成本地全量过滤。
         const inGroup = new Set((groupInfos[inviteDraft.convId]?.members ?? []).map((m) => m.user_id));
-        const candidates = accepted.filter((f) => !inGroup.has(f.user_id));
+        const candidates = accepted.filter((f) => !inGroup.has(f.user_id) && !f.deleted); // 已注销好友不可邀请（§6.16.3）
         return (
           <FriendPickerModal
             selected={inviteDraft.selected} candidates={candidates} friendLabel={friendLabel}
