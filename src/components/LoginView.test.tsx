@@ -27,13 +27,27 @@ const spinnerIn = (button: HTMLElement) => button.querySelector(".btn-spinner");
 describe("LoginView 登录中转圈", () => {
   afterEach(cleanup);
 
-  it("空闲时三个入口都无菊花且可点", () => {
+  it("空闲时登录/免密入口无菊花且可点；注册入口只在注册页签", () => {
     renderLogin();
-    for (const name of ["登录", "注册并登录", "免密登录"]) {
+    for (const name of ["登录", "免密登录（开发）"]) {
       const button = screen.getByRole("button", { name });
       expect(button).toBeEnabled();
       expect(spinnerIn(button)).toBeNull();
     }
+    expect(screen.queryByRole("button", { name: "注册并登录" })).toBeNull();
+    cleanup();
+    renderLogin({ loginTab: "register" });
+    const register = screen.getByRole("button", { name: "注册并登录" });
+    expect(register).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "登录" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "免密登录（开发）" })).toBeNull();
+  });
+
+  it("三个页签：密码登录 / 注册 / 扫码登录，点击回调页签值", () => {
+    const seen: string[] = [];
+    renderLogin({ onLoginTab: (t) => seen.push(t) });
+    for (const name of ["密码登录", "注册", "扫码登录"]) fireEvent.click(screen.getByRole("button", { name }));
+    expect(seen).toEqual(["password", "register", "qr"]);
   });
 
   it("点「登录」→ 该按钮转菊花并改文案，另外两个禁用但不转", () => {
@@ -47,14 +61,12 @@ describe("LoginView 登录中转圈", () => {
     );
     const busy = screen.getByRole("button", { name: "登录中…" });
     expect(spinnerIn(busy)).not.toBeNull();
-    const register = screen.getByRole("button", { name: "注册并登录" });
-    expect(register).toBeDisabled();
-    expect(spinnerIn(register)).toBeNull();
+    expect(screen.getByRole("button", { name: "免密登录（开发）" })).toBeDisabled();
   });
 
   it("点「免密登录」→ 菊花落在免密入口，不落在「登录」按钮上", () => {
     const { rerender } = renderLogin({ password: "" });
-    fireEvent.click(screen.getByRole("button", { name: "免密登录" }));
+    fireEvent.click(screen.getByRole("button", { name: "免密登录（开发）" }));
     rerender(
       <LoginView
         restoring={false} uid="1001" nickname="小明" password="" authErr="" authBusy={true} loginTab="password"

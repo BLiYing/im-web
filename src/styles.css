@@ -129,7 +129,7 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 #root { height: 100vh; }
 
 .login { max-width: 360px; margin: 0 auto; padding: 48px var(--space-4); display: flex; flex-direction: column; gap: var(--space-4); }
-.login-logo { width: 88px; height: 88px; align-self: center; border-radius: 22px; box-shadow: 0 12px 32px var(--shadow-soft); }
+.login-logo-box { width: 80px; height: 80px; align-self: center; display: flex; align-items: center; justify-content: center; border-radius: 20px; background: var(--accent); color: var(--on-accent); }
 .login h1 { font-size: 20px; margin: 0 0 var(--space-2); text-align: center; }
 .login label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
 .login input { padding: 10px; border: 1px solid var(--separator); border-radius: var(--radius-card); font-size: 15px; background: var(--page-bg); color: var(--text); }
@@ -2011,9 +2011,9 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .newchat-qr:hover { color: var(--accent); }
 
 /* ---- 登录页：密码 / 扫码 页签（QR P1）。页签样式自成一套（主按钮已收敛为 .login-submit，不再泛染登录区按钮）。---- */
-.login-tabs { display: flex; gap: 4px; align-self: center; padding: 3px; background: var(--surface); border: 1px solid var(--separator); border-radius: 10px; }
-.login-tabs .login-tab { flex: 0 0 auto; padding: 6px 20px; border: 0; border-radius: 8px; background: none; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; box-shadow: none; }
-.login-tabs .login-tab.on { background: var(--card-bg); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px var(--shadow-soft); }
+.login-tabs { display: flex; gap: 8px; }
+.login-tabs .login-tab { flex: 1 1 0; padding: 10px 0; border: 0; border-radius: var(--radius-card); background: var(--card-bg); color: var(--text-secondary); font-size: 14px; cursor: pointer; box-shadow: none; }
+.login-tabs .login-tab.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 /* ---- Web 扫码登录：四态一屏，二维码常驻、状态用覆盖层（QR P1，草图 §6）---- */
 .qr-login { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 6px 0; }

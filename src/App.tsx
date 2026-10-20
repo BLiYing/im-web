@@ -177,7 +177,7 @@ export default function App() {
   const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
   const { authErr, authNotice, setAuthErr, setAuthNotice, clearAuthNotice } = useAuthMsg(); // 登录/注册错误文案 + 非红通知（useAuthMsg）
-  const [loginTab, setLoginTab] = useState<"password" | "qr">("password"); // 登录页页签：密码 / 扫码
+  const [loginTab, setLoginTab] = useState<"password" | "register" | "qr">("password"); // 登录页页签：登录 / 注册 / 扫码（扫码为 Web 独有）
   // 扫码登录待入场会话：poll 领到 {uid,token} 后先 setUid 再由 effect 用新 uid 闭包跑 enterApp。
   const pendingQrRef = useRef<{ uid: string; token: string; refresh: string } | null>(null);
   const [qrTrigger, setQrTrigger] = useState(0);
