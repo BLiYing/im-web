@@ -4,7 +4,7 @@
 > 历史流水见 `current_task.archive.md`（2026-10-02 瘦身前的全量快照在其顶部）+ `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
-- **注销账号·通话入口与免密提示（2026-10-20，已提交）**：已注销对端不可呼叫——单聊入口拦截（toast `rtc.call.peer_deleted`）、群通话选人 / 通话中邀请候选剔除 `deleted`；冷静期账号免密登录显示本地化 `err.200005`，不再露服务端英文。口径见 `IMServer/docs/design/DELETE_ACCOUNT_DESIGN.md` §3.5/§3.6。限制：冷启动对端资料未加载时靠服务端 `invite-check` 兜底（提示笼统）。
+- **注销账号·通话入口与免密提示（2026-10-20，已提交）**：已注销对端不可呼叫——单聊入口拦截（toast `rtc.call.peer_deleted`）、群通话选人 / 通话中邀请候选剔除 `deleted`；冷静期账号免密登录显示本地化 `err.200005`，不再露服务端英文。口径见 `IMServer/docs/design/DELETE_ACCOUNT_DESIGN.md` §3.5/§3.6。已实测通过（回拨拦截 / 群选人 / 英文文案）。限制（已确认属预期）：杀 App 冷启动后直接点通话记录，对端资料未加载，靠服务端 `invite-check` 兜底，提示笼统「对方暂时无法被邀请」。
 - **注销账号（2026-10-16，已提交 main，未 push；Chrome 实测通过）**：设计 `IMServer/docs/design/DELETE_ACCOUNT_DESIGN.md` + 草图，契约 PROTOCOL §6.16。入口 `EditProfilePanel` 只读态底部 → `settings/DeleteAccountPanel.tsx`（阻断态群名可点 → `openGroupPanel`）；逻辑 `useDeleteAccount.ts`（含 `useRestoreOffer`：登录遇 200005 弹恢复，返回 restored/handled/none）；SDK `sdk/accountApi.ts`、`sdk/wipeOwner.ts`（`LocalStore.wipeOwner` 进契约：web IndexedDB + 桌面 SQLite 桥；另清会话缓存/Cache Storage/`im.*.<uid>` 键；先断连→await 清库→回登录页，1.5s 后补扫一遍）；别处注销=WS error `reason=account_deleted`→`onAccountDeleted`（提示同 done_hint）。**已过独立 code-review 并修**：补扫清库遇同 uid 已重登则跳过、联系人/搜索已注销头像走默认、300003 提示用 `chat.reject.recipient_deleted`、对端在线态不露、详情页隐藏拉黑/举报、无密码路径不弹恢复。已注销对端（`isPeerDeleted`）：输入框只读、资料页无加好友/通话、建群/邀请候选排除、发送 300003 给提示；`login.session`提示 `auth-info` 非红。
 - **二维码展示三端对齐（2026-10-16，已三端自测 + 全量测试，未提交）**：名片码/群二维码/群邀请链接卡片头部（头像·名字·成员数/@句柄）竖排居中（iOS `IMQRCardView`、Web `QRCardModal`+扫码结果分支）；iOS 扫一扫「我的二维码」改为嵌入 `IMQRCardViewController`（同 Android 共用整页）；群邀请链接页改为链接框 + 分享/复制 + 「查看二维码」，不画码（三端）；群码有效期提示三端统一为「X月X日 前有效，重置后旧码立即失效」（无到期时间退回 7 天口径）；链接页不放重置（重置只在二维码页）；新增 i18n 键 `qr.card.share_link/view_code/group_link_hint_expiry` 已入 `strings.json` 并重新生成。
 - **置顶消息面板 v3（2026-10-15，未提交，浏览器实测过：开面板 / 长按取消 / 实时摘除 / 一键取消所有）**：设计 `IMServer/docs/design/PINNED_PANEL_DESIGN.md` + 草图。横幅恒显最新置顶（`pinned.ts#latestPinned`）、不轮转、整条点击开面板、≡ 恒显、kicker「· N 条」；状态簇在 `usePinnedMessages.ts`（取消置顶帧本地摘除 + 300ms 合并重拉、空集自动收起）；面板 `components/modals/PinnedListModal.tsx`（`ModalHead` + 真气泡 `components/MessageBubble.tsx readOnly` + `icons/LocateInChatIcon.tsx`，长按 `.ctx-menu` 渲染在遮罩内）；SDK `sdk/pinnedApi.ts`（`message` 完整对象解析、`clearPinned`、批量取消帧 `targets` 经 `batchRemove.ts#applyBatchUnpinFrame` 逐条应用）。i18n 已改 IMServer 源表并只生成 Web/desktop 两份。
@@ -31,7 +31,7 @@
 - **⏸ 拆 `useChatScroll`**：独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
-- **注销（已知限制）**：通话记录/通话气泡点击回拨对已注销对端未单独禁用（服务端拒）；`chat.detail.deleted_user` 文案复用于输入框占位/300003 提示。登录页非红提示走 `useAuthMsg`（`authNotice` 存 i18n 键，与 authErr 互斥，改输入即清；切语言仍非红）。200005 原文（无密码路径）仍走 authErr 红字。
+- **注销（已知限制）**：通话记录/气泡回拨对已注销对端已在宿主端拦截（2026-10-20，见上）；`chat.detail.deleted_user` 文案复用于输入框占位/300003 提示。登录页非红提示走 `useAuthMsg`（`authNotice` 存 i18n 键，与 authErr 互斥，改输入即清；切语言仍非红）。200005 原文（无密码路径）仍走 authErr 红字。
 - **清空位点**：新增 `sdk/clearFloor.ts`（纯逻辑）；`localStore.clearMessages(owner,conv,knownLatest)` + `loadClearedUpTo`；桌面主进程有平行实现（`sqliteStore.ts`/`sqliteRows.ts`），改语义两边一起改。位点存在 IndexedDB **游标行**里（`advanceCursorInStore` 必须 `...prev` 保留它）。回填误伤面：history_visible 下界/不落库事件行会被当位点，无害。
 - **既有问题（未动）**：`SYNC_RESP` 里 `before` 在页内消息逐条 `updateSynced` 之后才读，页首贴着游标的连续 sync 页 `next > before` 恒假，**整页不落库、区间不登记**（只在内存）；靠开窗/重拉自愈所以没被发现。要修需先读 `before` 再处理页。
 - `imSdk.ts` 卡在 1359 行基线：新增逻辑靠把回执合批拆到 `sdk/receiptBatch.ts` + 压缩注释腾出。
