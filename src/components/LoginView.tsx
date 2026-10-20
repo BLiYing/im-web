@@ -6,12 +6,14 @@ import { useT } from "../i18n";
  * 登录页（含恢复登录过渡态 + 密码/扫码两页签）。从 App.tsx 抽出的纯展示组件：
  * 状态与动作全部由 App 注入，JSX 与原实现逐字一致。
  */
-export function LoginView({ restoring, uid, nickname, password, authErr, authBusy, loginTab, onUid, onNickname, onPassword, onLoginTab, onLogin, onRegister, onQRLogin }: {
+export function LoginView({ restoring, uid, nickname, password, authErr, authNotice, onInput, authBusy, loginTab, onUid, onNickname, onPassword, onLoginTab, onLogin, onRegister, onQRLogin }: {
   restoring: boolean;
   uid: string;      // 这里的 uid 实为 **username**（公开句柄）——登录接口只认它
   nickname: string; // 仅注册用：显示名
   password: string;
   authErr: string;
+  authNotice?: string; // 非红通知的 i18n 键（如注销成功）；与 authErr 互斥
+  onInput?: () => void; // 用户改动任一输入框：清掉通知
   authBusy: boolean;
   loginTab: "password" | "qr";
   onUid: (v: string) => void;
@@ -51,16 +53,17 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authBus
         <button className={`login-tab${loginTab === "qr" ? " on" : ""}`} onClick={() => onLoginTab("qr")}>{tr("login.tab_qr")}</button>
       </div>
       {/* 鉴权失效原因（如被踢下线）在两个页签下都要可见——被踢时可能正停在扫码页。 */}
-      {authErr && <p className={authErr === tr("delete_account.done_hint") ? "auth-info" : "auth-err"}>{authErr}</p>} {/* 注销成功提示走 authErr 位但非红（设计 §3.4） */}
+      {authErr && <p className="auth-err">{authErr}</p>}
+      {!authErr && authNotice && <p className="auth-info">{tr(authNotice)}</p>} {/* 注销成功提示：非红（设计 §3.4），存键随语言重译 */}
       {loginTab === "password" ? (
         <>
           <label>{tr("settings.info.username")}<input value={uid} autoFocus placeholder={tr("web.login.username_placeholder")}
-            onChange={(e) => onUid(e.target.value.trim())} /></label>
+            onChange={(e) => { onInput?.(); onUid(e.target.value.trim()); }} /></label>
           {/* 昵称只在注册时用得到：它是别人看到的名字，可中文/emoji，与用户名规则完全不同。 */}
           <label>{tr("login.nickname")}<input value={nickname} placeholder={tr("web.login.nickname_placeholder")}
-            onChange={(e) => onNickname(e.target.value)} /></label>
+            onChange={(e) => { onInput?.(); onNickname(e.target.value); }} /></label>
           <label>{tr("login.password")}<input type="password" value={password} placeholder={tr("web.login.password_placeholder")}
-            onChange={(e) => onPassword(e.target.value)}
+            onChange={(e) => { onInput?.(); onPassword(e.target.value); }}
             onKeyDown={(e) => { if (e.key === "Enter" && password && !authBusy) { setBusyAction("login"); onLogin(password); } }} /></label>
           {/* 「登录」按钮强制要求密码非空——空密码只能走下方「免密登录」明示入口（且需后端 -dev-login），
               避免开发期免密开关下点「登录」变成静默走免密（iOS 端登录页也是这样，密码不填直接走不通）。 */}

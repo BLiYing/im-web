@@ -85,3 +85,28 @@ describe("LoginView 登录中转圈", () => {
     expect(spinnerIn(button)).toBeNull();
   });
 });
+
+describe("LoginView 非红通知（authNotice）", () => {
+  it("通知存 i18n 键：用 auth-info 渲染、不是 auth-err；切语言后仍非红且重译", async () => {
+    const { setPref } = await import("../i18n");
+    const { container } = renderLogin({ authNotice: "delete_account.done_hint" });
+    expect(container.querySelector(".auth-info")).not.toBeNull();
+    expect(container.querySelector(".auth-err")).toBeNull();
+    const zh = container.querySelector(".auth-info")!.textContent;
+    setPref("en");
+    cleanup();
+    const r2 = renderLogin({ authNotice: "delete_account.done_hint" });
+    expect(r2.container.querySelector(".auth-info")).not.toBeNull();
+    expect(r2.container.querySelector(".auth-err")).toBeNull();
+    expect(r2.container.querySelector(".auth-info")!.textContent).not.toBe(zh);
+    setPref("zh-Hans");
+  });
+  it("有错误时错误优先；改动输入框触发 onInput", () => {
+    let n = 0;
+    const { container } = renderLogin({ authErr: "boom", authNotice: "delete_account.done_hint", onInput: () => { n++; } });
+    expect(container.querySelector(".auth-err")).not.toBeNull();
+    expect(container.querySelector(".auth-info")).toBeNull();
+    fireEvent.change(container.querySelector("input")!, { target: { value: "abc" } });
+    expect(n).toBe(1);
+  });
+});

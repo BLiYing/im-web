@@ -70,7 +70,7 @@ import { type LinkPreview } from "./components/LinkCard";
 import { LoginView } from "./components/LoginView";
 import { SESSION_KEY, loadSession, saveSession } from "./session";
 import { useDevices } from "./useDevices";
-import { useDialogs } from "./useDialogs";
+import { useDialogs } from "./useDialogs"; import { useAuthMsg } from "./useAuthMsg";
 import { useRestoreOffer } from "./useDeleteAccount";
 import { wipeOwnerLocalData } from "./sdk/wipeOwner";
 import { useToast } from "./useToast";
@@ -176,7 +176,7 @@ export default function App() {
   const refreshRef = useRef(""); // 本会话手上那枚续期凭据：落盘用（替代此前存在本地的明文密码）
   const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
-  const [authErr, setAuthErr] = useState(""); // 登录/注册错误文案
+  const { authErr, authNotice, setAuthErr, setAuthNotice, clearAuthNotice } = useAuthMsg(); // 登录/注册错误文案 + 非红通知（useAuthMsg）
   const [loginTab, setLoginTab] = useState<"password" | "qr">("password"); // 登录页页签：密码 / 扫码
   // 扫码登录待入场会话：poll 领到 {uid,token} 后先 setUid 再由 effect 用新 uid 闭包跑 enterApp。
   const pendingQrRef = useRef<{ uid: string; token: string; refresh: string } | null>(null);
@@ -845,7 +845,7 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
-      onAccountDeleted: () => { if (client !== clientRef.current) return; const o = uidRef.current; logout(); setAuthErr(t("delete_account.done_hint")); void wipeOwnerLocalData(o); }, // 别处注销本账号：踢下线 + 清本机缓存（PROTOCOL §6.16.2）
+      onAccountDeleted: () => { if (client !== clientRef.current) return; const o = uidRef.current; logout(); setAuthNotice("delete_account.done_hint"); void wipeOwnerLocalData(o); }, // 别处注销本账号：踢下线 + 清本机缓存（PROTOCOL §6.16.2）
       onFolderUpdate: (d) => { folders.applyRaw(d, { fromFrame: true }); }, // 会话文件夹整表快照（§6.15）
       onNotifySettingsUpdate: (version) => void notif.onServerVersionBump(version), // 账号级通知设置版本变更（M5 §6.13）→ 本端按需重拉
       // 续期凭据变化（登录下发 / 改密轮换 / 已死清空）→ 记下并尽快落盘；uid 尚未定时由入场末尾那次 saveSession 兜住。
@@ -2438,7 +2438,7 @@ export default function App() {
     return (<>{confirmDlg && <ConfirmDialog dlg={confirmDlg} set={setConfirmDlg} />}{/* 登录页也要能弹确认框：冷静期账号的「恢复账号」弹窗 */}
       <LoginView
         restoring={restoring} uid={loginName} nickname={nickname} password={password}
-        authErr={authErr} authBusy={authBusy} loginTab={loginTab}
+        authErr={authErr} authNotice={authNotice} onInput={clearAuthNotice} authBusy={authBusy} loginTab={loginTab}
         onUid={setLoginName} onNickname={setNickname} onPassword={setPassword} onLoginTab={setLoginTab}
         onLogin={(pwd) => void enterApp(loginName, pwd)} onRegister={() => void doRegister()}
         onQRLogin={(loginUid, token, refreshToken) => {
@@ -2855,7 +2855,7 @@ export default function App() {
         <SettingsPanelsHost
           showSettings={showSettings} setShowSettings={setShowSettings}
           myInfo={myInfo} uid={uid} stateText={stateText} infoRows={settingsInfoRows} groups={settingsGroups}
-          openProfile={openProfile} openGroupPanel={openGroupPanel} logout={logout} onAccountDeleted={() => { logout(); setAuthErr(t("delete_account.done_hint")); }}
+          openProfile={openProfile} openGroupPanel={openGroupPanel} logout={logout} onAccountDeleted={() => { logout(); setAuthNotice("delete_account.done_hint"); }}
           dataStorageOpen={dataStorageOpen} setDataStorageOpen={setDataStorageOpen}
           dlSettings={dlSettings} setDlSettings={setDlSettings} dlBlobs={dlBlobs} mediaOptedIn={mediaOptedIn}
           saveDownloadSettings={saveDownloadSettings} clearMediaCache={clearMediaCache}

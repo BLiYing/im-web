@@ -30,7 +30,7 @@
 - **⏸ 拆 `useChatScroll`**：独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
-- **注销（已知限制）**：通话记录/通话气泡点击回拨对已注销对端未单独禁用（服务端拒）；`chat.detail.deleted_user` 文案复用于输入框占位/300003 提示。LoginView 以 `authErr === delete_account.done_hint` 判定非红提示（字符串相等，切语言会变红；根治需独立 authNotice state，App.tsx 3490 红线下未做）。
+- **注销（已知限制）**：通话记录/通话气泡点击回拨对已注销对端未单独禁用（服务端拒）；`chat.detail.deleted_user` 文案复用于输入框占位/300003 提示。登录页非红提示走 `useAuthMsg`（`authNotice` 存 i18n 键，与 authErr 互斥，改输入即清；切语言仍非红）。200005 原文（无密码路径）仍走 authErr 红字。
 - **清空位点**：新增 `sdk/clearFloor.ts`（纯逻辑）；`localStore.clearMessages(owner,conv,knownLatest)` + `loadClearedUpTo`；桌面主进程有平行实现（`sqliteStore.ts`/`sqliteRows.ts`），改语义两边一起改。位点存在 IndexedDB **游标行**里（`advanceCursorInStore` 必须 `...prev` 保留它）。回填误伤面：history_visible 下界/不落库事件行会被当位点，无害。
 - **既有问题（未动）**：`SYNC_RESP` 里 `before` 在页内消息逐条 `updateSynced` 之后才读，页首贴着游标的连续 sync 页 `next > before` 恒假，**整页不落库、区间不登记**（只在内存）；靠开窗/重拉自愈所以没被发现。要修需先读 `before` 再处理页。
 - `imSdk.ts` 卡在 1359 行基线：新增逻辑靠把回执合批拆到 `sdk/receiptBatch.ts` + 压缩注释腾出。
