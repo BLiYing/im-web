@@ -14,7 +14,7 @@ describe("sendRejectNote（发送被拒提示，三端同口径：iOS IMSendReje
     expect(sendRejectNote(300208)).toBe("你已被管理员禁言");
   });
   it("对端已注销 300003：有提示（重发必败，PROTOCOL §6.16.3）", () => {
-    expect(sendRejectNote(300003)).toBe("该用户不存在或已注销");
+    expect(sendRejectNote(300003)).toBe("对方账号已注销，无法发送消息");
   });
   it("白名单之外（限频 300002 等）没有提示：消息仍可重发", () => {
     expect(sendRejectNote(300002)).toBe("");

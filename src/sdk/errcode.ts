@@ -69,7 +69,7 @@ const SEND_REJECT_KEYS: Record<number, string> = {
   200102: "chat.reject.blocked",
   200103: "chat.reject.not_friend",
   300001: "chat.reject.too_large",
-  300003: "chat.detail.deleted_user", // 对端已注销（PROTOCOL §6.16.3）：重发必败
+  300003: "chat.reject.recipient_deleted", // 对端已注销（PROTOCOL §6.16.3）：重发必败
   300004: "err.300004", // 被禁言
   300203: "err.300203", // 非群成员
   300206: "chat.input.disabled_mute_all", // 群全员禁言

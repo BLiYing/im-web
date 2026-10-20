@@ -37,7 +37,7 @@ export function DeleteAccountPanel({ state, onBack, onOpenGroup }: { state: Dele
           onChange={(e) => state.setPassword(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && state.canSubmit) void state.submit(); }} />
         <button type="button" className="icon-btn" disabled={blocked} onClick={() => setReveal((v) => !v)}
-          aria-label={reveal ? "hide" : "show"}>{reveal ? <EyeOff size={18} /> : <Eye size={18} />}</button>
+          aria-label={t(reveal ? "password.eye.hide" : "password.eye.show")}>{reveal ? <EyeOff size={18} /> : <Eye size={18} />}</button>
       </div>
       {state.error && <div className="pwd-error">{state.error}</div>}
       <button className="delacct-btn" disabled={!state.canSubmit} onClick={() => void state.submit()}>

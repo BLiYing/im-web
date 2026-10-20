@@ -845,7 +845,7 @@ export default function App() {
         logger.info(LOG_TAG.media, "capabilities_update_received", { version });
         void refreshDownloadSettings();
       },
-      onAccountDeleted: () => { if (client !== clientRef.current) return; const o = uidRef.current; logout(); setAuthErr(t("login.session_revoked")); void wipeOwnerLocalData(o); }, // 别处注销本账号：踢下线 + 清本机缓存（PROTOCOL §6.16.2）
+      onAccountDeleted: () => { if (client !== clientRef.current) return; const o = uidRef.current; logout(); setAuthErr(t("delete_account.done_hint")); void wipeOwnerLocalData(o); }, // 别处注销本账号：踢下线 + 清本机缓存（PROTOCOL §6.16.2）
       onFolderUpdate: (d) => { folders.applyRaw(d, { fromFrame: true }); }, // 会话文件夹整表快照（§6.15）
       onNotifySettingsUpdate: (version) => void notif.onServerVersionBump(version), // 账号级通知设置版本变更（M5 §6.13）→ 本端按需重拉
       // 续期凭据变化（登录下发 / 改密轮换 / 已死清空）→ 记下并尽快落盘；uid 尚未定时由入场末尾那次 saveSession 兜住。
@@ -2524,14 +2524,14 @@ export default function App() {
   const chatMemberCount = activeGroupInfo?.member_count ?? activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
-    : (peerConv?.peer_avatar_url || peerAvatar(peer));
+    : (peerConv?.peer_deleted ? undefined : (peerConv?.peer_avatar_url || peerAvatar(peer)));
   // 「大群」标注：大群不显示已读双勾/正在输入/成员在线态，副标题点明缘由，
   // 否则用户会把"功能没了"当成 bug 报上来。
   const chatIsSuper = activeGroupInfo?.is_super ?? activeGroupConv?.is_super ?? false;
   const chatSubtitle = isGroupChat
     ? (chatMemberCount > 0 ? t(chatIsSuper ? "chat.header.member_count_super" : "chat.header.member_count", { count: chatMemberCount }) : t(chatIsSuper ? "group.text.super" : "common.group_chat"))
     // 单聊：真实在线态（原先「最近上线」是写死的假文案，对谁都显示）。取不到快照时为空串，不占位。
-    : presenceText(presence[peer]);
+    : isPeerDeleted(peer) ? "" : presenceText(presence[peer]); // 已注销对端没有在线态
   // 单聊固定"正在输入"；群里覆盖式记最新一位打字者，副标题拼「{昵称} 正在输入」
   //（对齐 iOS `IMChatViewController+Socket.m` 的 `im_navigationSubtitle`）。
   const visibleChatSubtitle = (() => {
@@ -3220,7 +3220,7 @@ export default function App() {
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
           peerDeleted={!!detail.peer && (deletedPeers.has(detail.peer) || isPeerDeleted(detail.peer))}
-          peerPresenceText={detail.isGroup || !detail.peer ? "" : presenceText(presence[detail.peer])}
+          peerPresenceText={detail.isGroup || !detail.peer || isPeerDeleted(detail.peer) ? "" : presenceText(presence[detail.peer])}
           onClose={() => { setDetail(null); setDetailMore(false); setManageOpen(false); setAdminPanelOpen(false); }}
           setDetailTab={setDetailTab} setDetailMore={setDetailMore} setManageOpen={setManageOpen}
           setAdminPanelOpen={setAdminPanelOpen}

@@ -311,7 +311,7 @@ export function DetailPanel(p: DetailPanelProps) {
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !peerDeleted && <button className="detail-pill" onClick={() => startCall(d.peer!, false)}><Phone size={20} /><span>{tr("chat.header.call")}</span></button>}
                 {!isSystemPeer && !d.isGroup && detailPeerIsFriend && !peerDeleted && <button className="detail-pill" onClick={() => startCall(d.peer!, true)}><Video size={20} /><span>{tr("common.video")}</span></button>}
                 {d.isGroup && showDetailBody && <button className="detail-pill" onClick={() => setGroupCallPick(true)}><Users size={20} /><span>{tr("chat.detail.pill_group_call")}</span></button>}
-                {!isSystemPeer && showDetailBody && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>{tr("common.search")}</span></button>}
+                {!isSystemPeer && (showDetailBody || (peerDeleted && !d.isGroup)) && <button className="detail-pill" onClick={() => { onClose(); openInChatSearch(d.convId, d.peer ?? "", d.isGroup); }}><Search size={20} /><span>{tr("common.search")}</span></button>}
                 {/* 「更多」：单聊**非好友**不显示——菜单里全是"已经是好友"才有意义的项（推荐/拉黑/清空/删除好友），
                     此时页面只应给一个主入口「加好友」（与 iOS actionPillSpecs 同口径）。系统通知会话例外：它只有这一个入口。 */}
                 {(d.isGroup || isSystemPeer || detailPeerIsFriend) && (
@@ -330,13 +330,13 @@ export function DetailPanel(p: DetailPanelProps) {
                         }}><IdCard size={16} className="menu-icon" />{tr("chat.detail.recommend_to_friend")}</button>
                       )}
                       <button className="menu-item" onClick={() => { setDetailMore(false); doClearHistory(d.convId); }}><Trash2 size={16} className="menu-icon" />{tr("chat.detail.clear_history")}</button>
-                      {!isSystemPeer && !d.isGroup && (
+                      {!isSystemPeer && !d.isGroup && !peerDeleted && (
                         <button className={`menu-item ${peerBlocked ? "" : "danger"}`} onClick={() => { setDetailMore(false); doToggleBlock(d.peer!, !peerBlocked); }}><Ban size={16} className="menu-icon" />{peerBlocked ? tr("chat.menu.unblock") : tr("common.block")}</button>
                       )}
                       {/* 举报这个人（target_type=user）。2026-09-06 长按菜单把「举报消息/举报发送者」合并成
                           单个「举报消息」后，**针对人本身**的举报只剩这一个入口——删掉那一项时若不在这里补上，
                           等于静默丢掉了一整个能力（合并前两端资料页都没有举报）。系统通知会话不给。 */}
-                      {!isSystemPeer && !d.isGroup && d.peer && (
+                      {!isSystemPeer && !d.isGroup && d.peer && !peerDeleted && (
                         <button className="menu-item danger" onClick={() => { setDetailMore(false); doReportPeer(d.peer!, detailPeerNickname); }}><Flag size={16} className="menu-icon" />{tr("common.report")}</button>
                       )}
                       {d.isGroup && (

@@ -45,7 +45,7 @@ export function HomeSearchResults(p: {
       {p.homeFriendHits.length > 0 && <div className="section-label">{tr("search.section.contacts")}</div>}
       {p.homeFriendHits.map((f) => (
         <div key={`hf-${f.user_id}`} className="convitem" onClick={() => p.openPeerDetail(f.user_id)}>
-          <Avatar url={f.avatar_url} label={p.friendLabel(f)} seed={f.user_id} />
+          <Avatar url={f.deleted ? undefined : f.avatar_url} label={p.friendLabel(f)} seed={f.user_id} />
           <div className="convbody">
             <div className="convpeer">{p.highlight(p.friendLabel(f), `hfn-${f.user_id}`)}</div>
             {/* 副行与 iOS 对齐：「联系人」。 */}

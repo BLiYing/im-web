@@ -97,7 +97,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   // 会话列表**不下发 username**（§7.4），故末级只能到占位——那也好过露出内部 ID。
   const convLabel = (c: Conversation) => c.peer_deleted ? deletedName() : displayNameOf(c.peer, remarks, c.peer_remark || c.peer_nickname);
   const convDisplayLabel = (c: Conversation) => (c.is_group ? ((c.remark || "").trim() || c.name || "群聊") : convLabel(c));
-  const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_avatar_url);
+  const convAvatarUrl = (c: Conversation) => (c.is_group ? c.avatar_url : c.peer_deleted ? undefined : c.peer_avatar_url);
 
   // 对端头像/昵称的多来源兜底（会话 > 好友 > 任一群成员表 > 名片/搜索/解析缓存）：
   // 从没聊过的群成员点开单聊/资料卡时没有会话行，不兜底就只剩首字母圈（而群里气泡是正常的）。
@@ -105,10 +105,20 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
     conversations, friends, groups: Object.values(groupInfos),
     search: [...Object.values(peerCards), ...(searchResults ?? []), ...Object.values(profileCards)],
   });
-  const isPeerDeleted = (id: string): boolean =>
-    !!id && (conversations.some((c) => c.peer === id && c.peer_deleted) || friends.some((f) => f.user_id === id && f.deleted)
-      || !!peerCards[id]?.deleted || !!profileCards[id]?.deleted);
-  const peerAvatar = (id: string) => resolvePeerAvatar(id, peerSources());
+  // 已注销 uid 集合：首次用到时扫一遍 conversations / friends / 名片（懒建，一次 render 内复用；
+  // 气泡逐条调 senderLabel 时不再每条线性扫描）。
+  let deletedIds: Set<string> | null = null;
+  const isPeerDeleted = (id: string): boolean => {
+    if (!id) return false;
+    if (!deletedIds) {
+      deletedIds = new Set<string>();
+      for (const c of conversations) if (c.peer_deleted && c.peer) deletedIds.add(c.peer);
+      for (const f of friends) if (f.deleted) deletedIds.add(f.user_id);
+      for (const cards of [peerCards, profileCards]) for (const [uid, card] of Object.entries(cards)) if (card?.deleted) deletedIds.add(uid);
+    }
+    return deletedIds.has(id);
+  };
+  const peerAvatar = (id: string) => (isPeerDeleted(id) ? undefined : resolvePeerAvatar(id, peerSources())); // 已注销：不露头像，走默认头像
   const peerNick = (id: string) => resolvePeerNickname(id, peerSources());
   // 公开句柄只有 `GET /users/{id}` 的权威名片带（好友/会话列表不下发，见 PROTOCOL「用户标识」）。
   // 拿不到就 undefined，由调用方**整行隐藏**——绝不回退到内部 ID。
@@ -122,7 +132,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   // 群成员昵称（气泡回退用）：群昵称 > 全局昵称 > 全局解析缓存 > 空串（调用方走自己的兜底）。
   // 已注销（`deleted=true`）：成员表 / 全局解析缓存任一处标了就算。
   const isDeleted = (cid: string, id: string): boolean =>
-    !!(profileCards[id]?.deleted || groupInfos[cid]?.members.find((m) => m.user_id === id)?.deleted);
+    isPeerDeleted(id) || !!groupInfos[cid]?.members.find((m) => m.user_id === id)?.deleted; // 1:1 里对端的标记在会话/好友表上，也要认
   const memberNick = (cid: string, id: string): string => {
     if (isDeleted(cid, id)) return deletedName();
     const local = memberTableNickname(groupInfos[cid], id);

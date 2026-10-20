@@ -64,7 +64,7 @@ export function ContactsTab(p: ContactsTabProps) {
               const st = friendStatus.get(u.user_id);
               return (
                 <div key={`s-${u.user_id}`} className="convitem static">
-                  <Avatar url={u.avatar_url} label={labelOf(u.user_id, u.nickname, u.username)} seed={u.user_id} />
+                  <Avatar url={u.deleted ? undefined : u.avatar_url} label={labelOf(u.user_id, u.nickname, u.username)} seed={u.user_id} />
                   <div className="convbody">
                     <div className="convpeer">{labelOf(u.user_id, u.nickname, u.username)}</div>
                     {/* 副标题 = @句柄（+ 标签）。绝不显示 user_id——那是 10 位随机数字内部 ID
@@ -112,7 +112,7 @@ export function ContactsTab(p: ContactsTabProps) {
           getKey={(f) => f.user_id}
           renderRow={(f) => (
             <div className="convitem" onClick={() => openFriendChat(f.user_id)}>
-              <Avatar url={f.avatar_url} label={friendLabel(f)} seed={f.user_id}>
+              <Avatar url={f.deleted ? undefined : f.avatar_url} label={friendLabel(f)} seed={f.user_id}>
                 {isOnline(presence[f.user_id]) && <span className="presence-dot" />}
               </Avatar>
               <div className="convbody">

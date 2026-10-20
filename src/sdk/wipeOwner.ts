@@ -3,6 +3,7 @@
 // Cache Storage、以及 localStorage 里按该 uid 命名的键（`im.<名>.<uid>[.<conv>]`：opt-in / 已下载 / 失效 / 文件夹 / 语音已播）。别的账号不动。
 import { wipeOwner } from "./localStore";
 import { cacheClear } from "../mediaCache";
+import { loadSession } from "../session";
 
 const SETTLE_MS = 1500; // 断连前已在途的写（落库/会话列表缓存）可能晚于首次清库落地，隔一会再扫一遍
 
@@ -25,5 +26,6 @@ async function wipeOnce(owner: string): Promise<void> {
 export async function wipeOwnerLocalData(owner: string): Promise<void> {
   if (!owner) return;
   await wipeOnce(owner);
-  setTimeout(() => { void wipeOnce(owner); }, SETTLE_MS);
+  // 补扫时若同一 uid 已重新登录（恢复账号后立刻再入场），别把它刚写的新缓存清掉。
+  setTimeout(() => { if (loadSession()?.uid !== owner) void wipeOnce(owner); }, SETTLE_MS);
 }

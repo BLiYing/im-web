@@ -66,6 +66,7 @@ export function useRestoreOffer(deps: { askConfirm: AskConfirm; onError: (msg: s
   return useCallback(async (e: unknown, username: string, password: string): Promise<"restored" | "handled" | "none"> => {
     const err = e as AccountError;
     if (err?.code !== CODE_ACCOUNT_PENDING_DELETION) return "none";
+    if (!password) return "none"; // 免密路径（刷新凭据/扫码）没有密码可交给 /account/restore，直接显示 200005 原文（同 Android）
     const date = err.deleteAt
       ? new Date(deleteAtMs(err.deleteAt)).toLocaleDateString(getLang() === "en" ? "en" : "zh-CN", { month: "long", day: "numeric" }) // 跟 App 语言走，不跟浏览器 locale
       : "";
