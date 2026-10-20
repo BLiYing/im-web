@@ -1380,7 +1380,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
   color: var(--text); font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px; }
 .menu-item:hover { background: var(--surface-hover); }
 .menu-item.danger { color: var(--danger); }
-
+.menu-item.danger .menu-icon { color: inherit; }   /* 危险项图标随文字变红（.menu-icon 默认是次要灰，会盖掉继承） */
 /* 卡片 + 行 */
 .detail-card { margin: 16px; background: var(--card-bg); border-radius: var(--radius-card); overflow: hidden; }
 .detail-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 14px; border: 0; background: none;

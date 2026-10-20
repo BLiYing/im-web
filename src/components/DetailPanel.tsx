@@ -8,7 +8,7 @@ import type { DetailArchive } from "../useDetailServerArchive";
 import { useEffect, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import {
-  X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut,
+  X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut, UserX,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
   IdCard, UsersRound, Flag, Users,
 } from "lucide-react";
@@ -343,7 +343,7 @@ export function DetailPanel(p: DetailPanelProps) {
                         <button className="menu-item danger" onClick={() => { setDetailMore(false); void doLeaveGroup(d.convId); }}><LogOut size={16} className="menu-icon" />{tr("chat.detail.leave_group")}</button>
                       )}
                       {isOwner && (
-                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><Trash2 size={16} className="menu-icon" />{tr("chat.detail.dissolve_group")}</button>
+                        <button className="menu-item danger" onClick={() => { setDetailMore(false); doDissolveGroup(d.convId); }}><UserX size={16} className="menu-icon" />{tr("chat.detail.dissolve_group")}</button>
                       )}
                       {/* 删除好友：破坏性最重，按本仓 destructive-last 约定放末位（与消息/会话菜单一致）。
                           删完不关面板——好友列表刷新后本页自动切成非好友视图（只剩「加好友」）。 */}
