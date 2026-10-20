@@ -60,13 +60,13 @@ export function useDeleteAccount(deps: {
   return { password, setPassword, busy, error, ownedGroups, canSubmit, submit };
 }
 
-/** 登录遇 AccountPendingDeletion 的恢复流程。返回 "restored"=已恢复，调用方应重新走登录；"handled"=恢复失败（文案已走 onError，调用方别再覆盖）；"none"=不是冷静期错误 / 用户取消。 */
+/** 登录遇 AccountPendingDeletion 的恢复流程。返回 "restored"=已恢复，调用方应重新走登录；"handled"=恢复失败（文案已走 onError，调用方别再覆盖）；"none"=不是冷静期错误。取消 / 免密路径返回 "handled"。 */
 export function useRestoreOffer(deps: { askConfirm: AskConfirm; onError: (msg: string) => void }) {
   const { askConfirm, onError } = deps;
   return useCallback(async (e: unknown, username: string, password: string): Promise<"restored" | "handled" | "none"> => {
     const err = e as AccountError;
     if (err?.code !== CODE_ACCOUNT_PENDING_DELETION) return "none";
-    if (!password) return "none"; // 免密路径（刷新凭据/扫码）没有密码可交给 /account/restore，直接显示 200005 原文（同 Android）
+    if (!password) { onError(t("err.200005")); return "handled"; } // 免密路径（刷新凭据/扫码）没有密码可交给 /account/restore：给本地化指引，不显示 200005 服务端英文原文
     const date = err.deleteAt
       ? new Date(deleteAtMs(err.deleteAt)).toLocaleDateString(getLang() === "en" ? "en" : "zh-CN", { month: "long", day: "numeric" }) // 跟 App 语言走，不跟浏览器 locale
       : "";
@@ -74,7 +74,7 @@ export function useRestoreOffer(deps: { askConfirm: AskConfirm; onError: (msg: s
 
       title: t("delete_account.restore_title"), okText: t("delete_account.restore_action"),
     });
-    if (!ok) return "none";
+    if (!ok) return "handled"; // 用户主动取消：留在登录页、不留红字（同 iOS），别让调用方回落显示 200005 服务端英文原文
     try { await restoreAccount(username, password); return "restored"; }
     catch (re) { onError((re as Error).message); return "handled"; }
   }, [askConfirm, onError]);

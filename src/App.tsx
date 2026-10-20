@@ -3061,7 +3061,7 @@ export default function App() {
           groupNameOf={(cid) => { const c = convById(cid); return c ? convDisplayLabel(c) : undefined; }}
           groupAvatarOf={(cid) => { const c = convById(cid); return c ? convAvatarUrl(c) : undefined; }}
           onOpenGroup={(cid) => { setShowCallHistory(false); openGroupChat(cid); }}
-          onCallUnavailable={() => setToast(t("chat.message.call_unavailable"))}
+          onCallUnavailable={(reason) => setToast(t(reason === "peer_deleted" ? "rtc.call.peer_deleted" : "chat.message.call_unavailable"))}
           onClose={() => setShowCallHistory(false)}
         />
       )}
@@ -3454,7 +3454,7 @@ export default function App() {
 
       {/* im-rtc 通话：登录态下挂载 = 起引擎，退出登录卸载 = 销毁；名字头像走本页的解析链。 */}
       <RtcHost uid={uid} getAuthToken={getRtcAuthToken} record={{ clientRef, appendMsg }} profileKey={[userProfiles.cards, friends, conversations, groupInfos]}
-        profiles={{ nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles,
+        profiles={{ isDeleted: (u) => deletedPeers.has(u) || isPeerDeleted(u), nameOf: (u) => rtcNameOf(remarks, u, peerNick(u), peerUsername(u)), avatarOf: peerAvatar, request: requestProfiles,
           // 服务端分页 + 搜索：普通群、超级群同一条路（超级群本地成员表只有我自己）。
           groupMembers: async (cid, opts) => {
             const tok = clientRef.current?.authToken ?? "";

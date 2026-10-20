@@ -116,14 +116,23 @@ export function rtcReady(): boolean {
   return actionsRegistry.get() !== null;
 }
 
+/** 已注销对端判定（由 App 用会话 / 好友 / 名片汇总的 `isPeerDeleted` 注入）；默认都未注销。 */
+let deletedLookup: (uid: string) => boolean = () => false;
+export function setDeletedPeerLookup(fn: (uid: string) => boolean): void { deletedLookup = fn; }
+/** 对端已注销：通话入口（气泡回拨 / 通话记录）据此拦截并提示，不进引擎（服务端 invite-check 也会拒，但 Kit 只提示「暂时无法被邀请」）。 */
+export function isCallBlockedByDeletion(peerUid: string): boolean { return deletedLookup(peerUid); }
+
 /** 单聊 1v1：`video=true` 视频，否则语音。就绪返回 true。 */
 export function placeSingleCall(peerUid: string, video: boolean): boolean {
+  if (deletedLookup(peerUid)) return false; // 兜底：对端已注销一律不进引擎（入口另有明确提示，见 isCallBlockedByDeletion）
   return dispatchCall((actions) => { void actions.placeCall([peerUid], video ? "video" : "audio"); });
 }
 
 /** 群通话：类型固定 video（默认不开摄像头由 Kit 决定），chatGroupId = 群会话 id。 */
 export function placeGroupCall(chatGroupId: string, calleeUids: string[]): boolean {
+  const live = calleeUids.filter((u) => !deletedLookup(u)); // 已注销成员不呼叫（与 iOS / Android 同口径）
+  if (live.length === 0) return false;
   return dispatchCall((actions) => {
-    void actions.placeCall(calleeUids.slice(0, MAX_GROUP_CALL_PICK), "video", { isGroup: true, chatGroupId });
+    void actions.placeCall(live.slice(0, MAX_GROUP_CALL_PICK), "video", { isGroup: true, chatGroupId });
   });
 }

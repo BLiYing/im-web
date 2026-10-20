@@ -19,7 +19,7 @@ import { isUrlText, parseChatRecord, recordItemPreview, fileNameFromContent, med
 import { IdCard } from "lucide-react";
 import { CONTACT_CONTENT_TYPE, parseContactCard } from "../contactCard";
 import { CALL_CONTENT_TYPE, renderCallRecord } from "../callRecord";
-import { placeSingleCall } from "../rtc/rtcCall";
+import { isCallBlockedByDeletion, placeSingleCall } from "../rtc/rtcCall";
 import { ExpiredCover } from "./ExpiredCover";
 import { CallRecordBody } from "./CallRecordBubble";
 import { Avatar } from "./Avatar";
@@ -154,7 +154,7 @@ export function MessageBubble(p: MessageBubbleProps) {
                   onClick={() => resendMessage(m)}>!</button>
         )}
         <div className={`bubble${isMediaBubble ? " media" : ""}${isCardBubble ? " card" : ""}${callView ? " call-bubble" : ""}${callView ? "" : bubbleLayoutClass(m.contentType)}${menuActive ? " ctx-active" : ""}${ro ? " readonly" : ""}`}
-          onClick={callView && !selectMode && !ro ? () => { if (!placeSingleCall(peer, callView.icon === "video")) setToast(tr("chat.message.call_unavailable")); } : undefined}
+          onClick={callView && !selectMode && !ro ? () => { if (isCallBlockedByDeletion(peer)) { setToast(tr("rtc.call.peer_deleted")); return; } if (!placeSingleCall(peer, callView.icon === "video")) setToast(tr("chat.message.call_unavailable")); } : undefined}
           onContextMenu={onMenu}>
           {/* 转发消息按普通消息显示（隐私保护）：不再渲染"转发自 X"。forwardFrom 仍随消息保留，供再次转发保留最初作者链路，但不外显（与 iOS 拉齐）。 */}
           {m.replyToConvSeq ? (

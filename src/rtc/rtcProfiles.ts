@@ -18,6 +18,8 @@ export interface InviteMemberLike {
   nickname?: string;
   username?: string;
   avatar_url?: string;
+  /** 已注销账号：不可邀请（冷静期成员服务端群通话放行，由宿主在选人处剔除）。 */
+  deleted?: boolean;
 }
 
 export interface InviteCandidateOut {
@@ -42,7 +44,7 @@ export function buildInviteCandidates(
   const out: InviteCandidateOut[] = [];
   const seen = new Set<string>();
   for (const m of members) {
-    if (!m.user_id || m.user_id === selfUid || seen.has(m.user_id)) continue;
+    if (!m.user_id || m.user_id === selfUid || m.deleted || seen.has(m.user_id)) continue;
     seen.add(m.user_id);
     const name = nameOf(m.user_id) ?? (m.nickname?.trim() || (m.username ? `@${m.username}` : m.user_id));
     if (q && ![name, m.username ?? "", m.user_id].some((s) => s.toLowerCase().includes(q))) continue;

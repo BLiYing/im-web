@@ -7,9 +7,9 @@ import { Modal } from "../components/Modal";
 import { CheckRow } from "../components/rows";
 import { MAX_GROUP_CALL_PICK } from "./rtcCall";
 
-/** 候选 = 成员表去掉自己；纯函数，便于单测。 */
+/** 候选 = 成员表去掉自己与已注销者；纯函数，便于单测。 */
 export function callCandidates(members: readonly GroupMember[], selfUid: string): GroupMember[] {
-  return members.filter((m) => m.user_id !== selfUid);
+  return members.filter((m) => m.user_id !== selfUid && !m.deleted);
 }
 
 /** 勾选 / 取消勾选；达上限后不再加（取消始终可以）。 */

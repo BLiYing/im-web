@@ -9,7 +9,7 @@ import { useLang } from "../i18n";
 import { logger, LOG_TAG } from "../logging/logger";
 import { createRtcEngine, rtcTokenProvider } from "./rtcEngine";
 import { loadRtcConfig } from "./rtcConfig";
-import { registerCallActions, registerCallEngine, registerRtcRestart, shouldRestartRtc } from "./rtcCall";
+import { registerCallActions, registerCallEngine, registerRtcRestart, setDeletedPeerLookup, shouldRestartRtc } from "./rtcCall";
 import { buildInviteCandidates, type InviteMemberLike } from "./rtcProfiles";
 import { useCallRecordSend, type CallRecordSendDeps } from "../useCallRecordSend";
 
@@ -18,6 +18,8 @@ export interface RtcProfiles {
   /** 本机显示名；解析不到返回 undefined（Kit 先画 uid，解析回来再重画）。 */
   nameOf: (uid: string) => string | undefined;
   avatarOf: (uid: string) => string | undefined;
+  /** 该 uid 是否已注销（会话 / 好友 / 名片任一标了）：通话入口据此拦截，见 rtcCall.isCallBlockedByDeletion。 */
+  isDeleted?: (uid: string) => boolean;
   /** 声明「这些 uid 现在要显示」，缺的由 useUserProfiles 批量拉。 */
   request: (uids: string[]) => void;
   /**
@@ -57,6 +59,12 @@ export function RtcHost({ uid, getAuthToken, profiles, profileKey, record }: {
   // 已解析的界面语言（不是"跟系统"，是用户在设置里选的那个），直接映射到 Kit 的 locale——
   // 与 iOS/Android 同一个选择：绕开 uikit 自带的 resolveLocale('auto', ...)，避免两套"跟系统"判据打架。
   const lang = useLang();
+
+  // 已注销判定注入通话入口（气泡回拨 / 通话记录）。每次渲染换新闭包（它读最新的会话 / 好友 / 名片），故走 ref 取最新。
+  useEffect(() => {
+    setDeletedPeerLookup((u) => profilesRef.current.isDeleted?.(u) ?? false);
+    return () => setDeletedPeerLookup(() => false);
+  }, []);
 
   useEffect(() => {
     if (!uid) return undefined;

@@ -8,7 +8,7 @@ import { Modal } from "./Modal";
 import { Avatar } from "./Avatar";
 import { useT } from "../i18n";
 import { formatTime, type TimeFormat } from "../time";
-import { placeSingleCall } from "../rtc/rtcCall";
+import { isCallBlockedByDeletion, placeSingleCall } from "../rtc/rtcCall";
 import { useCallHistory } from "../useCallHistory";
 import {
   callHistoryLine, callHistoryPeerUid, filterHistoryRecords, groupHistoryByDay, type CallHistoryTab,
@@ -39,7 +39,7 @@ export interface CallHistoryPanelProps {
   /** 跳转到群会话（不提供「加入」，见设计文档 §0.2）。 */
   onOpenGroup: (chatGroupId: string) => void;
   /** 回拨走不通（未就绪/忙线由 Kit 自己兜底，这里只处理「服务没起来」）时的提示，通常是 setToast(...)。 */
-  onCallUnavailable: () => void;
+  onCallUnavailable: (reason?: "peer_deleted") => void;
   onClose: () => void;
 }
 
@@ -65,6 +65,7 @@ export function CallHistoryPanel({
   const handleRowClick = (r: CallHistoryRecord) => {
     if (r.isGroup) { onClose(); onOpenGroup(r.chatGroupId); return; }
     const peer = callHistoryPeerUid(r, myUid);
+    if (peer && isCallBlockedByDeletion(peer)) { onCallUnavailable("peer_deleted"); return; }
     if (!peer || !placeSingleCall(peer, r.mediaType === "video")) onCallUnavailable();
   };
 

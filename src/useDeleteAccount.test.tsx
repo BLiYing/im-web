@@ -72,6 +72,17 @@ describe("useRestoreOffer", () => {
     expect(await result.current(err(200002), "u", "p")).toBe("none");
     expect(askConfirm).not.toHaveBeenCalled();
   });
+  it("冷静期 + 无密码（免密路径）→ 本地化指引走 onError 并返回 handled，不弹窗不 restore", async () => {
+    const spy = vi.spyOn(api, "restoreAccount").mockResolvedValue();
+    const askConfirm = vi.fn(async () => true);
+    const onError = vi.fn();
+    const { result } = renderHook(() => useRestoreOffer({ askConfirm, onError }));
+    expect(await result.current(pending, "u", "")).toBe("handled");
+    expect(onError).toHaveBeenCalledWith(expect.not.stringContaining("pending deletion"));
+    expect(onError.mock.calls[0][0]).toBeTruthy();
+    expect(askConfirm).not.toHaveBeenCalled();
+    expect(spy).not.toHaveBeenCalled();
+  });
   it("冷静期 + 同意 → restore 后返回 restored", async () => {
     const spy = vi.spyOn(api, "restoreAccount").mockResolvedValue();
     const askConfirm = vi.fn(async () => true);
@@ -79,10 +90,12 @@ describe("useRestoreOffer", () => {
     expect(await result.current(pending, "limo", "pw")).toBe("restored");
     expect(spy).toHaveBeenCalledWith("limo", "pw");
   });
-  it("冷静期 + 取消 → none，不 restore", async () => {
+  it("冷静期 + 取消 → handled 且不报错，不 restore", async () => {
     const spy = vi.spyOn(api, "restoreAccount").mockResolvedValue();
-    const { result } = renderHook(() => useRestoreOffer({ askConfirm: async () => false, onError: vi.fn() }));
-    expect(await result.current(pending, "u", "p")).toBe("none");
+    const onError = vi.fn();
+    const { result } = renderHook(() => useRestoreOffer({ askConfirm: async () => false, onError }));
+    expect(await result.current(pending, "u", "p")).toBe("handled");
+    expect(onError).not.toHaveBeenCalled();
     expect(spy).not.toHaveBeenCalled();
   });
   it("restore 失败 → onError 并返回 handled（调用方不再覆盖文案）", async () => {

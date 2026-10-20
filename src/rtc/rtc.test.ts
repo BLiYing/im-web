@@ -3,7 +3,7 @@ import { loadRtcConfig, rtcConfigProblem } from "./rtcConfig";
 import { rtcTokenProvider, signToken } from "./rtcEngine";
 import { buildInviteCandidates, rtcNameOf } from "./rtcProfiles";
 import { callCandidates, togglePick } from "./RtcGroupCallPicker";
-import { MAX_GROUP_CALL_PICK, placeGroupCall, placeSingleCall, registerCallActions, registerRtcRestart, shouldRestartRtc } from "./rtcCall";
+import { MAX_GROUP_CALL_PICK, isCallBlockedByDeletion, setDeletedPeerLookup, placeGroupCall, placeSingleCall, registerCallActions, registerRtcRestart, shouldRestartRtc } from "./rtcCall";
 import type { GroupMember } from "../sdk/protocol";
 
 const full = { wsUrl: "ws://h:8787/v1/ws" };
@@ -82,6 +82,7 @@ describe("rtcNameOf", () => {
 
 describe("群通话选人", () => {
   const m = (id: string) => ({ user_id: id } as GroupMember);
+  it("候选去掉已注销成员", () => expect(callCandidates([m("a"), { ...m("gone"), deleted: true }], "me").map((x) => x.user_id)).toEqual(["a"]));
   it("候选去掉自己", () => expect(callCandidates([m("a"), m("me"), m("b")], "me").map((x) => x.user_id)).toEqual(["a", "b"]));
   it("勾选与取消", () => expect(togglePick(togglePick([], "a"), "a")).toEqual([]));
   it("达上限后不再加，但仍可取消", () => {
@@ -206,5 +207,20 @@ describe("被踢后现场重启", () => {
     const placeCall = vi.fn(async () => undefined);
     registerCallActions({ placeCall } as unknown as Parameters<typeof registerCallActions>[0]);
     expect(placeCall).not.toHaveBeenCalled();
+  });
+});
+
+describe("已注销对端的通话入口拦截", () => {
+  afterEach(() => setDeletedPeerLookup(() => false));
+  it("默认不拦；注入判定后按 uid 拦", () => {
+    expect(isCallBlockedByDeletion("u1")).toBe(false);
+    setDeletedPeerLookup((u) => u === "u1");
+    expect(isCallBlockedByDeletion("u1")).toBe(true);
+    expect(isCallBlockedByDeletion("u2")).toBe(false);
+  });
+  it("邀请候选剔除已注销成员", () => {
+    const none = () => undefined;
+    const r = buildInviteCandidates([{ user_id: "a" }, { user_id: "gone", deleted: true }], "me", [], "", none, none);
+    expect(r.map((x) => x.uid)).toEqual(["a"]);
   });
 });
