@@ -103,13 +103,13 @@ describe("useConvEditMode", () => {
     expect(hook.result.current.canRead).toBe(false);
   });
 
-  it("批量删除：确认后逐条删，全部成功退出编辑；文件夹 Tab 内确认文案多一句", async () => {
+  it("批量删除：确认后逐条删，全部成功退出编辑；文件夹 Tab 内确认文案与「全部」相同", async () => {
     const f: ChatFolder = { id: "f1", name: "工作", position: 0, conv_ids: ["a", "b"] };
     const { hook, client, opts } = setup({}, f);
     act(() => hook.result.current.enter());
     act(() => hook.result.current.selectAll());
     await act(async () => { await hook.result.current.removeSelected(); });
-    expect(opts.askConfirm).toHaveBeenCalledWith(expect.stringContaining("所有文件夹"), expect.objectContaining({ danger: true }));
+    expect(opts.askConfirm).toHaveBeenCalledWith(expect.not.stringContaining("所有文件夹"), expect.objectContaining({ danger: true }));
     expect(client.deleteConversation).toHaveBeenCalledTimes(2);
     expect(opts.refreshConversations).toHaveBeenCalledTimes(1);
     expect(hook.result.current.editing).toBe(false);

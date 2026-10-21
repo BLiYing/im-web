@@ -121,7 +121,7 @@ export function useConvEditMode(o: UseConvEditModeOptions) {
     const targets = selectedConvs;
     if (busy || confirming.current || targets.length === 0) return;
     const n = targets.length;
-    const body = t("conv.edit.delete_body") + (selectedFolder ? t("conv.edit.delete_body_folder") : "");
+    const body = t("conv.edit.delete_body");
     confirming.current = true;
     let ok = false;
     try { ok = await askConfirm(body, { title: t("conv.edit.delete_title", { count: n }), okText: t("common.delete"), danger: true }); }
@@ -141,7 +141,7 @@ export function useConvEditMode(o: UseConvEditModeOptions) {
       }
     } catch (e) { setToast(t("conv.error.delete_failed_detail", { detail: (e as Error).message })); }
     finally { setBusy(false); }
-  }, [selectedConvs, busy, selectedFolder, askConfirm, clientRef, currentConvRef, deselect, refreshConversations, setToast, exit]);
+  }, [selectedConvs, busy, askConfirm, clientRef, currentConvRef, deselect, refreshConversations, setToast, exit]);
 
   return {
     editing, enter, exit, selection, shown, busy, count: selection.size, allSelected,
