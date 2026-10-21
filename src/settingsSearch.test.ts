@@ -28,14 +28,21 @@ describe("settingsSearch", () => {
     expect(settingsSubtitle(byId("language"), "设置")).toBe("设置");
     expect(settingsSubtitle(byId("blocked"), "设置")).toBe(`${t("settings.row.privacy")} › ${t("blocked.title")}`);
   });
+  it("自动删除消息作为隐私页二级页登记；搜「自动删除」命中且副标题带隐私页路径", () => {
+    expect(ids("自动删除")).toEqual(["autoDelete"]);
+    expect(settingsSubtitle(all.find((e) => e.id === "autoDelete")!, "设置")).toBe(`${t("settings.row.privacy")} › ${t("ps.row.auto_delete_messages")}`);
+  });
   it("splitAliases 半角全角逗号都认", () => {
     expect(splitAliases(" 声音,提示音，铃声 ,, ")).toEqual(["声音", "提示音", "铃声"]);
   });
   it("路由逐级打开：二级页先开它的一级页", () => {
-    const h = { openTop: vi.fn(), setWallpaperOpen: vi.fn(), setBlockedOpen: vi.fn(), setChangePwdOpen: vi.fn() };
+    const h = { openTop: vi.fn(), setWallpaperOpen: vi.fn(), setBlockedOpen: vi.fn(), setChangePwdOpen: vi.fn(), openAutoDelete: vi.fn() };
     runSettingsRoute("blocked", h);
     expect(h.openTop).toHaveBeenCalledWith("privacy");
     expect(h.setBlockedOpen).toHaveBeenCalledWith(true);
+    runSettingsRoute("autoDelete", h); // 自动删除消息：隐私页 → 档位面板
+    expect(h.openTop).toHaveBeenLastCalledWith("privacy");
+    expect(h.openAutoDelete).toHaveBeenCalledTimes(1);
     runSettingsRoute("language", h);
     expect(h.openTop).toHaveBeenLastCalledWith("language");
   });

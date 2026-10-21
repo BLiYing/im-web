@@ -99,6 +99,7 @@ export interface IMClientHandlers {
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
   /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
   onConvUpdate?: (u: ConvUpdate) => void;
+  isExpired?: (convId: string, timestamp: number) => boolean; // 自动删除：该会话此刻是否已过期（入库即过滤，useAutoDelete 提供）
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
   onFolderUpdate?: (data: unknown) => void; // 会话文件夹整表快照（§6.15）：帧即最终状态，整表替换，版本去重在 useChatFolders
@@ -665,7 +666,7 @@ export class IMClient extends IMRestApi {
     }
   }
 
-  protected removeMessagesLocal(convId: string, seqs: number[]): Promise<void> { return removeBatchLocal(this.uid, convId, seqs, (c, q) => this.handlers.onMessageRemoved?.(c, q)); }
+  removeMessagesLocal(convId: string, seqs: number[]): Promise<void> { return removeBatchLocal(this.uid, convId, seqs, (c, q) => this.handlers.onMessageRemoved?.(c, q)); }
 
   /** 物理移除某条消息（落墓碑防重同步复现 + 通知 UI）。为所有人删除 / 仅为我删除 / msg_hidden 共用。 */
   private async removeMessageLocal(convId: string, targetConvSeq: number, advanceCursorTo: number): Promise<void> {
@@ -1000,7 +1001,7 @@ export class IMClient extends IMRestApi {
       case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
         this.handlers.onConvUpdate?.({
           conv_id: d.conv_id, action: d.action,
-          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, mute_until: Number(d.mute_until) || 0, marked_unread: !!d.marked_unread,
+          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, mute_until: Number(d.mute_until) || 0, marked_unread: !!d.marked_unread, auto_delete_sec: Number(d.auto_delete_sec) || 0,
           cleared_at: d.cleared_at ?? 0,
         });
         break;
@@ -1080,7 +1081,7 @@ export class IMClient extends IMRestApi {
     }
     // 「为所有人删除」直加载/同步收敛（任务2）：目标行带 deleted_at>0 → 物理移除、不入库为可见消息。
     // 对齐 recalled_at 的直渲染：不再仅依赖单独的 msg_op 事件行（拿到目标行却漏事件行时会误显已删文件）。
-    if (Number(d.deleted_at) > 0 && convId && convSeq > 0) {
+    if ((Number(d.deleted_at) > 0 || this.handlers.isExpired?.(convId, Number(d.timestamp) || 0)) && convId && convSeq > 0) { // 自动删除：入库即过期同样不进库不展示（AUTO_DELETE_DESIGN §3.2）
       void this.removeMessageLocal(convId, convSeq, isNextContiguous ? convSeq : 0);
       if (isNextContiguous) this.updateSynced(convId, convSeq);
       return;

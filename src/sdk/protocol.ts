@@ -287,6 +287,8 @@ export interface Conversation {
    *  都要用 `muteState.ts#isMutedNow(muted, mute_until, now)`，不要单独读 `muted`（见该文件头注登记的清单）。 */
   mute_until?: number;
   marked_unread?: boolean; // 手动标为未读（红点，不计数）
+  /** 自动删除消息档位秒数（个人级，0/缺省=关；白名单 0/86400/604800/2592000，AUTO_DELETE_DESIGN）。 */
+  auto_delete_sec?: number;
   remark?: string;         // 会话备注（G1，仅本人可见、多端同步）：非空替代 name/群名显示
   /**
    * 未读区间内有人 @我（含 @所有人），仅群聊（M4-8）。
@@ -309,6 +311,7 @@ export interface ConvUpdate {
   muted: boolean;
   mute_until: number; // 定时免打扰到期毫秒（0=永久或未免打扰，§5）
   marked_unread: boolean;
+  auto_delete_sec: number; // 自动删除档位（0=关，AUTO_DELETE_DESIGN §1）
   cleared_at?: number; // 仅 action=delete 带：删除位点
 }
 

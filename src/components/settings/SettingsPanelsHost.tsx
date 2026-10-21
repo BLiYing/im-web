@@ -4,7 +4,7 @@
 // 不持有业务状态。经 useAppServices()/useT() 直接取 clientRef/setToast/comingSoon/askConfirm/t，
 // 免得 App 侧再显式传一遍（这四个已经是 AppServicesContext 收拢的稳定服务）。
 // 纯搬移，DOM/行为逐字不变：Fragment 不引入包裹节点，各面板 JSX 与原 App.tsx 内联时完全一致。
-import { useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { useAppServices } from "../../AppServicesContext";
 import { useT } from "../../i18n";
 import { clamp, type HSVColor } from "../../color";
@@ -19,6 +19,9 @@ import { DataStoragePanel } from "./DataStoragePanel";
 import { EditProfilePanel, type ProfileDraft } from "./EditProfilePanel";
 import { DevicesPanel } from "./DevicesPanel";
 import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
+import { AutoDeleteDefaultPanel } from "./AutoDeleteDefaultPanel";
+import { closeAutoDeleteDefault, openAutoDeleteDefault, useAutoDeleteDefaultOpen } from "../../autoDeleteUi";
+import { getAutoDeleteDefault } from "../../sdk/privacyApi";
 import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { DeleteAccountContainer } from "./DeleteAccountPanel";
@@ -141,6 +144,16 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const t = useT();
   const { clientRef, setToast, comingSoon, askConfirm } = useAppServices();
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false); // 注销账号二级页（自持，不占 App 状态）
+  // 隐私页「自动删除消息」账号默认档位：进隐私页取一次最新值（不推帧，AUTO_DELETE_DESIGN §3.3 A）；选择面板开合态见 autoDeleteUi。
+  const [autoDeleteDefault, setAutoDeleteDefault] = useState<number | null>(null);
+  const autoDeleteOpen = useAutoDeleteDefaultOpen();
+  useEffect(() => {
+    if (!p.privacyOpen) { setAutoDeleteDefault(null); closeAutoDeleteDefault(); return; }
+    let alive = true;
+    const c = clientRef.current;
+    if (c) getAutoDeleteDefault(c.authToken).then((v) => { if (alive) setAutoDeleteDefault(v); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
+    return () => { alive = false; };
+  }, [p.privacyOpen, clientRef]);
   const powerSave = usePowerSave();
   usePowerSaveToast(setToast); // §5 自动开启提示（电量监听 / 根 class 在 main.tsx 的 installPowerSaving，登录页也生效）
   // 设置入口行「动画与性能」：生效时右值「省电中」（稿：Row.value），否则不给。
@@ -245,8 +258,17 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           blockedCount={p.blockedList ? p.blockedList.length : null}
           onOpenBlocked={() => p.setBlockedOpen(true)}
           onOpenChangePwd={() => p.setChangePwdOpen(true)}
+          autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault}
           onComingSoon={comingSoon}
           onBack={() => p.setPrivacyOpen(false)}
+        />
+      )}
+
+      {/* 账号默认「自动删除消息」档位选择面板（从隐私页或设置搜索进入）：选中即保存。 */}
+      {p.privacyOpen && autoDeleteOpen && (
+        <AutoDeleteDefaultPanel
+          token={() => clientRef.current?.authToken ?? ""} initial={autoDeleteDefault} setToast={setToast}
+          onSaved={setAutoDeleteDefault} onBack={closeAutoDeleteDefault}
         />
       )}
 

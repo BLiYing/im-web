@@ -2,7 +2,7 @@
 // 会话详情抽屉整块（DetailPanel）的渲染 + 接线回归（阶段 2 抽出；此前 App 级对抽屉零覆盖，App.smoke 不打开它）。
 // 派生逻辑（好友准入显隐 / 群 vs 单聊卡片 / 置顶·免打扰开关 / 更多菜单）与动作接线任一错了即红。
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { render, fireEvent, cleanup, waitFor } from "@testing-library/react";
 afterEach(cleanup);
 import { AppServicesProvider, type AppServices } from "../AppServicesContext";
 import { ChatActionsProvider, type ChatActions } from "../ChatActionsContext";
@@ -46,7 +46,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     setContactDraft: vi.fn(), setInviteDraft: vi.fn(), setMemberMenu: vi.fn(), setFileMenu: vi.fn(),
     openChat: vi.fn(), openInChatSearch: vi.fn(),
     doClearHistory: vi.fn(), doToggleBlock: vi.fn(), doReportPeer: vi.fn(), doRemoveFriend: vi.fn(), doLeaveGroup: vi.fn(async () => {}), doDissolveGroup: vi.fn(),
-    setConvPinned: vi.fn(), setConvMuted: vi.fn(), openGroupText: vi.fn(), openGroupCard: vi.fn(async () => {}),
+    setConvPinned: vi.fn(), setConvMuted: vi.fn(), setConvAutoDelete: vi.fn(async () => true), openGroupText: vi.fn(), openGroupCard: vi.fn(async () => {}),
     doEditMyGroupNickname: vi.fn(async () => {}), doEditGroupRemark: vi.fn(async () => {}), pickGroupAvatar: vi.fn(),
     openJoinRequests: vi.fn(async () => {}), openGroupBans: vi.fn(async () => {}), openPeerDetail: vi.fn(),
     ...over,
@@ -123,8 +123,8 @@ describe("DetailPanel · 单聊", () => {
   // 定时免打扰（NOTIFICATIONS_P1_DESIGN §4.1/§4.2）：行从开关变成「值 + 菜单」。
   it("免打扰行：未免打扰显「关」，点开菜单选「1 小时」→ setConvMuted(conv,true,~1h 后)，菜单无「取消免打扰」项", () => {
     const p = base();
-    const { getByText, queryByText } = mount(p);
-    expect(getByText("关闭")).toBeTruthy();
+    const { getByText, getAllByText, queryByText } = mount(p);
+    expect(getAllByText("关闭")).toHaveLength(2); // 免打扰行 + 自动删除行的右值
     fireEvent.click(getByText("消息免打扰"));
     expect(queryByText("取消免打扰")).toBeNull();
     const before = Date.now();
@@ -243,5 +243,30 @@ describe("DetailPanel · 群聊", () => {
   it("普通群 → 不出现「大群」行（标记只在大群上有意义）", () => {
     const { queryByText } = mount(groupProps({ groupInfos: { g1: gp({ is_super: false }) } }));
     expect(queryByText("大群")).toBeNull();
+  });
+});
+
+describe("DetailPanel · 自动删除消息行", () => {
+  it("右值=本会话档位；点进二级页，选档位 → setConvAutoDelete(conv, sec)，成功后回详情页", async () => {
+    const p = base({ conversations: [peerConv({ auto_delete_sec: 604800 })] });
+    const { getByText, queryByText, findByText } = mount(p);
+    expect(getByText("自动删除消息")).toBeTruthy();
+    expect(getByText("1 周")).toBeTruthy(); // 行右值
+    fireEvent.click(getByText("自动删除消息"));
+    expect(getByText(/消息自发出起计时/)).toBeTruthy(); // autodel.conv.footer
+    fireEvent.click(getByText("1 天"));
+    expect(p.setConvAutoDelete).toHaveBeenCalledWith(expect.objectContaining({ auto_delete_sec: 604800 }), 86400);
+    await findByText("用户信息"); // 成功 → 返回详情页
+    expect(queryByText(/消息自发出起计时/)).toBeNull();
+  });
+  it("保存被取消 / 失败（返回 false）→ 留在二级页，选中态回滚", async () => {
+    const p = base({ conversations: [peerConv()], setConvAutoDelete: vi.fn(async () => false) });
+    const { getByText, container } = mount(p);
+    fireEvent.click(getByText("自动删除消息"));
+    fireEvent.click(getByText("1 个月"));
+    await waitFor(() => {
+      const rows = [...container.querySelectorAll(".autodel-row")];
+      expect(rows.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false", "false"]); // 回滚到「关闭」
+    });
   });
 });

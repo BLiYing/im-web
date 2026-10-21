@@ -4,6 +4,7 @@ import { AppServicesProvider, type AppServices } from "./AppServicesContext";
 import { useGroupActions } from "./useGroupActions";
 import { useMessageStore } from "./useMessageStore";
 import { useLocalPreload } from "./useLocalPreload";
+import { useAutoDelete } from "./useAutoDelete";
 import { MemberMenu } from "./components/MemberMenu";
 import { loadConversation, markMessageDeleted, type MsgRecord } from "./sdk/localStore";
 import { planBatchDelete } from "./selectDelete";
@@ -534,6 +535,7 @@ export default function App() {
 
   // 本地库预载（登录 / 重连走全量 preloadLocal；会话刷新走 preloadNew，只登记新冒出来的会话）：见 useLocalPreload。
   const { preloadLocal, preloadNew } = useLocalPreload({ clientRef, seenByConv, deletedByConv, preloadMsgs });
+  const autoDel = useAutoDelete({ clientRef, uid, conversations, setConversations, msgsByConv, connState: state, refreshConversations, askConfirm, setToast }); // 自动删除消息：入库过滤 + 定时清理 + 改档位
 
   const scheduleConversationRefresh = useCallback(() => {
     if (conversationRefreshTimerRef.current !== null) {
@@ -839,7 +841,7 @@ export default function App() {
         scheduleListRefresh(); // 会话列表末条预览可能随之变化
       },
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
-      onConvUpdate: () => { scheduleListRefresh(); },
+      onConvUpdate: (u) => { autoDel.applyConvUpdate(u); scheduleListRefresh(); }, isExpired: autoDel.isExpired,
       // 账号级配置变更（M4-7）：另一端改了自动下载策略 → 重拉（零新链路的多端同步）。
       onVoiceTranscript: (convId, convSeq, status, text) => { void convId; applyRemoteTranscript(convSeq, status, text); },
       onCapabilitiesUpdate: (version) => {
@@ -1868,6 +1870,7 @@ export default function App() {
     newestLocalSeq: messages.reduce((mx, mm) => (mm.convSeq > mx ? mm.convSeq : mx), 0),
     getToken: () => clientRef.current?.authToken ?? "",
     clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
+    isExpired: (ts) => autoDel.isExpired(convId, ts),
   });
 
   // 资料页「媒体/文件/语音」页签：本地有缺口且在线时并入服务端分页（§4.9 第 5 项）；本地齐全时与改造前一样。
@@ -1876,6 +1879,7 @@ export default function App() {
     enabled: !!detail && pickQuerySource(!clientRef.current?.hasGap(detail.convId), state === "connected") === "server",
     getToken: () => clientRef.current?.authToken ?? "",
     clearedUpTo: detail ? (clientRef.current?.clearedUpToOf(detail.convId) ?? 0) : 0,
+    isExpired: (ts) => autoDel.isExpired(detail?.convId ?? "", ts),
   });
   // 任务3 · 查看器媒体时间线 + 左右翻页（含「翻过最旧一张去服务端续拉」）：见 useViewerNav。
   const { viewerList, viewerIdx, goViewer } = useViewerNav({ viewer, setViewer, messages, mediaPaging, setViewerMore, setToast, t });
@@ -3206,7 +3210,7 @@ export default function App() {
             if (targetIsGroup) openGroupChat(targetConvId); else openChat(targetPeer);
           }}
           doClearHistory={doClearHistory} doToggleBlock={doToggleBlock} doReportPeer={reportPeer} doRemoveFriend={doRemoveFriend} doLeaveGroup={doLeaveGroup} doDissolveGroup={doDissolveGroup}
-          setConvPinned={setConvPinned} setConvMuted={setConvMuted} openGroupText={openGroupText} openGroupCard={openGroupCard}
+          setConvPinned={setConvPinned} setConvMuted={setConvMuted} setConvAutoDelete={autoDel.setConvAutoDelete} openGroupText={openGroupText} openGroupCard={openGroupCard}
           doEditMyGroupNickname={doEditMyGroupNickname} doEditGroupRemark={doEditGroupRemark} pickGroupAvatar={pickGroupAvatar}
           openJoinRequests={openJoinRequests} openGroupBans={openGroupBans} openPeerDetail={openPeerDetail}
         />

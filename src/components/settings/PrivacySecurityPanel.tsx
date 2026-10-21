@@ -1,17 +1,22 @@
 import { Ban, Key, ShieldCheck, KeyRound, Mail, Timer, Phone, Eye, CircleUserRound, AlignLeft, Gift, Trash2, FileUp } from "lucide-react";
 import { renderRow, type Row } from "../rows";
 import { SubPanel } from "./SubPanel";
+import { tierLabelKey } from "../../autoDelete";
+import { useT } from "../../i18n";
 
 /** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/design/PRIVACY_SECURITY_DESIGN.md）：
  *  五组 A~E，仅 A 组两项（已屏蔽的用户 / 修改密码）为 P0 活行，B~E 为灰置 comingSoon 占位。
  *  「已登录设备」按设计不进本页（是设置页独立入口）。纯展示：动作与黑名单计数由 App 传入。 */
-export function PrivacySecurityPanel({ blockedCount, onOpenBlocked, onOpenChangePwd, onComingSoon, onBack }: {
+export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, onOpenBlocked, onOpenChangePwd, onOpenAutoDelete, onComingSoon, onBack }: {
   blockedCount: number | null; // null=未加载/加载中 → 右值留空
   onOpenBlocked: () => void;
   onOpenChangePwd: () => void;
+  autoDeleteSec: number | null; // 账号默认档位；null=未加载 → 右值留空
+  onOpenAutoDelete: () => void;
   onComingSoon: (title: string) => void;
   onBack: () => void;
 }) {
+  const t = useT();
   // 占位行：muted 灰置 + 点击提示即将上线；icon 保留全彩（与 iOS §2.5 一致）。
   const ph = (id: string, label: string, icon: Row["icon"], iconTint: string, value?: string): Row =>
     ({ id, label, icon, iconTint, value, chevron: true, muted: true, onClick: () => onComingSoon(label) });
@@ -34,9 +39,10 @@ export function PrivacySecurityPanel({ blockedCount, onOpenBlocked, onOpenChange
       ],
     },
     {
-      header: "会话隐私",
-      footer: "为你开始的每个新会话默认开启阅后自删。",
-      rows: [ph("autoDelete", "自动删除消息", Timer, "orange", "关闭")],
+      header: t("ps.section.chat_privacy"),
+      footer: t("ps.chat_privacy_footer"),
+      // 活行（AUTO_DELETE_DESIGN §3.3 A）：右值=账号默认档位，点进档位选择面板。
+      rows: [{ id: "autoDelete", label: t("ps.row.auto_delete_messages"), icon: Timer, iconTint: "orange", value: autoDeleteSec === null ? undefined : t(tierLabelKey(autoDeleteSec)), chevron: true, onClick: onOpenAutoDelete }],
     },
     {
       header: "谁能看到",

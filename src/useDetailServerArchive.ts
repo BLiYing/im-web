@@ -42,6 +42,8 @@ export function useDetailServerArchive(o: {
   enabled: boolean;
   getToken: () => string;
   clearedUpTo: number;
+  /** 自动删除：服务端页回来的过期项不进媒体 / 文件 / 语音页签（useAutoDelete.isExpired）。 */
+  isExpired?: (timestamp: number) => boolean;
 }): DetailArchive {
   const [server, setServer] = useState<{ convId: string; list: ChatMessage[] }>({ convId: o.convId, list: [] });
   const [state, setState] = useState(fresh);
@@ -105,8 +107,8 @@ export function useDetailServerArchive(o: {
   }, [o.enabled, loadMore]);
 
   const merge = useCallback(
-    (local: ChatMessage[]) => (server.convId === o.convId ? unionByConvSeq(local, server.list) : local),
-    [server, o.convId],
+    (local: ChatMessage[]) => (server.convId === o.convId ? unionByConvSeq(local, o.isExpired ? server.list.filter((m) => !o.isExpired!(m.timestamp)) : server.list) : local),
+    [server, o.convId, o.isExpired],
   );
   return {
     merge,

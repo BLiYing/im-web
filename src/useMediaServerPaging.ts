@@ -33,6 +33,8 @@ export function useMediaServerPaging(o: {
   newestLocalSeq: number;
   getToken: () => string;
   clearedUpTo: number;
+  /** 自动删除：服务端续拉回来的过期项不进媒体库 / 查看器（useAutoDelete.isExpired）。 */
+  isExpired?: (timestamp: number) => boolean;
 }): MediaServerPaging {
   const [olderState, setOlder] = useState<{ convId: string; list: ChatMessage[] }>({ convId: o.convId, list: [] });
   // 换会话那一帧 effect 还没来得及重置：按 convId 过滤，别让上个会话的续拉结果闪进新会话
@@ -133,7 +135,10 @@ export function useMediaServerPaging(o: {
     }
   }, []);
 
-  const merge = useCallback((localAsc: ChatMessage[]) => mergeServerNewer(newer, mergeServerOlder(older, localAsc)), [older, newer]);
+  const merge = useCallback((localAsc: ChatMessage[]) => {
+    const all = mergeServerNewer(newer, mergeServerOlder(older, localAsc));
+    return o.isExpired ? all.filter((m) => !o.isExpired!(m.timestamp)) : all;
+  }, [older, newer, o.isExpired]);
 
   return { merge, hasMore: o.enabled && hasMore, hasMoreNewer: o.enabled && hasMoreNewer, loading, loadOlder, loadNewer };
 }

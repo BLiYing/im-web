@@ -1,0 +1,22 @@
+{
+  "_comment": "自动删除消息「是否已过期」的三端共用向量（IMServer/docs/design/AUTO_DELETE_DESIGN.md §3）。口径：sec>0 且 ts + sec*1000 <= now 即过期（含等号）；sec<=0 恒不过期。floor_ts 是该 now/sec 下的时间下界：timestamp <= floor_ts 的消息过期（floor_ts = now - sec*1000；sec<=0 时为 0 = 不过滤）。三端测试（iOS IMAutoDeleteTests / Android AutoDeleteTest / Web autoDelete.test.ts）同读；改口径先改这里。",
+  "expired": [
+    { "name": "关闭时永不过期", "now": 10000000, "sec": 0, "ts": 1, "expect": false },
+    { "name": "负值当关闭", "now": 10000000, "sec": -1, "ts": 1, "expect": false },
+    { "name": "刚发出", "now": 10000000, "sec": 86400, "ts": 10000000, "expect": false },
+    { "name": "差 1ms 满 1 天", "now": 86400000, "sec": 86400, "ts": 1, "expect": false },
+    { "name": "恰满 1 天（含等号）", "now": 86400000, "sec": 86400, "ts": 0, "expect": true },
+    { "name": "超过 1 天", "now": 200000000, "sec": 86400, "ts": 100000000, "expect": true },
+    { "name": "1 周内", "now": 604799999, "sec": 604800, "ts": 0, "expect": false },
+    { "name": "恰满 1 周", "now": 604800000, "sec": 604800, "ts": 0, "expect": true },
+    { "name": "1 个月内", "now": 2591999999, "sec": 2592000, "ts": 0, "expect": false },
+    { "name": "恰满 1 个月", "now": 2592000000, "sec": 2592000, "ts": 0, "expect": true }
+  ],
+  "floor_ts": [
+    { "now": 200000000, "sec": 86400, "expect": 113600000 },
+    { "now": 200000000, "sec": 0, "expect": 0 },
+    { "now": 1000, "sec": 86400, "expect": 0 }
+  ],
+  "valid_sec": [0, 86400, 604800, 2592000],
+  "invalid_sec": [-1, 1, 3600, 86401, 31536000]
+}

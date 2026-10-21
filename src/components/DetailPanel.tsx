@@ -10,7 +10,7 @@ import type { Dispatch, SetStateAction } from "react";
 import {
   X, Camera, UserPlus, UserMinus, MessageCircle, Phone, Video, Search, MoreHorizontal, Trash2, Ban, LogOut, UserX,
   Megaphone, Info, ChevronRight, Pin, BellOff, Settings2, QrCode, Link2, SquarePen, Bookmark, AtSign,
-  IdCard, UsersRound, Flag, Users,
+  IdCard, UsersRound, Flag, Users, Timer,
 } from "lucide-react";
 import type { GroupTextKind } from "./modals/GroupTextModal";
 import type { ChatMessage, Conversation, FriendEntry, GroupBan, GroupInfo, GroupMember } from "../sdk/protocol";
@@ -23,6 +23,8 @@ import { useChatActions } from "../ChatActionsContext";
 import { Avatar } from "./Avatar";
 import { AnchoredMenu } from "./AnchoredMenu";
 import { MuteMenu } from "./MuteMenu";
+import { AutoDeleteConvPage } from "./AutoDeleteConvPage";
+import { tierLabelKey } from "../autoDelete";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { AdminListPanel } from "./AdminListPanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
@@ -121,6 +123,8 @@ export interface DetailPanelProps {
   doDissolveGroup: (cid: string) => void;
   setConvPinned: (c: Conversation, pinned: boolean) => void;
   setConvMuted: (c: Conversation, muted: boolean, muteUntil?: number) => void;
+  /** 改本会话「自动删除消息」档位（useAutoDelete：开启/缩短先确认、成功后立即清理）；false=取消或失败。 */
+  setConvAutoDelete: (c: Conversation, sec: number) => Promise<boolean>;
   openGroupText: (kind: GroupTextKind, cid: string) => void;
   openGroupCard: (cid: string, asLink?: boolean) => Promise<void>;
   doEditMyGroupNickname: (gp: GroupInfo) => Promise<void>;
@@ -141,7 +145,7 @@ export function DetailPanel(p: DetailPanelProps) {
     onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     openChat, openInChatSearch, doClearHistory, doToggleBlock, doReportPeer, doRemoveFriend, doLeaveGroup, doDissolveGroup,
-    setConvPinned, setConvMuted, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
+    setConvPinned, setConvMuted, setConvAutoDelete, openGroupText, openGroupCard, doEditMyGroupNickname, doEditGroupRemark,
     pickGroupAvatar, openJoinRequests, openGroupBans, openPeerDetail, serverConfig,
   } = p;
   const { clientRef, setToast, askFriendRequest } = useAppServices();
@@ -161,7 +165,8 @@ export function DetailPanel(p: DetailPanelProps) {
     window.addEventListener("resize", close);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("resize", close); };
   }, [muteMenuAt]);
-  useEffect(() => { setMuteMenuAt(null); }, [p.detail.convId]);
+  const [autoDeleteOpen, setAutoDeleteOpen] = useState(false); // 抽屉内「自动删除消息」二级页
+  useEffect(() => { setMuteMenuAt(null); setAutoDeleteOpen(false); }, [p.detail.convId]);
   const startCall = (peer: string, video: boolean) => {
     if (!placeSingleCall(peer, video)) setToast(tr("chat.message.call_unavailable"));
   };
@@ -263,7 +268,7 @@ export function DetailPanel(p: DetailPanelProps) {
     return (
       <div className="detail-mask" onClick={onClose}>
         <aside ref={panelRef} className="detail-panel" onClick={(e) => e.stopPropagation()}>
-          {!manageOpen && (
+          {!manageOpen && !autoDeleteOpen && (
             // 标题栏随面板滚动固定在顶部（对齐 iOS 大标题折叠为常驻导航栏）：关闭按钮一并锁在标题栏内。
             <div className="detail-sticky-head">
               <button className="detail-close" title={tr("common.close")} onClick={onClose}><X size={20} /></button>
@@ -271,7 +276,9 @@ export function DetailPanel(p: DetailPanelProps) {
             </div>
           )}
 
-          {manageOpen && gp && adminPanelOpen ? (
+          {autoDeleteOpen && conv ? (
+            <AutoDeleteConvPage conv={conv} onPick={(sec) => setConvAutoDelete(conv, sec)} onBack={() => setAutoDeleteOpen(false)} />
+          ) : manageOpen && gp && adminPanelOpen ? (
             <AdminListPanel gp={gp} uid={uid} memberLabel={memberLabel}
               onBack={() => setAdminPanelOpen(false)}
               onAdd={() => openAdminPicker(gp.conv_id)}
@@ -427,6 +434,11 @@ export function DetailPanel(p: DetailPanelProps) {
                     </>
                   )}
                 </div>
+                <button className="detail-row" disabled={!conv} onClick={() => setAutoDeleteOpen(true)}>
+                  <span className="detail-row-ic"><Timer size={18} /></span><span>{tr("ps.row.auto_delete_messages")}</span>
+                  <span className="detail-row-val">{tr(tierLabelKey(conv?.auto_delete_sec ?? 0))}</span>
+                  <ChevronRight size={16} className="detail-row-chev" />
+                </button>
                 {d.isGroup && canInviteHere && (
                   <button className="detail-row" onClick={() => void openGroupCard(d.convId)}>
                     <span className="detail-row-ic"><QrCode size={18} /></span><span>{tr("qr.card.group_title_code")}</span>

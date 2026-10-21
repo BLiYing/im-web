@@ -1064,6 +1064,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .radio-dot.on { border-color: var(--accent); }
 .radio-dot.on::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--accent); }
 .radio-text { display: flex; flex-direction: column; gap: 2px; }
+/* 自动删除档位单选组（AutoDeleteTiers）：行右侧 ✓（草图口径），行间分隔线；不新增 token */
+.autodel-row + .autodel-row { border-top: 1px solid var(--separator); }
+.autodel-row:disabled { cursor: default; }
+.autodel-check { margin-left: auto; color: var(--accent); flex-shrink: 0; }
 /* 语言面板：「跟随系统」与解析出的语言自称同一行（对齐 iOS/Android 单行），不竖排两行 */
 .language-panel .radio-text { flex-direction: row; align-items: baseline; gap: 8px; }
 .row-sub { font-size: 12px; color: var(--text-secondary); }
@@ -1640,7 +1644,7 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .settings-foot.profile-delete-foot { margin-top: 6px; padding: 0 var(--space-4); }
 /* 层叠：隐私页盖在设置页(30)之上；黑名单/修改密码是从隐私页再进一层，盖在隐私页之上。 */
 .privacy-panel { z-index: 40; }
-.blocked-panel, .changepwd-panel { z-index: 50; }
+.blocked-panel, .changepwd-panel, .autodel-panel { z-index: 50; }
 .switch-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: 12px 14px; font-size: 15.5px; cursor: pointer; }
 .switch-row:hover { background: var(--surface-hover); }
