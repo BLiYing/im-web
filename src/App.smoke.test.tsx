@@ -39,7 +39,7 @@ describe("App 冒烟：登录 → 会话 → 聊天主链路", () => {
   it("无会话缓存时渲染登录页；登录后进入主界面并列出会话", async () => {
     renderApp();
     expect(screen.getByText("IM Web 登录")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("免密登录"));
+    fireEvent.click(screen.getByText("免密登录（开发）"));
     await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));
     // 登录凭据落 localStorage（刷新静默重登的骨架）
     expect(JSON.parse(localStorage.getItem("im.session")!)).toMatchObject({ uid: UID });
@@ -110,7 +110,7 @@ describe("会话列表：大群标记", () => {
       conv({ conv_id: "g_plain", is_group: true, name: "小群", is_super: false } as never),
     ];
     renderApp();
-    fireEvent.click(screen.getByText("免密登录"));
+    fireEvent.click(screen.getByText("免密登录（开发）"));
     await waitFor(() => expect(screen.getByText("两万人群")).toBeInTheDocument());
 
     // 标记只出现一次：跟在大群那一行，不是每个群都有。

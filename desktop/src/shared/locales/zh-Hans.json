@@ -624,6 +624,21 @@
   "contacts.search.results_title": "搜索结果",
   "contacts.search.title": "添加朋友",
   "contacts.title": "通讯录",
+  "conv.edit.delete_body": "将从你的列表移除，不影响对方；对方再发消息时会话会重新出现。",
+  "conv.edit.delete_body_folder": "会话会同时从「全部」和所有文件夹中消失。",
+  "conv.edit.delete_failed": {
+    "other": "{count} 个会话删除失败"
+  },
+  "conv.edit.delete_n": {
+    "other": "删除 {count} 个会话"
+  },
+  "conv.edit.delete_title": {
+    "other": "删除 {count} 个会话？"
+  },
+  "conv.edit.mark_read": "已读",
+  "conv.edit.selected_count": {
+    "other": "已选择 {count} 项"
+  },
   "conv.error.delete_failed": "删除失败",
   "conv.error.delete_failed_detail": "删除失败：{detail}",
   "conv.error.invalid_peer_uid": "请输入有效且不同于自己的对方 uid",

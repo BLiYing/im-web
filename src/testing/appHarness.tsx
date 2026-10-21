@@ -40,7 +40,7 @@ export function renderApp() { return render(<App />); }
 export async function loginAndWait(): Promise<void> {
   renderApp();
   // 登录框预填的是默认 username；免密路径同样要经 /login 换内部 ID（Fake 直接给 internalUID）。
-  fireEvent.click(screen.getByText("免密登录"));
+  fireEvent.click(screen.getByText("免密登录（开发）"));
   await waitFor(() => expect(screen.getAllByText("小明").length).toBeGreaterThan(0));
 }
 

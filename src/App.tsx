@@ -78,7 +78,8 @@ import { renderRow, type Row } from "./components/rows";
 import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
 import { useOpenSettingsHit } from "./useOpenSettingsHit";
 import { useAccountNotifySettings } from "./useAccountNotifySettings";
-import { useChatFolders } from "./useChatFolders"; import { ChatFoldersProvider } from "./ChatFoldersContext"; import { filterConversations } from "./chatFolders"; import { ConvListHead, ConvListEmpty } from "./components/ChatFolderTabs"; import { ChatFoldersPanel } from "./components/settings/ChatFoldersPanel";
+import { useConvEditMode } from "./useConvEditMode"; import { useConvRowActions } from "./useConvRowActions"; import { ConvEditToggle, ConvEditBar } from "./components/ConvEditBar";
+import { useChatFolders } from "./useChatFolders"; import { ChatFoldersProvider } from "./ChatFoldersContext"; import { ConvListHead, ConvListEmpty } from "./components/ChatFolderTabs"; import { ChatFoldersPanel } from "./components/settings/ChatFoldersPanel";
 import { langPrefLabel, useT } from "./i18n";
 import { buildSettingsInfoRows } from "./settingsInfoRows";
 import { ConfirmDialog, PromptDialog } from "./components/Dialogs";
@@ -1566,58 +1567,22 @@ export default function App() {
     void hideFileForMe(m);                                    // 仅能删自己：直接隐藏
   }, [deleteMessage, canDeleteForEveryone, hideFileForMe]);
 
-  // 会话"设为已读"：推进已读位点（清未读数）+ 清除手动"标未读"标记，再刷新列表。
-  const markReadConv = useCallback((c: Conversation) => {
-    setConvMenu(null);
-    void (async () => {
-      try {
-        if (c.unread > 0) clientRef.current?.markRead(c.conv_id, c.latest_conv_seq);
-        if (c.marked_unread) {
-          await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted: !!c.muted, marked_unread: false });
-        }
-        await refreshConversations();
-      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
-    })();
-  }, [refreshConversations]);
-
-  // 会话"标为未读"：手动置红点（不改已读位点，不计数）。
-  const markUnreadConv = useCallback((c: Conversation) => {
-    setConvMenu(null);
-    void (async () => {
-      try {
-        await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: c.pinned_at ?? 0, muted: !!c.muted, marked_unread: true });
-        await refreshConversations();
-      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
-    })();
-  }, [refreshConversations]);
-
-  // 会话置顶/取消置顶：pinned_at=现在/0（后端据此把置顶会话排在列表顶）。
-  const setConvPinned = useCallback((c: Conversation, pinned: boolean) => {
-    setConvMenu(null);
-    void (async () => {
-      try {
-        await clientRef.current?.updateConvSettings(c.conv_id, { pinned_at: pinned ? Date.now() : 0, muted: !!c.muted, marked_unread: !!c.marked_unread });
-        await refreshConversations();
-      } catch (e) { setToast(t("common.error.action_failed", { detail: (e as Error).message })); }
-    })();
-  }, [refreshConversations]);
+  // 会话行单条操作（设为已读 / 标为未读 / 置顶 / 删除）：抽到 useConvRowActions。
+  const closeConvMenu = useCallback(() => setConvMenu(null), []);
+  const { markReadConv, markUnreadConv, setConvPinned, deleteConv } = useConvRowActions({
+    clientRef, refreshConversations, setToast, closeConvMenu, currentConvRef, deselect,
+  });
 
   // 会话免打扰/取消 + 时长二级菜单状态：抽到 useConvMute（CODING_STYLE §7 决策树①，自己有状态+一组操作）。
   const { setConvMuted, convMuteMenu, setConvMuteMenu, requestMute } = useConvMute({
     clientRef, refreshConversations, setToast, closeConvMenu: () => setConvMenu(null),
   });
 
-  // 删除会话（仅本人，后端记 cleared_at 不删消息）：若删的是当前打开会话则退出，否则刷新列表。
-  const deleteConv = useCallback((c: Conversation) => {
-    setConvMenu(null);
-    void (async () => {
-      try {
-        await clientRef.current?.deleteConversation(c.conv_id);
-        if (currentConvRef.current === c.conv_id) deselect(); // deselect 内部会 refreshConversations
-        else await refreshConversations();
-      } catch (e) { setToast(t("conv.error.delete_failed_detail", { detail: (e as Error).message })); }
-    })();
-  }, [refreshConversations, deselect]);
+  // 会话列表编辑模式（批量已读 / 删除，CONV_LIST_EDIT_MODE_DESIGN）：状态 + 批量操作在 useConvEditMode。
+  const convEdit = useConvEditMode({
+    clientRef, conversations, selectedFolder: folders.selectedFolder, tab, refreshConversations, setToast, askConfirm,
+    currentConvRef, deselect,
+  });
 
   /** 打开某条自己发的群消息的已读名单（M4-8）：按需拉取，不做常驻轮询。 */
   const openReadReceipts = useCallback((m: ChatMessage) => {
@@ -2765,6 +2730,8 @@ export default function App() {
           </div>
           {/* 显示公开句柄而非 uid（10 位随机内部 ID）。没有 username 时只留连接状态。 */}
           <span className="account-meta">{myInfo?.username ? `@${myInfo.username} · ` : ""}{stateText}</span>
+          {/* 编辑入口：仅「消息」页签；空列表隐藏（已在编辑中则保留「完成」）。 */}
+          {tab === "chats" && (convEdit.editing || convEdit.shown.length > 0) && <ConvEditToggle edit={convEdit} />}
         </header>
         <SidebarTabs tab={tab} conversations={conversations} incomingCount={incoming.length} includeMuted={notif.settings.badge.includeMuted}
           onChats={() => setTab("chats")}
@@ -2786,13 +2753,15 @@ export default function App() {
           ) : (
           <>
           <ConvListEmpty conversations={conversations} />
-          {filterConversations(conversations, folders.selectedFolder).map((c) => {
+          {convEdit.shown.map((c) => {
             // 定时免打扰到期后按未免打扰渲染（NOTIFICATIONS_P1_DESIGN §4.3）：铃铛消失、未读数不再置灰。
             const mutedNow = isMutedNow(!!c.muted, c.mute_until, Date.now());
             return (
-            <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""}`}
-              onClick={() => (c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
-              onContextMenu={(e) => { e.preventDefault(); setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
+            <div key={c.conv_id} className={`convitem ${c.conv_id === convId ? "active" : ""} ${c.pinned_at ? "pinned" : ""} ${convEdit.selection.has(c.conv_id) ? "sel" : ""}`}
+              // 编辑模式：点整行 = 勾选（Shift 连选），不进聊天；右键菜单关闭
+              onClick={(e) => (convEdit.editing ? convEdit.toggle(c.conv_id, e.shiftKey) : c.is_group ? openGroupChat(c.conv_id) : openChat(c.peer))}
+              onContextMenu={(e) => { e.preventDefault(); if (!convEdit.editing) setConvMenu({ x: e.clientX, y: e.clientY, c }); }}>
+              {convEdit.editing && <span className={`sel-check${convEdit.selection.has(c.conv_id) ? " on" : ""}`}>{convEdit.selection.has(c.conv_id) ? "✓" : ""}</span>}
               <Avatar url={convAvatarUrl(c)} label={convDisplayLabel(c)} seed={c.is_group ? c.conv_id : c.peer}>
                 {!c.is_group && isOnline(presence[c.peer]) && <span className="presence-dot" />}
               </Avatar>
@@ -2849,6 +2818,7 @@ export default function App() {
           friendLabel={friendLabel} presence={presence} setFriendMenu={setFriendMenu}
         />
         )}
+        {tab === "chats" && convEdit.editing && <ConvEditBar edit={convEdit} />}
 
         {/* 设置页体系的 12 个子面板路由：见 components/settings/SettingsPanelsHost
             （open 开关/数据仍全部由 App 拥有，那边只做「按开关渲染 + 拼胶水」，CODING_STYLE §7 决策树②）。 */}

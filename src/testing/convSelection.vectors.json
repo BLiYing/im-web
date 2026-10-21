@@ -1,0 +1,65 @@
+{
+  "_comment": "会话列表编辑模式「选择集」的三端共用向量（IMServer/docs/design/CONV_LIST_EDIT_MODE_DESIGN.md §2/§3）。改口径先改这里，三端测试（iOS IMConversationSelectionTests / Android ConversationSelectionTest / Web convSelection.test.ts）同读。场景语义：当前列表 = convs；ops 依次执行；select_all 选中当前列表全部；prune 的参数是『仍存在的会话 id』，执行后当前列表缩为这些会话；expect.ids 为选择集（升序）。",
+  "has_unread": [
+    { "name": "未读数>0", "unread": 3, "marked": false, "expect": true },
+    { "name": "手动标未读（无计数）", "unread": 0, "marked": true, "expect": true },
+    { "name": "两者皆有", "unread": 5, "marked": true, "expect": true },
+    { "name": "无未读", "unread": 0, "marked": false, "expect": false }
+  ],
+  "scenarios": [
+    {
+      "name": "空选择集",
+      "convs": [{ "id": "a", "unread": 1, "marked": false }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [],
+      "expect": { "ids": [], "all_selected": false, "has_unread": false }
+    },
+    {
+      "name": "勾选两次 = 取消",
+      "convs": [{ "id": "a", "unread": 1, "marked": false }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [["toggle", "a"], ["toggle", "a"]],
+      "expect": { "ids": [], "all_selected": false, "has_unread": false }
+    },
+    {
+      "name": "只选无未读的 → 已读不可用",
+      "convs": [{ "id": "a", "unread": 1, "marked": false }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [["toggle", "b"]],
+      "expect": { "ids": ["b"], "all_selected": false, "has_unread": false }
+    },
+    {
+      "name": "选中含手动标未读的 → 已读可用",
+      "convs": [{ "id": "a", "unread": 0, "marked": true }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [["toggle", "a"], ["toggle", "b"]],
+      "expect": { "ids": ["a", "b"], "all_selected": true, "has_unread": true }
+    },
+    {
+      "name": "全选",
+      "convs": [{ "id": "a", "unread": 1, "marked": false }, { "id": "b", "unread": 0, "marked": false }, { "id": "c", "unread": 0, "marked": false }],
+      "ops": [["select_all"]],
+      "expect": { "ids": ["a", "b", "c"], "all_selected": true, "has_unread": true }
+    },
+    {
+      "name": "全选后取消一个 → 不再是全选",
+      "convs": [{ "id": "a", "unread": 0, "marked": false }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [["select_all"], ["toggle", "b"]],
+      "expect": { "ids": ["a"], "all_selected": false, "has_unread": false }
+    },
+    {
+      "name": "清空（切 Tab）",
+      "convs": [{ "id": "a", "unread": 1, "marked": false }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [["select_all"], ["clear"]],
+      "expect": { "ids": [], "all_selected": false, "has_unread": false }
+    },
+    {
+      "name": "列表刷新：他端删除了 b → 剔除 b，a 保留",
+      "convs": [{ "id": "a", "unread": 2, "marked": false }, { "id": "b", "unread": 0, "marked": false }],
+      "ops": [["select_all"], ["prune", ["a"]]],
+      "expect": { "ids": ["a"], "all_selected": true, "has_unread": true }
+    },
+    {
+      "name": "列表为空时 all_selected 恒为 false",
+      "convs": [{ "id": "a", "unread": 0, "marked": false }],
+      "ops": [["toggle", "a"], ["prune", []]],
+      "expect": { "ids": [], "all_selected": false, "has_unread": false }
+    }
+  ]
+}

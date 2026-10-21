@@ -2264,3 +2264,27 @@ mark.search-hit { background: var(--accent-flash); color: inherit; border-radius
 .folder-empty-hero { text-align: center; padding: 28px 32px 8px; color: var(--text-secondary); }
 .folder-empty-hero b { display: block; color: var(--text); font-size: 17px; margin: 8px 0 4px; }
 .folder-list-empty { padding: 40px var(--space-4); text-align: center; color: var(--text-secondary); white-space: pre-line; }
+
+/* ===== 会话列表编辑模式（CONV_LIST_EDIT_MODE_DESIGN.md）===== */
+/* 入口：侧栏 header 行最右端的文字钮（header 是 flex-start，靠 margin-left:auto 顶到右端）。 */
+.sidebar header .conv-edit-toggle { margin-left: auto; font-size: 14px; font-weight: 400; white-space: nowrap; }
+/* 选中行底色 = 主色 16%（比置顶行的 10% 深，两者才分得清）；悬停仍优先。 */
+.convitem.sel { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.convitem.sel:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.convitem .sel-check { margin: 0 var(--space-2) 0 0; }
+/* 编辑模式下 Shift 连选不该顺带选中文字。 */
+.convitem:has(> .sel-check) { user-select: none; }
+/* 选择栏：独立一条（侧栏底色 + 顶 1px 分隔线），列表 flex:1 在其上方；不用聊天多选栏的透明背景（那里下面铺壁纸）。 */
+.conv-edit-bar { display: flex; align-items: center; gap: 12px; flex: none; height: 66px; padding: 10px 12px; box-sizing: border-box; background: var(--page-bg); border-top: 1px solid var(--separator); font-size: 14px; }
+.conv-edit-bar .link-inline { font-size: 14px; white-space: nowrap; }
+.conv-edit-bar .link-inline:disabled { opacity: .4; cursor: default; }
+.conv-edit-bar .select-count { flex: 1; color: var(--text-secondary); font-size: 13px; }
+/* 36px 高胶囊文字钮，玻璃底沿用 .sel-action 的 --glass-menu-*。 */
+.conv-edit-pill { flex: 0 0 auto; height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid var(--glass-menu-border); background: var(--glass-menu-bg); color: var(--text); font-size: 14px; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 8px var(--shadow-soft); backdrop-filter: blur(24px) saturate(165%); -webkit-backdrop-filter: blur(24px) saturate(165%); transition: transform .12s ease, opacity .12s ease; }
+.conv-edit-pill.danger { color: var(--danger); }
+.conv-edit-pill:hover:not(:disabled) { transform: translateY(-1px); }
+.conv-edit-pill:active:not(:disabled) { transform: scale(.96); }
+.conv-edit-pill:disabled { opacity: .4; cursor: default; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .conv-edit-pill { background: var(--card-bg); }
+}
