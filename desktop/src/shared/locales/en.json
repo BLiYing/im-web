@@ -652,10 +652,6 @@
     "one": "{count} conversation couldn't be deleted",
     "other": "{count} conversations couldn't be deleted"
   },
-  "conv.edit.delete_n": {
-    "one": "Delete {count} conversation",
-    "other": "Delete {count} conversations"
-  },
   "conv.edit.delete_title": {
     "one": "Delete {count} conversation?",
     "other": "Delete {count} conversations?"

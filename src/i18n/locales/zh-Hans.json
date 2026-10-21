@@ -629,9 +629,6 @@
   "conv.edit.delete_failed": {
     "other": "{count} 个会话删除失败"
   },
-  "conv.edit.delete_n": {
-    "other": "删除 {count} 个会话"
-  },
   "conv.edit.delete_title": {
     "other": "删除 {count} 个会话？"
   },
