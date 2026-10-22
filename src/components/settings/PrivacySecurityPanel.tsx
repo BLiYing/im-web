@@ -1,7 +1,7 @@
 import { Ban, Key, ShieldCheck, KeyRound, Mail, Timer, Phone, Eye, CircleUserRound, AlignLeft, Gift, Trash2, FileUp } from "lucide-react";
 import { renderRow, type Row } from "../rows";
 import { SubPanel } from "./SubPanel";
-import { tierLabelKey } from "../../autoDelete";
+import { tierLabel } from "../../autoDelete";
 import { useT } from "../../i18n";
 
 /** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/design/PRIVACY_SECURITY_DESIGN.md）：
@@ -42,7 +42,7 @@ export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, onOpenBlocke
       header: t("ps.section.chat_privacy"),
       footer: t("ps.chat_privacy_footer"),
       // 活行（AUTO_DELETE_DESIGN §3.3 A）：右值=账号默认档位，点进档位选择面板。
-      rows: [{ id: "autoDelete", label: t("ps.row.auto_delete_messages"), icon: Timer, iconTint: "orange", value: autoDeleteSec === null ? undefined : t(tierLabelKey(autoDeleteSec)), chevron: true, onClick: onOpenAutoDelete }],
+      rows: [{ id: "autoDelete", label: t("ps.row.auto_delete_messages"), icon: Timer, iconTint: "orange", value: autoDeleteSec === null ? undefined : tierLabel(t, autoDeleteSec), chevron: true, onClick: onOpenAutoDelete }],
     },
     {
       header: "谁能看到",

@@ -50,3 +50,13 @@ describe("三个服务端查询的出口都滤", () => {
     expect(res.days.map((d) => d.first_conv_seq)).toEqual([25]);
   });
 });
+
+describe("自动删除：服务端搜索命中滤掉已过期", () => {
+  it("isExpired 命中的项被滤，游标 / has_more 照服务端", async () => {
+    vi.spyOn(http, "callJson").mockResolvedValue({ conv_id: "c", items: [item(30), item(20), item(10)], next_cursor: 10, has_more: true });
+    const page = await searchConvMessages("t", "c", "x", { isExpired: (ts) => ts <= 20 });
+    expect(page.items.map((i) => i.conv_seq)).toEqual([30]);
+    expect(page.has_more).toBe(true);
+  });
+});
+

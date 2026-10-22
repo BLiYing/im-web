@@ -24,7 +24,7 @@ import { Avatar } from "./Avatar";
 import { AnchoredMenu } from "./AnchoredMenu";
 import { MuteMenu } from "./MuteMenu";
 import { AutoDeleteConvPage } from "./AutoDeleteConvPage";
-import { tierLabelKey } from "../autoDelete";
+import { tierLabel } from "../autoDelete";
 import { GroupManagePanel } from "./GroupManagePanel";
 import { AdminListPanel } from "./AdminListPanel";
 import { DetailTabs, type DetailTab } from "./DetailTabs";
@@ -277,7 +277,8 @@ export function DetailPanel(p: DetailPanelProps) {
           )}
 
           {autoDeleteOpen && conv ? (
-            <AutoDeleteConvPage conv={conv} onPick={(sec) => setConvAutoDelete(conv, sec)} onBack={() => setAutoDeleteOpen(false)} />
+            <AutoDeleteConvPage conv={conv} onPick={(sec) => setConvAutoDelete(conv, sec)} onBack={() => setAutoDeleteOpen(false)}
+              readOnly={d.isGroup && !canManage} onReadOnlyTap={() => setToast(tr("autodel.group_admin_only"))} />
           ) : manageOpen && gp && adminPanelOpen ? (
             <AdminListPanel gp={gp} uid={uid} memberLabel={memberLabel}
               onBack={() => setAdminPanelOpen(false)}
@@ -434,9 +435,9 @@ export function DetailPanel(p: DetailPanelProps) {
                     </>
                   )}
                 </div>
-                <button className="detail-row" disabled={!conv} onClick={() => setAutoDeleteOpen(true)}>
+                <button className="detail-row" disabled={!conv} onClick={() => (d.isGroup && !canManage ? setToast(tr("autodel.group_admin_only")) : setAutoDeleteOpen(true))}>
                   <span className="detail-row-ic"><Timer size={18} /></span><span>{tr("ps.row.auto_delete_messages")}</span>
-                  <span className="detail-row-val">{tr(tierLabelKey(conv?.auto_delete_sec ?? 0))}</span>
+                  <span className="detail-row-val">{tierLabel(tr, conv?.auto_delete_sec ?? 0)}</span>
                   <ChevronRight size={16} className="detail-row-chev" />
                 </button>
                 {d.isGroup && canInviteHere && (

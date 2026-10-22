@@ -84,6 +84,14 @@ describe("convPreview", () => {
     setPref("zh-Hans");
     expect(convPreview(conv({ from: "", content_type: "system", content: "兜底" }), deps)).toBe("兜底");
   });
+  it("auto_delete：会话列表预览按 sys_args.sec 渲染 on/off，操作者换本机显示名（我自称），缺字段回退 content", () => {
+    const base = { from: "", content_type: "system" as const, sys_event: "auto_delete", content: "整句兜底" };
+    const on = conv({ ...base, sys_args: { sec: "86400" }, sys_segments: [{ uid: PEER, text: "用户1002" }, { text: " 开启了…" }] }, { is_group: true });
+    expect(convPreview(on, deps)).toBe("老王 开启了自动删除，消息将在1 天后自动删除");
+    const off = conv({ ...base, sys_args: { sec: "0" }, sys_segments: [{ uid: ME, text: "用户1001" }] });
+    expect(convPreview(off, deps)).toBe("我 关闭了自动删除");
+    expect(convPreview(conv({ ...base }), deps)).toBe("整句兜底");
+  });
   it("P3：sys_event 不认识/为空则回退 sys_segments/content（不破坏现有回退路径）", () => {
     const unknown = conv({ from: PEER, content_type: "system", sys_event: "some_future_event", content: "整句兜底" }, { is_group: true });
     expect(convPreview(unknown, deps)).toBe("整句兜底");

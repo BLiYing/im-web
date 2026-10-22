@@ -12,7 +12,9 @@ import { LOG_TAG, logger } from "./logging/logger";
 /** 置顶重拉的合并窗口：批量删除 / 一键取消所有置顶带来的一串事件落在窗口里只拉一次（三端同 300ms，见 SYMMETRY *PinnedBanner*）。 */
 const PINNED_REFRESH_COALESCE_MS = 300;
 
-export function usePinnedMessages(clientRef: MutableRefObject<IMClient | null>, convId: string) {
+export function usePinnedMessages(clientRef: MutableRefObject<IMClient | null>, convId: string, isExpired?: (convId: string, timestamp: number) => boolean) {
+  const expiredRef = useRef(isExpired); // 自动删除：服务端不物理删，置顶列表里已过期的要本地滤掉（每次重拉都滤）
+  expiredRef.current = isExpired;
   // conv_id -> 置顶集合（服务端按 pinned_at 倒序）。进会话拉一次，之后靠实时 msg_op{op:pin} 帧触发重拉。
   const [byConv, setByConv] = useState<Record<string, PinnedMessage[]>>({});
   // 镜像：WS 回调是登录那一刻建的闭包，读不到后续 state——判断「撤回/编辑的是不是置顶项」只能经 ref 取当前值。
@@ -33,7 +35,7 @@ export function usePinnedMessages(clientRef: MutableRefObject<IMClient | null>, 
       // 「清空聊天记录」只记本机位点（服务端不知道）：位点以内的置顶消息本体已不可见，横幅不能再指向它们
       // （否则清空 → 删好友 → 重新加回后，仍显示清空前的旧置顶）。
       const floor = client ? Math.max(client.clearedUpToOf(cid), await client.loadClearedUpTo(cid)) : 0;
-      const items = dropCleared(all, floor);
+      const items = dropCleared(all, floor).filter((p) => !expiredRef.current?.(cid, p.timestamp));
       if (my !== gens.current[cid]) return;
       setByConv((prev) => ({ ...prev, [cid]: items }));
     } catch (e) {

@@ -3,7 +3,7 @@ import { callRecordAcked, takeFailedCallRecord } from "./useCallRecordSend";
 import type { ChatMessage } from "./sdk/protocol";
 import {
   type MsgMap, appendTo, patchByClientMsgId, mapMatchingClientMsgId,
-  mergeMetaBySeq, applyOpBySeq, removeBySeq, removeByClientMsgId,
+  mergeMetaBySeq, applyOpBySeq, removeBySeqs, removeByClientMsgId,
 } from "./messageStore";
 
 // 会话消息表的有状态外壳：持有 msgsByConv 状态 + 两个去重/墓碑 ref，把 messageStore 的纯变换包成方法。
@@ -19,7 +19,7 @@ export function useMessageStore() {
   const patchMsg = useCallback((cid: string, clientMsgId: string, patch: Partial<ChatMessage>) => setMsgsByConv((prev) => patchByClientMsgId(prev, cid, clientMsgId, patch)), []);
   const removeMsgRow = useCallback((cid: string, key: string) => setMsgsByConv((prev) => removeByClientMsgId(prev, cid, key)), []);
   const applyOp = useCallback((cid: string, seq: number, patch: Partial<ChatMessage>) => setMsgsByConv((prev) => applyOpBySeq(prev, cid, seq, patch)), []);
-  const removeSeq = useCallback((cid: string, seq: number) => setMsgsByConv((prev) => removeBySeq(prev, cid, seq)), []);
+  const removeSeqs = useCallback((cid: string, seqs: number[]) => setMsgsByConv((prev) => removeBySeqs(prev, cid, seqs)), []);
   const clearConv = useCallback((cid: string) => setMsgsByConv((prev) => ({ ...prev, [cid]: [] })), []);
   /** 预载本地历史：已在内存的会话（prev）优先，不被本地库覆盖。 */
   const preload = useCallback((loaded: MsgMap) => setMsgsByConv((prev) => ({ ...loaded, ...prev })), []);
@@ -68,7 +68,7 @@ export function useMessageStore() {
 
   return {
     msgsByConv, setMsgsByConv, seenByConv, deletedByConv,
-    appendMsg, patchMsg, removeMsgRow, applyOp, removeSeq, clearConv, preload, reset,
+    appendMsg, patchMsg, removeMsgRow, applyOp, removeSeqs, clearConv, preload, reset,
     ingestInbound, applyAck, markRejected,
   };
 }

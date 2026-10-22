@@ -339,6 +339,20 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       });
     },
 
+    async markMessagesDeleted(owner: string, convId: string, convSeqs: number[]): Promise<void> {
+      if (!owner || !convId || !Array.isArray(convSeqs)) return;
+      const seqs = [...new Set(convSeqs.filter((s) => Number.isInteger(s) && s > 0))];
+      if (seqs.length === 0) return;
+      guard("message_delete_failed", { conv_id: convId, count: seqs.length }, undefined, () => {
+        // 整批一个事务：墓碑 + 删消息行（语义同 markMessageDeleted）。
+        const tomb = db.prepare("INSERT OR REPLACE INTO deletions (id, owner, conv_id) VALUES (?, ?, ?)");
+        const del = db.prepare("DELETE FROM messages WHERE id = ?");
+        db.transaction(() => {
+          for (const s of seqs) { const id = keyOf(owner, convId, s); tomb.run(id, owner, convId); del.run(id); }
+        })();
+      });
+    },
+
     async clearMessages(owner: string, convId: string, knownLatest = 0): Promise<void> {
       if (!owner || !convId) return;
       // 同一事务：删消息 + 区间清单清空（落一行空清单、保留 head，否则 loadRanges 会由游标反推 [1,cursor]）

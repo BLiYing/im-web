@@ -60,13 +60,15 @@ export interface ConvSearchPage {
  */
 export async function searchConvMessages(
   token: string, convId: string, q: string,
-  opts: { from?: string; cursor?: number; limit?: number; clearedUpTo?: number } = {},
+  opts: { from?: string; cursor?: number; limit?: number; clearedUpTo?: number; isExpired?: (timestamp: number) => boolean } = {},
 ): Promise<ConvSearchPage> {
   const p = new URLSearchParams({ q });
   if (opts.from) p.set("from", opts.from);
   if (opts.cursor) p.set("cursor", String(opts.cursor));
   if (opts.limit) p.set("limit", String(opts.limit));
-  const page = await get<ConvSearchPage>(token, `/api/v1/conversations/${encodeURIComponent(convId)}/messages/search?${p}`);
+  const raw = await get<ConvSearchPage>(token, `/api/v1/conversations/${encodeURIComponent(convId)}/messages/search?${p}`);
+  // 自动删除：服务端不物理删，已过期的命中本地滤掉（游标 / has_more 照服务端，空页由调用方继续翻）。
+  const page = opts.isExpired ? { ...raw, items: (raw.items ?? []).filter((i) => !opts.isExpired!(i.timestamp)) } : raw;
   const floor = opts.clearedUpTo ?? 0;
   if (floor <= 0) return page;
   return { ...page, items: dropClearedItems(page.items ?? [], floor), has_more: hasMoreAboveFloor(page.has_more, page.next_cursor, floor) };

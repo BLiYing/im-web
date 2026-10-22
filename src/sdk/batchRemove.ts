@@ -5,14 +5,14 @@ import * as localStore from "./localStore";
 import { batchDeleteTargetsOf } from "../selectDelete";
 import { batchUnpinTargetsOf } from "./pinnedApi";
 
-/** 先把墓碑全部落库，再在**同一个同步循环**里逐条通知 UI——React 把这一串 setState 合成一次渲染，
- *  而不是每条 await 一次、渲染一次。 */
+/** 整批墓碑**一个事务**落库（localStore.markMessagesDeleted），随后**只通知一次**（带全部 seq），
+ *  UI 侧一批只做一次 setState / 置顶重拉 / 列表刷新，而不是逐条触发。 */
 export async function removeBatchLocal(
-  uid: string, convId: string, seqs: number[], onRemoved: (convId: string, seq: number) => void,
+  uid: string, convId: string, seqs: number[], onRemoved: (convId: string, seqs: number[]) => void,
 ): Promise<void> {
   if (seqs.length === 0) return;
-  await Promise.all(seqs.map((s) => localStore.markMessageDeleted(uid, convId, { convSeq: s })));
-  for (const s of seqs) onRemoved(convId, s);
+  await localStore.markMessagesDeleted(uid, convId, seqs);
+  onRemoved(convId, seqs);
 }
 
 /** 批量「为所有人删除」的实时广播帧（PROTOCOL §6.7.2）：一次只来一帧 targets——整批移除、整批登记事件行

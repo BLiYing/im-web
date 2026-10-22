@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   type MsgMap, appendTo, patchByClientMsgId, mapMatchingClientMsgId,
-  mergeMetaBySeq, applyOpBySeq, removeBySeq, removeByClientMsgId,
+  mergeMetaBySeq, applyOpBySeq, removeBySeq, removeBySeqs, removeByClientMsgId,
 } from "./messageStore";
 import type { ChatMessage } from "./sdk/protocol";
 
@@ -63,5 +63,16 @@ describe("messageStore 纯变换", () => {
     const map: MsgMap = { c1: [msg({ clientMsgId: "a" }), msg({ clientMsgId: "b" })] };
     expect(removeByClientMsgId(map, "c1", "a").c1.map((m) => m.clientMsgId)).toEqual(["b"]);
     expect(removeByClientMsgId(map, "zz", "a")).toBe(map);
+  });
+});
+
+describe("removeBySeqs", () => {
+  it("批量移除；无命中 / 空批 / 无该会话 → 同引用", () => {
+    const m = (q: number) => ({ convId: "c1", convSeq: q, clientMsgId: `k${q}` }) as ChatMessage;
+    const map = { c1: [m(5), m(6), m(7)] };
+    expect(removeBySeqs(map, "c1", [5, 7]).c1.map((x) => x.convSeq)).toEqual([6]);
+    expect(removeBySeqs(map, "c1", [99])).toBe(map);
+    expect(removeBySeqs(map, "c1", [])).toBe(map);
+    expect(removeBySeqs(map, "zz", [5])).toBe(map);
   });
 });

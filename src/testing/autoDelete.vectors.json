@@ -1,22 +1,42 @@
 {
-  "_comment": "自动删除消息「是否已过期」的三端共用向量（IMServer/docs/design/AUTO_DELETE_DESIGN.md §3）。口径：sec>0 且 ts + sec*1000 <= now 即过期（含等号）；sec<=0 恒不过期。floor_ts 是该 now/sec 下的时间下界：timestamp <= floor_ts 的消息过期（floor_ts = now - sec*1000；sec<=0 时为 0 = 不过滤）。三端测试（iOS IMAutoDeleteTests / Android AutoDeleteTest / Web autoDelete.test.ts）同读；改口径先改这里。",
+  "_comment": "自动删除消息 v2（会话级共享、不追溯）的三端 + 服务端共用向量（IMServer/docs/design/AUTO_DELETE_DESIGN.md §2）。口径：expired(ts, sec, from, now) = sec>0 && ts>=from && ts + sec*1000 <= now（含等号）；sec<=0 恒不过期；from 之前（ts<from）的消息永不过期。v2 新增字段 from（毫秒，= 会话级 auto_delete_from，本次设置生效时刻；sec=0 时为 0），expired 每条用例都带 from。过期集合是时间窗口 [from, now-sec*1000]，不再是「≤floor 的前缀」，故删除 v1 的 floor_ts；改用 window 段给出该窗口的端点：expect 为 {lo,hi}（timestamp 落在 [lo,hi] 内的消息过期，lo=from，hi=now-sec*1000），窗口为空（sec<=0 或 hi<lo）时 expect 为 null。from_after_system_message：档位变更系统消息 timestamp=sys_ts 时，本次生效的 from = sys_ts+1（通知自己不过期）；档位关闭时 from=0。三端测试（iOS IMAutoDeleteTests / Android AutoDeleteTest / Web autoDelete.test.ts）同读；服务端 internal/conversation/autodelete_test.go 同口径；改口径先改这里。",
   "expired": [
-    { "name": "关闭时永不过期", "now": 10000000, "sec": 0, "ts": 1, "expect": false },
-    { "name": "负值当关闭", "now": 10000000, "sec": -1, "ts": 1, "expect": false },
-    { "name": "刚发出", "now": 10000000, "sec": 86400, "ts": 10000000, "expect": false },
-    { "name": "差 1ms 满 1 天", "now": 86400000, "sec": 86400, "ts": 1, "expect": false },
-    { "name": "恰满 1 天（含等号）", "now": 86400000, "sec": 86400, "ts": 0, "expect": true },
-    { "name": "超过 1 天", "now": 200000000, "sec": 86400, "ts": 100000000, "expect": true },
-    { "name": "1 周内", "now": 604799999, "sec": 604800, "ts": 0, "expect": false },
-    { "name": "恰满 1 周", "now": 604800000, "sec": 604800, "ts": 0, "expect": true },
-    { "name": "1 个月内", "now": 2591999999, "sec": 2592000, "ts": 0, "expect": false },
-    { "name": "恰满 1 个月", "now": 2592000000, "sec": 2592000, "ts": 0, "expect": true }
+    {"name": "关闭时永不过期", "now": 10000000, "sec": 0, "from": 0, "ts": 1, "expect": false},
+    {"name": "负值当关闭", "now": 10000000, "sec": -1, "from": 0, "ts": 1, "expect": false},
+    {"name": "刚发出", "now": 10000000, "sec": 86400, "from": 0, "ts": 10000000, "expect": false},
+    {"name": "差 1ms 满 1 天", "now": 86400000, "sec": 86400, "from": 0, "ts": 1, "expect": false},
+    {"name": "恰满 1 天（含等号）", "now": 86400000, "sec": 86400, "from": 0, "ts": 0, "expect": true},
+    {"name": "超过 1 天", "now": 200000000, "sec": 86400, "from": 0, "ts": 100000000, "expect": true},
+    {"name": "1 周内", "now": 604799999, "sec": 604800, "from": 0, "ts": 0, "expect": false},
+    {"name": "恰满 1 周", "now": 604800000, "sec": 604800, "from": 0, "ts": 0, "expect": true},
+    {"name": "1 个月内", "now": 2591999999, "sec": 2592000, "from": 0, "ts": 0, "expect": false},
+    {"name": "恰满 1 个月", "now": 2592000000, "sec": 2592000, "from": 0, "ts": 0, "expect": true},
+    {"name": "2 分钟内", "now": 119999, "sec": 120, "from": 0, "ts": 0, "expect": false},
+    {"name": "恰满 2 分钟", "now": 120000, "sec": 120, "from": 0, "ts": 0, "expect": true},
+    {"name": "1 年内", "now": 31535999999, "sec": 31536000, "from": 0, "ts": 0, "expect": false},
+    {"name": "恰满 1 年", "now": 31536000000, "sec": 31536000, "from": 0, "ts": 0, "expect": true},
+    {"name": "from 之前永不过期（早已满期也不删）", "now": 200000000, "sec": 86400, "from": 150000000, "ts": 100000000, "expect": false},
+    {"name": "from 之前一毫秒仍不过期", "now": 200000000, "sec": 86400, "from": 150000000, "ts": 149999999, "expect": false},
+    {"name": "恰等 from 且已满期（含等号，ts>=from）", "now": 300000000, "sec": 86400, "from": 150000000, "ts": 150000000, "expect": true},
+    {"name": "from 之后未满期", "now": 200000000, "sec": 86400, "from": 150000000, "ts": 150000001, "expect": false},
+    {"name": "from 之后恰满期", "now": 236400000, "sec": 86400, "from": 150000000, "ts": 150000000, "expect": true},
+    {"name": "from 之后差 1ms 满期", "now": 236399999, "sec": 86400, "from": 150000000, "ts": 150000000, "expect": false},
+    {"name": "from>now（未来起点）任何消息都不过期", "now": 200000000, "sec": 86400, "from": 300000000, "ts": 1, "expect": false},
+    {"name": "关闭档位带 from 仍不过期", "now": 200000000, "sec": 0, "from": 50, "ts": 100, "expect": false}
   ],
-  "floor_ts": [
-    { "now": 200000000, "sec": 86400, "expect": 113600000 },
-    { "now": 200000000, "sec": 0, "expect": 0 },
-    { "now": 1000, "sec": 86400, "expect": 0 }
+  "window": [
+    {"name": "窗口 [from, now-sec*1000]", "now": 200000000, "sec": 86400, "from": 50000000, "expect": {"lo": 50000000, "hi": 113600000}},
+    {"name": "from=0 时窗口从 0 起", "now": 200000000, "sec": 86400, "from": 0, "expect": {"lo": 0, "hi": 113600000}},
+    {"name": "关闭档位无窗口", "now": 200000000, "sec": 0, "from": 0, "expect": null},
+    {"name": "尚未满期（hi<lo）窗口为空", "now": 100000000, "sec": 86400, "from": 50000000, "expect": null},
+    {"name": "恰好 hi=lo 窗口含单点", "now": 136400000, "sec": 86400, "from": 50000000, "expect": {"lo": 50000000, "hi": 50000000}},
+    {"name": "2 分钟档", "now": 500000, "sec": 120, "from": 100000, "expect": {"lo": 100000, "hi": 380000}}
   ],
-  "valid_sec": [0, 86400, 604800, 2592000],
-  "invalid_sec": [-1, 1, 3600, 86401, 31536000]
+  "from_after_system_message": [
+    {"sys_ts": 1000, "sec": 86400, "expect_from": 1001},
+    {"sys_ts": 1700000000000, "sec": 120, "expect_from": 1700000000001},
+    {"sys_ts": 1700000000000, "sec": 0, "expect_from": 0}
+  ],
+  "valid_sec": [0, 120, 3600, 86400, 172800, 259200, 345600, 432000, 518400, 604800, 1209600, 1814400, 2592000, 5184000, 7776000, 10368000, 12960000, 15552000, 31536000],
+  "invalid_sec": [-1, 1, 60, 119, 121, 7200, 86401, 691200, 2678400, 31536001]
 }

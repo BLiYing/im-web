@@ -67,6 +67,9 @@ export const applyMsgOpLocal = (
 export const markMessageDeleted = (owner: string, convId: string, target: DeleteTarget): Promise<void> =>
   activeLocalStore().markMessageDeleted(owner, convId, target);
 
+export const markMessagesDeleted = (owner: string, convId: string, convSeqs: number[]): Promise<void> =>
+  activeLocalStore().markMessagesDeleted(owner, convId, convSeqs);
+
 export const clearMessages = (owner: string, convId: string, knownLatest = 0): Promise<void> =>
   activeLocalStore().clearMessages(owner, convId, knownLatest);
 

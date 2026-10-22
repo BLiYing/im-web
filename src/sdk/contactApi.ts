@@ -60,9 +60,13 @@ export async function setRemark(token: string, userId: string, remark: string): 
  *  `mute_until` 可选（NOTIFICATIONS_P1_DESIGN §5.2）：省略时若本次 `muted=true` 且当前正处于未到期的
  *  定时免打扰，服务端保留原到期时间；显式传值则照写；`muted=false` 时服务端一律清 0。
  *  **改置顶/标未读等只想原样带回 `muted` 的调用方不要传本字段**，否则会把定时免打扰意外变成永久。 */
-export async function updateConvSettings(token: string, convId: string, s: { pinned_at: number; muted: boolean; mute_until?: number; marked_unread: boolean; auto_delete_sec?: number }): Promise<void> {
-  await api(token, `/api/v1/conversations/${encodeURIComponent(convId)}/settings`, { method: "PUT", body: JSON.stringify(s) });
+export async function updateConvSettings(token: string, convId: string, s: { pinned_at: number; muted: boolean; mute_until?: number; marked_unread: boolean; auto_delete_sec?: number }): Promise<ConvSettingsEcho | undefined> {
+  const data = await api(token, `/api/v1/conversations/${encodeURIComponent(convId)}/settings`, { method: "PUT", body: JSON.stringify(s) });
+  return data && typeof data === "object" ? { auto_delete_sec: Number(data.auto_delete_sec) || 0, auto_delete_from: Number(data.auto_delete_from) || 0 } : undefined;
 }
+
+/** PUT settings 回包里的会话级共享字段（v2：sec 与 from 一起覆盖）。 */
+export interface ConvSettingsEcho { auto_delete_sec: number; auto_delete_from: number }
 
 /** 设置会话备注（G1，仅本人可见、多端同步）：PUT /api/v1/conversations/{id}/remark。留空即清除。
  *  与设置三开关解耦（各走各端点，互不覆盖）；变更经 conv_update 同步全端。 */

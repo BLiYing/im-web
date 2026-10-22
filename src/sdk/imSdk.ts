@@ -27,7 +27,7 @@ import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, typ
 import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
 import { friendlyMessage, sendRejectNote } from "./errcode";
-import * as voiceApi from "./voiceApi"; import { t } from "../i18n";
+import * as voiceApi from "./voiceApi"; import { t } from "../i18n"; import { dropV1AutoDelete } from "../autoDelete";
 
 const PING_INTERVAL_MS = 25_000;
 const RECONNECT_BASE_MS = 1_000;
@@ -93,8 +93,8 @@ export interface IMClientHandlers {
   /** 消息操作（撤回/编辑/置顶）应用到某条消息：UI 据 patch 更新该条（convSeq 定位）。 */
   onMsgOp?: (convId: string, targetConvSeq: number, patch: MsgOpPatch) => void;
   /** 某条消息被**物理移除**（任务2）：为所有人删除（op=delete，全体成员）或仅为我删除（msg_hidden，本人多端）。
-   *  UI 据 (convId, convSeq) 从消息列表 / 详情文件列表移除该条，区别于 recall 的"改状态显墓碑"。 */
-  onMessageRemoved?: (convId: string, targetConvSeq: number) => void;
+   *  UI 据 (convId, convSeqs) 从消息列表 / 详情文件列表移除；**一批只通知一次**（批量删除 / 自动删除清理带全部 seq，单条路径为单元素数组），区别于 recall 的"改状态显墓碑"。 */
+  onMessageRemoved?: (convId: string, targetConvSeqs: number[]) => void;
   /** 我发起的消息操作被拒（如撤回超时 300008）：回滚提示。 */
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
   /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
@@ -672,7 +672,7 @@ export class IMClient extends IMRestApi {
   private async removeMessageLocal(convId: string, targetConvSeq: number, advanceCursorTo: number): Promise<void> {
     await localStore.markMessageDeleted(this.uid, convId, { convSeq: targetConvSeq });
     if (advanceCursorTo > 0) await localStore.advanceSyncCursor(this.uid, convId, advanceCursorTo);
-    this.handlers.onMessageRemoved?.(convId, targetConvSeq);
+    this.handlers.onMessageRemoved?.(convId, [targetConvSeq]);
   }
 
   /** 发一条 msg_op（撤回/编辑/置顶），返回其 client_msg_id（供对账/回滚）。 */
@@ -1001,7 +1001,7 @@ export class IMClient extends IMRestApi {
       case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
         this.handlers.onConvUpdate?.({
           conv_id: d.conv_id, action: d.action,
-          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, mute_until: Number(d.mute_until) || 0, marked_unread: !!d.marked_unread, auto_delete_sec: Number(d.auto_delete_sec) || 0,
+          pinned_at: d.pinned_at ?? 0, muted: !!d.muted, mute_until: Number(d.mute_until) || 0, marked_unread: !!d.marked_unread, auto_delete_sec: Number(d.auto_delete_sec) || 0, auto_delete_from: Number(d.auto_delete_from) || 0,
           cleared_at: d.cleared_at ?? 0,
         });
         break;
@@ -1221,7 +1221,7 @@ export class IMClient extends IMRestApi {
     localStore.saveConversations(this.uid, convs);
   }
   cachedConversations(): Conversation[] {
-    return localStore.loadConversations(this.uid);
+    return localStore.loadConversations(this.uid).map(dropV1AutoDelete); // v1 个人档位缓存不迁移（见 dropV1AutoDelete）
   }
 
   /** 发送"正在输入"给会话对端（临时态）。 */

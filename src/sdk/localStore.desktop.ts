@@ -88,6 +88,9 @@ export function createDesktopLocalStore(bridge: unknown): LocalStore | null {
     markMessageDeleted: (owner: string, convId: string, target: DeleteTarget) =>
       call("markMessageDeleted", undefined, () => b.call("markMessageDeleted", [owner, convId, target])),
 
+    markMessagesDeleted: (owner: string, convId: string, convSeqs: number[]) =>
+      call("markMessagesDeleted", undefined, () => b.call("markMessagesDeleted", [owner, convId, convSeqs])),
+
     clearMessages: (owner: string, convId: string, knownLatest = 0) =>
       call("clearMessages", undefined, () => b.call("clearMessages", [owner, convId, knownLatest])),
 

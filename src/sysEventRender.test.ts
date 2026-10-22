@@ -15,6 +15,28 @@ afterEach(() => setPref("zh-Hans"));
 
 // §1.2 通用算法：4 个不同形状的事件（两人名槽位 / 纯 args 无人名 / 无参数纯静态串 / 多人名拼接），
 // 中英文两版输出都断言。
+describe("buildGroupSysSegments · auto_delete（会话级自动删除）", () => {
+  const mk = (sec?: string, segs: ChatMessage["sysSegments"] = [{ uid: "1001", text: "群主张三" }, { text: " 开启了自动删除，消息将在1 天后自动删除" }]): ChatMessage => ({
+    convId: "c1", from: "", content: "兜底整句", contentType: "system", convSeq: 1, timestamp: 0, status: "received",
+    sysEvent: "auto_delete", sysArgs: sec === undefined ? undefined : { sec }, sysSegments: segs,
+  });
+  it("sec>0：sys.auto_delete.on，{actor} 取首个带 uid 段（可点），{period} 折算（中英）", () => {
+    const zh = buildGroupSysSegments(mk("604800"), t, "zh-Hans");
+    expect(zh?.map((s) => s.text).join("")).toBe("群主张三 开启了自动删除，消息将在1 周后自动删除");
+    expect(zh?.filter((s) => s.uid).map((s) => s.uid)).toEqual(["1001"]);
+    setPref("en");
+    expect(buildGroupSysSegments(mk("172800"), t, "en")?.map((s) => s.text).join("")).toContain("2 days");
+  });
+  it("sec=0：sys.auto_delete.off", () => {
+    expect(buildGroupSysSegments(mk("0"), t, "zh-Hans")?.map((s) => s.text).join("")).toBe("群主张三 关闭了自动删除");
+  });
+  it("缺 sec / sec 非法 / 无操作者段 → undefined（调用方回退 content）", () => {
+    expect(buildGroupSysSegments(mk(undefined), t, "zh-Hans")).toBeUndefined();
+    expect(buildGroupSysSegments(mk("abc"), t, "zh-Hans")).toBeUndefined();
+    expect(buildGroupSysSegments(mk("86400", [{ text: "x" }]), t, "zh-Hans")).toBeUndefined();
+  });
+});
+
 describe("buildGroupSysSegments", () => {
   it("member_remove：两个人名槽位（actor/target），中英文语序不同都要对", () => {
     const m: ChatMessage = {

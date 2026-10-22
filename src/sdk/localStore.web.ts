@@ -312,6 +312,32 @@ async function markMessageDeleted(owner: string, convId: string, opts: DeleteTar
   }
 }
 
+/** 批量版：同一个 readwrite 事务里写完整批墓碑 + 删消息行（见 LocalStore.markMessagesDeleted）。 */
+async function markMessagesDeleted(owner: string, convId: string, convSeqs: number[]): Promise<void> {
+  if (!owner || !convId) return;
+  const seqs = [...new Set(convSeqs.filter((s) => Number.isInteger(s) && s > 0))];
+  if (seqs.length === 0) return;
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([STORE, DELETIONS_STORE], "readwrite");
+      const del = tx.objectStore(DELETIONS_STORE);
+      const msgs = tx.objectStore(STORE);
+      const ownerConv = cursorKeyOf(owner, convId);
+      for (const s of seqs) {
+        const id = keyOf(owner, convId, s);
+        del.put({ id, ownerConv } satisfies DeletionRecord);
+        msgs.delete(id);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } catch (error) {
+    logger.warn(LOG_TAG.store, "message_delete_failed", { conv_id: convId, count: seqs.length, error });
+  }
+}
+
 /**
  * 读某会话被本地删除的 conv_seq 列表：登录/进会话时载入内存，供 onMessage 挡住服务端重同步的**复现**。
  * loadConversation 只在"读盘"时过滤墓碑，但服务端会通过实时同步(onMessage)把删掉的消息重新推来——那条路径绕过读盘过滤，
@@ -393,6 +419,7 @@ export const webLocalStore: LocalStore = {
   saveRejected,
   applyMsgOpLocal,
   markMessageDeleted,
+  markMessagesDeleted,
   clearMessages,
   wipeOwner: wipeOwnerRows,
   advanceSyncCursor,

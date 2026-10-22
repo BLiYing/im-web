@@ -1067,6 +1067,16 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* 自动删除档位单选组（AutoDeleteTiers）：行右侧 ✓（草图口径），行间分隔线；不新增 token */
 .autodel-row + .autodel-row { border-top: 1px solid var(--separator); }
 .autodel-row:disabled { cursor: default; }
+.autodel-row.readonly { opacity: 0.6; }
+.autodel-mask { align-items: flex-end; z-index: 70; }
+.autodel-sheet { width: 420px; max-height: 80vh; border-bottom-left-radius: 0; border-bottom-right-radius: 0; padding: 0; gap: 0; overflow: hidden; }
+.autodel-sheet .modal-title { padding: var(--space-4) var(--space-4) var(--space-2); text-align: center; }
+.autodel-sheet-list { overflow-y: auto; flex: 1; min-height: 0; }
+.autodel-sheet .modal-close { border-radius: 0; border-width: 1px 0 0; }
+.autodel-value { margin-left: auto; color: var(--text-secondary); }
+.autodel-value + .autodel-check { margin-left: 8px; }
+.autodel-chev { color: var(--text-tertiary); flex-shrink: 0; }
+.autodel-value + .autodel-check + .autodel-chev { margin-left: 4px; }
 .autodel-check { margin-left: auto; color: var(--accent); flex-shrink: 0; }
 /* 语言面板：「跟随系统」与解析出的语言自称同一行（对齐 iOS/Android 单行），不竖排两行 */
 .language-panel .radio-text { flex-direction: row; align-items: baseline; gap: 8px; }

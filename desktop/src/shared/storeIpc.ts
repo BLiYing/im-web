@@ -25,6 +25,7 @@ export const STORE_METHODS = [
   "saveRejected",
   "applyMsgOpLocal",
   "markMessageDeleted",
+  "markMessagesDeleted",
   "clearMessages",
   "wipeOwner",
   "advanceSyncCursor",

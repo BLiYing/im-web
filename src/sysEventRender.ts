@@ -20,6 +20,7 @@ import { tokenizeTemplate, type Args, type Lang } from "./i18n";
 import { fullDateTime } from "./time";
 import { formatMediaDuration } from "./media";
 import { localizeSnippet } from "./messageContent";
+import { tierLabel } from "./autoDelete";
 
 type Translate = (key: string, args?: Args) => string;
 
@@ -49,6 +50,7 @@ const GROUP_SYS_EVENTS: Record<string, SysEventDef> = {
   unmute_member: { key: "sys.group.unmute_member", slots: ["actor", "target"] },
   // 单聊系统消息（content_type=system、sender 空、无 sys_args/sys_segments）：好友关系新建立的留痕。无人名槽位。
   friend_accepted: { key: "sys.friend.accepted", slots: [] },
+  // auto_delete（会话级自动删除档位变更）的 key 随 sys_args.sec 变化（on/off），在 buildGroupSysSegments 里特判，不在此表。
 };
 
 /** §1.3：多人名单按语言习惯拼接的分隔符（zh 顿号，en 逗号+空格，不做 "A, B and C" 语法优化）。 */
@@ -74,10 +76,16 @@ export function buildGroupSysSegments(
 ): SysSegment[] | undefined {
   const ev = m.sysEvent;
   if (!ev) return undefined;
-  const def = GROUP_SYS_EVENTS[ev];
-  if (!def) return undefined;
   const candidates = (m.sysSegments ?? []).filter((s): s is SysSegment & { uid: string } => !!s.uid);
   const args: Record<string, string> = { ...(m.sysArgs ?? {}) };
+  let def = GROUP_SYS_EVENTS[ev];
+  if (ev === "auto_delete") { // 单聊 / 群通用：按 sys_args.sec 选 on/off，{period} 由 sec 折算；缺 sec / 缺操作者段 → 回退 content
+    const sec = Number(args.sec);
+    if (args.sec === undefined || args.sec === "" || !Number.isFinite(sec) || sec < 0 || candidates.length === 0) return undefined;
+    def = { key: sec > 0 ? "sys.auto_delete.on" : "sys.auto_delete.off", slots: ["actor"] };
+    args.period = tierLabel(t, sec);
+  }
+  if (!def) return undefined;
   // member_invite：第 1 个候选是邀请人（actor 槽位），其余是被邀请者——逐个出名字段（各自高亮、可点），
   // 段间插入分隔符文案段（§1.3，对齐 Android）。
   const invitees = ev === "member_invite" ? candidates.slice(1) : [];

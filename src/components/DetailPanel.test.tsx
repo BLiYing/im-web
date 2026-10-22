@@ -253,11 +253,11 @@ describe("DetailPanel · 自动删除消息行", () => {
     expect(getByText("自动删除消息")).toBeTruthy();
     expect(getByText("1 周")).toBeTruthy(); // 行右值
     fireEvent.click(getByText("自动删除消息"));
-    expect(getByText(/消息自发出起计时/)).toBeTruthy(); // autodel.conv.footer
+    expect(getByText(/自发出起计时，满时间后对话双方/)).toBeTruthy(); // autodel.conv.footer
     fireEvent.click(getByText("1 天"));
     expect(p.setConvAutoDelete).toHaveBeenCalledWith(expect.objectContaining({ auto_delete_sec: 604800 }), 86400);
     await findByText("用户信息"); // 成功 → 返回详情页
-    expect(queryByText(/消息自发出起计时/)).toBeNull();
+    expect(queryByText(/自发出起计时，满时间后对话双方/)).toBeNull();
   });
   it("保存被取消 / 失败（返回 false）→ 留在二级页，选中态回滚", async () => {
     const p = base({ conversations: [peerConv()], setConvAutoDelete: vi.fn(async () => false) });
@@ -266,7 +266,34 @@ describe("DetailPanel · 自动删除消息行", () => {
     fireEvent.click(getByText("1 个月"));
     await waitFor(() => {
       const rows = [...container.querySelectorAll(".autodel-row")];
-      expect(rows.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false", "false"]); // 回滚到「关闭」
+      expect(rows.map((r) => r.getAttribute("aria-checked"))).toEqual(["true", "false", "false", "false", "false", "false"]); // 回滚到「关闭」（5 固定行 + 自定义行）
     });
+  });
+});
+
+describe("DetailPanel · 自动删除消息行（群聊 v2）", () => {
+  const groupConv = (over: Partial<Conversation> = {}) => ({ conv_id: "g1", is_group: true, unread: 0, latest_conv_seq: 0, ...over }) as unknown as Conversation;
+  const gprops = (role: "owner" | "admin" | "member", over: Partial<DetailPanelProps> = {}) => base({
+    detail: { convId: "g1", isGroup: true }, conversations: [groupConv({ auto_delete_sec: 604800 })], groupInfos: { g1: gp({ my_role: role }) }, ...over,
+  });
+  it("普通成员：点行只 toast autodel.group_admin_only，不进档位页、不发 PUT", () => {
+    vi.mocked(services.setToast).mockClear();
+    const p = gprops("member");
+    const { getByText, queryByText } = mount(p);
+    fireEvent.click(getByText("自动删除消息"));
+    expect(services.setToast).toHaveBeenCalledWith("仅群主和管理员可以设置自动删除");
+    expect(queryByText(/群内所有成员同时自动删除/)).toBeNull();
+    expect(p.setConvAutoDelete).not.toHaveBeenCalled();
+  });
+  it("群主 / 管理员：进档位页（群页脚），选档位 → setConvAutoDelete", () => {
+    for (const role of ["owner", "admin"] as const) {
+      cleanup();
+      const p = gprops(role);
+      const { getByText } = mount(p);
+      fireEvent.click(getByText("自动删除消息"));
+      expect(getByText(/群内所有成员同时自动删除/)).toBeTruthy(); // autodel.conv.footer_group
+      fireEvent.click(getByText("1 天"));
+      expect(p.setConvAutoDelete).toHaveBeenCalledWith(expect.objectContaining({ conv_id: "g1" }), 86400);
+    }
   });
 });

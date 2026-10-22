@@ -69,6 +69,15 @@ export function removeBySeq(map: MsgMap, cid: string, seq: number): MsgMap {
   return next.length === list.length ? map : { ...map, [cid]: next };
 }
 
+/** 批量版 removeBySeq：一次过滤，整批只产生一个新 map（会话不存在 / 无命中 → 原样返回）。 */
+export function removeBySeqs(map: MsgMap, cid: string, seqs: number[]): MsgMap {
+  const list = map[cid];
+  if (!list || seqs.length === 0) return map;
+  const drop = new Set(seqs);
+  const next = list.filter((m) => !drop.has(m.convSeq));
+  return next.length === list.length ? map : { ...map, [cid]: next };
+}
+
 /** 单会话内按 clientMsgId 移除本地行（取消/重试/删除出箱件共用；会话不存在 → 原样返回）。 */
 export function removeByClientMsgId(map: MsgMap, cid: string, key: string): MsgMap {
   const list = map[cid];

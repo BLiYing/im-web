@@ -176,7 +176,7 @@ export const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId
  */
 export const LOCAL_STORE_METHODS = [
   "saveMessage", "saveIncomingMessage", "saveIncomingPage", "saveRejected",
-  "applyMsgOpLocal", "markMessageDeleted", "clearMessages", "advanceSyncCursor",
+  "applyMsgOpLocal", "markMessageDeleted", "markMessagesDeleted", "clearMessages", "advanceSyncCursor",
   "registerRange", "updateRangesHead",
   "loadConversation", "loadDeletedSeqs", "loadSyncCursor", "loadRanges", "loadClearedUpTo", "searchMessages",
   "wipeOwner",
@@ -255,6 +255,12 @@ export interface LocalStore {
    * 墓碑令后续读取永久过滤掉它，故刷新 / 后台重同步重新落库也**不复现**。
    */
   markMessageDeleted(owner: string, convId: string, target: DeleteTarget): Promise<void>;
+
+  /**
+   * 批量版 `markMessageDeleted`（仅 conv_seq 型）：**一个事务**写完整批墓碑并删除对应消息行（自动删除过期清理一次几千条，
+   * 逐条开事务会卡）。`convSeqs` 里 ≤0 / 非整数的项忽略；去重；空批 / owner、convId 为空 → 不开事务。语义同单条版。
+   */
+  markMessagesDeleted(owner: string, convId: string, convSeqs: number[]): Promise<void>;
 
   /**
    * 清空某会话的本机消息（对齐 iOS「清空聊天记录」，仅清本地、不动服务端）。

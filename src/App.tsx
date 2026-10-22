@@ -188,7 +188,7 @@ export default function App() {
   // 会话消息表 + 去重/墓碑集 + 去重/patch/append/删除方法：收口到 useMessageStore（纯逻辑见 messageStore.ts）。
   const {
     msgsByConv, setMsgsByConv, seenByConv, deletedByConv,
-    appendMsg: appendMsgRaw, patchMsg, removeMsgRow, applyOp, removeSeq, clearConv,
+    appendMsg: appendMsgRaw, patchMsg, removeMsgRow, applyOp, removeSeqs, clearConv,
     preload: preloadMsgs, reset: resetMsgStore, ingestInbound, applyAck, markRejected,
   } = useMessageStore();
   const [peer, setPeer] = useState("");
@@ -339,7 +339,7 @@ export default function App() {
     if (vm.contentType !== "image" && vm.contentType !== "video") return;
     optInMedia(vm.content);
   }, [viewer, uid, optInMedia]);
-  const pinned = usePinnedMessages(clientRef, convId); // 置顶集合 + 重拉 + 置顶面板开合（G0，见 usePinnedMessages.ts）
+  const pinned = usePinnedMessages(clientRef, convId, (cid, ts) => autoDel.isExpired(cid, ts)); // 置顶集合 + 重拉 + 置顶面板开合（G0，见 usePinnedMessages.ts）
   // 顶部横幅本地收起（✕）：按「账号 + 会话 + 内容签名」记，仅隐藏视图、不动服务端置顶/公告。
   // 持久化到 localStorage——退出会话/刷新后仍保持收起，直到内容变化（新置顶/改公告）签名变了才复现。
   const [dismissedBanners, setDismissedBanners] = useState<Record<string, boolean>>(() => {
@@ -832,12 +832,15 @@ export default function App() {
       // 若删掉的正好是一条置顶消息，服务端下次不再返回它——重拉一次免得横幅指向已消失的消息。
       // **不看是否命中横幅**（置顶列表还没加载完时会漏判、横幅晚一拍），改成按会话合并：短时间内多条移除
       // （别人批量删、msg_hidden 批量帧）只拉一次。只管打开过的会话——没拉过置顶的会话进来时自会拉。
-      onMessageRemoved: (cid, targetSeq) => {
+      // 一批只通知一次（带全部 seq）：自动删除清理 / 批量删除几千条也只做一次 setState、一次置顶重拉、一次列表刷新。
+      onMessageRemoved: (cid, targetSeqs) => {
+        if (targetSeqs.length === 0) return;
+        const gone = new Set(targetSeqs);
         pinned.onRemoved(cid, cid === currentConvRef.current);
-        removeSeq(cid, targetSeq); desktop.clearNotifications({ convId: cid, convSeqs: [targetSeq] }); // 从聊天列表移除该条 + 收回它的桌面通知
-        setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && m.convSeq === targetSeq)));
-        setViewer((v) => (v && v.m.convId === cid && v.m.convSeq === targetSeq ? null : v)); // 正在查看的媒体被删 → 关查看器
-        setTextReader((r) => (r && r.convId === cid && r.convSeq === targetSeq ? null : r)); // 正在全屏读的文本被删（为所有人删/仅删我）→ 关阅读器
+        removeSeqs(cid, targetSeqs); desktop.clearNotifications({ convId: cid, convSeqs: targetSeqs }); // 从聊天列表移除 + 收回桌面通知
+        setDetailMsgs((prev) => prev.filter((m) => !(m.convId === cid && gone.has(m.convSeq))));
+        setViewer((v) => (v && v.m.convId === cid && gone.has(v.m.convSeq) ? null : v)); // 正在查看的媒体被删 → 关查看器
+        setTextReader((r) => (r && r.convId === cid && gone.has(r.convSeq) ? null : r)); // 正在全屏读的文本被删（为所有人删/仅删我）→ 关阅读器
         scheduleListRefresh(); // 会话列表末条预览可能随之变化
       },
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
@@ -1859,6 +1862,7 @@ export default function App() {
     localComplete, online: state === "connected",
     getToken: () => clientRef.current?.authToken ?? "",
     clearedUpTo: clientRef.current?.clearedUpToOf(convId) ?? 0,
+    isExpired: (ts) => autoDel.isExpired(convId, ts),
   });
 
   // 会话媒体的服务端续拉（§4.9 第 5 项）：本地有缺口且在线时，查看器翻页 / 媒体库在本地那一段之上往更旧续拉；

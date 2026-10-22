@@ -289,6 +289,20 @@ export function runLocalStoreContract(store: LocalStore): void {
       expect(await store.loadDeletedSeqs(o, "c1")).toEqual([]);
     });
 
+    it("批量墓碑 markMessagesDeleted：整批删除 + 墓碑，重同步不复现；非法项/重复项忽略", async () => {
+      const o = newOwner("tombN");
+      for (const q of [1, 2, 3, 4, 5]) await store.saveMessage(o, msg("c1", q));
+      await store.saveMessage(o, msg("c2", 1));
+      await store.markMessagesDeleted(o, "c1", [2, 4, 4, 0, -1, 2.5]);
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([1, 3, 5]);
+      await store.saveMessage(o, msg("c1", 2)); // 重同步又推了一遍
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([1, 3, 5]);
+      expect((await store.loadDeletedSeqs(o, "c1")).sort()).toEqual([2, 4]);
+      expect((await store.loadConversation(o, "c2")).map((m) => m.convSeq)).toEqual([1]); // 会话隔离
+      await store.markMessagesDeleted(o, "c1", []); // 空批：无副作用
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([1, 3, 5]);
+    });
+
     it("墓碑按会话隔离：删了 c1 的第 1 条，不影响 c2 的第 1 条", async () => {
       const o = newOwner("tomb3");
       await store.saveMessage(o, msg("c1", 1));
