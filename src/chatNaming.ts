@@ -103,6 +103,7 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   // 从没聊过的群成员点开单聊/资料卡时没有会话行，不兜底就只剩首字母圈（而群里气泡是正常的）。
   const peerSources = () => ({
     conversations, friends, groups: Object.values(groupInfos),
+    fresh: Object.values(peerCards),
     search: [...Object.values(peerCards), ...(searchResults ?? []), ...Object.values(profileCards)],
   });
   // 已注销 uid 集合：首次用到时扫一遍 conversations / friends / 名片（懒建，一次 render 内复用；
@@ -178,8 +179,10 @@ export function makeNameResolvers(s: NamingSources): NameResolvers {
   // **超级群里走到第二层是常态而非例外**：成员表只含群主+管理员，不兜底的话满屏普通成员
   // 的气泡头像全是首字母圈（消息自带 from_nickname 却没有 from_avatar）。
   const senderAvatar = (m: ChatMessage): string | undefined => {
-    const url = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from)?.avatar_url;
-    return url || profileCards[m.from]?.avatar_url || undefined;
+    const mem = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from);
+    // 成员表命中即定论（服务端对无「头像」可见权者下发空串）；没命中才走全局解析缓存。
+    if (mem && typeof mem.avatar_url === "string") return mem.avatar_url || undefined;
+    return profileCards[m.from]?.avatar_url || undefined;
   };
 
   return {

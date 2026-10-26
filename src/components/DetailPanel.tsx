@@ -189,12 +189,12 @@ export function DetailPanel(p: DetailPanelProps) {
     // 单聊资料卡：无会话行时（从群成员点进的未聊过对端）从群成员表/好友/搜索兜底取头像，
     // 否则只回退首字母圈（bug：群里头像正常、点进资料卡却回退）。
     const avatarUrl = d.isGroup ? (gp?.avatar_url ?? conv?.avatar_url)
-      : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
+      : (d.peer ? peerAvatar(d.peer) : (conv?.peer_avatar_url || undefined));
     // 名片快照用的**真实昵称/头像**（推荐给朋友，入口 ②）：刻意**不含备注**（title 含），见 §2.4。
     const detailPeerNickname = d.isGroup ? undefined
       : (conv?.peer_nickname || (d.peer ? peerNick(d.peer) : undefined));
     const detailPeerAvatar = d.isGroup ? undefined
-      : (conv?.peer_avatar_url || (d.peer ? peerAvatar(d.peer) : undefined));
+      : (d.peer ? peerAvatar(d.peer) : (conv?.peer_avatar_url || undefined));
     // 单聊副标题 = **在线态**（对齐 iOS：标题是名字、副标题是「在线 / 最近在线」）。
     // 曾经显示 @句柄——但下方「用户名」行已经显示了它，头部再来一次是纯重复、没有新信息。
     // 取不到在线态时为空串，副标题自然隐藏（不显示占位；绝不回退到 d.peer 那串内部 ID）。

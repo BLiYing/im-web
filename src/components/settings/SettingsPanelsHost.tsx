@@ -21,7 +21,8 @@ import { DevicesPanel } from "./DevicesPanel";
 import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
 import { AutoDeleteDefaultPanel } from "./AutoDeleteDefaultPanel";
 import { closeAutoDeleteDefault, openAutoDeleteDefault, useAutoDeleteDefaultOpen } from "../../autoDeleteUi";
-import { getAutoDeleteDefault } from "../../sdk/privacyApi";
+import { getPrivacy, type Visibility } from "../../sdk/privacyApi";
+import { VisibilityPanel, type VisibilityKind } from "./VisibilityPanel";
 import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { DeleteAccountContainer } from "./DeleteAccountPanel";
@@ -147,11 +148,14 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   // 隐私页「自动删除消息」账号默认档位：进隐私页取一次最新值（不推帧，AUTO_DELETE_DESIGN §3.3 A）；选择面板开合态见 autoDeleteUi。
   const [autoDeleteDefault, setAutoDeleteDefault] = useState<number | null>(null);
   const autoDeleteOpen = useAutoDeleteDefaultOpen();
+  // 「谁能看到」上次上线 / 头像当前档位（同一次 GET /users/me/privacy）与二级单选页开合态。
+  const [visibility, setVisibility] = useState<{ lastSeen: Visibility; avatar: Visibility } | null>(null);
+  const [visKind, setVisKind] = useState<VisibilityKind | null>(null);
   useEffect(() => {
-    if (!p.privacyOpen) { setAutoDeleteDefault(null); closeAutoDeleteDefault(); return; }
+    if (!p.privacyOpen) { setAutoDeleteDefault(null); setVisibility(null); setVisKind(null); closeAutoDeleteDefault(); return; }
     let alive = true;
     const c = clientRef.current;
-    if (c) getAutoDeleteDefault(c.authToken).then((v) => { if (alive) setAutoDeleteDefault(v); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
+    if (c) getPrivacy(c.authToken).then((v) => { if (!alive) return; setAutoDeleteDefault(v.autoDeleteSec); setVisibility((cur) => cur ?? { lastSeen: v.lastSeen, avatar: v.avatar }); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
     return () => { alive = false; };
   }, [p.privacyOpen, clientRef]);
   const powerSave = usePowerSave();
@@ -259,6 +263,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onOpenBlocked={() => p.setBlockedOpen(true)}
           onOpenChangePwd={() => p.setChangePwdOpen(true)}
           autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault}
+          visibility={visibility} onOpenVisibility={setVisKind}
           onComingSoon={comingSoon}
           onBack={() => p.setPrivacyOpen(false)}
         />
@@ -269,6 +274,16 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
         <AutoDeleteDefaultPanel
           token={() => clientRef.current?.authToken ?? ""} initial={autoDeleteDefault} setToast={setToast}
           onSaved={setAutoDeleteDefault} onBack={closeAutoDeleteDefault}
+        />
+      )}
+
+      {/* 「谁能看到」▸ 上次上线 / 头像 三档单选页：选中即保存。GET 未回来时先按默认档显示，进页后的 GET 会校正。 */}
+      {p.privacyOpen && visKind && (
+        <VisibilityPanel
+          kind={visKind} token={() => clientRef.current?.authToken ?? ""} setToast={setToast}
+          initial={visibility?.[visKind] ?? (visKind === "lastSeen" ? "contacts" : "everyone")}
+          onSaved={(v) => setVisibility((cur) => ({ lastSeen: "contacts", avatar: "everyone", ...cur, [visKind]: v }))}
+          onBack={() => setVisKind(null)}
         />
       )}
 

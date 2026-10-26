@@ -139,3 +139,19 @@ describe("已注销用户（deleted=true）显示「已注销用户」，压过�
     expect(makeNameResolvers(sources()).friendLabel({ user_id: UID, nickname: "小明" } as FriendEntry)).toBe("小明");
   });
 });
+
+describe("senderAvatar：成员表空串 = 不可见，不回退陈旧解析缓存（隐私·头像）", () => {
+  const stale = { user_id: UID, avatar_url: "http://stale/a.png" } as UserCard;
+  it("成员表命中且头像为空 → undefined", () => {
+    const r = makeNameResolvers(sources({ groupInfos: { g1: group([{ user_id: UID, avatar_url: "" }]) }, profileCards: { [UID]: stale } }));
+    expect(r.senderAvatar(msg({}))).toBeUndefined();
+  });
+  it("成员表没有此人（超级群）→ 仍走解析缓存", () => {
+    const r = makeNameResolvers(sources({ groupInfos: { g1: group([]) }, profileCards: { [UID]: stale } }));
+    expect(r.senderAvatar(msg({}))).toBe("http://stale/a.png");
+  });
+  it("peerAvatar：会话行空串压过陈旧缓存", () => {
+    const r = makeNameResolvers(sources({ conversations: [conv({ peer_avatar_url: "" })], profileCards: { [UID]: stale } }));
+    expect(r.peerAvatar(UID)).toBeUndefined();
+  });
+});

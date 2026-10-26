@@ -6,6 +6,7 @@ import {
   presenceFromConversation,
   presenceFromFrame,
   presenceText,
+  seedPresence,
   type Presence,
 } from "./presence";
 import { setPref } from "../i18n";
@@ -149,5 +150,26 @@ describe("副标题文案：英文界面 + 跨年（P2 W6）", () => {
     setPref("en");
     expect(presenceText(at(thisYear), now)).toBe("Last seen Mar 3");
     expect(presenceText(at(lastYear), now)).toBe("Last seen Sep 21, 2025");
+  });
+});
+
+describe("seedPresence（上次上线隐私：三字段全缺=对我不可见，清旧值）", () => {
+  const live = { level: "online" as const, onlineUntil: 9e15, lastSeen: 5 };
+  it("有快照 → 覆盖", () => {
+    const out = seedPresence({ u1: live }, [{ peer: "u1", peer_presence: "long_ago", peer_last_seen: 7 }]);
+    expect(out.u1.level).toBe("long_ago");
+    expect(out.u1.lastSeen).toBe(7);
+  });
+  it("单聊三字段全缺 → 删除旧条目（不再显示陈旧在线 / N 分钟前）", () => {
+    const out = seedPresence({ u1: live, u2: live }, [{ peer: "u1" }]);
+    expect("u1" in out).toBe(false);
+    expect(out.u2).toBe(live);
+  });
+  it("群聊项不动既有值；不改入参", () => {
+    const prev = { u1: live };
+    const out = seedPresence(prev, [{ is_group: true, conv_id: "g" }]);
+    expect(out.u1).toBe(live);
+    seedPresence(prev, [{ peer: "u1" }]);
+    expect("u1" in prev).toBe(true);
   });
 });

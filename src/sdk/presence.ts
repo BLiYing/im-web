@@ -41,6 +41,22 @@ export function presenceFromConversation(c: unknown): Presence {
   };
 }
 
+/** 用会话列表快照更新在线态表（纯函数）。仅覆盖单聊；群聊无对端、保留既有值。
+ *  服务端对无「上次上线」可见权者**整组留空**（peer_presence/peer_online_until/peer_last_seen 全缺，
+ *  PRIVACY_VISIBILITY_DESIGN §2）——空即权威答案：删掉该对端旧条目，别让陈旧的「在线 / N 分钟前」留着；
+ *  有任一字段才按快照覆盖。 */
+export function seedPresence(prev: Record<string, Presence>, convs: readonly unknown[]): Record<string, Presence> {
+  const next = { ...prev };
+  for (const raw of convs) {
+    const c = (raw ?? {}) as Record<string, unknown>;
+    if (c.is_group || typeof c.peer !== "string" || !c.peer) continue;
+    const hidden = c.peer_presence === undefined && c.peer_online_until === undefined && c.peer_last_seen === undefined;
+    if (hidden) delete next[c.peer];
+    else next[c.peer] = presenceFromConversation(c);
+  }
+  return next;
+}
+
 /** 从 presence 帧 / 资料卡解析（键 status|presence / online_until / last_seen）。 */
 export function presenceFromFrame(d: unknown): Presence {
   const o = (d ?? {}) as Record<string, unknown>;

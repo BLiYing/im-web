@@ -43,9 +43,9 @@ describe("resolvePeerAvatar", () => {
     expect(resolvePeerAvatar("4501", src)).toBe("http://x/4501.png");
   });
 
-  it("空白 URL 视作无，继续向后兜底", () => {
+  it("会话行缺 peer_avatar_url 字段时继续向后兜底", () => {
     const src: PeerSources = {
-      conversations: [{ peer: "4501", peer_avatar_url: "   " }],
+      conversations: [{ peer: "4501" }],
       friends: [],
       groups: [{ members: [{ user_id: "4501", avatar_url: "http://grp/a.png" }] }],
       search: [],
@@ -74,5 +74,27 @@ describe("resolvePeerNickname", () => {
 
   it("全无返回 undefined（调用方回退 uid）", () => {
     expect(resolvePeerNickname("9999", empty)).toBeUndefined();
+  });
+});
+
+describe("服务端下发空串 = 权威「不可见」，不回退陈旧缓存（隐私·头像）", () => {
+  const stale = { user_id: "4501", avatar_url: "http://stale/a.png" };
+  it("会话行 peer_avatar_url 为空串 → undefined，哪怕好友 / 群成员 / 名片还留着旧头像", () => {
+    const src: PeerSources = {
+      conversations: [{ peer: "4501", peer_avatar_url: "" }],
+      friends: [stale], groups: [{ members: [stale] }], search: [stale],
+    };
+    expect(resolvePeerAvatar("4501", src)).toBeUndefined();
+  });
+  it("新鲜名片（资料页刚拉）为空串 → 压过陈旧的好友 / 群成员", () => {
+    const src: PeerSources = {
+      conversations: [], friends: [stale], groups: [{ members: [stale] }],
+      fresh: [{ user_id: "4501", avatar_url: "" }],
+    };
+    expect(resolvePeerAvatar("4501", src)).toBeUndefined();
+  });
+  it("新鲜名片有值仍生效", () => {
+    const src: PeerSources = { conversations: [], friends: [], groups: [], fresh: [{ user_id: "4501", avatar_url: "http://n/a.png" }] };
+    expect(resolvePeerAvatar("4501", src)).toBe("http://n/a.png");
   });
 });

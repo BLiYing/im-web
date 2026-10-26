@@ -21,7 +21,7 @@ import { makeNameResolvers } from "./chatNaming";
 import { useGroupInfoRefresh } from "./useGroupInfoRefresh";
 import { usePinnedMessages } from "./usePinnedMessages";
 import AvatarCropper from "./AvatarCropper";
-import { isOnline, presenceFromConversation, presenceText, type Presence } from "./sdk/presence";
+import { isOnline, presenceText, seedPresence, type Presence } from "./sdk/presence";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
 import { isViewableMedia, msgKey } from "./album";
 import { jumpDomToSeq } from "./messageJump";
@@ -505,17 +505,10 @@ export default function App() {
     return () => clearInterval(id);
   }, [peer, groupConvId, presence]);
 
-  // 用会话列表里的在线态快照播种 presence 表。仅覆盖单聊且带快照的项——
-  // 群聊无对端、老响应无这些字段，此时保留既有值（多半来自 presence 帧，比空值新）。
+  // 用会话列表里的在线态快照播种 presence 表。仅覆盖单聊；群聊无对端，保留既有值。
+  // 单聊项三字段全缺 = 对端「上次上线」对我不可见（隐私设置），清掉旧条目（见 seedPresence）。
   const seedPresenceFromConversations = useCallback((convs: Conversation[]) => {
-    setPresence((prev) => {
-      const next = { ...prev };
-      for (const c of convs) {
-        if (c.is_group || !c.peer || c.peer_presence === undefined) continue;
-        next[c.peer] = presenceFromConversation(c);
-      }
-      return next;
-    });
+    setPresence((prev) => seedPresence(prev, convs));
   }, []);
 
   const refreshConversations = useCallback(async (): Promise<Conversation[]> => {
@@ -1239,7 +1232,7 @@ export default function App() {
     recordSenderAvatar: (m) => {
       if (m.from === uid) return myInfo?.avatar_url || undefined;
       const gm = groupInfos[m.convId]?.members.find((x) => x.user_id === m.from);
-      if (gm?.avatar_url) return gm.avatar_url;
+      if (gm && typeof gm.avatar_url === "string") return gm.avatar_url || undefined; // 成员表命中即定论（空串=对方设了头像不可见）
       const c = conversations.find((x) => x.conv_id === m.convId);
       return (c && !c.is_group && c.peer === m.from && c.peer_avatar_url) || undefined;
     },
@@ -2497,7 +2490,7 @@ export default function App() {
   const chatMemberCount = activeGroupInfo?.member_count ?? activeGroupInfo?.members.length ?? activeGroupConv?.member_count ?? 0;
   const chatAvatarURL = isGroupChat
     ? (activeGroupInfo?.avatar_url || activeGroupConv?.avatar_url)
-    : (peerConv?.peer_deleted ? undefined : (peerConv?.peer_avatar_url || peerAvatar(peer)));
+    : (peerConv?.peer_deleted ? undefined : peerAvatar(peer));
   // 「大群」标注：大群不显示已读双勾/正在输入/成员在线态，副标题点明缘由，
   // 否则用户会把"功能没了"当成 bug 报上来。
   const chatIsSuper = activeGroupInfo?.is_super ?? activeGroupConv?.is_super ?? false;

@@ -36,6 +36,8 @@ export interface PeerSources {
   friends: FriendLike[];
   groups: GroupLike[];
   search?: CardLike[] | null;
+  /** 进资料页时 GET /users/{id} 拉到的权威名片（比好友/群成员/解析缓存新）。 */
+  fresh?: CardLike[] | null;
 }
 
 /** 空白字符串视作「无」，只在真正拿到非空值时命中。 */
@@ -55,9 +57,15 @@ function findMemberAcrossGroups(id: string, groups: GroupLike[]): MemberLike | u
   return undefined;
 }
 
-/** 对端头像 URL：会话 > 好友 > 群成员 > 搜索结果；全空返回 undefined（调用方回退首字母圈）。 */
+/** 对端头像 URL：会话 > 新鲜名片 > 好友 > 群成员 > 搜索结果；全空返回 undefined（调用方回退首字母圈）。
+ *  隐私「头像」设置（PRIVACY_VISIBILITY_DESIGN §2）：服务端对无权者下发**空串**——它是权威答案而非「没数据」。
+ *  故服务端下发过该字段（string，哪怕空）的会话行 / 新鲜名片命中即定论，不再回退到可能陈旧的好友 / 群成员 / 解析缓存，
+ *  否则对方改成「无人」后这里还会继续显示旧头像。字段缺失（undefined）才继续兜底。 */
 export function resolvePeerAvatar(id: string, src: PeerSources): string | undefined {
   const conv = src.conversations.find((c) => c.peer === id);
+  if (typeof conv?.peer_avatar_url === "string") return firstNonEmpty(conv.peer_avatar_url);
+  const fresh = (src.fresh ?? []).find((c) => c.user_id === id);
+  if (typeof fresh?.avatar_url === "string") return firstNonEmpty(fresh.avatar_url);
   const friend = src.friends.find((f) => f.user_id === id);
   const member = findMemberAcrossGroups(id, src.groups);
   const card = (src.search ?? []).find((c) => c.user_id === id);
