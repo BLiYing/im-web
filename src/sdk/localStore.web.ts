@@ -11,7 +11,7 @@
 // 而不成环。**跨实现的语义契约在 localStore.types.ts，改行为前先读那里的注释。**
 
 import type { ChatMessage, Conversation, MsgOpPatch } from "./protocol";
-import { addRange } from "./ranges";
+import { addRange, clipRangesThrough } from "./ranges";
 import { dropCleared, floorAtClear, seqFromRecordKey } from "./clearFloor";
 import { LOG_TAG, logger } from "../logging/logger";
 import {
@@ -369,7 +369,7 @@ async function loadDeletedSeqs(owner: string, convId: string): Promise<number[]>
  * 取数分流据此判 local ⇒ 会话空白且不自愈（/code-review 2026-09-09）。但**只清清单不够**——清单空了，
  * 进会话就会把服务端那一页拉回来，所以还要位点（§6.7，2026-10-02 Web 实测）。
  */
-async function clearMessages(owner: string, convId: string, knownLatest = 0): Promise<void> {
+async function clearMessages(owner: string, convId: string, knownLatest = 0, exact = false): Promise<void> {
   if (!owner || !convId) return;
   try {
     const db = await openDB();
@@ -386,10 +386,19 @@ async function clearMessages(owner: string, convId: string, knownLatest = 0): Pr
       const settle = () => {
         if (--pending > 0) return;
         const keys = (keysReq.result as IDBValidKey[]) ?? [];
-        let maxLocal = 0;
-        for (const key of keys) { store.delete(key); maxLocal = Math.max(maxLocal, seqFromRecordKey(String(key))); }
         const prevCursor = cursorReq.result as SyncCursorRecord | undefined;
         const prevRanges = rangesReq?.result as RangesRecord | undefined;
+        if (exact) { // 精确模式（§6.7.1）：位点 = max(已有位点, knownLatest)；只清 (0, 位点] 内的行与覆盖，位点之后本地已有的保留
+          const fl = floorAtClear(knownLatest, Number(prevCursor?.clearedUpTo));
+          for (const key of keys) { const sq = seqFromRecordKey(String(key)); if (sq > 0 && sq <= fl) store.delete(key); }
+          const cur = Number(prevCursor?.convSeq) || 0;
+          const base = prevRanges?.ranges ?? (cur > 0 ? [{ lo: 1, hi: cur }] : []);
+          if (fl > 0) cursorStore.put({ ...prevCursor, id, owner, convId, convSeq: Math.max(cur, fl), clearedUpTo: fl } satisfies SyncCursorRecord);
+          if (hasRanges) tx.objectStore(RANGES_STORE).put({ id, owner, convId, ranges: clipRangesThrough(base, fl), head: Number(prevRanges?.head) || 0 } satisfies RangesRecord);
+          return;
+        }
+        let maxLocal = 0;
+        for (const key of keys) { store.delete(key); maxLocal = Math.max(maxLocal, seqFromRecordKey(String(key))); }
         const floor = floorAtClear(
           knownLatest, Number(prevCursor?.clearedUpTo), Number(prevCursor?.convSeq), Number(prevRanges?.head), maxLocal,
         );

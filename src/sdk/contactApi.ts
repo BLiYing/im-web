@@ -75,6 +75,7 @@ export async function setConvRemark(token: string, convId: string, remark: strin
 }
 
 /** 删除会话（仅本人，记 cleared_at 不删消息）：DELETE /api/v1/conversations/{id}。 */
-export async function deleteConversation(token: string, convId: string): Promise<void> {
-  await api(token, `/api/v1/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
+export async function deleteConversation(token: string, convId: string): Promise<number> {
+  const data = await api(token, `/api/v1/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
+  return Number(data?.cleared_at) || 0;   // 删除位点（§6.7.1）；老服务端无此字段 → 0，客户端退回本机 head
 }

@@ -278,7 +278,9 @@ export interface LocalStore {
    * 清空之后：`conv_seq <= 位点` 的消息在 `saveMessage` / `saveIncomingMessage` / `saveIncomingPage` 里一律丢弃
    * （区间登记与游标推进口径不变）；位点之后的新消息照常收。
    */
-  clearMessages(owner: string, convId: string, knownLatest?: number): Promise<void>;
+  clearMessages(owner: string, convId: string, knownLatest?: number, exact?: boolean): Promise<void>;
+  // exact=true（「删除会话」§6.7.1）：位点 = max(已有位点, knownLatest)，**不**再取游标 / head / 本地最大 seq；
+  // 只删 conv_seq∈(0,位点] 的行并抹掉 <=位点 的区间覆盖，位点之后本地已有的真消息保留（它们是对方在删除后发的，仍可见）。
 
   /** 清空该 owner 的**全部**本机记录（消息/游标/墓碑/区间）；别的 owner 不动。注销账号用（DELETE_ACCOUNT_DESIGN §3.4）。失败只降级不抛。 */
   wipeOwner(owner: string): Promise<void>;

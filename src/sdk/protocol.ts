@@ -258,6 +258,7 @@ export interface Conversation {
    * 成员列表须走分页接口。**不要按 member_count 自己猜**——它跟群的类型走，不跟人数走。
    */
   is_super?: boolean;
+  cleared_at?: number;   // 本人删除会话的位点（>0 才有；§6.7.1：客户端据此把本机清到位点）
   peer: string;
   peer_nickname?: string;   // 对端昵称（空则回退 uid）
   peer_remark?: string;     // 我对对端的备注名（显示优先级最高，仅自己可见）

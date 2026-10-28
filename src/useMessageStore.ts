@@ -3,7 +3,7 @@ import { callRecordAcked, takeFailedCallRecord } from "./useCallRecordSend";
 import type { ChatMessage } from "./sdk/protocol";
 import {
   type MsgMap, appendTo, patchByClientMsgId, mapMatchingClientMsgId,
-  mergeMetaBySeq, applyOpBySeq, removeBySeqs, removeByClientMsgId,
+  mergeMetaBySeq, applyOpBySeq, removeBySeqs, removeByClientMsgId, clearThrough as clearThroughMap,
 } from "./messageStore";
 
 // 会话消息表的有状态外壳：持有 msgsByConv 状态 + 两个去重/墓碑 ref，把 messageStore 的纯变换包成方法。
@@ -21,6 +21,8 @@ export function useMessageStore() {
   const applyOp = useCallback((cid: string, seq: number, patch: Partial<ChatMessage>) => setMsgsByConv((prev) => applyOpBySeq(prev, cid, seq, patch)), []);
   const removeSeqs = useCallback((cid: string, seqs: number[]) => setMsgsByConv((prev) => removeBySeqs(prev, cid, seqs)), []);
   const clearConv = useCallback((cid: string) => setMsgsByConv((prev) => ({ ...prev, [cid]: [] })), []);
+  /** 清除到位点（删除会话）：只摘位点以内的，位点之后本地已有的真消息留着（它们的 seq 已在去重集里，整表清空会让它们再也上不了屏）。 */
+  const clearThrough = useCallback((cid: string, floor: number) => setMsgsByConv((prev) => clearThroughMap(prev, cid, floor)), []);
   /** 预载本地历史：已在内存的会话（prev）优先，不被本地库覆盖。 */
   const preload = useCallback((loaded: MsgMap) => setMsgsByConv((prev) => ({ ...loaded, ...prev })), []);
   /** 退登/切号复位：清空消息与去重/墓碑集。App 的其余复位（会话列表/在线态…）另行处理。 */
@@ -68,7 +70,7 @@ export function useMessageStore() {
 
   return {
     msgsByConv, setMsgsByConv, seenByConv, deletedByConv,
-    appendMsg, patchMsg, removeMsgRow, applyOp, removeSeqs, clearConv, preload, reset,
+    appendMsg, patchMsg, removeMsgRow, applyOp, removeSeqs, clearConv, clearThrough, preload, reset,
     ingestInbound, applyAck, markRejected,
   };
 }

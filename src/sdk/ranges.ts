@@ -42,6 +42,11 @@ export function addRange(ranges: SeqRange[], lo: number, hi: number): SeqRange[]
   return normalizeRanges([...ranges, { lo: Math.max(1, lo), hi }]);
 }
 
+/** 抹掉 `<= floor` 的覆盖（精确清除到位点：位点之后本地已有的段保留）。不修改入参。 */
+export function clipRangesThrough(ranges: SeqRange[], floor: number): SeqRange[] {
+  return normalizeRanges(ranges.filter((r) => r.hi > floor).map((r) => ({ lo: Math.max(r.lo, floor + 1), hi: r.hi })));
+}
+
 /** 某个 conv_seq 是否在本地已齐全的区间内。 */
 export function hasSeq(ranges: SeqRange[], seq: number): boolean {
   return ranges.some((r) => seq >= r.lo && seq <= r.hi);

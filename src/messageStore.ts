@@ -84,3 +84,11 @@ export function removeByClientMsgId(map: MsgMap, cid: string, key: string): MsgM
   if (!list) return map;
   return { ...map, [cid]: list.filter((x) => x.clientMsgId !== key) };
 }
+
+/** 清除到位点（删除会话 §6.7.1）：摘掉 `0 < convSeq <= floor`；位点之后的真消息与未落号的本地行（发送中 / 被拒）保留。无命中 → 原样返回。 */
+export function clearThrough(map: MsgMap, cid: string, floor: number): MsgMap {
+  const list = map[cid];
+  if (!list) return map;
+  const next = list.filter((m) => !(m.convSeq > 0 && m.convSeq <= floor));
+  return next.length === list.length ? map : { ...map, [cid]: next };
+}

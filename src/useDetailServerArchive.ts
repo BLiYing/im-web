@@ -34,6 +34,8 @@ export interface DetailArchive {
   hasMore: (k: ArchiveKind) => boolean;
   loading: (k: ArchiveKind) => boolean;
   loadMore: (k: ArchiveKind) => void;
+  /** 会话被清除到位点（删除会话）：摘掉已拉到的服务端项里 `<=floor` 的。 */
+  dropThrough: (convId: string, floor: number) => void;
 }
 
 export function useDetailServerArchive(o: {
@@ -110,10 +112,16 @@ export function useDetailServerArchive(o: {
     (local: ChatMessage[]) => (server.convId === o.convId ? unionByConvSeq(local, o.isExpired ? server.list.filter((m) => !o.isExpired!(m.timestamp)) : server.list) : local),
     [server, o.convId, o.isExpired],
   );
+  const dropThrough = useCallback((convId: string, floor: number) => {
+    if (listRef.current.length === 0 || convId !== oRef.current.convId) return;
+    listRef.current = listRef.current.filter((m) => !(m.convSeq > 0 && m.convSeq <= floor));
+    setServer({ convId, list: listRef.current });
+  }, []);
   return {
     merge,
     hasMore: (k) => o.enabled && state[k].hasMore,
     loading: (k) => state[k].loading,
     loadMore,
+    dropThrough,
   };
 }

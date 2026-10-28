@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   type MsgMap, appendTo, patchByClientMsgId, mapMatchingClientMsgId,
-  mergeMetaBySeq, applyOpBySeq, removeBySeq, removeBySeqs, removeByClientMsgId,
+  mergeMetaBySeq, applyOpBySeq, removeBySeq, removeBySeqs, removeByClientMsgId, clearThrough,
 } from "./messageStore";
 import type { ChatMessage } from "./sdk/protocol";
 
@@ -74,5 +74,16 @@ describe("removeBySeqs", () => {
     expect(removeBySeqs(map, "c1", [99])).toBe(map);
     expect(removeBySeqs(map, "c1", [])).toBe(map);
     expect(removeBySeqs(map, "zz", [5])).toBe(map);
+  });
+});
+
+describe("clearThrough —— 清除到位点：只摘 <=位点 的，其后的与未落号的本地行保留", () => {
+  it("摘掉 0<convSeq<=floor；保留 >floor 与 convSeq=0（发送中 / 被拒）；无命中原样返回", () => {
+    const map: MsgMap = { c1: [msg({ convSeq: 5 }), msg({ convSeq: 20 }), msg({ convSeq: 0, clientMsgId: "p" }), msg({ convSeq: 21 })], c2: [msg({ convSeq: 1 })] };
+    const r = clearThrough(map, "c1", 20);
+    expect(r.c1.map((m) => m.convSeq)).toEqual([0, 21]);
+    expect(r.c2).toBe(map.c2);
+    expect(clearThrough(r, "c1", 20)).toBe(r);
+    expect(clearThrough(map, "nope", 9)).toBe(map);
   });
 });

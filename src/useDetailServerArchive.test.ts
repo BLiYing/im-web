@@ -111,3 +111,18 @@ describe("useDetailServerArchive", () => {
     expect(fetchConvMedia).toHaveBeenCalledTimes(3);   // 三类第一页都没成功过：重连后各补一次
   });
 });
+
+describe("dropThrough —— 删除会话清到位点后，已拉到的服务端页不能留着", () => {
+  it("摘掉 <=位点 的服务端项，其后的保留", async () => {
+    fetchConvMedia.mockImplementation(async (_t: string, _c: string, kind: string) => ({
+      conv_id: "g", items: kind === "media" ? [item(30), item(20), item(10)] : [], next_cursor: 0, has_more: false,
+    }));
+    const { result } = renderHook(() => useDetailServerArchive(base));
+    await flush();
+    expect(result.current.merge([]).map((m) => m.convSeq).sort((a, b) => a - b)).toEqual([10, 20, 30]);
+    act(() => result.current.dropThrough("g", 20));
+    expect(result.current.merge([]).map((m) => m.convSeq)).toEqual([30]);
+    act(() => result.current.dropThrough("other", 99));   // 别的会话不动
+    expect(result.current.merge([]).map((m) => m.convSeq)).toEqual([30]);
+  });
+});

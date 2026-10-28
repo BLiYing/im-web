@@ -353,7 +353,7 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       });
     },
 
-    async clearMessages(owner: string, convId: string, knownLatest = 0): Promise<void> {
+    async clearMessages(owner: string, convId: string, knownLatest = 0, exact = false): Promise<void> {
       if (!owner || !convId) return;
       // 同一事务：删消息 + 区间清单清空（落一行空清单、保留 head，否则 loadRanges 会由游标反推 [1,cursor]）
       // + 抬本机清空位点（OFFLINE_BACKLOG_DESIGN §6.7，只增不减）+ 游标推到位点。**墓碑一概不动**
@@ -366,6 +366,18 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
           const cursor = (getCursor.get(cursorKeyOf(owner, convId)) as { conv_seq: number } | undefined)?.conv_seq ?? 0;
           const prev = readRanges(owner, convId);
           const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
+          if (exact) { // 精确模式（§6.7.1，与 im-web localStore.web.ts 平行）：位点 = max(已有位点, knownLatest)，只清 (0,位点]
+            const fl = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId));
+            db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ? AND conv_seq > 0 AND conv_seq <= ?").run(owner, convId, fl);
+            const base = prev?.ranges ?? (cursor > 0 ? [{ lo: 1, hi: cursor }] : []);
+            const clipped = normalizeRanges(base.filter((r) => r.hi > fl).map((r) => ({ lo: Math.max(r.lo, fl + 1), hi: r.hi })));
+            writeRanges(owner, convId, clipped, prev?.head ?? 0);
+            if (fl > 0) {
+              bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, fl);
+              db.prepare("UPDATE sync_cursors SET cleared_up_to = MAX(cleared_up_to, ?) WHERE id = ?").run(fl, cursorKeyOf(owner, convId));
+            }
+            return;
+          }
           const floor = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId), num(cursor), num(prev?.head), num(maxLocal));
           db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ?").run(owner, convId);
           writeRanges(owner, convId, [], prev?.head ?? 0);

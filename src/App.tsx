@@ -20,6 +20,7 @@ import { resolveDetailFollow } from "./detailFollow";
 import { makeNameResolvers } from "./chatNaming";
 import { useGroupInfoRefresh } from "./useGroupInfoRefresh";
 import { usePinnedMessages } from "./usePinnedMessages";
+import { makeConvClearedHandler } from "./convClearedHandler";
 import AvatarCropper from "./AvatarCropper";
 import { isOnline, presenceText, seedPresence, type Presence } from "./sdk/presence";
 import { buildMessageActions, buildConversationActions, type MenuAction, type MessageCtx } from "./menus";
@@ -188,9 +189,10 @@ export default function App() {
   // 会话消息表 + 去重/墓碑集 + 去重/patch/append/删除方法：收口到 useMessageStore（纯逻辑见 messageStore.ts）。
   const {
     msgsByConv, setMsgsByConv, seenByConv, deletedByConv,
-    appendMsg: appendMsgRaw, patchMsg, removeMsgRow, applyOp, removeSeqs, clearConv,
+    appendMsg: appendMsgRaw, patchMsg, removeMsgRow, applyOp, removeSeqs, clearConv, clearThrough,
     preload: preloadMsgs, reset: resetMsgStore, ingestInbound, applyAck, markRejected,
   } = useMessageStore();
+  const convClearedRef = useRef<ReturnType<typeof makeConvClearedHandler>>(() => {}); // 会话被清除到位点（§6.7.1）的 UI 同步；实现在 detailArchive 之后装入
   const [peer, setPeer] = useState("");
   const [input, setInput] = useState("");
   const [presence, setPresence] = useState<Record<string, Presence>>({}); // user -> 在线态（租约模型，见 sdk/presence.ts）
@@ -837,7 +839,7 @@ export default function App() {
         scheduleListRefresh(); // 会话列表末条预览可能随之变化
       },
       // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步 → 重新拉取权威会话列表覆盖本地。
-      onConvUpdate: (u) => { autoDel.applyConvUpdate(u); scheduleListRefresh(); }, isExpired: autoDel.isExpired,
+      onConvUpdate: (u) => { autoDel.applyConvUpdate(u); scheduleListRefresh(); }, onConvCleared: (cid, floor, advanced, ctx) => convClearedRef.current(cid, floor, advanced, ctx), isExpired: autoDel.isExpired,
       // 账号级配置变更（M4-7）：另一端改了自动下载策略 → 重拉（零新链路的多端同步）。
       onVoiceTranscript: (convId, convSeq, status, text) => { void convId; applyRemoteTranscript(convSeq, status, text); },
       onCapabilitiesUpdate: (version) => {
@@ -1877,6 +1879,10 @@ export default function App() {
     getToken: () => clientRef.current?.authToken ?? "",
     clearedUpTo: detail ? (clientRef.current?.clearedUpToOf(detail.convId) ?? 0) : 0,
     isExpired: (ts) => autoDel.isExpired(detail?.convId ?? "", ts),
+  });
+  convClearedRef.current = makeConvClearedHandler({
+    clearThrough, setDetailMsgs, dropArchive: detailArchive.dropThrough, pinnedDrop: pinned.dropBelowFloor, pinnedRefresh: (cid) => void pinned.refresh(cid),
+    setViewer, setTextReader, currentConv: () => currentConvRef.current, closeChat: deselect,
   });
   // 任务3 · 查看器媒体时间线 + 左右翻页（含「翻过最旧一张去服务端续拉」）：见 useViewerNav。
   const { viewerList, viewerIdx, goViewer } = useViewerNav({ viewer, setViewer, messages, mediaPaging, setViewerMore, setToast, t });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { atVisibleFloor, backfillClearedUpTo, dropCleared, effectiveFloor, floorAtClear, seqFromRecordKey } from "./clearFloor";
+import { convsNeedingAlign, atVisibleFloor, backfillClearedUpTo, dropCleared, effectiveFloor, floorAtClear, seqFromRecordKey } from "./clearFloor";
 
 describe("floorAtClear —— 清空那一刻的位点取最大的已知最新", () => {
   it("四个来源取大；NaN/负数当 0；全空是 0", () => {
@@ -49,5 +49,17 @@ describe("seqFromRecordKey", () => {
     expect(seqFromRecordKey("o|c1|42")).toBe(42);
     expect(seqFromRecordKey("o|c1|c:cm-1")).toBe(0);
     expect(seqFromRecordKey("o|c1|abc")).toBe(0);
+  });
+});
+
+describe("convsNeedingAlign —— 会话列表 cleared_at 超过本机位点才对齐（§6.7.1）", () => {
+  const mem: Record<string, number> = { a: 10, b: 50, c: 0 };
+  const f = (id: string) => mem[id] ?? 0;
+  it("只挑 cleared_at>0 且 > 本机位点的项；相等 / 更小 / 缺省都跳过", () => {
+    const got = convsNeedingAlign([
+      { conv_id: "a", cleared_at: 20 }, { conv_id: "b", cleared_at: 50 }, { conv_id: "c" },
+      { conv_id: "d", cleared_at: 0 }, { conv_id: "e", cleared_at: 3 },
+    ], f);
+    expect(got.map((c) => c.conv_id)).toEqual(["a", "e"]);
   });
 });

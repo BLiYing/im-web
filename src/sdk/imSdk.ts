@@ -22,6 +22,8 @@ import { ReceiptBatcher } from "./receiptBatch"; import { groupEventKeepsFloor }
 import { addRange, normalizeRanges, type SeqRange } from "./ranges";
 import { pendingToMessage, type PendingSend } from "./pendingSend";
 import { LOG_TAG, logger } from "../logging/logger";
+import { alignClearedFromList } from "./clearAlign";
+import { clearConversationImpl, clearToFloorImpl, type ClearHost, type ClearSource } from "./clearRoutine";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, type UploadProgressHandler } from "./http";
 // isAuthCode：「鉴权失败类错误码」判据（对齐 errcode / iOS IMIsAuthErrorCode），与续期同源，故同住一个模块。
 import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
@@ -99,6 +101,7 @@ export interface IMClientHandlers {
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
   /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
   onConvUpdate?: (u: ConvUpdate) => void;
+  onConvCleared?: (convId: string, floor: number, advanced: boolean, ctx: { source: "local" | "frame" | "align"; retained: boolean }) => void;   // 会话被清除到位点（§6.7.1，删除会话）：存储已清，UI 同步清内存；advanced=本机位点这次是否真的抬高了
   isExpired?: (convId: string, timestamp: number) => boolean; // 自动删除：该会话此刻是否已过期（入库即过滤，useAutoDelete 提供）
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
@@ -311,7 +314,9 @@ export class IMClient extends IMRestApi {
     });
     const body = await resp.json();
     if (body.code !== 0) throw new Error(body.message || "fetch conversations failed");
-    return (body.data?.conversations ?? []) as Conversation[];
+    const convs = (body.data?.conversations ?? []) as Conversation[];
+    await alignClearedFromList(convs, (c) => this.clearedSeq.get(c) ?? 0, (c) => this.loadClearedUpTo(c), (c, at) => this.clearToFloor(c, at, "align"));   // §6.7.1 触发点③
+    return convs;
   }
 
   /** 带 Bearer 的 HTTP 调用，统一解析 errcode 信封（code!=0 抛带 .code 的 Error）。
@@ -999,6 +1004,7 @@ export class IMClient extends IMRestApi {
         if (d.conv_id) void this.removeMessagesLocal(String(d.conv_id), hiddenSeqsOf(d));
         break;
       case T.CONV_UPDATE: // 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步
+        if (d.action === "delete" && d.conv_id) void this.clearToFloor(String(d.conv_id), Number(d.cleared_at) || 0, "frame").catch(() => {});   // 别的设备删了 → 本机同样清到位点（§6.7.1）
         this.handlers.onConvUpdate?.({
           conv_id: d.conv_id, action: d.action,
           pinned_at: d.pinned_at ?? 0, muted: !!d.muted, mute_until: Number(d.mute_until) || 0, marked_unread: !!d.marked_unread, auto_delete_sec: Number(d.auto_delete_sec) || 0, auto_delete_from: Number(d.auto_delete_from) || 0,
@@ -1120,14 +1126,10 @@ export class IMClient extends IMRestApi {
   }
 
   /** 读取某会话的本地持久化消息（IndexedDB），供 UI 启动时秒载。 */
-  loadLocal(convId: string): Promise<ChatMessage[]> {
-    return localStore.loadConversation(this.uid, convId);
-  }
+  loadLocal(convId: string): Promise<ChatMessage[]> { return localStore.loadConversation(this.uid, convId); }
 
   /** 读取某会话被本地删除的 conv_seq（内存墓碑），供收帧时拦住服务端重同步的复现。 */
-  loadDeletedSeqs(convId: string): Promise<number[]> {
-    return localStore.loadDeletedSeqs(this.uid, convId);
-  }
+  loadDeletedSeqs(convId: string): Promise<number[]> { return localStore.loadDeletedSeqs(this.uid, convId); }
 
   /** 读取当前 uid 命名空间内独立持久化的连续同步游标 / 本机清空位点（预载时一并交给 trackConversation）。 */
   loadSyncCursor(convId: string): Promise<number> { return localStore.loadSyncCursor(this.uid, convId); }
@@ -1144,33 +1146,25 @@ export class IMClient extends IMRestApi {
   }
 
   /** 抬高内存里的清空位点（只增不减）。 */
-  private raiseCleared(convId: string, seq: number): void {
-    if (convId && seq > (this.clearedSeq.get(convId) ?? 0)) this.clearedSeq.set(convId, seq);
-  }
+  private raiseCleared(convId: string, seq: number): void { if (convId && seq > (this.clearedSeq.get(convId) ?? 0)) this.clearedSeq.set(convId, seq); }
 
   /** 有效可见下界（开区间口径：`conv_seq <=` 它的对本端不存在）= 服务端下界 ∪ 本机清空位点，用时取大。 */
-  visibleFloorOf(convId: string): number {
-    return effectiveFloor(this.floorSeq.get(convId), this.clearedSeq.get(convId));
-  }
+  visibleFloorOf(convId: string): number { return effectiveFloor(this.floorSeq.get(convId), this.clearedSeq.get(convId)); }
 
   /** 本机清空位点（内存镜像；0 = 没清过）。服务端搜索 / 日历 / 媒体结果据此滤掉 `conv_seq <=` 它的。 */
-  clearedUpToOf(convId: string): number {
-    return this.clearedSeq.get(convId) ?? 0;
-  }
+  clearedUpToOf(convId: string): number { return this.clearedSeq.get(convId) ?? 0; }
 
-  /** 清空聊天记录（仅本机，§6.7）：存储事务里删消息 + 清区间 + 抬位点 + 推游标，再对齐内存镜像。`knownLatest` 传会话列表 latest（head/游标这里补）。 */
-  async clearConversation(convId: string, knownLatest = 0): Promise<number> {
-    const known = Math.max(knownLatest, this.headSeq.get(convId) ?? 0, this.syncedSeq.get(convId) ?? 0);
-    this.raiseCleared(convId, known);   // 先乐观抬内存位点（只增不减，无害）：存储往返期间到的 sync/window 页要被它挡住，别又冒上屏
-    await localStore.clearMessages(this.uid, convId, known);
-    const floor = await localStore.loadClearedUpTo(this.uid, convId);
-    this.raiseCleared(convId, floor);
-    this.updateSynced(convId, floor);
-    this.convRanges.delete(convId);
-    if ((this.headSeq.get(convId) ?? 0) <= floor) this.gapped.delete(convId);   // 位点追上 head：可见范围内已无缺口
-    this.handlers.onRanges?.(convId);
-    return floor;
+  /** 清空聊天记录（仅本机，§6.7）/ 清除到位点（§6.7.1 删除会话）：实现见 sdk/clearRoutine.ts。 */
+  clearConversation(convId: string, knownLatest = 0, exact = false): Promise<number> { return clearConversationImpl(this.clearHost(), convId, knownLatest, exact); }
+  clearToFloor(c: string, at = 0, source: ClearSource = "local"): Promise<number> { return clearToFloorImpl(this.clearHost(), c, at, source); }
+  private clearHost(): ClearHost {
+    return {
+      uid: this.uid, clearedSeq: this.clearedSeq, floorSeq: this.floorSeq, headSeq: this.headSeq, syncedSeq: this.syncedSeq, convRanges: this.convRanges, gapped: this.gapped,
+      raiseCleared: (c, s) => this.raiseCleared(c, s), updateSynced: (c, s) => this.updateSynced(c, s), onRanges: (c) => this.handlers.onRanges?.(c),
+      onConvCleared: (c, f, adv, ctx) => this.handlers.onConvCleared?.(c, f, adv, ctx),
+    };
   }
+  override async deleteConversation(c: string): Promise<number> { return this.clearToFloor(c, await super.deleteConversation(c)); }
 
   /** 登记「[lo, hi] 这一段我已齐全」到内存镜像，并通知 UI 重算渲染切段。
    *  **只在真的把这一段下发的消息都收下之后才调**——"没下载就不许登记"是这套区间的正确性底座。 */

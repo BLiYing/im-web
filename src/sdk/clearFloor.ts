@@ -60,3 +60,14 @@ export function seqFromRecordKey(id: string): number {
   const n = Number(tail);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
+
+/**
+ * 「删除会话」＝ 清除到位点（OFFLINE_BACKLOG_DESIGN §6.7.1）：会话列表快照里哪些项要对齐。
+ * 条件：服务端 `cleared_at > 0` 且**超过**本机位点（只增不减，等于或小于的说明本机已对齐过）。
+ * `localFloor` 先给内存镜像（同步），返回 undefined 表示内存没有、需要读存储——由调用方决定怎么读。
+ */
+export function convsNeedingAlign<T extends { conv_id: string; cleared_at?: number }>(
+  convs: T[], memFloorOf: (convId: string) => number,
+): T[] {
+  return convs.filter((c) => Number(c.cleared_at) > 0 && Number(c.cleared_at) > memFloorOf(c.conv_id));
+}

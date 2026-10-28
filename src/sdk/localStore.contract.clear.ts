@@ -196,4 +196,47 @@ export function runClearFloorContract({ store, newOwner, msg }: ContractCtx): vo
       expect(await store.loadSyncCursor(o, "c1")).toBe(20);
     });
   });
+
+  describe("精确清除到位点 clearMessages(..., exact=true)（删除会话 §6.7.1）", () => {
+    it("位点 = max(已有位点, knownLatest)：不取游标 / head / 本地最大 seq；位点之后本地已有的消息保留", async () => {
+      const o = newOwner("cf-exact");
+      for (const q of [3, 8, 12]) await store.saveMessage(o, msg("c1", q));
+      await store.advanceSyncCursor(o, "c1", 12);
+      await store.clearMessages(o, "c1", 8, true);
+      expect(await store.loadClearedUpTo(o, "c1")).toBe(8);
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([12]);
+      expect(await store.loadSyncCursor(o, "c1")).toBe(12);   // 游标只增不减
+    });
+
+    it("区间清单只抹 <=位点 的覆盖，其后的段与 head 保留；游标 / 位点推到不小于位点", async () => {
+      const o = newOwner("cf-exact-ranges");
+      await store.registerRange(o, "c1", 1, 20, 25);
+      await store.clearMessages(o, "c1", 8, true);
+      expect(await store.loadRanges(o, "c1")).toEqual({ ranges: [{ lo: 9, hi: 20 }], head: 25 });
+      const o2 = newOwner("cf-exact-push");
+      await store.advanceSyncCursor(o2, "c1", 3);
+      await store.clearMessages(o2, "c1", 30, true);
+      expect(await store.loadSyncCursor(o2, "c1")).toBe(30);
+      expect((await store.loadRanges(o2, "c1")).ranges).toEqual([]);   // 游标反推的 [1,3] 全在位点以内，不许留着宣称「齐全」
+    });
+
+    it("只增不减；位点以内的消息此后不再落库；已有位点比 knownLatest 高时不回退", async () => {
+      const o = newOwner("cf-exact-mono");
+      await store.clearMessages(o, "c1", 30, true);
+      await store.clearMessages(o, "c1", 5, true);
+      expect(await store.loadClearedUpTo(o, "c1")).toBe(30);
+      await store.saveMessage(o, msg("c1", 20));
+      await store.saveMessage(o, msg("c1", 31));
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([31]);
+    });
+
+    it("knownLatest=0 且无旧位点：不凭空编位点；被拒消息（convSeq=0）不受影响", async () => {
+      const o = newOwner("cf-exact-zero");
+      await store.saveRejected(o, msg("c1", 0, { clientMsgId: "cm-9", status: "failed", note: "n" }));
+      await store.saveMessage(o, msg("c1", 4));
+      await store.clearMessages(o, "c1", 0, true);
+      expect(await store.loadClearedUpTo(o, "c1")).toBe(0);
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([0, 4]);
+    });
+  });
 }

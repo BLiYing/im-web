@@ -73,7 +73,7 @@ export abstract class IMRestApi {
   setRemark(userId: string, remark: string): Promise<void> { return contactApi.setRemark(this.token, userId, remark); }
   updateConvSettings(convId: string, s: { pinned_at: number; muted: boolean; mute_until?: number; marked_unread: boolean; auto_delete_sec?: number }): Promise<contactApi.ConvSettingsEcho | undefined> { return contactApi.updateConvSettings(this.token, convId, s); }
   setConvRemark(convId: string, remark: string): Promise<void> { return contactApi.setConvRemark(this.token, convId, remark); }
-  deleteConversation(convId: string): Promise<void> { return contactApi.deleteConversation(this.token, convId); }
+  deleteConversation(convId: string): Promise<number> { return contactApi.deleteConversation(this.token, convId); }
   // ---- 群聊 / 入群（M3~G3）：无状态 HTTP，实现在 sdk/groupApi.ts ----
   createGroup(name: string, memberIds: string[], avatarUrl = ""): Promise<GroupInfo> { return groupApi.createGroup(this.token, name, memberIds, avatarUrl); }
   listGroups(): Promise<GroupSummary[]> { return groupApi.listGroups(this.token); }
