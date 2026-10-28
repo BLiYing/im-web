@@ -1654,7 +1654,13 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .settings-foot.profile-delete-foot { margin-top: 6px; padding: 0 var(--space-4); }
 /* 层叠：隐私页盖在设置页(30)之上；黑名单/修改密码是从隐私页再进一层，盖在隐私页之上。 */
 .privacy-panel { z-index: 40; }
-.blocked-panel, .changepwd-panel, .autodel-panel, .visibility-panel { z-index: 50; }
+.blocked-panel, .changepwd-panel, .autodel-panel, .visibility-panel, .export-panel { z-index: 50; }
+/* 导出我的数据：按钮复用 .delacct-btn 的版型，换成 accent / 中性底（无新令牌）。 */
+.export-btn { background: var(--accent); }
+.export-btn-neutral { background: var(--neutral-control); color: var(--text); }
+.export-card { padding: var(--space-4); }
+.export-card .file-progress { height: 6px; margin: 0 0 var(--space-2); }
+.export-line { font-size: 14px; color: var(--text); }
 .switch-row { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding: 12px 14px; font-size: 15.5px; cursor: pointer; }
 .switch-row:hover { background: var(--surface-hover); }

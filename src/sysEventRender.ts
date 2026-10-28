@@ -18,6 +18,7 @@
 import type { ChatMessage, SysSegment } from "./sdk/protocol";
 import { tokenizeTemplate, type Args, type Lang } from "./i18n";
 import { fullDateTime } from "./time";
+import { formatFileSize } from "./fileMetadata";
 import { formatMediaDuration } from "./media";
 import { localizeSnippet } from "./messageContent";
 import { tierLabel } from "./autoDelete";
@@ -122,8 +123,8 @@ function formatNoticeAt(rfc3339: string | undefined): string {
 }
 
 /**
- * §1.4：系统通知单聊（登录/改密/被踢下线）——没有 sysSegments，按 sys_args 拼多行文本
- * （对齐服务端 buildXxxNoticeText 的行结构，`\n` 连接）。返回 undefined = 非这三个事件之一
+ * §1.4：系统通知单聊（登录/改密/被踢下线/导出完成）——没有 sysSegments，按 sys_args 拼多行文本
+ * （对齐服务端 buildXxxNoticeText 的行结构，`\n` 连接）。返回 undefined = 非这些事件之一
  * → 调用方回退显示 content（服务端预生成的整句，现有行为不变）。
  */
 export function buildSysNoticeText(
@@ -172,6 +173,14 @@ export function buildSysNoticeText(
     );
     lines.push(t("sys.notice.device_kicked.footer"));
     return lines.join("\n");
+  }
+  if (ev === "export_ready") {
+    // PROTOCOL §6.18：sys_args={size_bytes, conv_count, msg_count, expires_at(RFC3339)}，均为字符串。
+    return [
+      t("sys.notice.export_ready.headline"),
+      t("sys.notice.export_ready.summary", { size: formatFileSize(Number(args.size_bytes) || 0), convs: Number(args.conv_count) || 0, msgs: Number(args.msg_count) || 0 }),
+      t("sys.notice.export_ready.footer", { time: formatNoticeAt(args.expires_at) }),
+    ].join("\n");
   }
   return undefined;
 }

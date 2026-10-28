@@ -26,6 +26,7 @@ import { VisibilityPanel, type VisibilityKind } from "./VisibilityPanel";
 import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { DeleteAccountContainer } from "./DeleteAccountPanel";
+import { ExportDataContainer } from "./ExportDataPanel";
 import { deleteAccount } from "../../sdk/accountApi";
 import { wipeOwnerLocalData } from "../../sdk/wipeOwner";
 import { GeneralPanel } from "./GeneralPanel";
@@ -145,6 +146,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const t = useT();
   const { clientRef, setToast, comingSoon, askConfirm } = useAppServices();
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false); // 注销账号二级页（自持，不占 App 状态）
+  const [exportOpen, setExportOpen] = useState(false); // 导出我的数据二级页（自持；隐私页收起时一并关）
   // 隐私页「自动删除消息」账号默认档位：进隐私页取一次最新值（不推帧，AUTO_DELETE_DESIGN §3.3 A）；选择面板开合态见 autoDeleteUi。
   const [autoDeleteDefault, setAutoDeleteDefault] = useState<number | null>(null);
   const autoDeleteOpen = useAutoDeleteDefaultOpen();
@@ -152,7 +154,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const [visibility, setVisibility] = useState<{ lastSeen: Visibility; avatar: Visibility } | null>(null);
   const [visKind, setVisKind] = useState<VisibilityKind | null>(null);
   useEffect(() => {
-    if (!p.privacyOpen) { setAutoDeleteDefault(null); setVisibility(null); setVisKind(null); closeAutoDeleteDefault(); return; }
+    if (!p.privacyOpen) { setAutoDeleteDefault(null); setVisibility(null); setVisKind(null); setExportOpen(false); closeAutoDeleteDefault(); return; }
     let alive = true;
     const c = clientRef.current;
     if (c) getPrivacy(c.authToken).then((v) => { if (!alive) return; setAutoDeleteDefault(v.autoDeleteSec); setVisibility((cur) => cur ?? { lastSeen: v.lastSeen, avatar: v.avatar }); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
@@ -262,7 +264,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           blockedCount={p.blockedList ? p.blockedList.length : null}
           onOpenBlocked={() => p.setBlockedOpen(true)}
           onOpenChangePwd={() => p.setChangePwdOpen(true)}
-          autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault}
+          autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault} onOpenExport={() => setExportOpen(true)}
           visibility={visibility} onOpenVisibility={setVisKind}
           onComingSoon={comingSoon}
           onBack={() => p.setPrivacyOpen(false)}
@@ -285,6 +287,11 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onSaved={(v) => setVisibility((cur) => ({ lastSeen: "contacts", avatar: "everyone", ...cur, [visKind]: v }))}
           onBack={() => setVisKind(null)}
         />
+      )}
+
+      {/* 导出我的数据（数据 ▸ 导出）：关闭即停轮询，重开从 latest 恢复进度。 */}
+      {p.privacyOpen && exportOpen && (
+        <ExportDataContainer key={p.uid} token={() => clientRef.current?.authToken ?? ""} setToast={setToast} onBack={() => setExportOpen(false)} />
       )}
 
       {/* 已屏蔽的用户子面板（从隐私页进入；数据/解除来自 useFriendOps）。 */}

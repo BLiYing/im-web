@@ -9,12 +9,13 @@ import { useT } from "../../i18n";
 /** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/design/PRIVACY_SECURITY_DESIGN.md）：
  *  五组 A~E，仅 A 组两项（已屏蔽的用户 / 修改密码）为 P0 活行，B~E 为灰置 comingSoon 占位。
  *  「已登录设备」按设计不进本页（是设置页独立入口）。纯展示：动作与黑名单计数由 App 传入。 */
-export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, onOpenVisibility, onOpenBlocked, onOpenChangePwd, onOpenAutoDelete, onComingSoon, onBack }: {
+export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, onOpenVisibility, onOpenBlocked, onOpenChangePwd, onOpenAutoDelete, onOpenExport, onComingSoon, onBack }: {
   blockedCount: number | null; // null=未加载/加载中 → 右值留空
   onOpenBlocked: () => void;
   onOpenChangePwd: () => void;
   autoDeleteSec: number | null; // 账号默认档位；null=未加载 → 右值留空
   onOpenAutoDelete: () => void;
+  onOpenExport: () => void; // 数据 ▸ 导出我的数据（活行）
   visibility: { lastSeen: Visibility; avatar: Visibility } | null; // 「谁能看到」当前档位；null=未加载 → 右值留空
   onOpenVisibility: (kind: VisibilityKind) => void;
   onComingSoon: (title: string) => void;
@@ -67,7 +68,7 @@ export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, 
       header: "数据",
       rows: [
         ph("clearAll", "清除所有对话", Trash2, "gray"),
-        ph("export", "导出我的数据", FileUp, "blue"),
+        { id: "export", label: t("ps.row.export_data"), icon: FileUp, iconTint: "blue", chevron: true, onClick: onOpenExport },
       ],
     },
   ];

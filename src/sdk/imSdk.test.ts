@@ -11,6 +11,7 @@ const BACKEND_ERRCODES = new Set<number>([
   100101, 100102, 100103, // 认证鉴权
   200001, 200002, 200003, 200004, 200005, // 用户
   200101, 200102, 200103, 200104, 200105, 200106, // 好友
+  200010, 200011, // 数据导出（PROTOCOL §6.18）
   200110, // 二维码
   300001, 300002, 300003, 300004, 300005, 300006, 300007, 300008, // 消息
   300101, 300102, // 会话
@@ -32,6 +33,10 @@ describe("friendlyMessage 错误码友好中文", () => {
     expect(friendlyMessage(300203, "not a group member")).toBe("你不在该群中");
     expect(friendlyMessage(300202, "invalid group name")).toBe("群名不能为空且不超过 30 字");
     expect(friendlyMessage(300205, "group member limit exceeded")).toBe("群成员已达上限");
+  });
+  it("导出错误码 200010/200011 映射为本地化文案（盖掉后端英文）", () => {
+    expect(friendlyMessage(200010, "export already in progress")).toBe("已有导出任务正在进行");
+    expect(friendlyMessage(200011, "export cooldown")).toBe("24 小时内只能导出一次");
   });
   it("300204 不映射：透传服务端具体原因（如群主需先转让）", () => {
     expect(friendlyMessage(300204, "群主需先转让群主再退群")).toBe("群主需先转让群主再退群");

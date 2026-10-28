@@ -43,4 +43,10 @@ describe("HTTP 日志脱敏", () => {
     expect(formatResponseText('{"token":"jwt"}', null, true)).toBe('{"token":"***"}');
     expect(formatResponseText("private upstream error", "text/plain", false)).toBe("<non-json redacted 22 chars>");
   });
+  it("导出下载链接的一次性 token 不落日志", () => {
+    const safe = sanitizeValue({ url: "/api/v1/exports/download?t=abc.def", other: "/api/v1/x?t=keep" }, true) as Record<string, string>;
+    expect(safe.url).toBe("/api/v1/exports/download?t=***");
+    expect(safe.other).toBe("/api/v1/x?t=keep");
+    expect(formatResponseText('{"data":{"url":"/api/v1/exports/download?t=SECRET&x=1","expires_in":600}}', "application/json", false)).not.toContain("SECRET");
+  });
 });

@@ -178,6 +178,18 @@ describe("buildSysNoticeText", () => {
     expect(s).toContain("· 时间：");
   });
 
+  it("export_ready：三行（标题 / 大小·会话·消息 / 过期时间），数值缺失不出 NaN", () => {
+    const m: ChatMessage = {
+      convId: "c1", from: "777000", content: "兜底整句", contentType: "text", convSeq: 1, timestamp: 0, status: "received",
+      sysEvent: "export_ready", sysArgs: { size_bytes: "2048", conv_count: "3", msg_count: "42", expires_at: "2026-10-27T10:00:00Z" },
+    };
+    const lines = buildSysNoticeText(m, t, "zh-Hans")!.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain("3");
+    expect(lines[1]).toContain("42");
+    expect(buildSysNoticeText({ ...m, sysArgs: undefined }, t, "zh-Hans")).not.toContain("NaN");
+  });
+
   it("sysEvent 非三个通知事件之一 → undefined（调用方回退 content）", () => {
     const m: ChatMessage = { convId: "c1", from: "", content: "整句", contentType: "text", convSeq: 1, timestamp: 0, status: "received", sysEvent: "member_join" };
     expect(buildSysNoticeText(m, t, "zh-Hans")).toBeUndefined();

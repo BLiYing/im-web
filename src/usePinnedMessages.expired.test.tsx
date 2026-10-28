@@ -18,7 +18,8 @@ describe("usePinnedMessages 过期过滤", () => {
   it("已过期的置顶不进集合，未过期的保留", async () => {
     const ref = { current: client([pin(2, 2000), pin(1, 1000)]) } as MutableRefObject<IMClient | null>;
     const { result } = renderHook(() => usePinnedMessages(ref, "c1", (_c, ts) => ts <= 1000));
-    await waitFor(() => expect(Object.keys(result.current).length).toBeGreaterThan(0));
+    // 返回对象一开始就有 active/panelOpen 两个键，不能拿键数当「拉取完成」；等 active 真有内容。
+    await waitFor(() => expect(result.current.active.length).toBeGreaterThan(0));
     const all = JSON.stringify(result.current);
     expect(all).toContain("s2");
     expect(all).not.toContain("s1");

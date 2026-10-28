@@ -22,6 +22,8 @@ export const FRIENDLY_MESSAGES: Record<number, string> = {
   200104: "err.200104",
   200105: "err.200105",
   200106: "friend.requests.empty",
+  200010: "err.200010", // 导出：已有进行中的任务
+  200011: "err.200011", // 导出：24h 冷却（data.retry_after_sec 由调用方读）
   200110: "err.200110",
   300201: "err.300201",
   300202: "err.300202",

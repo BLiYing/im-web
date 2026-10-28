@@ -22,6 +22,11 @@ function dataURIMetadata(value: string): string | null {
   return `<data-uri type=${mediaType} chars=${value.length}>`;
 }
 
+/** 导出下载链接 `/api/v1/exports/download?t=<token>`：token 即身份（免 JWT），不得落日志。 */
+function maskDownloadToken(value: string): string {
+  return value.replace(/(\/exports\/download\?(?:[^"\s#]*&)?t=)[^&"\s#]+/g, "$1***");
+}
+
 export function sanitizeValue(value: unknown, includeBusinessContent: boolean): unknown {
   if (Array.isArray(value)) return value.map((child) => sanitizeValue(child, includeBusinessContent));
   if (value && typeof value === "object") {
@@ -36,7 +41,7 @@ export function sanitizeValue(value: unknown, includeBusinessContent: boolean): 
     }
     return result;
   }
-  if (typeof value === "string") return dataURIMetadata(value) ?? value;
+  if (typeof value === "string") return dataURIMetadata(value) ?? maskDownloadToken(value);
   return value;
 }
 
