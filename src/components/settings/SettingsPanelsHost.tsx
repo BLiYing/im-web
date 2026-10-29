@@ -22,7 +22,7 @@ import { PrivacySecurityPanel } from "./PrivacySecurityPanel";
 import { AutoDeleteDefaultPanel } from "./AutoDeleteDefaultPanel";
 import { closeAutoDeleteDefault, openAutoDeleteDefault, useAutoDeleteDefaultOpen } from "../../autoDeleteUi";
 import { getPrivacy, type Visibility } from "../../sdk/privacyApi";
-import { VisibilityPanel, type VisibilityKind } from "./VisibilityPanel";
+import { VisibilityPanel, VISIBILITY_DEFAULTS, type VisibilityKind } from "./VisibilityPanel";
 import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { DeleteAccountContainer } from "./DeleteAccountPanel";
@@ -167,13 +167,13 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const [autoDeleteDefault, setAutoDeleteDefault] = useState<number | null>(null);
   const autoDeleteOpen = useAutoDeleteDefaultOpen();
   // 「谁能看到」上次上线 / 头像当前档位（同一次 GET /users/me/privacy）与二级单选页开合态。
-  const [visibility, setVisibility] = useState<{ lastSeen: Visibility; avatar: Visibility } | null>(null);
+  const [visibility, setVisibility] = useState<Record<VisibilityKind, Visibility> | null>(null);
   const [visKind, setVisKind] = useState<VisibilityKind | null>(null);
   useEffect(() => {
     if (!p.privacyOpen) { setAutoDeleteDefault(null); setVisibility(null); setVisKind(null); setExportOpen(false); setClearAllOpen(false); closeAutoDeleteDefault(); return; }
     let alive = true;
     const c = clientRef.current;
-    if (c) getPrivacy(c.authToken).then((v) => { if (!alive) return; setAutoDeleteDefault(v.autoDeleteSec); setVisibility((cur) => cur ?? { lastSeen: v.lastSeen, avatar: v.avatar }); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
+    if (c) getPrivacy(c.authToken).then((v) => { if (!alive) return; setAutoDeleteDefault(v.autoDeleteSec); setVisibility((cur) => cur ?? { lastSeen: v.lastSeen, avatar: v.avatar, bio: v.bio, phone: v.phone }); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
     return () => { alive = false; };
   }, [p.privacyOpen, clientRef]);
   const powerSave = usePowerSave();
@@ -299,8 +299,8 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
       {p.privacyOpen && visKind && (
         <VisibilityPanel
           kind={visKind} token={() => clientRef.current?.authToken ?? ""} setToast={setToast}
-          initial={visibility?.[visKind] ?? (visKind === "lastSeen" ? "contacts" : "everyone")}
-          onSaved={(v) => setVisibility((cur) => ({ lastSeen: "contacts", avatar: "everyone", ...cur, [visKind]: v }))}
+          initial={visibility?.[visKind] ?? VISIBILITY_DEFAULTS[visKind]}
+          onSaved={(v) => setVisibility((cur) => ({ ...VISIBILITY_DEFAULTS, ...cur, [visKind]: v }))}
           onBack={() => setVisKind(null)}
         />
       )}

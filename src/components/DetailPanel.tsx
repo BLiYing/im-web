@@ -59,6 +59,8 @@ export interface DetailPanelProps {
   /** 对端的**公开句柄**（GET /users/{id} 的 username），UI 显示为 @xxx。
    *  「用户名」行显示它——绝不能显示 d.peer，那是 10 位随机数字内部 ID（见 docs/UI.md「用户标识」）。 */
   peerUsername: (id: string) => string | undefined;
+  /** 对端权威名片（GET /users/{id}，打开资料面板时拉）：取个性签名 / 手机号——对方档位不允许时服务端不下发，行不占位。 */
+  peerCard: (id: string) => import("../sdk/protocol").UserCard | undefined;
   /**
    * 超级群的成员分页（普通群不传，走 gp.members 全量）。
    * 超级群的 `GET /groups/{id}` 只回我自己，成员表必须由 App 走 groupMembersPage 分页取，
@@ -141,7 +143,7 @@ export function DetailPanel(p: DetailPanelProps) {
   const panelRef = useRef<HTMLElement>(null);
   const {
     detail, conversations, groupInfos, friends, uid, detailTab, detailMsgs, archive, detailMore, manageOpen, adminPanelOpen, groupBans,
-    groupRemark, peerNick, peerUsername, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
+    groupRemark, peerNick, peerUsername, peerCard, peerAvatar, memberLabel, mediaGate, mediaSrc, canManageMember, onShareContact, contactDisplayName, peerDeleted, peerPresenceText,
     onClose, setDetailTab, setDetailMore, setManageOpen, setAdminPanelOpen, openAdminPicker, openTransferPicker, revokeAdmin,
     setContactDraft, setInviteDraft, setMemberMenu, setFileMenu,
     openChat, openInChatSearch, doClearHistory, doToggleBlock, doReportPeer, doRemoveFriend, doLeaveGroup, doDissolveGroup,
@@ -481,9 +483,15 @@ export function DetailPanel(p: DetailPanelProps) {
                 </div>
               )}
 
-              {/* ---- 单聊：备注名 / 用户名 ---- */}
+              {/* ---- 单聊：个性签名? / 备注名 / 用户名 / 手机号? ---- */}
               {!d.isGroup && (
                 <div className="detail-card">
+                  {/* 个性签名排最上（对方档位允许且填了才有，否则整行不占位）；点击复制整段。 */}
+                  {d.peer && peerCard(d.peer)?.bio && (
+                    <button className="detail-row bio" title={tr("profile.bio.copied")} onClick={() => {
+                      void navigator.clipboard?.writeText(peerCard(d.peer!)?.bio ?? "").then(() => setToast(tr("profile.bio.copied")), () => setToast(tr("common.copy_failed")));
+                    }}><span className="detail-row-bio-label">{tr("profile.readonly.bio_label")}</span><span className="detail-row-bio-value">{peerCard(d.peer)?.bio}</span></button>
+                  )}
                   <button className="detail-row" onClick={() => setContactDraft({ peer: d.peer!, remark: conv?.peer_remark ?? "" })}>
                     <span className="detail-row-ic"><SquarePen size={18} /></span><span>{tr("chat.detail.remark_name")}</span>
                     <span className="detail-row-val">{conv?.peer_remark || tr("chat.detail.tap_to_set")}</span><ChevronRight size={16} className="detail-row-chev" />
@@ -498,6 +506,12 @@ export function DetailPanel(p: DetailPanelProps) {
                       if (!handle) return;
                       void navigator.clipboard?.writeText(handle).then(() => setToast(tr("chat.detail.username_copied")), () => setToast(tr("common.copy_failed")));
                     }}><span className="detail-row-ic"><AtSign size={18} /></span><span>{tr("settings.info.username")}</span><span className="detail-row-val accent">@{peerUsername(d.peer)}</span></button>
+                  )}
+                  {/* 手机号：对方「手机号码」档位允许且填了才有；点击复制（Web 无长按语义，同用户名行）。 */}
+                  {d.peer && peerCard(d.peer)?.phone && (
+                    <button className="detail-row" title={tr("chat.detail.phone")} onClick={() => {
+                      void navigator.clipboard?.writeText(peerCard(d.peer!)?.phone ?? "").then(() => setToast(tr("chat.detail.phone_copied")), () => setToast(tr("common.copy_failed")));
+                    }}><span className="detail-row-ic"><Phone size={18} /></span><span>{tr("chat.detail.phone")}</span><span className="detail-row-val">{peerCard(d.peer)?.phone}</span></button>
                   )}
                 </div>
               )}

@@ -1,4 +1,4 @@
-import { Ban, Key, ShieldCheck, KeyRound, Mail, Timer, Phone, Eye, CircleUserRound, AlignLeft, Gift, Trash2, FileUp } from "lucide-react";
+import { Ban, Key, ShieldCheck, KeyRound, Mail, Timer, Phone, Eye, CircleUserRound, AlignLeft, Trash2, FileUp } from "lucide-react";
 import { renderRow, type Row } from "../rows";
 import { SubPanel } from "./SubPanel";
 import { tierLabel } from "../../autoDelete";
@@ -7,7 +7,7 @@ import type { Visibility } from "../../sdk/privacyApi";
 import { useT } from "../../i18n";
 
 /** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/design/PRIVACY_SECURITY_DESIGN.md）：
- *  五组 A~E，仅 A 组两项（已屏蔽的用户 / 修改密码）为 P0 活行，B~E 为灰置 comingSoon 占位。
+ *  五组 A~E：A 组两项、C 自动删除、D「谁能看到」四行、E 数据为活行，B 组为灰置 comingSoon 占位（生日不做，已删）。
  *  「已登录设备」按设计不进本页（是设置页独立入口）。纯展示：动作与黑名单计数由 App 传入。 */
 export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, onOpenVisibility, onOpenBlocked, onOpenChangePwd, onOpenAutoDelete, onOpenExport, onOpenClearAll, onComingSoon, onBack }: {
   blockedCount: number | null; // null=未加载/加载中 → 右值留空
@@ -17,7 +17,7 @@ export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, 
   onOpenAutoDelete: () => void;
   onOpenExport: () => void; // 数据 ▸ 导出我的数据（活行）
   onOpenClearAll: () => void; // 数据 ▸ 清除所有对话（活行，破坏性：不登记设置搜索）
-  visibility: { lastSeen: Visibility; avatar: Visibility } | null; // 「谁能看到」当前档位；null=未加载 → 右值留空
+  visibility: Record<VisibilityKind, Visibility> | null; // 「谁能看到」当前档位；null=未加载 → 右值留空
   onOpenVisibility: (kind: VisibilityKind) => void;
   onComingSoon: (title: string) => void;
   onBack: () => void;
@@ -58,11 +58,10 @@ export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, 
       header: "谁能看到",
       footer: "这些设置决定他人在你的资料页看到多少。",
       rows: [
-        ph("phone", "手机号码", Phone, "green", "我的联系人"),
+        live("phone", t("ps.row.phone_number"), Phone, "green", visibility?.phone),
         live("lastSeen", t("ps.row.last_seen"), Eye, "blue", visibility?.lastSeen),
         live("avatar", t("ps.row.avatar"), CircleUserRound, "purple", visibility?.avatar),
-        ph("bio", "个人简介", AlignLeft, "yellow", "所有人"),
-        ph("birthday", "生日", Gift, "pink", "我的联系人"),
+        live("bio", t("ps.row.bio"), AlignLeft, "yellow", visibility?.bio),
       ],
     },
     {

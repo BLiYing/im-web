@@ -5,24 +5,24 @@ import { fakeClientRef } from "./testing/fakeIMClient";
 import { useProfileEdit, type ProfileEditDeps } from "./useProfileEdit";
 afterEach(cleanup); // 多次 renderHook：卸载前一用例（CODING_STYLE §八）
 function mount(client: Record<string, unknown> = {}) {
-  const c = { fetchMyProfile: vi.fn(async () => ({ nickname: "我", username: "myhandle", avatar_url: "a.png", tags: ["x", "y"] })), updateMyProfile: vi.fn(async (p: Record<string, unknown>) => ({ nickname: p.nickname, username: "myhandle", phone: p.phone, avatar_url: p.avatar_url })), updateMyUsername: vi.fn(async (u: string) => ({ nickname: "新名", username: u, phone: "138", avatar_url: "a.png" })), uploadAvatar: vi.fn(async () => ({ url: "https://cdn/av.jpg" })), ...client };
+  const c = { fetchMyProfile: vi.fn(async () => ({ nickname: "我", username: "myhandle", avatar_url: "a.png", bio: "慢慢来", tags: ["x", "y"] })), updateMyProfile: vi.fn(async (p: Record<string, unknown>) => ({ nickname: p.nickname, username: "myhandle", phone: p.phone, avatar_url: p.avatar_url })), updateMyUsername: vi.fn(async (u: string) => ({ nickname: "新名", username: u, phone: "138", avatar_url: "a.png" })), uploadAvatar: vi.fn(async () => ({ url: "https://cdn/av.jpg" })), ...client };
   const deps: ProfileEditDeps = { clientRef: fakeClientRef(c), setToast: vi.fn() };
   return { ...renderHook(() => useProfileEdit(deps)), deps, c };
 }
 describe("useProfileEdit", () => {
-  it("loadMyInfo 填 myInfo（phone 缺省兜底 \"\"）；openProfile 填草稿（tags 空格连接）", async () => {
+  it("loadMyInfo 填 myInfo（phone 缺省兜底 \"\"）；openProfile 填草稿（bio 原样）", async () => {
     const { result } = mount();
     await act(async () => { await result.current.loadMyInfo(); });
     expect(result.current.myInfo).toEqual({ nickname: "我", username: "myhandle", phone: "", avatar_url: "a.png" });
     await act(async () => { await result.current.openProfile(); });
-    expect(result.current.profileDraft).toEqual({ nickname: "我", username: "myhandle", avatar_url: "a.png", phone: "", tags: "x y" });
+    expect(result.current.profileDraft).toEqual({ nickname: "我", username: "myhandle", avatar_url: "a.png", phone: "", bio: "慢慢来" });
   });
-  it("saveProfile：tags 按空格/逗号切分去空 → updateMyProfile；成功后刷新 myInfo 并关草稿", async () => {
+  it("saveProfile：bio 去首尾空白、不再发 tags → updateMyProfile；成功后刷新 myInfo 并关草稿", async () => {
     const { result, c } = mount();
     await act(async () => { await result.current.openProfile(); });
-    act(() => result.current.setProfileDraft({ nickname: " 新名 ", username: "myhandle", avatar_url: "a.png", phone: "138", tags: "a, b  c" }));
+    act(() => result.current.setProfileDraft({ nickname: " 新名 ", username: "myhandle", avatar_url: "a.png", phone: "138", bio: "  新签名  " }));
     await act(async () => { await result.current.saveProfile(); });
-    expect(c.updateMyProfile).toHaveBeenCalledWith({ nickname: "新名", avatar_url: "a.png", phone: "138", tags: ["a", "b", "c"] });
+    expect(c.updateMyProfile).toHaveBeenCalledWith({ nickname: "新名", avatar_url: "a.png", phone: "138", bio: "新签名" });
     // username 与载入值相同 → **不**发改名请求（否则每次保存都可能撞「用户名已被占用」）。
     expect(c.updateMyUsername).not.toHaveBeenCalled();
     // 保存后**回只读态而不是关面板**（2026-08-30 双态改造）：草稿仍在（供只读态渲染），
@@ -35,7 +35,7 @@ describe("useProfileEdit", () => {
   it("saveProfile：改名失败仍把**已保存成功**的资料本体同步进 myInfo（否则头部一直显旧昵称）", async () => {
     const { result, c, deps } = mount({ updateMyUsername: vi.fn(async () => { throw new Error("用户名已被占用"); }) });
     await act(async () => { await result.current.openProfile(); });
-    act(() => { result.current.enterProfileEditing(); result.current.setProfileDraft({ nickname: "新名", username: "taken", avatar_url: "b.png", phone: "138", tags: "" }); });
+    act(() => { result.current.enterProfileEditing(); result.current.setProfileDraft({ nickname: "新名", username: "taken", avatar_url: "b.png", phone: "138", bio: "" }); });
     await act(async () => { await result.current.saveProfile(); });
     expect(deps.setToast).toHaveBeenCalledWith("用户名未能修改：用户名已被占用");
     // updateMyProfile 已经成功了：昵称/头像/手机号服务端就是新的，头部不能还挂着旧值。
@@ -47,7 +47,7 @@ describe("useProfileEdit", () => {
   it("saveProfile：username 改了才发改名请求，并用它回的名片刷新 myInfo", async () => {
     const { result, c } = mount();
     await act(async () => { await result.current.openProfile(); });
-    act(() => result.current.setProfileDraft({ nickname: "新名", username: "newhandle", avatar_url: "a.png", phone: "138", tags: "" }));
+    act(() => result.current.setProfileDraft({ nickname: "新名", username: "newhandle", avatar_url: "a.png", phone: "138", bio: "" }));
     await act(async () => { await result.current.saveProfile(); });
     expect(c.updateMyUsername).toHaveBeenCalledWith("newhandle");
     expect(result.current.myInfo?.username).toBe("newhandle");
@@ -58,7 +58,7 @@ describe("useProfileEdit", () => {
   it("saveProfile：昵称清空直接拒（回退链止于昵称，空了会露出内部 ID）", async () => {
     const { result, c, deps } = mount();
     await act(async () => { await result.current.openProfile(); });
-    act(() => result.current.setProfileDraft({ nickname: "   ", username: "myhandle", avatar_url: "a.png", phone: "", tags: "" }));
+    act(() => result.current.setProfileDraft({ nickname: "   ", username: "myhandle", avatar_url: "a.png", phone: "", bio: "" }));
     await act(async () => { await result.current.saveProfile(); });
     expect(c.updateMyProfile).not.toHaveBeenCalled();
     expect(deps.setToast).toHaveBeenCalledWith("昵称不能为空");
@@ -93,7 +93,7 @@ describe("useProfileEdit 的只读/编辑双态", () => {
     expect(result.current.profileEditing).toBe(true);
 
     // 改了草稿再取消：应回只读态，且重新拉一次 /users/me（不能把未保存的输入当成权威值留着）
-    act(() => result.current.setProfileDraft({ nickname: "临时改的", username: "tmp", avatar_url: "", phone: "", tags: "" }));
+    act(() => result.current.setProfileDraft({ nickname: "临时改的", username: "tmp", avatar_url: "", phone: "", bio: "" }));
     const before = c.fetchMyProfile.mock.calls.length;
     await act(async () => { result.current.cancelProfileEditing(); });
     expect(result.current.profileEditing).toBe(false);
@@ -124,7 +124,7 @@ describe("useProfileEdit 直进编辑（openProfile({ edit: true })）", () => {
   it("保存成功 = 刷新 myInfo + 关面板 + 「已保存」吐司", async () => {
     const { result, deps } = mount();
     await act(async () => { await result.current.openProfile({ edit: true }); });
-    act(() => result.current.setProfileDraft({ nickname: "新名", username: "myhandle", avatar_url: "a.png", phone: "", tags: "" }));
+    act(() => result.current.setProfileDraft({ nickname: "新名", username: "myhandle", avatar_url: "a.png", phone: "", bio: "" }));
     await act(async () => { await result.current.saveProfile(); });
     expect(result.current.myInfo?.nickname).toBe("新名");
     expect(result.current.profileDraft).toBeNull();

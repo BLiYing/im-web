@@ -60,4 +60,23 @@ describe("VisibilityPanel", () => {
     await waitFor(() => expect(p.onBack).toHaveBeenCalled());
     expect(puts).toEqual([{ avatar_visibility: "nobody" }]);
   });
+
+  it("个人简介 / 手机号码：标题、页脚、PUT 字段各自独立（只带被改的一项）", async () => {
+    const puts: unknown[] = [];
+    stubFetch({ get: {}, putOk: true }, puts);
+    const p = props();
+    const { getByText, unmount } = render(<VisibilityPanel kind="phone" initial="nobody" {...p} />);
+    expect(getByText("手机号码")).toBeTruthy();
+    expect(getByText(/决定谁能在你的资料页看到手机号码/)).toBeTruthy();
+    fireEvent.click(getByText("我的联系人"));
+    await waitFor(() => expect(p.onBack).toHaveBeenCalled());
+    expect(puts).toEqual([{ phone_visibility: "contacts" }]);
+    unmount();
+    const q = props();
+    const r = render(<VisibilityPanel kind="bio" initial="everyone" {...q} />);
+    expect(r.getByText("个人简介")).toBeTruthy();
+    fireEvent.click(r.getByText("无人"));
+    await waitFor(() => expect(q.onBack).toHaveBeenCalled());
+    expect(puts[1]).toEqual({ bio_visibility: "nobody" });
+  });
 });

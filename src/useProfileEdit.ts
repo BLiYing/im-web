@@ -10,7 +10,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
   const { clientRef, setToast } = d;
   // username 是公开句柄（@xxx），与 nickname 是两回事：前者可被搜索到、也是登录名，规则严格；后者随便填。
   const [myInfo, setMyInfo] = useState<{ nickname: string; username: string; phone: string; avatar_url: string } | null>(null); // 设置页顶部资料展示
-  const [profileDraft, setProfileDraft] = useState<{ nickname: string; username: string; avatar_url: string; phone: string; tags: string } | null>(null); // 编辑资料弹窗（null=关闭）
+  const [profileDraft, setProfileDraft] = useState<{ nickname: string; username: string; avatar_url: string; phone: string; bio: string } | null>(null); // 编辑资料弹窗（null=关闭）
   // 打开弹窗时的 username 原值：只有真改了才发改名请求，否则每次保存都可能撞「用户名已被占用」。
   const [loadedUsername, setLoadedUsername] = useState("");
   const [profileBusy, setProfileBusy] = useState(false);
@@ -29,13 +29,13 @@ export function useProfileEdit(d: ProfileEditDeps) {
     } catch { /* 忽略：头像回退首字母圈 */ }
   }, []);
 
-  // 打开"我的资料"面板：拉本人资料填入草稿（tags 以空格连接成可编辑串）。edit=true 时直进编辑态（见 profileDirect）。
+  // 打开"我的资料"面板：拉本人资料填入草稿。edit=true 时直进编辑态（见 profileDirect）。
   const openProfile = useCallback(async (opts?: { edit?: boolean }) => {
     try {
       const p = await clientRef.current?.fetchMyProfile();
       // phone 后端是 omitempty：空时 JSON 无该键 → undefined，须兜底为 ""，否则 input 由非受控变受控告警。
       if (p) {
-        setProfileDraft({ nickname: p.nickname ?? "", username: p.username ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", tags: (p.tags ?? []).join(" ") });
+        setProfileDraft({ nickname: p.nickname ?? "", username: p.username ?? "", avatar_url: p.avatar_url ?? "", phone: p.phone ?? "", bio: p.bio ?? "" });
         setLoadedUsername(p.username ?? "");
         const direct = opts?.edit === true;
         setProfileEditing(direct); // 点头部进来从只读态开始；右上角「编辑」直进编辑态
@@ -46,7 +46,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
     }
   }, []);
 
-  // 保存资料：tags 按空格/逗号切分去空，PUT 整体替换。
+  // 保存资料：PUT 整体替换（bio 给了就替换；tags 不再发，服务端缺省保持原值）。
   const saveProfile = useCallback(async () => {
     if (!profileDraft) return;
     // 昵称必填：全端显示名回退链止于它，清空会让各处露出 10 位数字内部 ID。后端也会拒，这里前置提示。
@@ -60,7 +60,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
         nickname: profileDraft.nickname.trim(),
         avatar_url: profileDraft.avatar_url.trim(),
         phone: profileDraft.phone.trim(),
-        tags: profileDraft.tags.split(/[\s,]+/).filter(Boolean),
+        bio: profileDraft.bio.trim(),
       });
       // 改名走**独立接口**，且只在真改了才发——每次保存都发会把「用户名已被占用」抛给
       // 一个压根没动用户名的用户。资料已保存成功，故改名失败只提示、不回滚、不关弹窗。
@@ -71,7 +71,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
           renamed = await clientRef.current?.updateMyUsername(newName);
           setLoadedUsername(newName);
         } catch (e) {
-          // 资料本体（昵称/头像/手机号/标签）**已经保存成功**了，只是改名这一步失败——
+          // 资料本体（昵称/头像/手机号/签名）**已经保存成功**了，只是改名这一步失败——
           // 必须先把它同步到 myInfo，否则左上角与设置页头部会一直显示旧昵称旧头像，
           // 直到刷新才追上（服务端与界面不一致，用户会以为整次保存都没生效）。
           if (updated) setMyInfo({ nickname: updated.nickname ?? "", username: updated.username ?? "", phone: updated.phone ?? "", avatar_url: updated.avatar_url ?? "" });
@@ -94,7 +94,7 @@ export function useProfileEdit(d: ProfileEditDeps) {
         // 留在页内看到新昵称/新句柄才是完整的反馈闭环（与 iOS exitEditingAfterSave 同）。
         setProfileDraft({
           nickname: fresh.nickname ?? "", username: fresh.username ?? "",
-          avatar_url: fresh.avatar_url ?? "", phone: fresh.phone ?? "", tags: (fresh.tags ?? []).join(" "),
+          avatar_url: fresh.avatar_url ?? "", phone: fresh.phone ?? "", bio: fresh.bio ?? "",
         });
       }
       setProfileEditing(false);

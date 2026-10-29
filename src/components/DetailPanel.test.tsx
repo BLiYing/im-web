@@ -37,7 +37,7 @@ function base(over: Partial<DetailPanelProps> = {}): DetailPanelProps {
     detail: { convId: "u_u1_u_u2", isGroup: false, peer: "u2" },
     conversations: [peerConv()], groupInfos: { g1: gp() }, friends: [friendOf("u2")], uid: "u1",
     detailTab: "media", detailMsgs: [], detailMore: false, manageOpen: false, adminPanelOpen: false, groupBans: null,
-    groupRemark: () => "", peerNick: () => "小明", peerUsername: () => "xiaoming", peerAvatar: () => undefined,
+    groupRemark: () => "", peerNick: () => "小明", peerUsername: () => "xiaoming", peerCard: () => undefined, peerAvatar: () => undefined,
     memberLabel: (m: GroupMember) => m.group_nickname || m.nickname || m.user_id, mediaGate: () => undefined,
     mediaSrc: (m: { content: string }) => m.content, canManageMember: () => true,
     onShareContact: vi.fn(), contactDisplayName: (id: string, fb?: string) => fb || id,
@@ -95,6 +95,28 @@ describe("DetailPanel · 单聊", () => {
     const { getByTitle } = mount(base({ peerUsername: () => "xiaoming" }));
     fireEvent.click(getByTitle("点击复制用户名"));
     expect(writeText).toHaveBeenCalledWith("xiaoming");
+  });
+
+  // 个性签名 / 手机号：对方档位允许且填了才有；顺序 签名 → 备注名 → 用户名 → 手机号。
+  it("对端名片带 bio / phone：签名在最上、手机号在用户名之后，点击复制", () => {
+    const writeText = vi.fn(async () => {});
+    Object.assign(navigator, { clipboard: { writeText } });
+    const { getByText, getByTitle } = mount(base({ peerCard: () => ({ user_id: "u2", nickname: "小明", bio: "慢慢来", phone: "139", tags: [] } as never) }));
+    const card = getByText("慢慢来").closest(".detail-card")!; // 页上还有别的 detail-card（置顶 / 免打扰等），只看信息卡
+    const rows = Array.from(card.querySelectorAll(".detail-row")).map((r) => r.textContent ?? "");
+    const iBio = rows.findIndex((t) => t.includes("慢慢来"));
+    const iRemark = rows.findIndex((t) => t.includes("备注名"));
+    const iUser = rows.findIndex((t) => t.includes("@xiaoming"));
+    const iPhone = rows.findIndex((t) => t.includes("139"));
+    expect([iBio, iRemark, iUser, iPhone]).toEqual([0, 1, 2, 3]);
+    fireEvent.click(getByTitle("手机号"));
+    expect(writeText).toHaveBeenCalledWith("139");
+  });
+
+  it("对端名片不带 bio / phone（对方档位不允许或没填）：两行整行不占位", () => {
+    const { queryByText } = mount(base({ peerCard: () => ({ user_id: "u2", nickname: "小明", tags: [] } as never) }));
+    expect(queryByText("个性签名")).toBeNull();
+    expect(queryByText("手机号")).toBeNull();
   });
 
   // 拿不到句柄时整行隐藏——不显示"未设置"，更不回退到内部 ID。

@@ -1042,6 +1042,7 @@ export default function App() {
     setMyInfo(null); setPassword(""); setAuthErr("");
     setGroupConvId("");
     setGroupInfos({});
+    setPeerCards({}); // 对端名片含按「查看者」裁剪的 bio / phone / remark：换号后不能沿用上一个账号看到的
     setDetail(null);
     setGroupsModal(null);
     resetDownloadState(); // 下载门控缓存（M4-7）：revoke blob / 清下载态 / 清解门控与失效标记（见 useMediaDownload）
@@ -3193,7 +3194,7 @@ export default function App() {
           membersLoading={superLoading}
           conversations={conversations} groupInfos={groupInfos} friends={friends} uid={uid}
           detailTab={detailTab} detailMsgs={detailArchive.merge(detailMsgs)} archive={detailArchive} detailMore={detailMore} manageOpen={manageOpen} adminPanelOpen={adminPanelOpen} groupBans={groupBans}
-          groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
+          groupRemark={groupRemark} peerNick={peerNick} peerUsername={peerUsername} peerCard={(id) => peerCards[id]} peerAvatar={peerAvatar} memberLabel={groupMemberLabel} mediaGate={mediaGate} mediaSrc={mediaSrc} canManageMember={canManageMember}
           onShareContact={shareContactCard}
           contactDisplayName={(userId, fallback) => displayNameOf(userId, remarks, fallback)}
           peerDeleted={!!detail.peer && (deletedPeers.has(detail.peer) || isPeerDeleted(detail.peer))}

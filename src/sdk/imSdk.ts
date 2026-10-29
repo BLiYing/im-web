@@ -393,7 +393,8 @@ export class IMClient extends IMRestApi {
   }
 
   /** 整体更新本人资料（PUT 语义）：PUT /api/v1/users/me。 */
-  async updateMyProfile(p: { nickname: string; avatar_url: string; phone: string; tags: string[] }): Promise<MyProfile> {
+  /** 不再发 tags：服务端缺省 = 保持原值，发空数组会把老标签清掉。 */
+  async updateMyProfile(p: { nickname: string; avatar_url: string; phone: string; bio: string }): Promise<MyProfile> {
     const data = await this.api("/api/v1/users/me", { method: "PUT", body: JSON.stringify(p) });
     return data as MyProfile;
   }

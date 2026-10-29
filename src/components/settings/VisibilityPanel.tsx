@@ -5,19 +5,24 @@ import { getPrivacy, putPrivacy, VISIBILITY_LEVELS, type PrivacyPatch, type Priv
 import { useT } from "../../i18n";
 
 /** 「谁能看到」可配置项：行名 / 页脚 / 取值字段（PRIVACY_VISIBILITY_DESIGN §4）。 */
-export type VisibilityKind = "lastSeen" | "avatar";
+export type VisibilityKind = "lastSeen" | "avatar" | "bio" | "phone";
 export const VISIBILITY_META: Record<VisibilityKind, { titleKey: string; footerKey: string }> = {
   lastSeen: { titleKey: "ps.row.last_seen", footerKey: "ps.visibility.last_seen.footer" },
   avatar: { titleKey: "ps.row.avatar", footerKey: "ps.visibility.avatar.footer" },
+  bio: { titleKey: "ps.row.bio", footerKey: "ps.visibility.bio.footer" },
+  phone: { titleKey: "ps.row.phone_number", footerKey: "ps.visibility.phone.footer" },
 };
 
 /** 档位 → i18n 键（行右值与单选项共用）。 */
 export const visibilityKey = (v: Visibility) => `ps.visibility.${v}`;
 
 /** 只带被改那一项的 PUT 入参（避免覆盖其它隐私项，如自动删除默认档位）。 */
-export const visibilityPatch = (kind: VisibilityKind, v: Visibility): PrivacyPatch => (kind === "lastSeen" ? { lastSeen: v } : { avatar: v });
+export const visibilityPatch = (kind: VisibilityKind, v: Visibility): PrivacyPatch => ({ [kind]: v });
 
-/** 隐私与安全 ▸ 谁能看到 ▸ 上次上线 / 头像：三档单选页。进页 GET 取最新值；选中即保存（不弹确认），
+/** 各项出厂默认档（GET 未回来 / 老服务端缺字段时用）。 */
+export const VISIBILITY_DEFAULTS: Record<VisibilityKind, Visibility> = { lastSeen: "contacts", avatar: "everyone", bio: "everyone", phone: "nobody" };
+
+/** 隐私与安全 ▸ 谁能看到 ▸ 上次上线 / 头像 / 个人简介 / 手机号码：三档单选页。进页 GET 取最新值；选中即保存（不弹确认），
  *  成功返回上一页并回传新值，失败 toast `ps.visibility.save_failed` 且选中态回滚。复用 `.radio-row` 单选组。 */
 export function VisibilityPanel({ kind, token, initial, setToast, onSaved, onBack }: {
   kind: VisibilityKind;

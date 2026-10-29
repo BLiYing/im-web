@@ -69,7 +69,7 @@ export function ContactsTab(p: ContactsTabProps) {
                     <div className="convpeer">{labelOf(u.user_id, u.nickname, u.username)}</div>
                     {/* 副标题 = @句柄（+ 标签）。绝不显示 user_id——那是 10 位随机数字内部 ID
                         （docs/UI.md「用户标识」）。句柄缺失时只留标签。 */}
-                    <div className="convlast">{[u.username ? `@${u.username}` : "", u.tags.join(" ")].filter(Boolean).join(" · ")}</div>
+                    <div className="convlast">{u.username ? `@${u.username}` : ""}</div>
                   </div>
                   <div className="row-actions">
                     {st === "accepted" ? (

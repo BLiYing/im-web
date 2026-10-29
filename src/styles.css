@@ -1085,6 +1085,11 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .settings-row.info { cursor: default; }
 .settings-row.info .row-label { color: var(--text); }
 .settings-row.info .row-value { margin-left: auto; color: var(--text-secondary); font-size: 13px; }
+/* 个性签名行（我的资料只读卡）：上小字标签 12、下值 15，多行换行不截断（PROFILE_BIO_DESIGN §3.3） */
+.settings-bio { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 8px 14px; border: 0; background: none; text-align: left; cursor: pointer; }
+.settings-bio-label { font-size: 12px; color: var(--text-secondary); }
+.settings-bio-value { font-size: 15px; color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+.settings-group .settings-bio + .settings-row { border-top: 1px solid var(--separator); }
 /* 顶部名片 */
 .settings-profile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-4) 0 var(--space-3); }
 .settings-avatar { width: 84px; height: 84px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 30px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
@@ -1102,6 +1107,10 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 .edit-field:last-child { border-bottom: 0; }
 .edit-field span { font-size: 12px; color: var(--text-secondary); }
 .edit-field input { border: 0; background: none; color: var(--text); font-size: 15px; padding: 4px 0; outline: none; }
+.edit-field textarea { border: 0; background: none; color: var(--text); font: inherit; font-size: 15px; padding: 4px 0 18px; outline: none; resize: none; width: 100%; }
+.edit-field-bio { position: relative; }
+.edit-bio-count { position: absolute; right: 14px; bottom: 8px; font-style: normal; font-size: 12px; color: var(--text-secondary); }
+.edit-bio-count.warn { color: var(--danger); }
 
 /* 通用设置 ▸ 聊天壁纸：操作卡片 + 三列预设宫格，对齐移动端截图。 */
 .wallpaper-panel { z-index: 50; }
@@ -1414,6 +1423,10 @@ button.detail-row:hover { background: var(--surface-hover); }
 .entry-circle { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--on-accent); background: var(--accent); }
 .settings-row.list-entry { min-height: 74px; }  /* 例外页：与下方头像 52 的例外行同高（settings-row 上下 padding 11） */
 .detail-row-ic { flex-shrink: 0; color: var(--text-secondary); display: flex; }
+/* 对方个性签名行：纵向，上小字标签 12、下值 15（PROFILE_BIO_DESIGN §3.3） */
+.detail-row.bio { flex-direction: column; align-items: flex-start; gap: 2px; }
+.detail-row-bio-label { font-size: 12px; color: var(--text-secondary); }
+.detail-row-bio-value { font-size: 15px; color: var(--text); white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
 .detail-row.accent, .detail-row.accent .detail-row-ic { color: var(--accent); }
 /* 危险行（转让群组）：整行红——与详情页底部「解散群组」同族。本页唯一的红色例外，有意为之。 */
 .detail-row.danger, .detail-row.danger .detail-row-ic, .detail-row.danger .detail-row-chev { color: var(--danger); }

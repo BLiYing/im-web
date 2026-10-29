@@ -52,7 +52,7 @@ describe("DeleteAccountPanel", () => {
 });
 
 describe("EditProfilePanel 注销入口", () => {
-  const props = { draft: { nickname: "李默", username: "limo", avatar_url: "", phone: "", tags: "" }, uid: "u", busy: false,
+  const props = { draft: { nickname: "李默", username: "limo", avatar_url: "", phone: "", bio: "" }, uid: "u", busy: false,
     onEnterEditing: vi.fn(), onCancelEditing: vi.fn(), onChange: vi.fn(), onSave: vi.fn(), onPickAvatar: vi.fn(), onBack: vi.fn() };
   it("只读态底部有红字入口 + 脚注，点击回调", () => {
     const onDeleteAccount = vi.fn();

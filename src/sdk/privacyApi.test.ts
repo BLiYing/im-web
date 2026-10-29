@@ -19,13 +19,13 @@ describe("档位解析", () => {
     expect(parseVisibility(undefined, "contacts")).toBe("contacts");
     expect(parseVisibility(3, "contacts")).toBe("contacts");
   });
-  it("GET：缺字段用默认（上次上线 contacts / 头像 everyone）", async () => {
+  it("GET：缺字段用默认（上次上线 contacts / 头像 everyone / 个人简介 everyone / 手机号码 nobody）", async () => {
     stubFetch({ auto_delete_default_sec: 86400 });
-    expect(await getPrivacy("t")).toEqual({ autoDeleteSec: 86400, lastSeen: "contacts", avatar: "everyone" });
+    expect(await getPrivacy("t")).toEqual({ autoDeleteSec: 86400, lastSeen: "contacts", avatar: "everyone", bio: "everyone", phone: "nobody" });
   });
   it("GET：读出服务端档位", async () => {
-    stubFetch({ auto_delete_default_sec: 0, last_seen_visibility: "nobody", avatar_visibility: "contacts" });
-    expect(await getPrivacy("t")).toEqual({ autoDeleteSec: 0, lastSeen: "nobody", avatar: "contacts" });
+    stubFetch({ auto_delete_default_sec: 0, last_seen_visibility: "nobody", avatar_visibility: "contacts", bio_visibility: "nobody", phone_visibility: "everyone" });
+    expect(await getPrivacy("t")).toEqual({ autoDeleteSec: 0, lastSeen: "nobody", avatar: "contacts", bio: "nobody", phone: "everyone" });
   });
 });
 
@@ -34,6 +34,8 @@ describe("PUT 部分更新", () => {
     expect(patchBody({ lastSeen: "nobody" })).toEqual({ last_seen_visibility: "nobody" });
     expect(patchBody({ avatar: "contacts" })).toEqual({ avatar_visibility: "contacts" });
     expect(patchBody({ autoDeleteSec: 0 })).toEqual({ auto_delete_default_sec: 0 }); // 0 是合法档位，不能被当缺省丢掉
+    expect(patchBody({ bio: "nobody" })).toEqual({ bio_visibility: "nobody" });
+    expect(patchBody({ phone: "contacts" })).toEqual({ phone_visibility: "contacts" });
   });
   it("改上次上线：请求体不带 auto_delete_default_sec / avatar_visibility", async () => {
     const bodies: unknown[] = [];

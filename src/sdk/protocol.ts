@@ -327,6 +327,10 @@ export interface UserCard {
   username?: string;
   nickname: string;
   avatar_url: string;
+  /** 仅 GET /users/{id}：对方「手机号码」档位允许且填了才有（PROFILE_BIO_DESIGN）；搜索 / 列表恒无。 */
+  phone?: string;
+  /** 个性签名；可见性同 phone，对应「个人简介」档位。 */
+  bio?: string;
   tags: string[];
   status: string;
   /** 已注销（匿名化后）账号：端上一律显示「已注销用户」+ 默认头像（DELETE_ACCOUNT_DESIGN §5；待与 PROTOCOL 对账）。 */
@@ -341,6 +345,8 @@ export interface MyProfile {
   nickname: string;
   avatar_url: string;
   phone: string;
+  /** 个性签名（≤70 字符）；空时服务端不下发（omitempty）。 */
+  bio?: string;
   tags: string[];
   status: string;
 }
