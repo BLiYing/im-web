@@ -20,7 +20,8 @@ const gone = (m: ChatMessage, cid: string, floor: number): boolean => m.convId =
 
 /** `advanced=false`（本标签位点没抬高：本机删除的回声帧、或同进程列表对齐已先清过）不重复清 UI；
  *  聊天页只在本机删除动作时关（别端删除不关，对齐 iOS）。 */
-export interface ClearCtx { source: "local" | "frame" | "align"; retained: boolean }
+export interface ClearCtx { source: "local" | "frame" | "align"; retained: boolean; batch?: boolean }
+// batch=清除所有对话：成百上千个会话一次到位，置顶横幅的服务端重拉只给正开着的会话做（其余会话的置顶已被 pinnedDrop 当场摘净）。
 
 export function makeConvClearedHandler<V extends { m: ChatMessage }>(d: ConvClearedDeps<V>): (cid: string, floor: number, advanced: boolean, ctx: ClearCtx) => void {
   return (cid, floor, advanced, ctx) => {
@@ -29,7 +30,7 @@ export function makeConvClearedHandler<V extends { m: ChatMessage }>(d: ConvClea
       d.setDetailMsgs((prev) => prev.filter((m) => !gone(m, cid, floor)));
       d.dropArchive(cid, floor);
       d.pinnedDrop(cid, floor);   // 位点以内的置顶当场摘（纯本地），再与服务端对齐
-      d.pinnedRefresh(cid);
+      if (!ctx.batch || d.currentConv() === cid) d.pinnedRefresh(cid);
       d.setViewer((v) => (v && gone(v.m, cid, floor) ? null : v));
       d.setTextReader((r) => (r && gone(r, cid, floor) ? null : r));
     }

@@ -94,6 +94,9 @@ export function createDesktopLocalStore(bridge: unknown): LocalStore | null {
     clearMessages: (owner: string, convId: string, knownLatest = 0, exact = false) =>
       call("clearMessages", undefined, () => b.call("clearMessages", [owner, convId, knownLatest, exact])),
 
+    clearMessagesBatch: (owner: string, items: { convId: string; at: number }[]) =>
+      call("clearMessagesBatch", undefined, () => b.call("clearMessagesBatch", [owner, items])),
+
     wipeOwner: (owner: string) => call("wipeOwner", undefined, () => b.call("wipeOwner", [owner])),
 
     advanceSyncCursor: (owner: string, convId: string, convSeq: number) =>

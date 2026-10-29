@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { saveMessage, saveRejected, applyMsgOpLocal, loadConversation, saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage, markMessageDeleted, loadDeletedSeqs } from "./localStore";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { saveMessage, saveRejected, applyMsgOpLocal, loadConversation, saveConversations, loadConversations, loadSyncCursor, advanceSyncCursor, saveIncomingMessage, markMessageDeleted, loadDeletedSeqs, clearMessagesBatch, loadClearedUpTo } from "./localStore";
 import { searchMessages } from "./localStore.search";
 import type { ChatMessage, Conversation } from "./protocol";
 
@@ -307,4 +307,24 @@ describe("localStore 会话列表缓存（localStorage）", () => {
   it("无缓存返回空数组", () => {
     expect(loadConversations("never")).toEqual([]);
   });
+});
+
+describe("clearMessagesBatch 事务异常", () => {
+  it("事务中途抛错（abort）：整批回滚、Promise 不悬挂、不抛", async () => {
+    const o = "oBatchAbort";
+    await saveMessage(o, msg("c1", 3, "a"));
+    await saveMessage(o, msg("c2", 4, "a"));
+    const orig = IDBObjectStore.prototype.put;
+    let n = 0;
+    const spy = vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, ...a: Parameters<typeof orig>) {
+      if (++n === 2) throw new Error("boom");
+      return orig.apply(this, a);
+    });
+    try {
+      await clearMessagesBatch(o, [{ convId: "c1", at: 3 }, { convId: "c2", at: 4 }]);
+    } finally { spy.mockRestore(); }
+    expect((await loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([3]);
+    expect((await loadConversation(o, "c2")).map((m) => m.convSeq)).toEqual([4]);
+    expect(await loadClearedUpTo(o, "c1")).toBe(0);
+  }, 3000);
 });

@@ -62,4 +62,14 @@ describe("makeConvClearedHandler —— 会话被清除到位点后 UI 各处同
     expect(b.d.clearThrough).toHaveBeenCalledWith("c1", 20);
     expect(b.d.closeChat).not.toHaveBeenCalled();
   });
+  it("批量（清除所有对话）：置顶服务端重拉只给正开着的会话，其余会话不发网络请求；本地清理照做", () => {
+    const t = deps("c1");
+    const h = makeConvClearedHandler(t.d);
+    h("c2", 20, true, { source: "align", retained: false, batch: true });
+    expect(t.d.pinnedRefresh).not.toHaveBeenCalled();
+    expect(t.d.pinnedDrop).toHaveBeenCalledWith("c2", 20);
+    h("c1", 20, true, { source: "align", retained: false, batch: true });
+    expect(t.d.pinnedRefresh).toHaveBeenCalledWith("c1");
+    expect(t.d.closeChat).not.toHaveBeenCalled();   // 正开着的聊天页保持打开
+  });
 });

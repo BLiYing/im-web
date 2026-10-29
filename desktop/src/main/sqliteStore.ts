@@ -223,6 +223,35 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
     }
   }
 
+  /** 在调用方已开的事务里清一个会话（clearMessages / clearMessagesBatch 共用）。语义见 LocalStore.clearMessages。 */
+  const clearOne = (owner: string, convId: string, knownLatest: number, exact: boolean): void => {
+    const maxLocal = (db.prepare("SELECT MAX(conv_seq) AS m FROM messages WHERE owner = ? AND conv_id = ?")
+      .get(owner, convId) as { m: number | null }).m ?? 0;
+    const cursor = (getCursor.get(cursorKeyOf(owner, convId)) as { conv_seq: number } | undefined)?.conv_seq ?? 0;
+    const prev = readRanges(owner, convId);
+    const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    if (exact) { // 精确模式（§6.7.1，与 im-web localStore.web.ts 平行）：位点 = max(已有位点, knownLatest)，只清 (0,位点]
+      const fl = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId));
+      db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ? AND conv_seq > 0 AND conv_seq <= ?").run(owner, convId, fl);
+      const base = prev?.ranges ?? (cursor > 0 ? [{ lo: 1, hi: cursor }] : []);
+      const clipped = normalizeRanges(base.filter((r) => r.hi > fl).map((r) => ({ lo: Math.max(r.lo, fl + 1), hi: r.hi })));
+      writeRanges(owner, convId, clipped, prev?.head ?? 0);
+      if (fl > 0) {
+        bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, fl);
+        db.prepare("UPDATE sync_cursors SET cleared_up_to = MAX(cleared_up_to, ?) WHERE id = ?").run(fl, cursorKeyOf(owner, convId));
+      }
+      return;
+    }
+    const floor = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId), num(cursor), num(prev?.head), num(maxLocal));
+    db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ?").run(owner, convId);
+    writeRanges(owner, convId, [], prev?.head ?? 0);
+    if (floor > 0) {
+      bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, floor);
+      db.prepare("UPDATE sync_cursors SET cleared_up_to = MAX(cleared_up_to, ?) WHERE id = ?")
+        .run(floor, cursorKeyOf(owner, convId));
+    }
+  };
+
   return {
     name: "desktop-sqlite",
 
@@ -360,33 +389,16 @@ export function createSqliteStore(path: string, onWarn?: StoreWarn) {
       // （删掉墓碑会让重同步把删过的消息复活）。位点 = max(已有位点, knownLatest, 区间行 head, 游标, 本地最大 seq)，
       // 与 im-web `clearFloor.ts#floorAtClear` 平行。清空而不抬位点的话，进会话会把服务端那一页整页拉回来。
       guard("conversation_clear_failed", { conv_id: convId }, undefined, () => {
-        db.transaction(() => {
-          const maxLocal = (db.prepare("SELECT MAX(conv_seq) AS m FROM messages WHERE owner = ? AND conv_id = ?")
-            .get(owner, convId) as { m: number | null }).m ?? 0;
-          const cursor = (getCursor.get(cursorKeyOf(owner, convId)) as { conv_seq: number } | undefined)?.conv_seq ?? 0;
-          const prev = readRanges(owner, convId);
-          const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
-          if (exact) { // 精确模式（§6.7.1，与 im-web localStore.web.ts 平行）：位点 = max(已有位点, knownLatest)，只清 (0,位点]
-            const fl = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId));
-            db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ? AND conv_seq > 0 AND conv_seq <= ?").run(owner, convId, fl);
-            const base = prev?.ranges ?? (cursor > 0 ? [{ lo: 1, hi: cursor }] : []);
-            const clipped = normalizeRanges(base.filter((r) => r.hi > fl).map((r) => ({ lo: Math.max(r.lo, fl + 1), hi: r.hi })));
-            writeRanges(owner, convId, clipped, prev?.head ?? 0);
-            if (fl > 0) {
-              bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, fl);
-              db.prepare("UPDATE sync_cursors SET cleared_up_to = MAX(cleared_up_to, ?) WHERE id = ?").run(fl, cursorKeyOf(owner, convId));
-            }
-            return;
-          }
-          const floor = Math.max(0, num(knownLatest), clearedFloorOf(owner, convId), num(cursor), num(prev?.head), num(maxLocal));
-          db.prepare("DELETE FROM messages WHERE owner = ? AND conv_id = ?").run(owner, convId);
-          writeRanges(owner, convId, [], prev?.head ?? 0);
-          if (floor > 0) {
-            bumpCursor.run(cursorKeyOf(owner, convId), owner, convId, floor);
-            db.prepare("UPDATE sync_cursors SET cleared_up_to = MAX(cleared_up_to, ?) WHERE id = ?")
-              .run(floor, cursorKeyOf(owner, convId));
-          }
-        })();
+        db.transaction(() => clearOne(owner, convId, knownLatest, exact))();
+      });
+    },
+
+    // 批量精确清除（「清除所有对话」）：整批一个事务，逐项语义同 clearMessages(..., exact=true)。
+    async clearMessagesBatch(owner: string, items: { convId: string; at: number }[]): Promise<void> {
+      const list = Array.isArray(items) ? items.filter((i) => i && i.convId) : [];
+      if (!owner || list.length === 0) return;
+      guard("conversation_clear_batch_failed", { count: list.length }, undefined, () => {
+        db.transaction(() => { for (const it of list) clearOne(owner, it.convId, it.at, true); })();
       });
     },
 

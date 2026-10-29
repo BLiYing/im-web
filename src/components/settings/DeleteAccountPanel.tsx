@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Eye, EyeOff, TriangleAlert } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react";
 import { useT } from "../../i18n";
 import { useDeleteAccount, type DeleteAccountState } from "../../useDeleteAccount";
-import { SubPanel } from "./SubPanel";
+import { DangerConfirmPage } from "./DangerConfirmPage";
 
 /** 注销账号二级页（DELETE_ACCOUNT_DESIGN §3 / §4 Web 列，草图 DELETE_ACCOUNT_UX_SKETCH §C/§D）。
  *  风格参照 ChangePasswordPanel；状态与提交全在 useDeleteAccount，本组件纯展示。
@@ -12,15 +12,12 @@ export function DeleteAccountPanel({ state, onBack, onOpenGroup }: { state: Dele
   const [reveal, setReveal] = useState(false);
   const blocked = state.ownedGroups.length > 0;
   return (
-    <SubPanel className="delete-account-panel" title={t("delete_account.title")} onBack={onBack}>
-      <div className="delacct-warn" aria-hidden="true"><TriangleAlert size={30} /></div>
-      <div className="delacct-head">{t("delete_account.header")}</div>
-      <div className="settings-group">
-        {[1, 2, 3, 4].map((n) => (
-          <div className="delacct-li" key={n}><span aria-hidden="true">•</span><span>{t(`delete_account.consequence_${n}`)}</span></div>
-        ))}
-      </div>
-      <div className="delacct-tip">{t("delete_account.cooldown_hint")}</div>
+    <DangerConfirmPage
+      className="delete-account-panel" title={t("delete_account.title")} headline={t("delete_account.header")}
+      bullets={[1, 2, 3, 4].map((n) => t(`delete_account.consequence_${n}`))} tip={t("delete_account.cooldown_hint")}
+      error={state.error} errorClass="pwd-error" buttonLabel={t("delete_account.title")}
+      busy={state.busy} disabled={!state.canSubmit} onSubmit={() => void state.submit()} onBack={onBack}
+    >
       {blocked && (
         <div className="delacct-owned" role="alert">
           {t("delete_account.owned_groups")}<br />
@@ -39,11 +36,7 @@ export function DeleteAccountPanel({ state, onBack, onOpenGroup }: { state: Dele
         <button type="button" className="icon-btn" disabled={blocked} onClick={() => setReveal((v) => !v)}
           aria-label={t(reveal ? "password.eye.hide" : "password.eye.show")}>{reveal ? <EyeOff size={18} /> : <Eye size={18} />}</button>
       </div>
-      {state.error && <div className="pwd-error">{state.error}</div>}
-      <button className="delacct-btn" disabled={!state.canSubmit} onClick={() => void state.submit()}>
-        {state.busy ? <span className="btn-spinner keep-anim" aria-hidden="true" /> : null}{t("delete_account.title")}
-      </button>
-    </SubPanel>
+    </DangerConfirmPage>
   );
 }
 

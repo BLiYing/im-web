@@ -1021,6 +1021,7 @@ button.fav-check.on { background: var(--accent); border-color: var(--accent); co
 /* iOS 设置图标：圆角色块 + 白字形（对齐 IMSettingsViewController 30×30 / 圆角7 / 白 glyph）。 */
 .row-icon-tile { width: 29px; height: 29px; flex-shrink: 0; border-radius: 7px; display: grid; place-items: center; color: var(--on-media); }
 .row-icon-tile.gray { background: var(--ic-gray); }
+.row-icon-tile.danger { background: var(--danger); }   /* 破坏性入口（清除所有对话，CLEAR_ALL §2） */
 .row-icon-tile.red { background: var(--ic-red); }
 .row-icon-tile.orange { background: var(--ic-orange); }
 .row-icon-tile.yellow { background: var(--ic-yellow); }
@@ -1649,12 +1650,13 @@ button.detail-row.danger:hover { background: color-mix(in srgb, var(--danger) 8%
 .delacct-pwd input { flex: 1; min-width: 0; padding: 10px var(--space-4); border: 0; background: transparent; color: var(--text); font-size: 15px; outline: none; }
 .delacct-btn { display: flex; width: 100%; height: 48px; margin-top: var(--space-3); align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: var(--radius-card); background: var(--danger); color: var(--on-accent); font-size: 15px; cursor: pointer; }
 .delacct-btn:disabled { opacity: .4; cursor: not-allowed; }
+.clear-all-panel .auth-err { padding: 8px 14px 0; line-height: 1.5; }   /* 清除所有对话页的错误行：与 .pwd-error 同间距 */
 /* 我的资料页底部入口：与 .settings-logout 同款按钮（紧贴上一组），脚注 13px --text-secondary。 */
 .profile-delete-btn { margin-top: 0; }
 .settings-foot.profile-delete-foot { margin-top: 6px; padding: 0 var(--space-4); }
 /* 层叠：隐私页盖在设置页(30)之上；黑名单/修改密码是从隐私页再进一层，盖在隐私页之上。 */
 .privacy-panel { z-index: 40; }
-.blocked-panel, .changepwd-panel, .autodel-panel, .visibility-panel, .export-panel { z-index: 50; }
+.blocked-panel, .changepwd-panel, .autodel-panel, .visibility-panel, .export-panel, .clear-all-panel { z-index: 50; }
 /* 导出我的数据：按钮复用 .delacct-btn 的版型，换成 accent / 中性底（无新令牌）。 */
 .export-btn { background: var(--accent); }
 .export-btn-neutral { background: var(--neutral-control); color: var(--text); }

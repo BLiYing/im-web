@@ -13,7 +13,7 @@ export interface ClearHost {
   raiseCleared(convId: string, seq: number): void;
   updateSynced(convId: string, seq: number): void;
   onRanges(convId: string): void;
-  onConvCleared(convId: string, floor: number, advanced: boolean, ctx: { source: ClearSource; retained: boolean }): void;
+  onConvCleared(convId: string, floor: number, advanced: boolean, ctx: { source: ClearSource; retained: boolean; batch?: boolean }): void;
 }
 
 /** 清空聊天记录（仅本机，§6.7）：存储事务里删消息 + 清区间 + 抬位点 + 推游标，再对齐内存镜像。`knownLatest` 传会话列表 latest（head/游标这里补）。 */
@@ -31,7 +31,7 @@ export async function clearConversationImpl(h: ClearHost, convId: string, knownL
 }
 
 /** 清空后重建区间镜像：精确清除会留下位点之后的段（存储里还在），镜像不能整个丢掉，否则那些真消息被当成「没下载」。 */
-async function reloadRangesAfterClear(h: ClearHost, convId: string, floor: number): Promise<void> {
+export async function reloadRangesAfterClear(h: ClearHost, convId: string, floor: number): Promise<void> {
   const stored = await loadRanges(h.uid, convId).then((r) => r.ranges).catch(() => [] as SeqRange[]);
   const kept = normalizeRanges([...clipRangesThrough(h.convRanges.get(convId) ?? [], floor), ...clipRangesThrough(stored, floor)]);
   if (kept.length > 0) h.convRanges.set(convId, kept); else h.convRanges.delete(convId);

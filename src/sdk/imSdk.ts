@@ -24,6 +24,7 @@ import { pendingToMessage, type PendingSend } from "./pendingSend";
 import { LOG_TAG, logger } from "../logging/logger";
 import { alignClearedFromList } from "./clearAlign";
 import { clearConversationImpl, clearToFloorImpl, type ClearHost, type ClearSource } from "./clearRoutine";
+import { clearAllToFloorsImpl } from "./clearAll";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, type UploadProgressHandler } from "./http";
 // isAuthCode：「鉴权失败类错误码」判据（对齐 errcode / iOS IMIsAuthErrorCode），与续期同源，故同住一个模块。
 import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
@@ -101,7 +102,7 @@ export interface IMClientHandlers {
   onMsgOpFailed?: (op: string, convId: string, targetConvSeq: number, msg: string) => void;
   /** 会话级设置变更（置顶/免打扰/标未读/删除会话，M4.5）：多端同步，UI 据完整状态覆盖本地会话列表。 */
   onConvUpdate?: (u: ConvUpdate) => void;
-  onConvCleared?: (convId: string, floor: number, advanced: boolean, ctx: { source: "local" | "frame" | "align"; retained: boolean }) => void;   // 会话被清除到位点（§6.7.1，删除会话）：存储已清，UI 同步清内存；advanced=本机位点这次是否真的抬高了
+  onConvCleared?: (convId: string, floor: number, advanced: boolean, ctx: { source: "local" | "frame" | "align"; retained: boolean; batch?: boolean }) => void;   // 会话被清除到位点（§6.7.1，删除会话）：存储已清，UI 同步清内存；advanced=本机位点这次是否真的抬高了
   isExpired?: (convId: string, timestamp: number) => boolean; // 自动删除：该会话此刻是否已过期（入库即过滤，useAutoDelete 提供）
   /** 账号级客户端配置版本变更（M4-7 自动下载策略）：另一端改了策略，本端应重拉。 */
   onCapabilitiesUpdate?: (version: number) => void;
@@ -1157,6 +1158,8 @@ export class IMClient extends IMRestApi {
   /** 清空聊天记录（仅本机，§6.7）/ 清除到位点（§6.7.1 删除会话）：实现见 sdk/clearRoutine.ts。 */
   clearConversation(convId: string, knownLatest = 0, exact = false): Promise<number> { return clearConversationImpl(this.clearHost(), convId, knownLatest, exact); }
   clearToFloor(c: string, at = 0, source: ClearSource = "local"): Promise<number> { return clearToFloorImpl(this.clearHost(), c, at, source); }
+  /** 「清除所有对话」：批量清除到位点（单事务），实现见 sdk/clearAll.ts。 */
+  clearAllToFloors(items: { convId: string; clearedAt: number }[]): Promise<void> { return clearAllToFloorsImpl(this.clearHost(), items); }
   private clearHost(): ClearHost {
     return {
       uid: this.uid, clearedSeq: this.clearedSeq, floorSeq: this.floorSeq, headSeq: this.headSeq, syncedSeq: this.syncedSeq, convRanges: this.convRanges, gapped: this.gapped,

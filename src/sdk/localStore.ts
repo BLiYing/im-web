@@ -73,6 +73,9 @@ export const markMessagesDeleted = (owner: string, convId: string, convSeqs: num
 export const clearMessages = (owner: string, convId: string, knownLatest = 0, exact = false): Promise<void> =>
   activeLocalStore().clearMessages(owner, convId, knownLatest, exact);
 
+export const clearMessagesBatch = (owner: string, items: { convId: string; at: number }[]): Promise<void> =>
+  activeLocalStore().clearMessagesBatch(owner, items);
+
 export const wipeOwner = (owner: string): Promise<void> => activeLocalStore().wipeOwner(owner);
 
 export const loadClearedUpTo = (owner: string, convId: string): Promise<number> =>

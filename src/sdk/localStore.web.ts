@@ -371,47 +371,64 @@ async function loadDeletedSeqs(owner: string, convId: string): Promise<number[]>
  */
 async function clearMessages(owner: string, convId: string, knownLatest = 0, exact = false): Promise<void> {
   if (!owner || !convId) return;
+  await clearBatch(owner, [{ convId, at: knownLatest }], exact, "conversation_clear_failed");
+}
+
+/** 批量精确清除（「清除所有对话」）：所有会话放**同一个**事务，要么全清要么全不清；语义逐会话同 `clearMessages(..., exact=true)`。 */
+async function clearMessagesBatch(owner: string, items: { convId: string; at: number }[]): Promise<void> {
+  const list = items.filter((i) => i.convId);
+  if (!owner || list.length === 0) return;
+  await clearBatch(owner, list, true, "conversation_clear_batch_failed");
+}
+
+async function clearBatch(owner: string, items: { convId: string; at: number }[], exact: boolean, failLog: string): Promise<void> {
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const hasRanges = db.objectStoreNames.contains(RANGES_STORE); // 陈旧连接兜底，同 loadConversation
       const tx = db.transaction(hasRanges ? [STORE, CURSOR_STORE, RANGES_STORE] : [STORE, CURSOR_STORE], "readwrite");
-      const store = tx.objectStore(STORE);
-      const cursorStore = tx.objectStore(CURSOR_STORE);
-      const id = cursorKeyOf(owner, convId);
-      const rangesReq = hasRanges ? tx.objectStore(RANGES_STORE).get(id) : null;
-      const cursorReq = cursorStore.get(id);
-      const keysReq = store.index("ownerConv").getAllKeys(id);
-      let pending = rangesReq ? 3 : 2;
-      const settle = () => {
-        if (--pending > 0) return;
-        const keys = (keysReq.result as IDBValidKey[]) ?? [];
-        const prevCursor = cursorReq.result as SyncCursorRecord | undefined;
-        const prevRanges = rangesReq?.result as RangesRecord | undefined;
-        if (exact) { // 精确模式（§6.7.1）：位点 = max(已有位点, knownLatest)；只清 (0, 位点] 内的行与覆盖，位点之后本地已有的保留
-          const fl = floorAtClear(knownLatest, Number(prevCursor?.clearedUpTo));
-          for (const key of keys) { const sq = seqFromRecordKey(String(key)); if (sq > 0 && sq <= fl) store.delete(key); }
-          const cur = Number(prevCursor?.convSeq) || 0;
-          const base = prevRanges?.ranges ?? (cur > 0 ? [{ lo: 1, hi: cur }] : []);
-          if (fl > 0) cursorStore.put({ ...prevCursor, id, owner, convId, convSeq: Math.max(cur, fl), clearedUpTo: fl } satisfies SyncCursorRecord);
-          if (hasRanges) tx.objectStore(RANGES_STORE).put({ id, owner, convId, ranges: clipRangesThrough(base, fl), head: Number(prevRanges?.head) || 0 } satisfies RangesRecord);
-          return;
-        }
-        let maxLocal = 0;
-        for (const key of keys) { store.delete(key); maxLocal = Math.max(maxLocal, seqFromRecordKey(String(key))); }
-        const floor = floorAtClear(
-          knownLatest, Number(prevCursor?.clearedUpTo), Number(prevCursor?.convSeq), Number(prevRanges?.head), maxLocal,
-        );
-        if (floor > 0) cursorStore.put({ ...prevCursor, id, owner, convId, convSeq: Math.max(Number(prevCursor?.convSeq) || 0, floor), clearedUpTo: floor } satisfies SyncCursorRecord);
-        if (hasRanges) tx.objectStore(RANGES_STORE).put({ id, owner, convId, ranges: [], head: Number(prevRanges?.head) || 0 } satisfies RangesRecord);
-      };
-      for (const r of [rangesReq, cursorReq, keysReq]) if (r) r.onsuccess = settle;
+      for (const it of items) clearOneInTx(tx, hasRanges, owner, it.convId, it.at, exact);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);   // 处理器抛错 / 配额：只触发 abort 不触发 error，缺它 Promise 会悬挂
     });
   } catch (error) {
-    logger.warn(LOG_TAG.store, "conversation_clear_failed", { conv_id: convId, error });
+    logger.warn(LOG_TAG.store, failLog, { conv_id: items.length === 1 ? items[0].convId : undefined, count: items.length, error });
   }
+}
+
+/** 在已开的事务里清一个会话（读三行 → 全部回来后改写）。单会话与批量共用，语义见 `LocalStore.clearMessages`。 */
+function clearOneInTx(tx: IDBTransaction, hasRanges: boolean, owner: string, convId: string, knownLatest: number, exact: boolean): void {
+  const store = tx.objectStore(STORE);
+  const cursorStore = tx.objectStore(CURSOR_STORE);
+  const id = cursorKeyOf(owner, convId);
+  const rangesReq = hasRanges ? tx.objectStore(RANGES_STORE).get(id) : null;
+  const cursorReq = cursorStore.get(id);
+  const keysReq = store.index("ownerConv").getAllKeys(id);
+  let pending = rangesReq ? 3 : 2;
+  const settle = () => {
+    if (--pending > 0) return;
+    const keys = (keysReq.result as IDBValidKey[]) ?? [];
+    const prevCursor = cursorReq.result as SyncCursorRecord | undefined;
+    const prevRanges = rangesReq?.result as RangesRecord | undefined;
+    if (exact) { // 精确模式（§6.7.1）：位点 = max(已有位点, knownLatest)；只清 (0, 位点] 内的行与覆盖，位点之后本地已有的保留
+      const fl = floorAtClear(knownLatest, Number(prevCursor?.clearedUpTo));
+      for (const key of keys) { const sq = seqFromRecordKey(String(key)); if (sq > 0 && sq <= fl) store.delete(key); }
+      const cur = Number(prevCursor?.convSeq) || 0;
+      const base = prevRanges?.ranges ?? (cur > 0 ? [{ lo: 1, hi: cur }] : []);
+      if (fl > 0) cursorStore.put({ ...prevCursor, id, owner, convId, convSeq: Math.max(cur, fl), clearedUpTo: fl } satisfies SyncCursorRecord);
+      if (hasRanges) tx.objectStore(RANGES_STORE).put({ id, owner, convId, ranges: clipRangesThrough(base, fl), head: Number(prevRanges?.head) || 0 } satisfies RangesRecord);
+      return;
+    }
+    let maxLocal = 0;
+    for (const key of keys) { store.delete(key); maxLocal = Math.max(maxLocal, seqFromRecordKey(String(key))); }
+    const floor = floorAtClear(
+      knownLatest, Number(prevCursor?.clearedUpTo), Number(prevCursor?.convSeq), Number(prevRanges?.head), maxLocal,
+    );
+    if (floor > 0) cursorStore.put({ ...prevCursor, id, owner, convId, convSeq: Math.max(Number(prevCursor?.convSeq) || 0, floor), clearedUpTo: floor } satisfies SyncCursorRecord);
+    if (hasRanges) tx.objectStore(RANGES_STORE).put({ id, owner, convId, ranges: [], head: Number(prevRanges?.head) || 0 } satisfies RangesRecord);
+  };
+  for (const r of [rangesReq, cursorReq, keysReq]) if (r) r.onsuccess = settle;
 }
 
 /**
@@ -430,6 +447,7 @@ export const webLocalStore: LocalStore = {
   markMessageDeleted,
   markMessagesDeleted,
   clearMessages,
+  clearMessagesBatch,
   wipeOwner: wipeOwnerRows,
   advanceSyncCursor,
   registerRange,

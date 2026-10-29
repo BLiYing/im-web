@@ -2847,7 +2847,7 @@ export default function App() {
           fontSize={fontSize} setFontSize={setFontSize} theme={theme} setTheme={setTheme}
           timeFormat={timeFormat} setTimeFormat={setTimeFormat} sendKey={sendKey} setSendKey={setSendKey}
           desktop={desktop} setWallpaperOpen={setWallpaperOpen}
-          notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} notif={notif} conversations={conversations}
+          notificationsOpen={notificationsOpen} setNotificationsOpen={setNotificationsOpen} notif={notif} conversations={conversations} setConversations={setConversations}
           convDisplayLabel={convDisplayLabel} convAvatarUrl={convAvatarUrl} setConvMuted={setConvMuted} openConvById={openConvById}
           languageOpen={languageOpen} setLanguageOpen={setLanguageOpen} performanceOpen={performanceOpen} setPerformanceOpen={setPerformanceOpen}
           wallpaperOpen={wallpaperOpen} wallpaper={wallpaper} isDark={isDark} wallpaperBlur={wallpaperBlur}

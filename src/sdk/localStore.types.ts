@@ -176,7 +176,7 @@ export const cursorKeyOf = (owner: string, convId: string) => `${owner}|${convId
  */
 export const LOCAL_STORE_METHODS = [
   "saveMessage", "saveIncomingMessage", "saveIncomingPage", "saveRejected",
-  "applyMsgOpLocal", "markMessageDeleted", "markMessagesDeleted", "clearMessages", "advanceSyncCursor",
+  "applyMsgOpLocal", "markMessageDeleted", "markMessagesDeleted", "clearMessages", "clearMessagesBatch", "advanceSyncCursor",
   "registerRange", "updateRangesHead",
   "loadConversation", "loadDeletedSeqs", "loadSyncCursor", "loadRanges", "loadClearedUpTo", "searchMessages",
   "wipeOwner",
@@ -281,6 +281,13 @@ export interface LocalStore {
   clearMessages(owner: string, convId: string, knownLatest?: number, exact?: boolean): Promise<void>;
   // exact=true（「删除会话」§6.7.1）：位点 = max(已有位点, knownLatest)，**不**再取游标 / head / 本地最大 seq；
   // 只删 conv_seq∈(0,位点] 的行并抹掉 <=位点 的区间覆盖，位点之后本地已有的真消息保留（它们是对方在删除后发的，仍可见）。
+
+  /**
+   * 批量精确清除（「清除所有对话」）：对每项等价于 `clearMessages(owner, convId, at, true)`，但**整批放同一个事务**
+   * （单事务 / 单次跨进程往返，要么全清要么全不清）。`at` = 服务端返回的 `cleared_at`，位点只增不减；
+   * 位点之后的行（对方在清除后发的新消息）与待发送行（无 conv_seq）保留。空列表 / 空 owner 为空操作。
+   */
+  clearMessagesBatch(owner: string, items: { convId: string; at: number }[]): Promise<void>;
 
   /** 清空该 owner 的**全部**本机记录（消息/游标/墓碑/区间）；别的 owner 不动。注销账号用（DELETE_ACCOUNT_DESIGN §3.4）。失败只降级不抛。 */
   wipeOwner(owner: string): Promise<void>;

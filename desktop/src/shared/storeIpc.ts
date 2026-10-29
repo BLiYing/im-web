@@ -27,6 +27,7 @@ export const STORE_METHODS = [
   "markMessageDeleted",
   "markMessagesDeleted",
   "clearMessages",
+  "clearMessagesBatch",
   "wipeOwner",
   "advanceSyncCursor",
   "registerRange",

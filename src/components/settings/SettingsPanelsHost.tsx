@@ -4,7 +4,7 @@
 // 不持有业务状态。经 useAppServices()/useT() 直接取 clientRef/setToast/comingSoon/askConfirm/t，
 // 免得 App 侧再显式传一遍（这四个已经是 AppServicesContext 收拢的稳定服务）。
 // 纯搬移，DOM/行为逐字不变：Fragment 不引入包裹节点，各面板 JSX 与原 App.tsx 内联时完全一致。
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useAppServices } from "../../AppServicesContext";
 import { useT } from "../../i18n";
 import { clamp, type HSVColor } from "../../color";
@@ -27,6 +27,9 @@ import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { DeleteAccountContainer } from "./DeleteAccountPanel";
 import { ExportDataContainer } from "./ExportDataPanel";
+import { ClearAllConversationsContainer } from "./ClearAllConversationsPanel";
+import { clearAllConversations } from "../../sdk/clearAllApi";
+import { applyClearAllLocal } from "../../clearAllLocal";
 import { deleteAccount } from "../../sdk/accountApi";
 import { wipeOwnerLocalData } from "../../sdk/wipeOwner";
 import { GeneralPanel } from "./GeneralPanel";
@@ -113,6 +116,7 @@ export interface SettingsPanelsHostProps {
   setNotificationsOpen: Dispatch<SetStateAction<boolean>>;
   notif: UseNotifySettings;
   conversations: readonly Conversation[];
+  setConversations: Dispatch<SetStateAction<Conversation[]>>; // 清除所有对话：本机立即摘掉被清的会话项
   convDisplayLabel: (c: Conversation) => string;
   convAvatarUrl: (c: Conversation) => string | undefined;
   setConvMuted: (c: Conversation, muted: boolean, muteUntil?: number) => void;
@@ -147,6 +151,18 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const { clientRef, setToast, comingSoon, askConfirm } = useAppServices();
   const [deleteAccountOpen, setDeleteAccountOpen] = useState(false); // 注销账号二级页（自持，不占 App 状态）
   const [exportOpen, setExportOpen] = useState(false); // 导出我的数据二级页（自持；隐私页收起时一并关）
+  const [clearAllOpen, setClearAllOpen] = useState(false); // 清除所有对话二级页（自持；同上）
+  const convsRef = useRef(p.conversations); convsRef.current = p.conversations;
+  const clearAllRun = useCallback(async () => { const c = clientRef.current; if (!c) throw new Error(t("conn.state.disconnected")); return clearAllConversations(c.authToken); }, [clientRef, t]);
+  const clearAllApply = useCallback((res: Parameters<typeof applyClearAllLocal>[0]) => applyClearAllLocal(res, {
+    clearAllToFloors: async (items) => { await clientRef.current?.clearAllToFloors(items); },
+    dropConversations: (ids) => {
+      p.setConversations((prev) => prev.filter((c) => !ids.has(c.conv_id)));
+      clientRef.current?.cacheConversations(convsRef.current.filter((c) => !ids.has(c.conv_id)) as Conversation[]);
+    },
+    clearMediaCache: p.clearMediaCache,
+    clearNotifications: p.desktop.clearNotifications,
+  }), [clientRef, p.setConversations, p.clearMediaCache, p.desktop.clearNotifications]);
   // 隐私页「自动删除消息」账号默认档位：进隐私页取一次最新值（不推帧，AUTO_DELETE_DESIGN §3.3 A）；选择面板开合态见 autoDeleteUi。
   const [autoDeleteDefault, setAutoDeleteDefault] = useState<number | null>(null);
   const autoDeleteOpen = useAutoDeleteDefaultOpen();
@@ -154,7 +170,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   const [visibility, setVisibility] = useState<{ lastSeen: Visibility; avatar: Visibility } | null>(null);
   const [visKind, setVisKind] = useState<VisibilityKind | null>(null);
   useEffect(() => {
-    if (!p.privacyOpen) { setAutoDeleteDefault(null); setVisibility(null); setVisKind(null); setExportOpen(false); closeAutoDeleteDefault(); return; }
+    if (!p.privacyOpen) { setAutoDeleteDefault(null); setVisibility(null); setVisKind(null); setExportOpen(false); setClearAllOpen(false); closeAutoDeleteDefault(); return; }
     let alive = true;
     const c = clientRef.current;
     if (c) getPrivacy(c.authToken).then((v) => { if (!alive) return; setAutoDeleteDefault(v.autoDeleteSec); setVisibility((cur) => cur ?? { lastSeen: v.lastSeen, avatar: v.avatar }); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
@@ -264,7 +280,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           blockedCount={p.blockedList ? p.blockedList.length : null}
           onOpenBlocked={() => p.setBlockedOpen(true)}
           onOpenChangePwd={() => p.setChangePwdOpen(true)}
-          autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault} onOpenExport={() => setExportOpen(true)}
+          autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault} onOpenExport={() => setExportOpen(true)} onOpenClearAll={() => setClearAllOpen(true)}
           visibility={visibility} onOpenVisibility={setVisKind}
           onComingSoon={comingSoon}
           onBack={() => p.setPrivacyOpen(false)}
@@ -292,6 +308,15 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
       {/* 导出我的数据（数据 ▸ 导出）：关闭即停轮询，重开从 latest 恢复进度。 */}
       {p.privacyOpen && exportOpen && (
         <ExportDataContainer key={p.uid} token={() => clientRef.current?.authToken ?? ""} setToast={setToast} onBack={() => setExportOpen(false)} />
+      )}
+
+      {/* 清除所有对话（数据 ▸ 清除所有对话）：二次确认 → POST clear → 成功后本机清除并回隐私页 toast；失败不改本机。 */}
+      {p.privacyOpen && clearAllOpen && (
+        <ClearAllConversationsContainer
+          key={p.uid} count={p.conversations.length} run={clearAllRun} apply={clearAllApply} askConfirm={askConfirm}
+          onDone={(n) => { setClearAllOpen(false); setToast(n > 0 ? t("privacy.clear_all.done", { n }) : t("privacy.clear_all.none")); }}
+          onBack={() => setClearAllOpen(false)}
+        />
       )}
 
       {/* 已屏蔽的用户子面板（从隐私页进入；数据/解除来自 useFriendOps）。 */}

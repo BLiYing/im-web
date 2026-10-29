@@ -239,4 +239,30 @@ export function runClearFloorContract({ store, newOwner, msg }: ContractCtx): vo
       expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([0, 4]);
     });
   });
+
+  describe("批量精确清除 clearMessagesBatch（清除所有对话）", () => {
+    it("每个会话只清 <= 各自 at 的行；位点之后的新消息与 convSeq=0 的行保留；位点各自落库", async () => {
+      const o = newOwner("cf-batch");
+      for (const q of [3, 8, 12]) await store.saveMessage(o, msg("c1", q));
+      for (const q of [2, 5]) await store.saveMessage(o, msg("c2", q));
+      await store.saveRejected(o, msg("c1", 0, { clientMsgId: "cm-b", status: "failed", note: "n" }));
+      await store.clearMessagesBatch(o, [{ convId: "c1", at: 8 }, { convId: "c2", at: 5 }, { convId: "c3", at: 4 }]);
+      expect((await store.loadConversation(o, "c1")).map((m) => m.convSeq)).toEqual([0, 12]);
+      expect(await store.loadConversation(o, "c2")).toEqual([]);
+      expect([await store.loadClearedUpTo(o, "c1"), await store.loadClearedUpTo(o, "c2"), await store.loadClearedUpTo(o, "c3")]).toEqual([8, 5, 4]);
+    });
+
+    it("区间清单逐会话裁到位点；只增不减；别的 owner 不动；空列表 / 空 owner 为空操作", async () => {
+      const o = newOwner("cf-batch-r"), other = newOwner("cf-batch-r");
+      await store.registerRange(o, "c1", 1, 20, 25);
+      await store.saveMessage(other, msg("c1", 3));
+      await store.clearMessagesBatch(o, [{ convId: "c1", at: 8 }]);
+      await store.clearMessagesBatch(o, [{ convId: "c1", at: 3 }]);   // 回声 / 重复：位点不回退
+      expect(await store.loadRanges(o, "c1")).toEqual({ ranges: [{ lo: 9, hi: 20 }], head: 25 });
+      expect(await store.loadClearedUpTo(o, "c1")).toBe(8);
+      expect((await store.loadConversation(other, "c1")).map((m) => m.convSeq)).toEqual([3]);
+      await expect(store.clearMessagesBatch(o, [])).resolves.toBeUndefined();
+      await expect(store.clearMessagesBatch("", [{ convId: "c1", at: 9 }])).resolves.toBeUndefined();
+    });
+  });
 }
