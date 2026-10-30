@@ -1,0 +1,25 @@
+/* 两步验证（设置页 + 登录二步页）样式：只用现有语义令牌；二维码白底是刻意的，深浅色都要能被认证器识别。 */
+.settings-panel.twostep-panel { z-index: 50; } /* 加特异度：本文件先于 styles.css 加载，单类选择器会被后面的 .settings-panel(z-index:30) 盖掉 */
+.ts-hero { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 20px 24px 8px; color: var(--accent); }
+.ts-hero h3 { margin: 8px 0 4px; font-size: 16px; font-weight: 600; color: var(--text); }
+.ts-hero p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.row-value.ts-low { color: var(--ic-orange); font-weight: 600; }
+.settings-row.ts-center { justify-content: center; }
+.settings-row.ts-act { color: var(--accent); justify-content: center; }
+.ts-chev { transition: transform .15s; }
+.ts-chev.open { transform: rotate(180deg); }
+.ts-qr { width: 200px; height: 200px; margin: 12px auto; padding: 12px; box-sizing: border-box; border-radius: 12px; background: #fff; }
+.ts-qr img { display: block; }
+.ts-key-box { padding: 10px 14px; border-top: 1px solid var(--separator); text-align: center; }
+.ts-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; letter-spacing: 1px; color: var(--text); word-break: break-all; user-select: all; }
+.ts-link { border: 0; background: none; padding: 6px 0 0; color: var(--accent); font-size: 13px; cursor: pointer; }
+.ts-switch { padding: 8px 14px 0; }
+.ts-switch .ts-link { padding: 0; }
+.ts-codes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--text); user-select: all; }
+.edit-field input.ts-code6, .login input.ts-code6 { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 24px; letter-spacing: 8px; text-align: center; padding: 10px 0; }
+.edit-field input.ts-recovery, .login input.ts-recovery { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; }
+.login input.ts-code6.invalid, .login input.ts-recovery.invalid { border-color: var(--danger); }
+.ts-login-title { text-align: center; }
+.ts-login-hint { margin: 0; text-align: center; font-size: 13px; color: var(--text-secondary); }
+.ts-login-link { border: 0; background: none; padding: 4px; color: var(--accent); font-size: 13px; cursor: pointer; text-align: center; }
+.ts-login-link.muted { color: var(--text-secondary); }

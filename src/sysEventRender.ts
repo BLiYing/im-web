@@ -162,6 +162,12 @@ export function buildSysNoticeText(
     lines.push(t("sys.notice.password_changed.footer"));
     return lines.join("\n");
   }
+  if (ev === "twostep_recovery_used") { // 用恢复码登录：剩余数 + 设备行（有才显）；args.left 是服务端数字串
+    const lines = [t("sys.notice.twostep_recovery_used.headline", { at: formatNoticeAt(args.at), left: args.left ?? "0" })];
+    if (args.device) lines.push(t("sys.notice.twostep_recovery_used.device_line", { device: args.device }));
+    lines.push(t("sys.notice.twostep_recovery_used.footer"));
+    return lines.join("\n");
+  }
   if (ev === "device_kicked") {
     const device = args.target_device || t("common.unknown_device_kicked");
     const at = formatNoticeAt(args.at);

@@ -50,3 +50,19 @@ describe("HTTP 日志脱敏", () => {
     expect(formatResponseText('{"data":{"url":"/api/v1/exports/download?t=SECRET&x=1","expires_in":600}}', "application/json", false)).not.toContain("SECRET");
   });
 });
+
+describe("两步验证脱敏", () => {
+  it("ticket / otpauth_uri / secret / 恢复码 / 字符串 code 全部隐藏，数字 code（信封业务码）保留", () => {
+    const safe = sanitizeValue({
+      code: 200020, ticket: "T-123", otpauth_uri: "otpauth://totp/IM:a?secret=ABC", secret: "ABC", recovery_codes: ["k7m2q-9xw3p"],
+      data: { code: "123456", password: "pw" },
+    }, true) as Record<string, any>;
+    expect(safe.code).toBe(200020);
+    expect(safe.ticket).toBe("***");
+    expect(safe.otpauth_uri).toBe("***");
+    expect(safe.secret).toBe("***");
+    expect(safe.recovery_codes).toBe("***");
+    expect(safe.data.code).toBe("***");
+    expect(JSON.stringify(safe)).not.toContain("k7m2q");
+  });
+});

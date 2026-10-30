@@ -1,12 +1,12 @@
 // 设置项搜索（SEARCH_DESIGN §3.1 的 Web 落地）：显式登记表 + 匹配 + 打开路由，全部纯函数、不碰 React。
 // 对称兄弟：iOS `IMSettingsSearchRegistry`、Android `SettingsSearchIndex`（SYMMETRY.md 登记）。
 // Web 设置页与 iOS 条目不同（镜像 Telegram Web），所以登记的是 Web 实有的页面，不是照抄 iOS 的 24 条。
-import { Bell, Timer, Database, Gauge, Image as ImageIcon, Languages, Lock, MonitorSmartphone, Ban, KeyRound, Settings2 } from "lucide-react";
+import { Bell, Timer, Database, Gauge, Image as ImageIcon, Languages, Lock, MonitorSmartphone, Ban, KeyRound, Settings2, ShieldCheck } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 export type SettingsRoute =
   | "general" | "animations" | "notifications" | "data" | "privacy" | "devices" | "language"
-  | "wallpaper" | "blocked" | "changePassword" | "autoDelete";
+  | "wallpaper" | "blocked" | "changePassword" | "autoDelete" | "twoStep";
 
 export interface SettingsSearchEntry {
   id: string;
@@ -49,6 +49,7 @@ export function settingsSearchEntries(t: (key: string) => string): SettingsSearc
     mk("wallpaper", "wallpaper", [general, t("general.wallpaper")], ImageIcon, "blue"),
     mk("blocked", "blocked", [privacy, t("blocked.title")], Ban, "red"),
     mk("autoDelete", "autoDelete", [privacy, t("ps.row.auto_delete_messages")], Timer, "orange"),
+    mk("twoStep", "twoStep", [privacy, t("ps.row.two_factor")], ShieldCheck, "gray"),
     mk("changePassword", "changePassword", [privacy, t("settings.change_password")], KeyRound, "blue"),
   ];
 }
@@ -72,6 +73,8 @@ export interface SettingsRouteHandlers {
   setChangePwdOpen: (v: boolean) => void;
   /** 打开隐私页下的「自动删除消息」档位面板（开合态在 autoDeleteUi，不占 App state）。 */
   openAutoDelete?: () => void;
+  /** 打开隐私页下的「两步验证」页（开合态在 twoStepUi）。 */
+  openTwoStep?: () => void;
 }
 
 /** 逐级打开：先一级页、再二级页，返回键沿原路退（面板栈），不回搜索页。 */
@@ -80,6 +83,7 @@ export function runSettingsRoute(route: SettingsRoute, h: SettingsRouteHandlers)
     case "wallpaper": h.openTop("general"); h.setWallpaperOpen(true); return;
     case "blocked": h.openTop("privacy"); h.setBlockedOpen(true); return;
     case "autoDelete": h.openTop("privacy"); h.openAutoDelete?.(); return;
+    case "twoStep": h.openTop("privacy"); h.openTwoStep?.(); return;
     case "changePassword": h.openTop("privacy"); h.setChangePwdOpen(true); return;
     default: h.openTop(route);
   }

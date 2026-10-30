@@ -32,6 +32,14 @@ describe("settingsSearch", () => {
     expect(ids("自动删除")).toEqual(["autoDelete"]);
     expect(settingsSubtitle(all.find((e) => e.id === "autoDelete")!, "设置")).toBe(`${t("settings.row.privacy")} › ${t("ps.row.auto_delete_messages")}`);
   });
+  it("两步验证作为隐私页二级页登记；搜「两步」命中，路由先开隐私页再开它", () => {
+    expect(ids("两步")).toEqual(["twoStep"]);
+    expect(settingsSubtitle(all.find((e) => e.id === "twoStep")!, "设置")).toBe(`${t("settings.row.privacy")} › ${t("ps.row.two_factor")}`);
+    const h = { openTop: vi.fn(), setWallpaperOpen: vi.fn(), setBlockedOpen: vi.fn(), setChangePwdOpen: vi.fn(), openTwoStep: vi.fn() };
+    runSettingsRoute("twoStep", h);
+    expect(h.openTop).toHaveBeenCalledWith("privacy");
+    expect(h.openTwoStep).toHaveBeenCalledTimes(1);
+  });
   it("splitAliases 半角全角逗号都认", () => {
     expect(splitAliases(" 声音,提示音，铃声 ,, ")).toEqual(["声音", "提示音", "铃声"]);
   });

@@ -28,6 +28,7 @@ import { clearAllToFloorsImpl } from "./clearAll";
 import { tracedFetch, tracedUpload, fetchEnvelope, callJson, setTokenRescue, type UploadProgressHandler } from "./http";
 // isAuthCode：「鉴权失败类错误码」判据（对齐 errcode / iOS IMIsAuthErrorCode），与续期同源，故同住一个模块。
 import { acquireToken, createRenewer, isDeadCredential as isAuthCode } from "./tokenSession";
+import type { TwoStepSubmit } from "./twoStepApi";
 import { startChunkedUpload, CHUNKED_THRESHOLD } from "./chunkedUpload";
 import { friendlyMessage, sendRejectNote } from "./errcode";
 import * as voiceApi from "./voiceApi"; import { t } from "../i18n"; import { dropV1AutoDelete } from "../autoDelete";
@@ -142,6 +143,7 @@ export class IMClient extends IMRestApi {
   /** 长效续期凭据（180 天绝对寿命）：免密换新 access token，替代"把明文密码存本地反复重放"。
    *  两类会话都有（密码登录由 /login 下发，扫码登录由 qr/login/poll 一次性下发）。 */
   private refreshToken = "";
+  private twoStep?: TwoStepSubmit; // 见 connect()
   /** 过期救援（单飞）：HTTP 层撞 100102 时调。凭据已死 → 擦掉 + 停重连 + 回登录页。 */
   private renewToken = createRenewer({
     getRefreshToken: () => this.refreshToken,
@@ -213,7 +215,8 @@ export class IMClient extends IMRestApi {
    *  **入参是 username（公开句柄），不是内部 ID**——登录接口只认前者。
    *  真正的身份（10 位内部 ID）由登录响应带回并写进 this.uid，之后一切 conv_id 推导、
    *  本地库分区、接口参数都用它。见 IMServer/docs/ACCOUNT_IDENTITY_REDESIGN.md。 */
-  async connect(username: string, password = "", refreshToken = ""): Promise<void> {
+  async connect(username: string, password = "", refreshToken = "", twoStep?: TwoStepSubmit): Promise<void> {
+    this.twoStep = twoStep; // 两步验证第二步的 ticket+code：只供下一次取 token 用，用完即丢（fetchToken）
     if (this.uid && this.username !== username) {
       // IMClient 是可复用 SDK；切换账号时绝不能沿用上个 uid 的会话游标。
       this.syncedSeq.clear();
@@ -821,9 +824,10 @@ export class IMClient extends IMRestApi {
   /** 取本次（重）连要用的 token：判据与三条路（探活 / 续期 / 凭据登录）全在 `sdk/tokenSession.ts`。
    *  抛出的 auth 码由 openSocket 现有分支路由到 onAuthError；网络失败抛非 auth 错，继续重连。 */
   private async fetchToken(password: string): Promise<{ token: string; uid: string }> {
+    const twoStep = this.twoStep; this.twoStep = undefined; // 一次性：失败也不留（重试要用户重新提交）
     const got = await acquireToken({
       token: this.token, refreshToken: this.refreshToken, username: this.username, password,
-      qrSession: !!this.sessionToken, device: { deviceId: platform().deviceId(), deviceName: platform().deviceName() },
+      qrSession: !!this.sessionToken, device: { deviceId: platform().deviceId(), deviceName: platform().deviceName() }, twoStep,
     }, this.uid);
     if (got.refreshToken) this.adoptRefreshToken(got.refreshToken); // 只有 /login 下发；触发登录的入口不止一处，故收口在此
     return { token: got.token, uid: got.uid };

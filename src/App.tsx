@@ -73,7 +73,7 @@ import { LoginView } from "./components/LoginView";
 import { SESSION_KEY, loadSession, saveSession } from "./session";
 import { useDevices } from "./useDevices";
 import { useDialogs } from "./useDialogs"; import { useAuthMsg } from "./useAuthMsg";
-import { useRestoreOffer } from "./useDeleteAccount";
+import { useRestoreOffer } from "./useDeleteAccount"; import { useTwoStepLogin } from "./useTwoStepLogin";
 import { wipeOwnerLocalData } from "./sdk/wipeOwner";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
@@ -180,6 +180,7 @@ export default function App() {
   const [restoring, setRestoring] = useState(() => !!restoreRef.current); // 恢复中：登录页显示过渡态
   const [authBusy, setAuthBusy] = useState(false); // 登录/注册请求进行中
   const { authErr, authNotice, setAuthErr, setAuthNotice, clearAuthNotice } = useAuthMsg(); // 登录/注册错误文案 + 非红通知（useAuthMsg）
+  const tsl = useTwoStepLogin({ phase, setAuthErr }); // 登录二步页（ticket 只在内存；useTwoStepLogin）
   const [loginTab, setLoginTab] = useState<"password" | "register" | "qr">("password"); // 登录页页签：登录 / 注册 / 扫码（扫码为 Web 独有）
   // 扫码登录待入场会话：poll 领到 {uid,token} 后先 setUid 再由 effect 用新 uid 闭包跑 enterApp。
   const pendingQrRef = useRef<{ uid: string; token: string; refresh: string } | null>(null);
@@ -876,8 +877,9 @@ export default function App() {
     setLogContext(name || knownUid || ""); // 让后续每条 dev 日志带上账号标签（登录后换成内部 ID）
     try {
       if (token) await client.connectWithToken(knownUid || "", token, refresh); // 扫码登录：票据已带内部 ID
-      else await client.connect(name, pwd, refresh); // 首次登录失败（密码错误等）会抛错
+      else await client.connect(name, pwd, refresh, tsl.take()); // 首次登录失败（密码错误等）会抛错
     } catch (e) {
+      if (tsl.intercept(e)) { client.disconnect(); clientRef.current = null; setAuthBusy(false); return; } // 200020 进二步页 / 二步错误由 hook 出文案
       const code = (e as { code?: number }).code;
       const cached = client.cachedConversations();
       if (code === undefined && cached.length > 0) {
@@ -2411,7 +2413,7 @@ export default function App() {
     return (<>{confirmDlg && <ConfirmDialog dlg={confirmDlg} set={setConfirmDlg} />}{/* 登录页也要能弹确认框：冷静期账号的「恢复账号」弹窗 */}
       <LoginView
         restoring={restoring} uid={loginName} nickname={nickname} password={password}
-        authErr={authErr} authNotice={authNotice} onInput={clearAuthNotice} authBusy={authBusy} loginTab={loginTab}
+        authErr={authErr} authNotice={authNotice} onInput={clearAuthNotice} authBusy={authBusy} loginTab={loginTab} twoStep={tsl}
         onUid={setLoginName} onNickname={setNickname} onPassword={setPassword} onLoginTab={setLoginTab}
         onLogin={(pwd) => void enterApp(loginName, pwd)} onRegister={() => void doRegister()}
         onQRLogin={(loginUid, token, refreshToken) => {

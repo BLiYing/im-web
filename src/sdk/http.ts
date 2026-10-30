@@ -198,8 +198,9 @@ export async function callJson(input: RequestInfo | URL, init?: RequestInit): Pr
     if (fresh) body = await fetchEnvelope(input, withBearer(init, fresh));
   }
   if (body.code !== 0) {
-    const err = new Error(friendlyMessage(body.code, body.message ?? "")) as Error & { code?: number };
+    const err = new Error(friendlyMessage(body.code, body.message ?? "")) as Error & { code?: number; data?: unknown };
     err.code = body.code;
+    if (body.data !== undefined) err.data = body.data; // 业务错误的 data（如两步验证 attempts_left）；错误体是标准信封，别丢
     throw err;
   }
   return body.data;

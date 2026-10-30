@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { MessageCircle } from "lucide-react";
 import { QRLoginTab } from "../QRUI";
 import { useT } from "../i18n";
+import { TwoStepLogin } from "./TwoStepLogin";
+import type { TwoStepLogin as TwoStepLoginApi } from "../useTwoStepLogin";
 
 /**
  * 登录页（含恢复登录过渡态 + 登录/注册/扫码三页签（结构对齐 Android，扫码为 Web 独有））。从 App.tsx 抽出的纯展示组件：
  * 状态与动作全部由 App 注入，JSX 与原实现逐字一致。
  */
-export function LoginView({ restoring, uid, nickname, password, authErr, authNotice, onInput, authBusy, loginTab, onUid, onNickname, onPassword, onLoginTab, onLogin, onRegister, onQRLogin }: {
+export function LoginView({ restoring, uid, nickname, password, authErr, authNotice, onInput, authBusy, loginTab, onUid, onNickname, onPassword, onLoginTab, onLogin, onRegister, onQRLogin, twoStep }: {
   restoring: boolean;
   uid: string;      // 这里的 uid 实为 **username**（公开句柄）——登录接口只认它
   nickname: string; // 仅注册用：显示名
@@ -24,6 +26,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authNot
   onLogin: (pwd: string) => void; // 密码登录（空串=免密）
   onRegister: () => void;
   onQRLogin: (uid: string, token: string, refreshToken: string) => void;
+  twoStep?: TwoStepLoginApi; // 登录二步页状态（useTwoStepLogin）；active 时整页换成二步表单
 }) {
   const tr = useT();
   // 哪个入口在转圈。三个按钮共用 App 的 authBusy，不记来源就会三个一起转。
@@ -45,6 +48,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authNot
       </div>
     );
   }
+  if (twoStep?.view.active) return <TwoStepLogin api={twoStep} authBusy={authBusy} onLogin={() => onLogin(password)} />;
   return (
     <div className="login">
       <div className="login-logo-box" aria-hidden="true"><MessageCircle size={40} /></div>

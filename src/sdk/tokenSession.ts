@@ -12,6 +12,7 @@
 import { fetchEnvelope } from "./http";
 import { friendlyMessage } from "./errcode";
 import { accountError, CODE_ACCOUNT_PENDING_DELETION } from "./accountApi";
+import { loginTwoStep, twoStepError, TS_CODE, type TwoStepSubmit } from "./twoStepApi";
 import { t } from "../i18n";
 
 /** 鉴权类业务码：拿到这些说明「这枚凭据永远不会再好起来」，重试无意义。 */
@@ -32,6 +33,8 @@ export interface TokenCredentials {
   qrSession: boolean;
   /** 登录设备字段，随 `/login` 上报（扫码路径由票据透传，不走这里）。 */
   device: { deviceId: string; deviceName: string };
+  /** 两步验证第二步：有它就直接 `POST /login/two-step`（设备字段取自第一步），不探活、不续期、不走 /login。 */
+  twoStep?: TwoStepSubmit;
 }
 
 export interface TokenResult {
@@ -52,7 +55,8 @@ function authError(code: number, message: string): Error & { code?: number } {
 export function isDeadCredential(code: number | undefined): boolean {
   return code === CODE_TOKEN_REVOKED || code === CODE_TOKEN_EXPIRED
     || code === 200001 || code === 200002 || code === 200003 // 账号不存在 / 密码错 / 被封
-    || code === CODE_ACCOUNT_PENDING_DELETION; // 冷静期账号：重试无意义，等用户选「恢复」
+    || code === CODE_ACCOUNT_PENDING_DELETION // 冷静期账号：重试无意义，等用户选「恢复」
+    || code === TS_CODE.required; // 重连时密码登录撞上两步验证：后台无法代答，重试无意义，回登录页走二步
 }
 
 /**
@@ -80,6 +84,7 @@ export async function renewWithRefresh(refreshToken: string): Promise<{ token: s
  * 修复的核心，改动本函数时勿丢）。`100101` 一律抛（两类会话都强制回登录）；其它失效才往下走。
  */
 export async function acquireToken(c: TokenCredentials, uid: string): Promise<TokenResult> {
+  if (c.twoStep) return await loginTwoStep(c.twoStep); // 同 /login 成功体：token/uid/refresh_token
   if (c.token) {
     const probe = await fetchEnvelope("/api/v1/devices", {
       headers: { Authorization: `Bearer ${c.token}` },
@@ -109,6 +114,7 @@ export async function acquireToken(c: TokenCredentials, uid: string): Promise<To
       device_id: c.device.deviceId, device_name: c.device.deviceName,
     }),
   });
+  if (body.code === TS_CODE.required) throw twoStepError(body.code, body.message ?? "", body.data); // 密码对且已开启两步验证：data 带 ticket
   if (body.code !== 0 || !body.data?.token || !body.data?.uid) {
     throw body.code === CODE_ACCOUNT_PENDING_DELETION ? accountError(body.code, body.message ?? "", body.data) : authError(body.code, body.message ?? t("login.error.login_failed"));
   }

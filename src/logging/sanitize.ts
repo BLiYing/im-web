@@ -4,7 +4,10 @@ const ALWAYS_SENSITIVE = new Set([
   "token", "accesstoken", "refreshtoken", "idtoken", "jwt",
   "authorization", "cookie", "setcookie",
   "phone", "phonenumber", "mobile", "telephone",
+  "ticket", "otpauthuri", "recoverycodes", // 两步验证：登录票据 / 绑定 URI（含密钥）/ 恢复码明文
 ]);
+/** 信封的 `code` 是数字业务码，必须原样保留；字符串形态的 `code` 是两步验证动态码 / 恢复码，不得落日志。 */
+const SENSITIVE_WHEN_STRING = new Set(["code"]);
 const BUSINESS_CONTENT = new Set([
   "content", "text", "note", "reason", "resolution", "translation", "description", "remark",
 ]);
@@ -33,7 +36,7 @@ export function sanitizeValue(value: unknown, includeBusinessContent: boolean): 
     const result: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
       const normalized = normalizedKey(key);
-      if (ALWAYS_SENSITIVE.has(normalized) || (!includeBusinessContent && BUSINESS_CONTENT.has(normalized))) {
+      if (ALWAYS_SENSITIVE.has(normalized) || (typeof child === "string" && SENSITIVE_WHEN_STRING.has(normalized)) || (!includeBusinessContent && BUSINESS_CONTENT.has(normalized))) {
         result[key] = "***";
       } else {
         result[key] = sanitizeValue(child, includeBusinessContent);

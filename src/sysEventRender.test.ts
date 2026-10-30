@@ -166,6 +166,20 @@ describe("buildSysNoticeText", () => {
     expect(buildSysNoticeText(noDevice, t, "zh-Hans")?.split("\n")).toHaveLength(2);
   });
 
+  it("twostep_recovery_used：剩余数代入；设备行有才显；中英文都渲染", () => {
+    const m: ChatMessage = {
+      convId: "c1", from: "777000", content: "", contentType: "text", convSeq: 1, timestamp: 0, status: "received",
+      sysEvent: "twostep_recovery_used", sysArgs: { left: "7", at: "2026-10-29T10:00:00Z", device: "Chrome · macOS" },
+    };
+    const zhText = buildSysNoticeText(m, t, "zh-Hans")!;
+    expect(zhText.split("\n")).toHaveLength(3);
+    expect(zhText).toContain("剩余 7 个恢复码");
+    expect(zhText).toContain("· 登录设备：Chrome · macOS");
+    expect(buildSysNoticeText({ ...m, sysArgs: { left: "0", at: "2026-10-29T10:00:00Z" } }, t, "zh-Hans")!.split("\n")).toHaveLength(2);
+    setPref("en");
+    expect(buildSysNoticeText(m, t, "en")).toContain("7 recovery codes left");
+  });
+
   it("device_kicked：有 actor_device 走 by_line，没有走 time_line；device 缺省兜底", () => {
     const byActor: ChatMessage = {
       convId: "c1", from: "777000", content: "", contentType: "text", convSeq: 1, timestamp: 0, status: "received",

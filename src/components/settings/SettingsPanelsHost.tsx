@@ -27,6 +27,10 @@ import { BlockedListPanel } from "./BlockedListPanel";
 import { ChangePasswordPanel } from "./ChangePasswordPanel";
 import { DeleteAccountContainer } from "./DeleteAccountPanel";
 import { ExportDataContainer } from "./ExportDataPanel";
+import { TwoStepPanel } from "./TwoStepPanel";
+import { useTwoStep } from "../../useTwoStep";
+import { closeTwoStepPanel, openTwoStepPanel, useTwoStepPanelOpen } from "../../twoStepUi";
+import { statusValue } from "../../twoStepRules";
 import { ClearAllConversationsContainer } from "./ClearAllConversationsPanel";
 import { clearAllConversations } from "../../sdk/clearAllApi";
 import { applyClearAllLocal } from "../../clearAllLocal";
@@ -176,6 +180,13 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
     if (c) getPrivacy(c.authToken).then((v) => { if (!alive) return; setAutoDeleteDefault(v.autoDeleteSec); setVisibility((cur) => cur ?? { lastSeen: v.lastSeen, avatar: v.avatar, bio: v.bio, phone: v.phone }); }).catch(() => { /* 右值留空，进选择面板时会再取 */ });
     return () => { alive = false; };
   }, [p.privacyOpen, clientRef]);
+  // 两步验证：状态簇挂在这里（面板关掉不丢：enable 的恢复码只回一次）；换账号整体复位。进隐私页 / 进出二级页都重新取状态（右值随之刷新）。
+  const twoStep = useTwoStep({ owner: p.uid, token: () => clientRef.current?.authToken ?? "", askConfirm, setToast });
+  const twoStepOpen = useTwoStepPanelOpen();
+  const twoStepRef = useRef(twoStep); twoStepRef.current = twoStep;
+  useEffect(() => {
+    if (p.privacyOpen) void twoStepRef.current.refresh(); else { closeTwoStepPanel(); twoStepRef.current.close(); }
+  }, [p.privacyOpen, twoStepOpen]);
   const powerSave = usePowerSave();
   usePowerSaveToast(setToast); // §5 自动开启提示（电量监听 / 根 class 在 main.tsx 的 installPowerSaving，登录页也生效）
   // 设置入口行「动画与性能」：生效时右值「省电中」（稿：Row.value），否则不给。
@@ -282,6 +293,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onOpenChangePwd={() => p.setChangePwdOpen(true)}
           autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault} onOpenExport={() => setExportOpen(true)} onOpenClearAll={() => setClearAllOpen(true)}
           visibility={visibility} onOpenVisibility={setVisKind}
+          twoStepValue={statusValue(twoStep.status ? twoStep.status.enabled : null, t)} onOpenTwoStep={openTwoStepPanel}
           onComingSoon={comingSoon}
           onBack={() => p.setPrivacyOpen(false)}
         />
@@ -304,6 +316,9 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           onBack={() => setVisKind(null)}
         />
       )}
+
+      {/* 两步验证（账号保护 ▸ 两步验证）：介绍 / 验证密码 / 绑定 / 恢复码 / 状态 / 关闭 / 重新生成，同一面板内按状态机切页。 */}
+      {p.privacyOpen && twoStepOpen && <TwoStepPanel s={twoStep} onClose={closeTwoStepPanel} />}
 
       {/* 导出我的数据（数据 ▸ 导出）：关闭即停轮询，重开从 latest 恢复进度。 */}
       {p.privacyOpen && exportOpen && (

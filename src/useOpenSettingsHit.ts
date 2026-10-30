@@ -2,6 +2,7 @@
 // 从 App.tsx 抽出只为守体量红线：一级页复用设置列表里那一行的 onClick（连同它自带的预加载），不另写一套。
 import type { Row } from "./components/rows";
 import { openAutoDeleteDefault } from "./autoDeleteUi";
+import { openTwoStepPanel } from "./twoStepUi";
 import { runSettingsRoute, type SettingsSearchEntry } from "./settingsSearch";
 
 export function useOpenSettingsHit(p: {
@@ -21,6 +22,7 @@ export function useOpenSettingsHit(p: {
       setBlockedOpen: p.setBlockedOpen,
       setChangePwdOpen: p.setChangePwdOpen,
       openAutoDelete: openAutoDeleteDefault,
+      openTwoStep: openTwoStepPanel,
     });
   };
 }

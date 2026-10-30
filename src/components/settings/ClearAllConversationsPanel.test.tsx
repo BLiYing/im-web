@@ -34,7 +34,7 @@ describe("PrivacySecurityPanel · 数据 ▸ 清除所有对话", () => {
     const onOpenClearAll = vi.fn(), onComingSoon = vi.fn();
     const { getByText, container } = render(
       <PrivacySecurityPanel blockedCount={0} autoDeleteSec={null} visibility={null} onOpenVisibility={vi.fn()} onOpenBlocked={vi.fn()} onOpenChangePwd={vi.fn()}
-        onOpenAutoDelete={vi.fn()} onOpenExport={vi.fn()} onOpenClearAll={onOpenClearAll} onComingSoon={onComingSoon} onBack={vi.fn()} />,
+        onOpenAutoDelete={vi.fn()} onOpenExport={vi.fn()} onOpenClearAll={onOpenClearAll} onOpenTwoStep={vi.fn()} onComingSoon={onComingSoon} onBack={vi.fn()} />,
     );
     const row = getByText("清除所有对话").closest("button")!;
     expect(row.className).not.toContain("muted");
