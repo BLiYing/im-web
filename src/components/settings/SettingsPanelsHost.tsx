@@ -31,6 +31,10 @@ import { TwoStepPanel } from "./TwoStepPanel";
 import { useTwoStep } from "../../useTwoStep";
 import { closeTwoStepPanel, openTwoStepPanel, useTwoStepPanelOpen } from "../../twoStepUi";
 import { statusValue } from "../../twoStepRules";
+import { EmailLoginPanel } from "./EmailLoginPanel";
+import { useEmailLogin } from "../../useEmailLogin";
+import { closeEmailLoginPanel, openEmailLoginPanel, useEmailLoginPanelOpen } from "../../emailLoginUi";
+import { emailRowValue } from "../../emailRules";
 import { ClearAllConversationsContainer } from "./ClearAllConversationsPanel";
 import { clearAllConversations } from "../../sdk/clearAllApi";
 import { applyClearAllLocal } from "../../clearAllLocal";
@@ -187,6 +191,14 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   useEffect(() => {
     if (p.privacyOpen) void twoStepRef.current.refresh(); else { closeTwoStepPanel(); twoStepRef.current.close(); }
   }, [p.privacyOpen, twoStepOpen]);
+  // 邮箱登录：同两步验证的挂法；进隐私页 / 进出二级页都重新取值（右值随之刷新），关二级页丢弃页内临时状态。
+  const emailLogin = useEmailLogin({ owner: p.uid, token: () => clientRef.current?.authToken ?? "", askConfirm, setToast });
+  const emailOpen = useEmailLoginPanelOpen();
+  const emailRef = useRef(emailLogin); emailRef.current = emailLogin;
+  useEffect(() => {
+    if (!emailOpen) emailRef.current.reset();
+    if (p.privacyOpen) void emailRef.current.refresh(); else closeEmailLoginPanel();
+  }, [p.privacyOpen, emailOpen]);
   const powerSave = usePowerSave();
   usePowerSaveToast(setToast); // §5 自动开启提示（电量监听 / 根 class 在 main.tsx 的 installPowerSaving，登录页也生效）
   // 设置入口行「动画与性能」：生效时右值「省电中」（稿：Row.value），否则不给。
@@ -294,6 +306,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
           autoDeleteSec={autoDeleteDefault} onOpenAutoDelete={openAutoDeleteDefault} onOpenExport={() => setExportOpen(true)} onOpenClearAll={() => setClearAllOpen(true)}
           visibility={visibility} onOpenVisibility={setVisKind}
           twoStepValue={statusValue(twoStep.status ? twoStep.status.enabled : null, t)} onOpenTwoStep={openTwoStepPanel}
+          emailValue={emailRowValue(emailLogin.info, t)} onOpenEmail={openEmailLoginPanel}
           onComingSoon={comingSoon}
           onBack={() => p.setPrivacyOpen(false)}
         />
@@ -319,6 +332,9 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
 
       {/* 两步验证（账号保护 ▸ 两步验证）：介绍 / 验证密码 / 绑定 / 恢复码 / 状态 / 关闭 / 重新生成，同一面板内按状态机切页。 */}
       {p.privacyOpen && twoStepOpen && <TwoStepPanel s={twoStep} onClose={closeTwoStepPanel} />}
+
+      {/* 邮箱登录（账号保护 ▸ 邮箱登录）：说明 / 填邮箱 + 密码 / 验证码 / 已绑定 / 解绑，同一面板内按状态机切页。 */}
+      {p.privacyOpen && emailOpen && <EmailLoginPanel s={emailLogin} onClose={closeEmailLoginPanel} />}
 
       {/* 导出我的数据（数据 ▸ 导出）：关闭即停轮询，重开从 latest 恢复进度。 */}
       {p.privacyOpen && exportOpen && (

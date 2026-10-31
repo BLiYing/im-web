@@ -32,6 +32,14 @@ describe("settingsSearch", () => {
     expect(ids("自动删除")).toEqual(["autoDelete"]);
     expect(settingsSubtitle(all.find((e) => e.id === "autoDelete")!, "设置")).toBe(`${t("settings.row.privacy")} › ${t("ps.row.auto_delete_messages")}`);
   });
+  it("邮箱登录作为隐私页二级页登记；搜「邮箱」命中，路由先开隐私页再开它", () => {
+    expect(ids("邮箱")).toEqual(["emailLogin"]);
+    expect(settingsSubtitle(all.find((e) => e.id === "emailLogin")!, "设置")).toBe(`${t("settings.row.privacy")} › ${t("ps.row.email_login")}`);
+    const h = { openTop: vi.fn(), setWallpaperOpen: vi.fn(), setBlockedOpen: vi.fn(), setChangePwdOpen: vi.fn(), openEmailLogin: vi.fn() };
+    runSettingsRoute("emailLogin", h);
+    expect(h.openTop).toHaveBeenCalledWith("privacy");
+    expect(h.openEmailLogin).toHaveBeenCalledTimes(1);
+  });
   it("两步验证作为隐私页二级页登记；搜「两步」命中，路由先开隐私页再开它", () => {
     expect(ids("两步")).toEqual(["twoStep"]);
     expect(settingsSubtitle(all.find((e) => e.id === "twoStep")!, "设置")).toBe(`${t("settings.row.privacy")} › ${t("ps.row.two_factor")}`);

@@ -23,3 +23,7 @@
 .ts-login-hint { margin: 0; text-align: center; font-size: 13px; color: var(--text-secondary); }
 .ts-login-link { border: 0; background: none; padding: 4px; color: var(--accent); font-size: 13px; cursor: pointer; text-align: center; }
 .ts-login-link.muted { color: var(--text-secondary); }
+/* 邮箱登录：长邮箱换行不撑破；服务未启用说明；重发/更换文字链按钮的禁用态 */
+.ts-hero h3.email-addr { word-break: break-all; }
+.ts-hero p.email-unavail { margin-top: 8px; }
+.ts-link:disabled { color: var(--text-secondary); cursor: default; }

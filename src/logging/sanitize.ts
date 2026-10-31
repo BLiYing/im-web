@@ -3,11 +3,16 @@ const ALWAYS_SENSITIVE = new Set([
   "password", "passwd", "passcode", "secret", "clientsecret",
   "token", "accesstoken", "refreshtoken", "idtoken", "jwt",
   "authorization", "cookie", "setcookie",
+  "email", // 邮箱登录：绑定 / 更换的完整邮箱不落日志（设计 EMAIL_LOGIN_DESIGN §5.4；脱敏展示用 email_masked，不受影响）
   "phone", "phonenumber", "mobile", "telephone",
   "ticket", "otpauthuri", "recoverycodes", // 两步验证：登录票据 / 绑定 URI（含密钥）/ 恢复码明文
 ]);
 /** 信封的 `code` 是数字业务码，必须原样保留；字符串形态的 `code` 是两步验证动态码 / 恢复码，不得落日志。 */
 const SENSITIVE_WHEN_STRING = new Set(["code"]);
+/** 登录名可以填邮箱（EMAIL_LOGIN_DESIGN §2.4）：`username` 字段含 `@` 就是邮箱，同样不落日志；普通用户名仍原样保留。 */
+function isEmailLoginName(normalizedKey: string, value: unknown): boolean {
+  return normalizedKey === "username" && typeof value === "string" && value.includes("@");
+}
 const BUSINESS_CONTENT = new Set([
   "content", "text", "note", "reason", "resolution", "translation", "description", "remark",
 ]);
@@ -36,7 +41,7 @@ export function sanitizeValue(value: unknown, includeBusinessContent: boolean): 
     const result: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
       const normalized = normalizedKey(key);
-      if (ALWAYS_SENSITIVE.has(normalized) || (typeof child === "string" && SENSITIVE_WHEN_STRING.has(normalized)) || (!includeBusinessContent && BUSINESS_CONTENT.has(normalized))) {
+      if (ALWAYS_SENSITIVE.has(normalized) || (typeof child === "string" && SENSITIVE_WHEN_STRING.has(normalized)) || isEmailLoginName(normalized, child) || (!includeBusinessContent && BUSINESS_CONTENT.has(normalized))) {
         result[key] = "***";
       } else {
         result[key] = sanitizeValue(child, includeBusinessContent);

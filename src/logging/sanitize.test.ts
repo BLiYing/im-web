@@ -16,6 +16,20 @@ describe("HTTP 日志脱敏", () => {
     expect(safe.data.content).toBe("hello");
   });
 
+  it("邮箱登录：完整 email 与字符串验证码不落日志，email_masked 保留", () => {
+    const safe = sanitizeValue({ email: "a@b.com", code: "123456", data: { email: "a@b.com", email_masked: "a***@b.com" } }, true) as Record<string, any>;
+    expect(safe.email).toBe("***");
+    expect(safe.code).toBe("***");
+    expect(safe.data.email).toBe("***");
+    expect(safe.data.email_masked).toBe("a***@b.com");
+  });
+
+  it("登录名填了邮箱：username 含 @ 时脱敏，普通用户名保留", () => {
+    const safe = sanitizeValue({ username: "Me@Example.com" }, true) as Record<string, any>;
+    expect(safe.username).toBe("***");
+    expect((sanitizeValue({ username: "plain_user" }, true) as Record<string, any>).username).toBe("plain_user");
+  });
+
   it("生产模式隐藏业务正文", () => {
     const safe = sanitizeValue({ content: "private", data: [{ text: "nested", code: 0 }] }, false) as Record<string, any>;
     expect(safe.content).toBe("***");

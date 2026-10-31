@@ -63,7 +63,7 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authNot
       {!authErr && authNotice && <p className="auth-info">{tr(authNotice)}</p>} {/* 注销成功提示：非红（设计 §3.4），存键随语言重译 */}
       {loginTab !== "qr" ? (
         <>
-          <label>{tr("settings.info.username")}<input value={uid} autoFocus placeholder={loginTab === "register" ? tr("web.login.username_placeholder") : undefined}
+          <label>{loginTab === "register" ? tr("settings.info.username") : tr("login.identifier.label")}<input value={uid} autoFocus autoComplete={loginTab === "register" ? undefined : "username"} placeholder={loginTab === "register" ? tr("web.login.username_placeholder") : undefined}
             onChange={(e) => { onInput?.(); onUid(e.target.value.trim()); }} /></label>
           <label>{tr("login.password")}<input type="password" value={password} placeholder={loginTab === "register" ? tr("web.login.password_placeholder") : undefined}
             onChange={(e) => { onInput?.(); onPassword(e.target.value); }}

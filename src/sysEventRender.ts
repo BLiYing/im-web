@@ -168,6 +168,13 @@ export function buildSysNoticeText(
     lines.push(t("sys.notice.twostep_recovery_used.footer"));
     return lines.join("\n");
   }
+  if (ev === "email_bound" || ev === "email_changed" || ev === "email_unbound") { // 绑定 / 更换 / 解绑邮箱：参数只有脱敏邮箱（unbound 无）+ 时间 + 设备行（有才显）
+    const k = `sys.notice.${ev}`;
+    const lines = [t(`${k}.headline`, { email: args.email_masked ?? "", at: formatNoticeAt(args.at) })];
+    if (args.device) lines.push(t(`${k}.device_line`, { device: args.device }));
+    lines.push(t(`${k}.footer`));
+    return lines.join("\n");
+  }
   if (ev === "device_kicked") {
     const device = args.target_device || t("common.unknown_device_kicked");
     const at = formatNoticeAt(args.at);

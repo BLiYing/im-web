@@ -94,7 +94,7 @@ describe("TwoStepPanel", () => {
 });
 
 describe("PrivacySecurityPanel · 两步验证行", () => {
-  const base = { blockedCount: 0, autoDeleteSec: null, visibility: null, onOpenVisibility: noop, onOpenBlocked: noop, onOpenChangePwd: noop, onOpenAutoDelete: noop, onOpenExport: noop, onOpenClearAll: noop, onComingSoon: noop, onBack: noop };
+  const base = { blockedCount: 0, autoDeleteSec: null, visibility: null, onOpenVisibility: noop, onOpenBlocked: noop, onOpenChangePwd: noop, onOpenAutoDelete: noop, onOpenExport: noop, onOpenClearAll: noop, onOpenEmail: noop, onComingSoon: noop, onBack: noop };
   it("活行：不灰置、右值随状态、点击进入而不是「即将上线」", () => {
     const onOpenTwoStep = vi.fn(), onComingSoon = vi.fn();
     const { getByText } = render(<PrivacySecurityPanel {...base} onComingSoon={onComingSoon} twoStepValue="开启" onOpenTwoStep={onOpenTwoStep} />);
@@ -108,5 +108,23 @@ describe("PrivacySecurityPanel · 两步验证行", () => {
   it("加载前右值留空", () => {
     const { getByText } = render(<PrivacySecurityPanel {...base} onOpenTwoStep={noop} />);
     expect(getByText("两步验证").closest("button")!.querySelector(".row-value")).toBeNull();
+  });
+});
+
+describe("PrivacySecurityPanel · 邮箱登录行", () => {
+  const base = { blockedCount: 0, autoDeleteSec: null, visibility: null, onOpenVisibility: noop, onOpenBlocked: noop, onOpenChangePwd: noop, onOpenAutoDelete: noop, onOpenExport: noop, onOpenClearAll: noop, onOpenTwoStep: noop, onComingSoon: noop, onBack: noop };
+  it("活行：不灰置、右值显示邮箱、点击进入而不是「即将上线」", () => {
+    const onOpenEmail = vi.fn(), onComingSoon = vi.fn();
+    const { getByText } = render(<PrivacySecurityPanel {...base} onComingSoon={onComingSoon} emailValue="a@b.com" onOpenEmail={onOpenEmail} />);
+    const row = getByText("邮箱登录").closest("button")!;
+    expect(row.className).not.toContain("muted");
+    expect(row.textContent).toContain("a@b.com");
+    fireEvent.click(row);
+    expect(onOpenEmail).toHaveBeenCalled();
+    expect(onComingSoon).not.toHaveBeenCalled();
+  });
+  it("加载前右值留空", () => {
+    const { getByText } = render(<PrivacySecurityPanel {...base} onOpenEmail={noop} />);
+    expect(getByText("邮箱登录").closest("button")!.querySelector(".row-value")).toBeNull();
   });
 });

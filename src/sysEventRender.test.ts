@@ -180,6 +180,26 @@ describe("buildSysNoticeText", () => {
     expect(buildSysNoticeText(m, t, "en")).toContain("7 recovery codes left");
   });
 
+  it("email_bound / email_changed / email_unbound：脱敏邮箱代入 {email}；设备行有才显；unbound 无邮箱；中英文都渲染", () => {
+    const mk = (ev: string, args: Record<string, string>): ChatMessage => ({
+      convId: "c1", from: "777000", content: "", contentType: "text", convSeq: 1, timestamp: 0, status: "received", sysEvent: ev, sysArgs: args,
+    });
+    const at = "2026-10-30T10:00:00Z";
+    const bound = buildSysNoticeText(mk("email_bound", { email_masked: "a***@x.com", at, device: "Chrome · macOS" }), t, "zh-Hans")!;
+    expect(bound.split("\n")).toHaveLength(3);
+    expect(bound).toContain("a***@x.com");
+    expect(bound).toContain("· 操作设备：Chrome · macOS");
+    expect(bound).not.toContain("{");
+    const changed = buildSysNoticeText(mk("email_changed", { email_masked: "b***@y.com", at }), t, "zh-Hans")!;
+    expect(changed.split("\n")).toHaveLength(2);
+    expect(changed).toContain("b***@y.com");
+    const unbound = buildSysNoticeText(mk("email_unbound", { at }), t, "zh-Hans")!;
+    expect(unbound.split("\n")).toHaveLength(2);
+    expect(unbound).not.toContain("{");
+    setPref("en");
+    expect(buildSysNoticeText(mk("email_bound", { email_masked: "a***@x.com", at }), t, "en")).toContain("login email a***@x.com");
+  });
+
   it("device_kicked：有 actor_device 走 by_line，没有走 time_line；device 缺省兜底", () => {
     const byActor: ChatMessage = {
       convId: "c1", from: "777000", content: "", contentType: "text", convSeq: 1, timestamp: 0, status: "received",

@@ -9,7 +9,7 @@ import { useT } from "../../i18n";
 /** 隐私与安全容器页（拉齐 iOS IMPrivacySecurityViewController，设计 docs/design/PRIVACY_SECURITY_DESIGN.md）：
  *  五组 A~E：A 组两项、C 自动删除、D「谁能看到」四行、E 数据为活行，B 组为灰置 comingSoon 占位（生日不做，已删）。
  *  「已登录设备」按设计不进本页（是设置页独立入口）。纯展示：动作与黑名单计数由 App 传入。 */
-export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, onOpenVisibility, onOpenBlocked, onOpenChangePwd, onOpenAutoDelete, onOpenExport, onOpenClearAll, twoStepValue, onOpenTwoStep, onComingSoon, onBack }: {
+export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, onOpenVisibility, onOpenBlocked, onOpenChangePwd, onOpenAutoDelete, onOpenExport, onOpenClearAll, twoStepValue, onOpenTwoStep, emailValue, onOpenEmail, onComingSoon, onBack }: {
   blockedCount: number | null; // null=未加载/加载中 → 右值留空
   onOpenBlocked: () => void;
   onOpenChangePwd: () => void;
@@ -18,6 +18,8 @@ export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, 
   onOpenExport: () => void; // 数据 ▸ 导出我的数据（活行）
   twoStepValue?: string; // 账号保护 ▸ 两步验证右值（开启 / 关闭）；未加载 → 留空
   onOpenTwoStep: () => void;
+  emailValue?: string; // 账号保护 ▸ 邮箱登录右值（未绑定 / 邮箱地址）；未加载 → 留空
+  onOpenEmail: () => void;
   onOpenClearAll: () => void; // 数据 ▸ 清除所有对话（活行，破坏性：不登记设置搜索）
   visibility: Record<VisibilityKind, Visibility> | null; // 「谁能看到」当前档位；null=未加载 → 右值留空
   onOpenVisibility: (kind: VisibilityKind) => void;
@@ -47,7 +49,7 @@ export function PrivacySecurityPanel({ blockedCount, autoDeleteSec, visibility, 
       rows: [
         { id: "2fa", label: t("ps.row.two_factor"), icon: ShieldCheck, iconTint: "gray", value: twoStepValue, chevron: true, onClick: onOpenTwoStep },
         ph("passkey", "通行密钥", KeyRound, "purple", "关闭"),
-        ph("emailLogin", "邮箱登录", Mail, "teal"),
+        { id: "emailLogin", label: t("ps.row.email_login"), icon: Mail, iconTint: "teal", value: emailValue, chevron: true, onClick: onOpenEmail },
       ],
     },
     {

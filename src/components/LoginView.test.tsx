@@ -122,3 +122,16 @@ describe("LoginView 非红通知（authNotice）", () => {
     expect(n).toBe(1);
   });
 });
+
+describe("LoginView 用户名/邮箱标签", () => {
+  afterEach(cleanup);
+  it("登录页签：标签「用户名或邮箱」+ autocomplete=username；注册页签保持「用户名」", () => {
+    renderLogin();
+    const input = screen.getAllByLabelText("用户名或邮箱")[0];
+    expect(input).toHaveAttribute("autocomplete", "username");
+    cleanup();
+    renderLogin({ loginTab: "register" });
+    expect(screen.queryByLabelText("用户名或邮箱")).toBeNull();
+    expect(screen.getByLabelText("用户名")).not.toHaveAttribute("autocomplete");
+  });
+});
