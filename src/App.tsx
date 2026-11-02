@@ -133,8 +133,8 @@ import { hasUnloadedBelow, moreLocalAbove } from "./windowPlan";
 import { ReadTick } from "./components/ReadTick";
 import {
   Settings, Bookmark, Settings2, Gauge, Bell, Database, Lock, Folder,
-  MonitorSmartphone, Languages, Smile, Users, Megaphone,
-  Headphones, Phone,
+  MonitorSmartphone, Languages, Users,
+  Phone,
   BellOff, Menu,
   Pin,
  
@@ -2700,7 +2700,7 @@ export default function App() {
       { id: "folders", label: t("settings.row.folders"), icon: Folder, iconTint: "blue", chevron: true, onClick: () => setFoldersPanel({ editId: null }) },
       { id: "devices", label: t("settings.row.devices"), icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
       { id: "language", label: t("settings.language.title"), icon: Languages, iconTint: "purple", value: langPrefLabel(), chevron: true, onClick: () => setLanguageOpen(true) },
-      { id: "stickers", label: t("settings.row.stickers"), icon: Smile, iconTint: "pink", chevron: true, onClick: () => comingSoon(t("settings.row.stickers")) },
+      // 「贴纸与表情」行暂时隐藏（2026-11-03，功能未做）；文案 key settings.row.stickers 保留。
     ], aboutRows(t), // 「关于我们」单行组（二级页含隐私政策 / 服务条款 / 技术支持 / 版本）
   ];
 
@@ -2717,8 +2717,7 @@ export default function App() {
     { id: "friendRequests", label: t("friend.requests.title"), icon: UserPlus, iconTint: "green", chevron: true,
       badge: incoming.length > 0 ? unreadBadgeText(incoming.length) : undefined,
       onClick: () => { setFriendRequests(true); void refreshFriends(); } },
-    { id: "official", label: t("contacts.row.official_accounts"), icon: Megaphone, iconTint: "orange", chevron: true, onClick: () => comingSoon(t("contacts.row.official_accounts")) },
-    { id: "service", label: t("contacts.row.service_accounts"), icon: Headphones, iconTint: "teal", chevron: true, onClick: () => comingSoon(t("contacts.row.service_accounts")) },
+    // 公众号 / 服务号入口暂时隐藏（2026-11-03，功能未做，三端同步）；文案 key 保留。
   ];
 
   return (
