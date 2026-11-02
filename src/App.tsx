@@ -77,7 +77,7 @@ import { useRestoreOffer } from "./useDeleteAccount"; import { useTwoStepLogin }
 import { wipeOwnerLocalData } from "./sdk/wipeOwner";
 import { useToast } from "./useToast";
 import { renderRow, type Row } from "./components/rows";
-import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost";
+import { SettingsPanelsHost } from "./components/settings/SettingsPanelsHost"; import { aboutRows } from "./components/settings/aboutRows";
 import { useOpenSettingsHit } from "./useOpenSettingsHit";
 import { useAccountNotifySettings } from "./useAccountNotifySettings";
 import { useConvEditMode } from "./useConvEditMode"; import { useConvRowActions } from "./useConvRowActions"; import { ConvEditToggle, ConvEditBar } from "./components/ConvEditBar";
@@ -2701,7 +2701,7 @@ export default function App() {
       { id: "devices", label: t("settings.row.devices"), icon: MonitorSmartphone, iconTint: "teal", chevron: true, onClick: () => { setDevicesOpen(true); void loadDevices(); } },
       { id: "language", label: t("settings.language.title"), icon: Languages, iconTint: "purple", value: langPrefLabel(), chevron: true, onClick: () => setLanguageOpen(true) },
       { id: "stickers", label: t("settings.row.stickers"), icon: Smile, iconTint: "pink", chevron: true, onClick: () => comingSoon(t("settings.row.stickers")) },
-    ],
+    ], aboutRows(t), // 「关于我们」单行组（二级页含隐私政策 / 服务条款 / 技术支持 / 版本）
   ];
 
   const openSettingsHit = useOpenSettingsHit({ rows: settingsGroups[0], clearSearch: () => search.setHomeSearch(""), showSettings: () => setShowSettings(true), setWallpaperOpen, setBlockedOpen, setChangePwdOpen });

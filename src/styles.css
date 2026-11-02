@@ -138,6 +138,9 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .login-submit { padding: 12px; border: 0; border-radius: var(--radius-card); background: var(--accent); color: var(--on-accent); font-size: 15px; cursor: pointer; }
 .login-submit:disabled { opacity: 0.6; cursor: default; }
 .login-submit.secondary { background: var(--card-bg); color: var(--accent); border: 1px solid var(--accent); }
+/* 底部隐式同意提示（ABOUT_LEGAL_DESIGN 批②）：居中小字，两段为可点链接。 */
+.login-agree { margin: var(--space-2) 0 0; text-align: center; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.login-agree-link { display: inline; padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer; }
 .auth-err { margin: 0; color: var(--danger); font-size: 13px; }
 .auth-info { margin: 0; color: var(--accent); font-size: 13px; }
 /* 按钮内联菊花（登录 / 注册并登录 / 免密登录共用）：跟随按钮文字色，禁用态随 opacity 一起变淡。

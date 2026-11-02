@@ -3,8 +3,16 @@ import react from "@vitejs/plugin-react";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const rootDir = dirname(fileURLToPath(import.meta.url));
+
+// 「关于我们」的版本串：package.json version + git 短 hash（取不到 git 时只显示 version）。
+const appVersion: string = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8")).version;
+function gitShortHash(): string {
+  try { return execSync("git rev-parse --short HEAD", { cwd: rootDir, stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return ""; }
+}
 
 // 开发期日志落盘（配合 src/logging/logger.ts 的 dev sink）：浏览器把结构化日志 POST 到 /__devlog，
 // 这里的中间件把 NDJSON 追加到 dev-logs/im-web.log，便于直接读文件排查（生产/构建不启用）。
@@ -39,10 +47,13 @@ const target = process.env.IM_SERVER_TARGET || "http://localhost:8080";
 const wsTarget = target.replace(/^http/, "ws");
 export default defineConfig({
   plugins: [react(), devLogSink()],
+  define: { __APP_VERSION__: JSON.stringify(appVersion), __APP_BUILD__: JSON.stringify(gitShortHash()) },
   server: {
     port: 5173,
     proxy: {
       "/api": { target, changeOrigin: true },
+      "/legal": { target, changeOrigin: true }, // 隐私政策 / 服务条款静态页（IMServer internal/legal）
+      "/support": { target, changeOrigin: true }, // 技术支持静态页
       "/uploads": { target, changeOrigin: true },
       "/avatars": { target, changeOrigin: true }, // 头像独立目录（方案 C），与 /uploads 同后端
       "/ws": { target: wsTarget, ws: true },

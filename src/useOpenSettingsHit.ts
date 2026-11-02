@@ -4,6 +4,7 @@ import type { Row } from "./components/rows";
 import { openAutoDeleteDefault } from "./autoDeleteUi";
 import { openTwoStepPanel } from "./twoStepUi";
 import { openEmailLoginPanel } from "./emailLoginUi";
+import { openAboutPanel } from "./aboutUi";
 import { runSettingsRoute, type SettingsSearchEntry } from "./settingsSearch";
 
 export function useOpenSettingsHit(p: {
@@ -25,6 +26,7 @@ export function useOpenSettingsHit(p: {
       openAutoDelete: openAutoDeleteDefault,
       openTwoStep: openTwoStepPanel,
       openEmailLogin: openEmailLoginPanel,
+      openAbout: openAboutPanel,
     });
   };
 }

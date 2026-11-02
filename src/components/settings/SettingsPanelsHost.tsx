@@ -43,6 +43,8 @@ import { wipeOwnerLocalData } from "../../sdk/wipeOwner";
 import { GeneralPanel } from "./GeneralPanel";
 import { NotificationsPanel } from "./NotificationsPanel";
 import { LanguageSettings } from "./LanguagePanel";
+import { AboutSettings } from "./AboutPanel";
+import { closeAboutPanel, useAboutPanelOpen } from "../../aboutUi";
 import { WallpaperPanel } from "./WallpaperPanel";
 import { WallpaperColorPanel } from "./WallpaperColorPanel";
 import { PerformancePanel } from "./PerformancePanel";
@@ -194,6 +196,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
   // 邮箱登录：同两步验证的挂法；进隐私页 / 进出二级页都重新取值（右值随之刷新），关二级页丢弃页内临时状态。
   const emailLogin = useEmailLogin({ owner: p.uid, token: () => clientRef.current?.authToken ?? "", askConfirm, setToast });
   const emailOpen = useEmailLoginPanelOpen();
+  const aboutOpen = useAboutPanelOpen();
   const emailRef = useRef(emailLogin); emailRef.current = emailLogin;
   useEffect(() => {
     if (!emailOpen) emailRef.current.reset();
@@ -406,6 +409,7 @@ export function SettingsPanelsHost(p: SettingsPanelsHostProps) {
         />
       )}
 
+      {aboutOpen && <AboutSettings onBack={closeAboutPanel} />}{/* 关于我们：隐私政策 / 服务条款 / 技术支持 / 版本（ABOUT_LEGAL_DESIGN） */}
       {p.languageOpen && <LanguageSettings onBack={() => p.setLanguageOpen(false)} />}{/* 语言选择：偏好存 localStorage（每设备）、切换即刻生效 */}
 
       {/* 聊天壁纸 / 纯色编辑：见 components/settings/WallpaperPanel · WallpaperColorPanel。 */}

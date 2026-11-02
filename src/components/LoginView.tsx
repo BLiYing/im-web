@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MessageCircle } from "lucide-react";
 import { QRLoginTab } from "../QRUI";
+import { LoginAgreeFooter } from "./LoginAgreeFooter";
 import { useT } from "../i18n";
 import { TwoStepLogin } from "./TwoStepLogin";
 import type { TwoStepLogin as TwoStepLoginApi } from "../useTwoStepLogin";
@@ -96,6 +97,8 @@ export function LoginView({ restoring, uid, nickname, password, authErr, authNot
       ) : (
         <QRLoginTab onLogin={onQRLogin} />
       )}
+      {/* 底部隐式同意提示（三端一致，ABOUT_LEGAL_DESIGN 批②）：恢复态 / 二步页已在上面提前 return，不显示。 */}
+      <LoginAgreeFooter />
     </div>
   );
 }

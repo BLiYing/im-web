@@ -21,7 +21,7 @@ import { URL } from "node:url";
 /** 反代前缀。**与仓库根 vite.config.ts 的 proxy 配置是对称的**——那边加一条，这边就得加一条，
  *  否则 dev 通、打包版 404。写这行时就漏过一次 `/avatars`（头像独立目录，方案 C），
  *  是照着 vite.config.ts 核对才发现的。已在 docs/SYMMETRY.md 登记。 */
-const PROXY_PREFIXES = ["/api", "/uploads", "/avatars"];
+const PROXY_PREFIXES = ["/api", "/uploads", "/avatars", "/legal", "/support"];
 const WS_PATH = "/ws";
 
 const MIME: Record<string, string> = {
