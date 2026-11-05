@@ -12,8 +12,10 @@
 import { useCallback, useMemo, useState } from "react";
 import type { MutableRefObject } from "react";
 import type { IMClient } from "./sdk/imSdk";
-import type { ChatMessage, Conversation, FriendEntry } from "./sdk/protocol";
+import { convIdFor, type ChatMessage, type Conversation, type FriendEntry } from "./sdk/protocol";
+import type { ForwardVerb } from "./useForward";
 import { CONTACT_CONTENT_TYPE, buildContactCard, type ContactCard } from "./contactCard";
+import { groupInviteMessage } from "./shareTargets";
 
 /** 一次最多发几张名片（与转发选择页多选上限一致）。没有上限的话"一次发 200 张"就是刷屏。 */
 export const CONTACT_MAX_SELECTION = 9;
@@ -32,12 +34,14 @@ export interface ContactShareDeps {
   setForwardMode: (m: "each" | "merged") => void;
   setForwarding: (m: ChatMessage[] | null) => void;
   /** 转发选择页的吐司动词：分享名片置「发送」（默认是「转发」，语义不对）。 */
-  setForwardVerb: (v: string) => void;
+  setForwardVerb: (v: ForwardVerb) => void;
+  /** 选择页排除的 conv_id：推荐某人名片时排除与他的单聊、发群邀请时排除该群本身（见 useForward.forwardExclude）。 */
+  setForwardExclude: (ids: string[]) => void;
 }
 
 export function useContactShare(d: ContactShareDeps) {
   const { clientRef, setToast, uid, friends, conversations, currentConvRef,
-          appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb } = d;
+          appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb, setForwardExclude } = d;
 
   /** 入口 ① 的选人弹窗：null=关闭；selected 存 uid（与搜索过滤无关，见 FriendPickerModal）。 */
   const [cardPicker, setCardPicker] = useState<{ selected: string[] } | null>(null);
@@ -107,7 +111,8 @@ export function useContactShare(d: ContactShareDeps) {
     const content = buildContactCard(card.userId, card.username, card.nickname, card.avatarUrl);
     if (!content) { setToast("该用户资料不完整，无法分享名片"); return; }
     setForwardMode("each");
-    setForwardVerb("发送"); // 分享名片不是转发，吐司说「已发送到 X」（与 iOS 一致）
+    setForwardVerb("send"); // 分享名片不是转发，吐司说「已发送到 X」（与 iOS 一致）
+    setForwardExclude([convIdFor(uid, card.userId)]); // 把张三的名片推荐给张三本人没有意义
     setForwarding([{
       clientMsgId: `card-${card.userId}`, convId: "",
       // ⚠️ `from` 必须留空：转发路径取 `origin = m.forwardFrom || m.fromNickname || m.from`，
@@ -119,7 +124,18 @@ export function useContactShare(d: ContactShareDeps) {
       convSeq: 1,          // >0：转发路径按"已确认消息"处理（0 会被当成未发出的占位过滤掉）
       timestamp: Date.now(), status: "sent",
     }]);
-  }, [setForwardMode, setForwarding, setForwardVerb, setToast]);
+  }, [setForwardMode, setForwarding, setForwardVerb, setForwardExclude, setToast, uid]);
+
+  /**
+   * 群二维码 / 群邀请链接「发送给朋友」（SHARE_PICKER_UX_SKETCH ⑤）：合成一条「邀请你加入群聊「群名」+ 链接」文本，
+   * 与 ②③ 同一条路交给转发选择页。对方点链接走已有的入群预览（需审批的群照常申请），本端不做额外处理。
+   */
+  const shareGroupInvite = useCallback((groupConvId: string, groupName: string, url: string) => {
+    setForwardMode("each");
+    setForwardVerb("send");
+    setForwardExclude([groupConvId]); // 把群自己的邀请发回群里没有意义
+    setForwarding([groupInviteMessage(groupName, url)]);
+  }, [setForwardMode, setForwarding, setForwardVerb, setForwardExclude]);
 
   /** 入口 ① 的候选：全部好友（名片不排除任何人——推荐当前会话对端本身也是合理操作）。 */
   const contactCandidates = useMemo(
@@ -127,7 +143,7 @@ export function useContactShare(d: ContactShareDeps) {
 
   return {
     cardPicker, cardConfirm, contactCandidates,
-    openContactPicker, toggleContactPick, confirmContactPick, sendContactCards, shareContactCard,
+    openContactPicker, toggleContactPick, confirmContactPick, sendContactCards, shareContactCard, shareGroupInvite,
     closeContactPicker: () => setCardPicker(null),
     closeContactConfirm: () => setCardConfirm(null),
   };

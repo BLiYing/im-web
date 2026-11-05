@@ -16,6 +16,7 @@ function setup(over: Partial<Parameters<typeof useContactShare>[0]> = {}) {
   const setForwarding = vi.fn();
   const setForwardMode = vi.fn();
   const setForwardVerb = vi.fn();
+  const setForwardExclude = vi.fn();
   const setToast = vi.fn();
   const deps = {
     clientRef: { current: { sendMedia } } as never,
@@ -23,11 +24,11 @@ function setup(over: Partial<Parameters<typeof useContactShare>[0]> = {}) {
     friends: [friend("1002", "小明", "老王"), friend("1003", "小红")],
     conversations: [conv("u_1001_u_1002")],
     currentConvRef: { current: "u_1001_u_1002" },
-    appendMsg, setAttachPanel: vi.fn(), setForwardMode, setForwarding, setForwardVerb,
+    appendMsg, setAttachPanel: vi.fn(), setForwardMode, setForwarding, setForwardVerb, setForwardExclude,
     ...over,
   } as Parameters<typeof useContactShare>[0];
   const { result } = renderHook(() => useContactShare(deps));
-  return { result, sendMedia, appendMsg, setForwarding, setForwardMode, setForwardVerb, setToast };
+  return { result, sendMedia, appendMsg, setForwarding, setForwardMode, setForwardVerb, setForwardExclude, setToast };
 }
 
 describe("入口①：选好友 → 确认 → 发进当前会话", () => {
@@ -85,7 +86,7 @@ describe("入口②③：交给转发选择页", () => {
     act(() => result.current.shareContactCard({ userId: "1003", nickname: "小红" }));
     expect(setForwardMode).toHaveBeenCalledWith("each");
     // 分享名片不是转发，吐司动词要置成「发送」（与 iOS IMContactShare 一致）。
-    expect(setForwardVerb).toHaveBeenCalledWith("发送");
+    expect(setForwardVerb).toHaveBeenCalledWith("send");
     const [msgs] = setForwarding.mock.calls[0] as [ChatMessage[]];
     expect(msgs[0].from).toBe("");
     expect(msgs[0].forwardFrom).toBeUndefined();
@@ -124,5 +125,22 @@ describe("名片构造必须带 username", () => {
     expect(cards[0].username).toBe("xiaoming");   // ← 漏了这个字段就前功尽弃
     expect(cards[0].userId).toBe("4820571639");
     expect(cards[0].nickname).toBe("小明");
+  });
+});
+
+describe("分享时排除无意义的目标（选择页 exclude）", () => {
+  it("推荐某人的名片：排除与他本人的单聊", () => {
+    const { result, setForwardExclude } = setup();
+    act(() => result.current.shareContactCard({ userId: "1003", nickname: "小红" }));
+    expect(setForwardExclude).toHaveBeenCalledWith(["u_1001_u_1003"]);
+  });
+
+  it("群邀请「发送给朋友」：排除该群本身，动词为「发送」，消息是邀请文案 + 链接", () => {
+    const { result, setForwardExclude, setForwardVerb, setForwarding } = setup();
+    act(() => result.current.shareGroupInvite("g_9", "产品群", "http://x/q/g/t"));
+    expect(setForwardExclude).toHaveBeenCalledWith(["g_9"]);
+    expect(setForwardVerb).toHaveBeenCalledWith("send");
+    const [msgs] = setForwarding.mock.calls[0] as [ChatMessage[]];
+    expect(msgs[0].content).toBe("邀请你加入群聊「产品群」\nhttp://x/q/g/t");
   });
 });

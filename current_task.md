@@ -4,6 +4,11 @@
 > 历史流水见 `current_task.archive.md`（2026-10-02 瘦身前的全量快照在其顶部）+ `git log`。聊天交互蓝图以 `../IMServer/docs/CHAT_UX.md` 为准。
 
 ## 当前焦点
+- **分享选择页：好友/群聊入口 + 底部已选栏 + 发送确认**（2026-11-05，未提交，**未浏览器目测**；稿 `../IMServer/docs/design/sketches/SHARE_PICKER_UX_SKETCH.html`）：
+  `ForwardPicker` 新增可选 `sources`（不传＝「添加例外」原样，无入口/已选栏）；选择模型纯函数 `shareTargets.ts`（+单测）；
+  宿主 `components/modals/ForwardPickerHost.tsx`（App 只剩一次调用；打开时拉 `/groups`）；零件 `SharePickerParts.tsx`；
+  建群成员条抽成 `components/MemberChips.tsx` 两处共用；`QRCardModal.shareTo` →「发送给朋友 / 其他应用…」，群码走 `useContactShare.shareGroupInvite`。
+  手测：转发一条消息 → 多选 → 我的好友里勾一个没聊过的人 → 发送(N) → 确认面板 → 发送，左侧应出现新会话。
 - 近期功能（邮箱登录、两步验证、清除所有对话、删除会话统一口径、导出我的数据、自动删除 v2、会话列表编辑模式、注销账号、置顶面板、聊天文件夹、失效媒体口径等）均已落地并推送，详情见 `current_task.archive.md` 末段。
 - 浏览器实测欠账：邮箱登录、删除会话统一口径、隐私「上次上线/头像」、自动删除 v2、导出我的数据冷却页、聊天文件夹（桌面端）。原文见 archive。
 
@@ -18,6 +23,11 @@
 - **⏸ 拆 `useChatScroll`**：独立大重构，性价比最差，缓做或不做。
 
 ## 已知坑 / 限制
+- **分享选择页**：选中集只存 conv_id（好友按 `convIdFor` 本地推导），三源去重靠它，别改成存 uid；群列表接口无禁言/角色/人数 → 群一律不置灰、不显 (N)；
+  群列表拉取失败不弹吐司，「我的群聊」/ 主页群搜索就地「加载失败，点击重试」；来源齐后剔除解析不到的幽灵选中（群还在加载/失败时不剔）；
+  `useForward.forwardExclude` 统一排除无意义目标（群邀请排除该群、推荐名片排除与本人的单聊），随关窗复位；
+  好友子页是 `updated_at` 降序平铺（**Web 通讯录本就无 A–Z 分组**，iOS/Android 有）；单选仍「点行即发」（Web 改造前就没有单选确认框）；
+  完成吐司已走 i18n（`forward.toast.*_to_name` / `common.sent_to_chats` / `favorites.forward.success_count`，动词是 `ForwardVerb = "forward" | "send"`）；群邀请文本按**发送者当前语言**拼进消息。
 - **清除所有对话**：请求进行中用户已返回隐私页则不弹 toast（本机照清）；HTTP 成功但本机存储清除失败只记日志，靠回声帧 / 下次列表 `cleared_at` 对齐补清；聊天页正开着时消息清空、页面保持打开；批量路径 `onConvCleared` 的 `retained` 恒 false（无消费方）；详情抽屉文件列表 / 置顶横幅沿用 §6.7.1 限制。
 - **导出我的数据（已决定不处理）**：① 失败态关闭面板重开会再次显示失败页（「重试」的 dismissed 标记只活在面板生命周期内）；② 最新任务被取消后看不到之前的冷却（发起时服务端 200011 会纠正）。另：下载令牌经 `<a download>` 触发，浏览器端无法感知 401（令牌已用/过期），不做探测（HEAD 会烧令牌）；只有「换取 download_url」失败才 toast `export.download_failed`（`useDataExport.test.tsx` 已覆盖）。
 - **自动删除**：聊天内搜索的服务端结果、通知中心不做过滤（过期项可能在服务端搜索命中里出现）；清理以本机时钟，改系统时间会早/晚；会话行预览本地先重算（内存里没载到 from 之前的老消息时暂空），随后被列表节流刷新的服务端值覆盖；PUT 无回包时（极少）等 conv_update 回灌 sec+from。

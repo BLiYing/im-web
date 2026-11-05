@@ -1049,6 +1049,8 @@
     "one": "Forward to ({count} message)",
     "other": "Forward to ({count} messages)"
   },
+  "forward.toast.forwarded_to_name": "Forwarded to {name}",
+  "forward.toast.sent_to_name": "Sent to {name}",
   "friend.block.confirm": "Block this contact? You won’t receive their messages anymore.",
   "friend.block.done": "Blocked",
   "friend.block.failed_toast": "Couldn't block this user",
@@ -2018,6 +2020,34 @@
   "settings.row.privacy": "Privacy & security",
   "settings.row.stickers": "Stickers & emoji",
   "settings.title": "Settings",
+  "share.group_invite.text": "You're invited to join the group \"{name}\"",
+  "share.method.other_apps": "Other apps…",
+  "share.method.title_card": "Share my card",
+  "share.method.title_group": "Share group invite",
+  "share.method.to_friends": "Send to friends",
+  "share.picker.bar_hint": {
+    "one": "Select up to {count} friend or group",
+    "other": "Select up to {count} friends or groups"
+  },
+  "share.picker.confirm_title": {
+    "one": "Send separately to ({count})",
+    "other": "Send separately to ({count})"
+  },
+  "share.picker.load_failed_retry": "Failed to load. Tap to retry.",
+  "share.picker.my_friends": "My Friends",
+  "share.picker.my_groups": "My Groups",
+  "share.picker.no_friends": "No friends to choose",
+  "share.picker.no_groups": "No groups",
+  "share.picker.recent": "Recent Chats",
+  "share.picker.search_friends": "Search friends",
+  "share.picker.search_groups": "Search groups",
+  "share.picker.section_friends": "Friends",
+  "share.picker.section_groups": "Groups",
+  "share.picker.selected_of_max": "{count}/{max} selected",
+  "share.preview.each_messages": {
+    "one": "[Forward individually] {count} message",
+    "other": "[Forward individually] {count} messages"
+  },
   "sidebar.tab.chats": "Messages",
   "sidebar.tab.unread_aria": "Unread messages",
   "storage.clear_cache_failed": "Couldn't clear the cache",

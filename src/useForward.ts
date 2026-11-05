@@ -8,9 +8,12 @@ import type { IMClient } from "./sdk/imSdk";
 import { convIdFor, type ChatMessage, type Conversation, type GroupInfo } from "./sdk/protocol";
 import { toggleCapped } from "./selection";
 import { displayNameNoRemark } from "./remarks";
+import { t } from "./i18n"; // 非组件 hook：吐司按调用时刻语言取
 import { fileNameFromContent, chatRecordTitle, buildRecordSenderKeys, type RecordItem } from "./messageContent";
 
 export const MAX_FORWARD_TARGETS = 9;
+/** 完成吐司的动词：转发消息说「已转发到」，分享名片 / 群邀请说「已发送到」。 */
+export type ForwardVerb = "forward" | "send";
 
 export interface ForwardDeps {
   uid: string;
@@ -45,16 +48,19 @@ export function useForward(d: ForwardDeps) {
    *  （与 iOS IMContactShare 的文案对齐——两端同一操作不该一个说"已转发"一个说"已发送"）。
    *  **复位放在 closeForwardPicker**：取消/点蒙层关掉选择页时也要还原，否则那次「发送」会粘住，
    *  下一次真正的转发会吐司「已发送到 X」。 */
-  const [forwardVerb, setForwardVerb] = useState("转发");
+  const [forwardVerb, setForwardVerb] = useState<ForwardVerb>("forward");
+  /** 选择页里不列出的 conv_id（三个来源统一排除）：发群邀请时排除该群本身、推荐某人名片时排除与他的单聊——
+   *  发给自己 / 发回群里没有意义。随 closeForwardPicker 复位，同 forwardVerb 的理由。 */
+  const [forwardExclude, setForwardExclude] = useState<string[]>([]);
 
   const forwardMessage = useCallback((m: ChatMessage) => { setMenu(null); setForwardMode("each"); setForwarding([m]); }, []);
   // 关闭转发选择器并复位多选态（点蒙层 / 取消 / 发送完成统一走这里）。
-  const closeForwardPicker = useCallback(() => { setForwarding(null); setForwardMulti(false); setForwardTargets([]); setForwardVerb("转发"); }, []);
+  const closeForwardPicker = useCallback(() => { setForwarding(null); setForwardMulti(false); setForwardTargets([]); setForwardVerb("forward"); setForwardExclude([]); }, []);
   // 多选态切换某个目标会话（上限 MAX_FORWARD_TARGETS，超限吐司，对齐 iOS）。
   // 副作用（吐司）在 updater 外算，避免 StrictMode 双调用致重复吐司。
   const toggleForwardTarget = useCallback((cid: string) => {
     const { next, overflow } = toggleCapped(forwardTargets, cid, MAX_FORWARD_TARGETS);
-    if (overflow) { setToast(`最多选择 ${MAX_FORWARD_TARGETS} 个会话`); return; }
+    if (overflow) { setToast(t("forward.picker.max_selection", { count: MAX_FORWARD_TARGETS })); return; }
     setForwardTargets(next);
   }, [forwardTargets]);
   // 向单个 target 会话发出转发（逐条保留各自类型 / 合并打包 chat_record 一条）。不负责关闭弹窗/吐司。
@@ -161,9 +167,14 @@ export function useForward(d: ForwardDeps) {
     targets.forEach((t) => sendForwardToTarget(t)); // 不透传 forEach 的 index 作 msgsArg
     closeForwardPicker();
     exitSelectMode();
-    setToast(targets.length === 1
-      ? `已${forwardVerb}到 ${targets[0].is_group ? (targets[0].name || "群聊") : (targets[0].peer_remark || targets[0].peer_nickname || displayNameNoRemark(null))}`
-      : `已${forwardVerb}到 ${targets.length} 个会话`);
+    const sent = forwardVerb === "send";
+    if (targets.length === 1) {
+      const t0 = targets[0];
+      const name = t0.is_group ? (t0.name || t("common.group_chat")) : (t0.peer_remark || t0.peer_nickname || displayNameNoRemark(null));
+      setToast(t(sent ? "forward.toast.sent_to_name" : "forward.toast.forwarded_to_name", { name }));
+    } else {
+      setToast(t(sent ? "common.sent_to_chats" : "favorites.forward.success_count", { count: targets.length }));
+    }
   }, [sendForwardToTarget, closeForwardPicker, exitSelectMode, forwardVerb]);
   // 多选批量转发：收集选中的消息，打开选择器。
   const forwardSelected = useCallback(() => {
@@ -175,6 +186,6 @@ export function useForward(d: ForwardDeps) {
   return {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
     forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected,
-    setForwardVerb,
+    setForwardVerb, forwardExclude, setForwardExclude,
   };
 }

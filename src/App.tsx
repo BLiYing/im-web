@@ -107,7 +107,7 @@ import { GroupBansModal } from "./components/modals/GroupBansModal";
 import { ReadReceiptsModal } from "./components/modals/ReadReceiptsModal";
 import { GroupTextModal, type GroupTextKind } from "./components/modals/GroupTextModal";
 import { FavoritesModal } from "./components/modals/FavoritesModal";
-import { ForwardPicker } from "./components/modals/ForwardPicker";
+import { ForwardPickerHost } from "./components/modals/ForwardPickerHost";
 import { RecordModal } from "./components/modals/RecordModal";
 import { TextReader } from "./components/TextReader";
 import { MediaViewer } from "./components/MediaViewer";
@@ -1230,7 +1230,7 @@ export default function App() {
   // 转发簇 → useForward（阶段 6）：须在 exitSelectMode/setMenu/useMessageStore/selected/groupInfos 之后。
   const {
     forwarding, setForwarding, forwardMode, setForwardMode, forwardMulti, setForwardMulti, forwardTargets, setForwardTargets,
-    forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected, setForwardVerb,
+    forwardMessage, closeForwardPicker, toggleForwardTarget, sendForwardToTarget, doForwardToTargets, forwardSelected, setForwardVerb, forwardExclude, setForwardExclude,
   } = useForward({ uid, peer, groupConvId, clientRef, setToast, appendMsg, msgsByConv, groupInfos, selected, setMenu, exitSelectMode,
     // 合并转发条目的头像快照（相对路径；同源直接可当 <img src>）：我自己 → 本人资料；
     // 群 → 成员表；单聊 → 会话行的对端头像。都取不到就不带 `a`，读端按 uid 兜底。
@@ -1296,9 +1296,9 @@ export default function App() {
   // 入口 ②③ 合成一条 contact 消息交给**已有的**转发选择页（故消费 useForward 的 setForwardMode/setForwarding）。
   const {
     cardPicker, cardConfirm, contactCandidates,
-    openContactPicker, toggleContactPick, confirmContactPick, sendContactCards, shareContactCard,
+    openContactPicker, toggleContactPick, confirmContactPick, sendContactCards, shareContactCard, shareGroupInvite,
     closeContactPicker, closeContactConfirm,
-  } = useContactShare({ clientRef, setToast, uid, friends, conversations, currentConvRef, appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb });
+  } = useContactShare({ clientRef, setToast, uid, friends, conversations, currentConvRef, appendMsg, setAttachPanel, setForwardMode, setForwarding, setForwardVerb, setForwardExclude });
 
   // 多选批量删除：两档与单条删除同源（见 selectDelete.ts）。原先这里只抹本机内存 + IndexedDB 墓碑、
   // 根本不问服务端——按钮却写着「仅为我删除」，与单条那档（hide，多端同步）同名不同义：换台设备消息还在。
@@ -3045,22 +3045,12 @@ export default function App() {
         />
       )}
 
-      {/* 转发会话选择器（M4-3）：见 components/modals/ForwardPicker。 */}
+      {/* 转发 / 分享会话选择器（M4-3 + 好友/群聊来源，SHARE_PICKER_UX_SKETCH）：见 components/modals/ForwardPickerHost。 */}
       {forwarding && (
-        <ForwardPicker
-          count={forwarding.length}
-          conversations={conversations}
-          multi={forwardMulti}
-          mode={forwardMode}
-          targets={forwardTargets}
-          convAvatarUrl={convAvatarUrl}
-          convDisplayLabel={convDisplayLabel}
+        <ForwardPickerHost forwarding={forwarding} uid={uid} friends={friends} conversations={conversations} multi={forwardMulti} mode={forwardMode}
+          targets={forwardTargets} convAvatarUrl={convAvatarUrl} convDisplayLabel={convDisplayLabel} onSetMode={setForwardMode}
           onToggleMulti={() => { setForwardMulti((v) => !v); setForwardTargets([]); }}
-          onSetMode={setForwardMode}
-          onToggleTarget={toggleForwardTarget}
-          onForward={doForwardToTargets}
-          onClose={closeForwardPicker}
-        />
+          onToggleTarget={toggleForwardTarget} onForward={doForwardToTargets} onClose={closeForwardPicker} exclude={forwardExclude} setTargets={setForwardTargets} />
       )}
 
       {/* 合并转发详情（镜像 iOS）：见 components/modals/RecordModal（栈式下钻，合成消息在 App 构造）。 */}
@@ -3376,6 +3366,8 @@ export default function App() {
           card={qrCardModal.card}
           canReset={qrCardModal.canReset}
           onReset={resetQRCard}
+          shareTo={{ kind: qrCardModal.kind, onSendToFriends: () => { setQrCardModal(null); if (qrCardModal.kind === "group") shareGroupInvite(qrCardModal.convId ?? "", qrCardModal.name, qrCardModal.card.url);
+            else shareContactCard({ userId: uid, username: myInfo?.username, nickname: myInfo?.nickname, avatarUrl: myInfo?.avatar_url }); } }}
           onClose={() => setQrCardModal(null)}
         />
       )}

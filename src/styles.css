@@ -511,9 +511,37 @@ body { margin: 0; font: 14px/1.5 -apple-system, "PingFang SC", system-ui, sans-s
 .fwd-item:hover { background: var(--surface-hover); }
 .fwd-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .fwd-empty { padding: 16px; color: var(--text-secondary); text-align: center; }
+.fwd-retry { border: none; background: none; color: var(--accent); font: inherit; cursor: pointer; }
 /* 「添加例外」等场景传入的列表脚注（对齐 settings-foot 的字号/行高）。左右不再另加内边距：
    它不像 .fwd-list 那样用负 margin 撑满弹窗，本就在 .modal 的内边距之内，再加一层会比标题/搜索框/取消按钮多缩进一截。 */
 .fwd-foot { padding: 0 0 4px; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+/* 分享选择页：好友 / 群聊入口 + 底部已选栏 + 发送确认面板（IMServer docs/design/sketches/SHARE_PICKER_UX_SKETCH.html）。 */
+.fwd-share { position: relative; overflow: hidden; }
+.fwd-title-main { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.fwd-count { font-size: 12px; font-weight: 400; color: var(--text-secondary); white-space: nowrap; }
+.fwd-back { display: flex; align-items: center; gap: 2px; padding: 0; border: none; background: none; color: var(--accent); font: inherit; cursor: pointer; }
+.fwd-sec { padding: 8px var(--space-4) 4px; font-size: 12px; color: var(--text-secondary); }
+.fwd-entry .fwd-item-label { flex: 1; }
+.fwd-entry-ic { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--on-accent); }
+.fwd-entry-ic.friends { background: var(--ic-green); }
+.fwd-entry-ic.groups { background: var(--ic-blue); }
+.fwd-entry-chev { color: var(--text-tertiary); flex-shrink: 0; }
+.fwd-bar { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; padding-top: var(--space-2); border-top: 1px solid var(--separator); }
+.fwd-bar-hint { flex: 1; font-size: 13px; color: var(--text-secondary); }
+.fwd-bar-send { flex-shrink: 0; }
+.member-chips.fwd-strip { flex: 1; min-width: 0; flex-wrap: nowrap; overflow-x: auto; }
+.fwd-strip .member-chip { flex-shrink: 0; }
+.fwd-confirm-mask { position: absolute; inset: 0; display: flex; align-items: flex-end; background: var(--overlay); }
+.fwd-confirm { width: 100%; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4);
+  background: var(--surface-elevated); border-radius: var(--radius-card) var(--radius-card) 0 0; animation: fwd-slide-up 0.2s ease-out; }
+@keyframes fwd-slide-up { from { transform: translateY(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fwd-confirm { animation: none; } }
+.fwd-confirm-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; }
+.fwd-preview { padding: 8px 10px; border-radius: 8px; background: var(--subtle-fill); color: var(--text); font-size: 13px; line-height: 1.5;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 96px; overflow: hidden; }
+.fwd-confirm-send { width: 100%; }
+.qr-share-menu { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--separator); }
+.qr-share-title { font-size: 12px; color: var(--text-secondary); text-align: center; }
 /* 列表页统一搜索框（转发选择 / 邀请成员 / 建群选好友共用；@面板另有 sticky 变体 .mention-search）。
    与全站输入框同款圆角字段。 */
 .list-search {

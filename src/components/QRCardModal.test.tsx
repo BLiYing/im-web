@@ -42,4 +42,18 @@ describe("QRCardModal", () => {
     rerender(<QRCardModal {...base} canReset mode="link" />);
     expect(queryByText("重置二维码")).toBeNull();
   });
+
+  // SHARE_PICKER_UX_SKETCH ⑤：「分享」先选发送方式；不传 shareTo 时没有「分享」按钮（行为与改造前一致）。
+  it("分享：先出发送方式（群码标题「分享群聊邀请」），点「发送给朋友」回调；不传 shareTo 不出分享按钮", () => {
+    const onSendToFriends = vi.fn();
+    const { getByText, queryByText, rerender } = render(<QRCardModal {...base} mode="link" />);
+    expect(queryByText("分享")).toBeNull();
+    rerender(<QRCardModal {...base} mode="link" shareTo={{ kind: "group", onSendToFriends }} />);
+    expect(queryByText("发送给朋友")).toBeNull();
+    fireEvent.click(getByText("分享"));
+    expect(getByText("分享群聊邀请")).toBeTruthy();
+    fireEvent.click(getByText("发送给朋友"));
+    expect(onSendToFriends).toHaveBeenCalledTimes(1);
+    expect(queryByText("发送给朋友")).toBeNull(); // 选完收起
+  });
 });

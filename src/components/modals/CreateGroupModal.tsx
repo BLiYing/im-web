@@ -6,6 +6,7 @@ import { ListSearchInput, isSearching } from "../ListSearchInput";
 import { Modal } from "../Modal";
 import { CheckRow } from "../rows";
 import { Avatar } from "../Avatar";
+import { MemberChips } from "../MemberChips";
 import { defaultGroupName, publicNameOf, runeLength, truncateRunes, MAX_GROUP_NAME_LEN } from "../../groupName";
 import { useT } from "../../i18n";
 
@@ -96,20 +97,10 @@ export function CreateGroupModal({ draft, accepted, friendLabel, myPublicName, b
           </label>
         </div>
         <div className="section-label">{tr("group.create.members_summary", { count: draft.selected.length, total: draft.selected.length + 1 })}</div>
-        <div className="member-chips">
-          {draft.selected.map((id) => {
-            const f = byId.get(id);
-            const label = f ? friendLabel(f) : id;
-            return (
-              <span className="member-chip" key={id}>
-                <Avatar url={f?.avatar_url} label={label} seed={id} cls="avatar chip-av" />
-                <span className="chip-name">{label}</span>
-                <button className="chip-x" title={tr("common.remove")} onClick={() => removeMember(id)}>✕</button>
-              </span>
-            );
-          })}
+        <MemberChips onRemove={removeMember}
+          items={draft.selected.map((id) => { const f = byId.get(id); return { id, label: f ? friendLabel(f) : id, url: f?.avatar_url, seed: id }; })}>
           <button className="member-chip add" onClick={() => setStep(1)}>{tr("group.create.add_more")}</button>
-        </div>
+        </MemberChips>
         {hint && <p className="create-hint">{hint}</p>}
         <div className="modal-actions">
           <button className="link" onClick={() => setStep(1)}>{tr("common.previous")}</button>

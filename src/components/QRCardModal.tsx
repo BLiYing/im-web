@@ -16,16 +16,20 @@ export function QRCardModal(props: {
   card: QRCard;
   canReset: boolean;         // 我的码恒 true；群码仅群主/管理员
   onReset: () => Promise<void>;
+  /** 「分享 → 发送给朋友」（SHARE_PICKER_UX_SKETCH ⑤）：名片码发名片消息、群码 / 邀请链接发邀请文本，由宿主接到转发选择页。
+   *  传了才出「分享」按钮；点了先选发送方式（发送给朋友 / 其他应用…——后者即原来的系统分享，仅浏览器支持时出现）。 */
+  shareTo?: { kind: "me" | "group"; onSendToFriends: () => void };
   onClose: () => void;
 }) {
   const tr = useT();
-  const { title, subtitle, meta, mode = "code", onViewCode, name, avatarUrl, card, canReset, onReset, onClose } = props;
+  const { title, subtitle, meta, mode = "code", onViewCode, name, avatarUrl, card, canReset, onReset, shareTo, onClose } = props;
   const linkMode = mode === "link";
   const canShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
   const [img, setImg] = useState("");
   const [copied, setCopied] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [shareMenu, setShareMenu] = useState(false);
 
   useEffect(() => {
     if (linkMode) return;
@@ -84,7 +88,7 @@ export function QRCardModal(props: {
               <button className="mini-btn" onClick={copyLink}>
                 {copied ? <><Check size={15} /> {tr("common.copied")}</> : <><Copy size={15} /> {tr("qr.copy_link")}</>}
               </button>
-              {canShare && <button className="mini-btn ghost" onClick={shareLink}><Share2 size={15} /> {tr("qr.card.share_link")}</button>}
+              {!shareTo && canShare && <button className="mini-btn ghost" onClick={shareLink}><Share2 size={15} /> {tr("qr.card.share_link")}</button>}
             </>
           ) : (
             <>
@@ -94,7 +98,16 @@ export function QRCardModal(props: {
               </button>
             </>
           )}
+          {shareTo && <button className="mini-btn ghost" onClick={() => setShareMenu(true)}><Share2 size={15} /> {tr("common.share")}</button>}
         </div>
+        {shareTo && shareMenu && (
+          <div className="qr-share-menu" role="menu">
+            <div className="qr-share-title">{tr(shareTo.kind === "me" ? "share.method.title_card" : "share.method.title_group")}</div>
+            <button className="mini-btn" onClick={() => { setShareMenu(false); shareTo.onSendToFriends(); }}>{tr("share.method.to_friends")}</button>
+            {canShare && <button className="mini-btn ghost" onClick={() => { setShareMenu(false); shareLink(); }}>{tr("share.method.other_apps")}</button>}
+            <button className="link" onClick={() => setShareMenu(false)}>{tr("common.cancel")}</button>
+          </div>
+        )}
         {linkMode && onViewCode && (
           <button className="qr-reset-link qr-view-code" onClick={onViewCode}><QrCode size={14} /> {tr("qr.card.view_code")}</button>
         )}

@@ -108,13 +108,13 @@ describe("useForward", () => {
 
   it("setForwardVerb 换动词后吐司用新词（分享名片走「已发送到」）", () => {
     const { result, deps } = mount();
-    act(() => { result.current.setForwardVerb("发送"); result.current.forwardMessage(msg()); });
+    act(() => { result.current.setForwardVerb("send"); result.current.forwardMessage(msg()); });
     act(() => result.current.doForwardToTargets([conv()]));
     expect(deps.setToast).toHaveBeenCalledWith("已发送到 老王");
   });
   it("取消选择页（closeForwardPicker）也复位动词：下一次真转发仍说「已转发到」", () => {
     const { result, deps } = mount();
-    act(() => { result.current.setForwardVerb("发送"); result.current.forwardMessage(msg()); });
+    act(() => { result.current.setForwardVerb("send"); result.current.forwardMessage(msg()); });
     act(() => result.current.closeForwardPicker());   // 用户点取消 / 点蒙层
     act(() => result.current.forwardMessage(msg()));  // 换成一次普通转发
     act(() => result.current.doForwardToTargets([conv()]));
